@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+*.pyd
+
+# C++ build
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Generated build outputs
+payload.h
+payload.exe
+payload.bin
+payload.windows.exe
+payload.linux.bin
+Universal_Loader.py
+build.log
+build_error.log
+*.renamelog
+Nixon_Security_Root.cer
+RUN_*.bat
+RUN_*.command
+binaries.tar
+
+# Archives
+*.tar
+*.tar.xz
+*.zip
+
+# Proxy / config data
+socks_proxies.txt
+http_proxies.txt
+orbital-relay.json
+
+# Environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Nuitka/Cython
+*.build/
+*.dist/
+
+# GitHub Actions workflow (generated)
+.github/workflows/nuitka.yml
