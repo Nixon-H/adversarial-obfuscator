@@ -1722,7 +1722,8 @@ class StringLiteralObfuscator(ast.NodeTransformer):
     def _generate_babel_name(self):
         return get_random_var_name("STR_DEC")
     def visit_JoinedStr(self, node):
-        return self.generic_visit(node)
+        node.values = [self.visit(v) if isinstance(v, ast.FormattedValue) else v for v in node.values]
+        return node
     def visit_FormattedValue(self, node):
         return self.generic_visit(node)
     def _xor_encode(self, s):
