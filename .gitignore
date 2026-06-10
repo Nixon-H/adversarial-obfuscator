@@ -44,6 +44,7 @@ binaries.tar
 socks_proxies.txt
 http_proxies.txt
 orbital-relay.json
+.build_tmp_*
 
 # Environments
 venv/
