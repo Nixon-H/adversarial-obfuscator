@@ -1,0 +1,29 @@
+[
+  {
+    "profile": {
+      "failed_metrics": [
+        "naming_recovery",
+        "decompilation_resistance",
+        "complexity_impact",
+        "static_confusion"
+      ],
+      "weak_scores": {
+        "naming_recovery": 0.3,
+        "semantic_leakage": 0.6,
+        "decompilation_resistance": 0.2,
+        "complexity_impact": 0.4,
+        "entropy": 0.7,
+        "static_confusion": 0.3
+      },
+      "recommended_actions": [
+        "strengthen_symbol_renaming",
+        "add_opaque_predicates",
+        "add_exec_eval_patterns",
+        "add_decoy_apis",
+        "add_misleading_imports",
+        "increase_dispatch_fan_out"
+      ]
+    },
+    "source_hash": 857683258
+  }
+]

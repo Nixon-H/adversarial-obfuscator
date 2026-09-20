@@ -1,0 +1,39 @@
+name: Weekly long fuzz
+
+# Scheduled crash-hunting: unit tests assert fail-closed behavior on fixed
+# corpora; libFuzzer explores the parser space around them. A finding here
+# means a fuzzer input escaped the fail-closed envelope (unexpected
+# exception type, hang, or sanitizer abort) — file an issue with the
+# artifact input attached.
+on:
+  schedule:
+    - cron: "0 3 * * 0"  # Sundays 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      fuzz_seconds:
+        description: "Seconds per target"
+        required: false
+        default: "600"
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly (libFuzzer needs -Zbuild-std datasets)
+        run: rustup toolchain install nightly --component rust-src
+      - name: Long fuzz config_parse
+        continue-on-error: true
+        run: cargo +nightly fuzz run config_parse -- -max_total_time=${{ inputs.fuzz_seconds || 600 }} 2>&1 | tail -8
+        working-directory: relay/fuzz
+      - name: Long fuzz loader boundary
+        continue-on-error: true
+        run: cargo +nightly fuzz run fuzz_target_1 -- -max_total_time=${{ inputs.fuzz_seconds || 600 }} 2>&1 | tail -8
+        working-directory: relay/fuzz
+      - name: Upload crashers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashers-weekly
+          path: relay/fuzz/artifacts/
+          if-no-files-found: ignore

@@ -1,0 +1,268 @@
+================================================================================
+FULL 21-SECTION ANALYSIS — obf-test.py (companion to obf-test-deep-analysis.txt)
+Date (UTC): 2026-09-04 | Method: static only, never executed
+Outer SHA256: 8399d59acd52d0c604a0053c74ee5985e4af93d6561cc0d1326c1b69faf6caea
+Stage2 SHA256: 4073f53d6feb65452a12a889f8e26532f95254b268fab41b016a2f4c537d46e9
+Native SHA256: 436896605da45c7b5e13144610a22f9ce6d3630d49d15f474fc1de88d14c8456
+Inner blob SHA256 (compressed pyd): f5c82a82c47b39612b90e7541ec62157e634ad3969e3208b896686a08412469f
+================================================================================
+
+1. EXECUTIVE SUMMARY
+Outer env gate (3,14,'nt',64,'AMD64') + outer b85/XOR/sub/lzma/exec(globals)
+-> stage2 reorder[0,4,3,2,1]+translate(85 live)+b85+sha256+zlib
+-> native Cython PE64 cp314-win_amd64.pyd (297472 B, PyInit__6976a7f8f71b4023a6cc)
+-> harvest 28 exports, host_g bridge, forensic cleanup, settrace clear,
+-> staged call _0ebd(_MF 4322 blobs ~2.82M chars, _ITB 256 B).
+Definitely: gate, import hiding, both containers, sha check, memfd/tempfile+
+ExtensionFileLoader, trace clear, cleanup waiter, NYSER1 reconstructor,
+wrapper names. Probably (import present, call unconfirmed): IsDebuggerPresent,
+QueryPerformanceCounter. Not in Python: eval/compile/marshal/CodeType/AST,
+gettrace check, timing trap, VM strings, network/license/expiry.
+Verdict: strong vs casual, moderate vs static, weak vs dynamic after 1-line
+gate patch. All keys/tables/blobs in file.
+
+2. COMPLETE MECHANISM INVENTORY (condensed; full evidence in deep file)
+M01 Env pin gate [Definitely] lines 3-12. _req vs _cur 5-tuple, stderr+flush,
+ os._exit(1). Moderate gate / very weak security. Patch 1 line. Deps sys/os/struct/platform.
+M02 Import indirection [Definitely] 15-19,28-29. __import__(_a([...]))+getattr.
+ Very weak, hookable. Deps builtins.
+M03 Int-list strings [Definitely] 7 names base64/lzma/builtins/b85decode/
+ decompress/exec/globals as [98,97,...]. Very weak.
+M04 Renaming [Definitely] _nyk_z_*, _syz/_nyzo (dead _nyzo), _2d02..., _a-_o,
+ stage2 aliases, native hashes. Weak. Rename via AST.
+M05 Outer b85+XOR+sub+lzma [Definitely] 20-29. _g 169635 chars/1076 chunks
+ ->135708 B ->XOR 32 B (_h) ->sub 32 B (_i) ->lzma->235691 chars. Moderate
+ vs casual, weak vs analyst. Deps base64/lzma.
+M06 exec(globals) [Definitely] line 29+30. Runs stage2 in host globals. Weak,
+ single dump point.
+M07 settrace/setprofile None [Definitely] 34-35. Hygiene only, no detect.
+ Very weak. Re-set after to bypass.
+M08 Deferred call [Definitely] 36-39 try _0ebd(_MF,_ITB) finally pass.
+ Name defined only by stage2. Weak glue.
+M09 _ITB 256 B (86 uniq, 171 zeros; hex in deep file) + _MF 4322 strs
+ len 73-999 avg 653 total 2823972, 85-char alphabet [Definitely] lines 32-33.
+ Moderate bulk, weak crypto. Dump via shim.
+M10 Inner reorder+translate+b85 [Definitely] stage2 5-7. 5-tuple
+ [38675,103332,100,7165,2070] order [0,4,3,2,1] ->151342 chars
+ ->translate 256 B/85 live ->b85 ->121073 B. Moderate eyeball, weak code.
+M11 sha256 [Definitely] stage2 8-9 hexdigest != f5c82a... -> RuntimeError("").
+ Moderate evidence, weak vs patch. Deps hashlib.
+M12 zlib+memfd/tempfile+ExtensionFileLoader [Definitely] stage2 10-44.
+ zlib->297472 B MZ PE64; memfd_create+MFD_CLOEXEC -> /proc/self/fd/%d else
+ mkdtemp(prefix _0x)+O_EXCL 0600+spec_from_file_location+exec_module.
+ Strong stealth (memfd) / moderate else. Hook exec_module to dump.
+M13 Harvest+host_g [Definitely] stage2 45-99. 28x globals()[py]=getattr(native),
+ _nyk_host_g=globals(), clear buffer. Weak (explicit map).
+M14 Cleanup [Definitely] 46-69. memfd atexit.close; posix remove/rmdir via
+ _40ca callback; nt detached Popen [python -c OpenProcess(1048576)+
+ WaitForSingleObject(INFINITE)+urandom(sz) overwrite+rmtree x100] flags
+ 0x8|0x200 DEVNULL; stale _0x purge. Moderate anti-forensic. DESTRUCTIVE.
+M15 Cython+NYSER1 [Definitely] strings: cython_3_2_8, PyInit, docstring
+ "Reconstruct ... .replace ... lambda unhookable via attribute rebinding",
+ nyser_loads/r_u32/r_blob/r_str/r_int/r_value/r_code, Marshal_ReadObject,
+ Xor ops. Moderate. Hook nyser_loads.
+M16 Wrappers [Names definitely, behavior probably] _advance_stage/
+ _get_stage_key/_layer_key/_heartbeat/_verify_heartbeat/_strdec/_funcdec/
+ _integrity/_hwid_open/_kill/_input/_print/_open_file/_cc_qr. Bodies in native.
+M17 IsDebuggerPresent+QueryPerformanceCounter+GetCurrentProcessId/ThreadId+
+ GetSystemTimeAsFileTime [Imports definitely, use unconfirmed]. No
+ CheckRemote/NtQuery/OutputDebug, no VM strings. Weak as observed.
+
+3. OBFUSCATION TECHNIQUES
+Renaming (weak); int-list strings + import indirection (very weak, signature);
+1076-chunk + 5-chunk splits (scanner-break, no crypto); permute+substitute
+(moderate eyeball); base85 x2 (encoding, beacon); XOR+sub (reversible,
+in-file keys); lzma+zlib (compression); exec(globals)+exec_module+getattr
+(static-graph break, single dump); Cython+NYSER1 (only near-real protection,
+boundary-loggable). No flattening/opaque/junk (except dead _nyzo)/arith-split.
+
+4. DEFENSIVE TECHNIQUES
+Gate (not detect); one sha (only real Python integrity); trace clear
+(hygiene); fileless+secure-delete+stale-purge (strongest); single-interpreter/
+re-import guards (reload friction); NYSER1 self-contained lambda (anti-hook
+note); candidate debugger/timer imports (unconfirmed). Both: M05/M10/M11/M12/
+M15. No hook/patch/self-check/signature/VM/timing in Python.
+
+5. EXECUTION FLOW
+0 aliased imports; 1 gate (exit/cont); 2 _syz used, _nyzo dead; 3 def loader;
+4 call: int-lists->b85/XOR/sub/lzma->exec stage2(globals)->_6776404f:
+ join/order->translate->b85 (121 KB)->sha?raise:zlib (297 KB PE)->memfd else
+ mkdtemp->spec+exec_module->harvest 28+host_g+clear->atexit/waiter/remove;
+5 settrace/setprofile None; 6 _0ebd(_MF,_ITB)==native._1a88 staged decrypt
+ (advance/layer/str/func/nyser + heartbeat/integrity/hwid). Essential chain:
+ gate->exec->loader->native->_MF call. Optional branches: memfd/tempfile,
+ nt waiter/posix remove, stale purge. Stops: gate, sha RuntimeError,
+ spec None ImportError, missing attr, version guard.
+
+6. TRANSFORMATION LAYERS
+L0 source->rename+int-lists (one-way, structure visible).
+L1 stage2->b85+XOR+sub+lzma (_g 169 K; reversed outer 23-29; b85/keys visible).
+L2 native->split5+permute+subst+b85+zlib+sha (151 K; reversed stage2 7-10;
+ chunks/table/hash visible). L3 native PE in mem/fileless (297 KB;
+ exec_module; MZ after dump). L4 app->NYSER1+staged keys (_MF+_ITB; native
+ call; blobs only). L5 runtime wrappers+host bridge (on use; names only).
+
+7. CRYPTO/ENCODING
+b85=encoding; XOR (32 B from _h)+sub &255 (32 B from _i)=obfuscation, keys in
+file; translate 85/256=substitution; zlib/lzma=compression; sha256=integrity
+(sound use, patchable, hex f5c82a... verified). No AES/ChaCha/RSA/PBKDF/HMAC/
+Fernet in binary; only xored+Xor ops. _MF=obscured/recoverable, not proven
+crypto. No salt/IV/nonce.
+
+8. RUNTIME RECONSTRUCTION
+Gen source: stage2 (exec). Gen module: pyd (exec_module). Gen bytecode:
+NYSER1 .replace in native (no Python CodeType/compile/marshal; Marshal API
+only in native). Dyn imports: __import__ + importlib.util/machinery. Attrs:
+4x outer + 32x stage2 getattr. globals/host_g yes; setattr/locals/dict no.
+eval/compile no. Decrypt/decompress/exec yes. Tempfiles yes (memfd else _0x
+0600 O_EXCL). Memory-only when memfd ok. No frame/stack/getframe/inspect/
+gettrace detect, import hooks, patch detect in Python.
+
+9. ANTI-DEBUGGING
+T1 clear hooks 34-35: no detect, always, clear. Bypass re-set/patch. Very weak.
+T2 IsDebuggerPresent import: maybe PEB BeingDebugged; cond/resp unknown, call
+unconfirmed. Weak. T3 QueryPerformanceCounter/SystemTime: candidate timing,
+no Python logic (also Cython runtime). Unconfirmed. No gettrace/ptrace/
+breakpoint/hook/CheckRemote/NtQuery/OutputDebug/frida/ida/x64dbg strings,
+no Python thresholds.
+
+10. ANTI-TAMPERING
+Only Python: sha of compressed native (M11), RuntimeError("") on diff. Bypass
+NOP/update hex. Gate is not integrity. Native single-load guards hinder
+re-import only. No self/file/sig/bytecode/module hash, payload MAC, func
+anti-patch in Python. Native integrity/heartbeat names unverified bodies.
+
+11. ENVIRONMENT/VM/SANDBOX
+Definitely: py3.14, nt, 64-bit, AMD64, fail-closed; Linux/mac/x86/ARM/!=3.14
+refuse. Pyd cp314-win_amd64 + python314.dll + KERNEL32/VCRUNTIME => Win-x64-
+3.14; MZ 0x8664 6 secs. Probably not VM/sandbox: zero VBox/VMware/HyperV/
+QEMU/KVM/sandbox/frida/procmon/wireshark strings; no environ/registry
+MachineGuid/disk/CPU/MAC (only GetCurrentProcess/ThreadId). Leak:
+C:/Users/karma/AppData/Local/Temp/aiUilne7z6v\_6976....c (builder IOC).
+
+12. SECRETS
+No URLs/passwords/tokens/API keys in Python or strings (only header comment).
+Protection keys only (_h/_i 40->32 B, 256 B table, sha) — obscured,
+recoverable, extractable (literals). No salt/IV/nonce. No license config.
+Embedded: stage2 source + native + _MF/_ITB (encrypted at rest, boundary-
+loggable). Values redacted to lengths here; full literals in file.
+
+13. STRENGTH ASSESSMENT
+String Yes/Weak/hide imports/stereotyped. Constant Yes/Weak/same. Name Yes/
+Weak/structure intact. Control-flow No/—/straight loader. Runtime-decode
+Yes/Moderate/hide stages/keys-in-file hookable. Dynamic-exec Yes/Weak*/
+single dump (*stealth good, analyst bad). Anti-debug hygiene/Very weak/no
+detect. Anti-tamper one-sha/Moderate/patchable. Env Yes/Moderate gate/1-line
+patch. Payload Yes/Moderate/boundary-loggable.
+Scores: static 7 (3 MB entropy, no plaintext; minus stereotyped decoder);
+dynamic 3 (clear+fileless+delete help, but exec boundary ideal, no traps);
+RE 5 (Cython+NYSER1 forces asm, but map+docstring+strings); tamper 3 (one
+sha); copy 8 (off-matrix fails, message guides rebuild).
+
+14. WEAKNESSES/BYPASS (conceptual)
+Gate patch or matching Win py3.14 AMD64. Outer dump hook exec/line29.
+Inner dump hook zlib/b85 or save pre-exec_module blob. Hash NOP/update hex.
+Table+order offline reuse (done as data here). 28 getattr oracle + globals
+dump after stage2:71. Wrap _nyk_*/nyser for keys/plaintext. Stub
+atexit/Popen/remove/rmdir, copies only (waiter urandom-destructive).
+Signatures: discord.nyami.cc, b85decode, _0x, _6976..., NYSER1, unhookable
+phrase. Dead _nyzo, finally:pass, empty RuntimeError aid patching. No depth:
+once dumped, stays dumped.
+
+15. ARCHITECTURE DIAGRAM
+[Header+latin-1] -> [Gate M01] -mismatch-> _exit(1) | match ->
+[Outer obf M02-04] -> [Container M05 keys in file] -> [exec M06] ->
+[Stage2 M10 sha M11] -fail-> RuntimeError | ok -> [memfd|_0x M12] ->
+[Native Cython NYSER1 M15] -> [Harvest+host_g M13] -> [Cleanup M14] ->
+[Trace clear M07] -> [Staged _0ebd(_MF,_ITB)==_1a88 M08/09] ->
+[Protected logic: staged decrypt+heartbeat/integrity/hwid/kill (unverified)].
+
+16. BUILD PIPELINE (evidenced only)
+App -> Cythonize cp314-win_amd64.pyd (PyInit, VCRUNTIME/python314.dll) ->
+split blobs _MF[4322]+_ITB[256] custom alphabet -> zlib native -> sha ->
+b85 -> split5 permute[0,4,3,2,1] translate-wrap -> stage2 loader (renamed,
+memfd/tempfile, 28 exports, nt waiter) -> lzma -> sub(_i) -> XOR(_h) ->
+b85 -> _g 1076 chunks -> outer (latin-1, gate, int-lists, _ITB/_MF,
+trace clear, try/finally) -> header discord.nyami.cc.
+
+17. RUNTIME PIPELINE
+Artifact -> gate -> outer decode -> exec stage2 globals -> stage2 decode+
+sha+zlib -> memfd|tempfile + exec_module -> publish 28 + host_g + arm
+cleanup -> clear trace -> native _1a88(_MF,_ITB) staged run -> protected
+behavior (unrecovered) -> atexit close/remove/nt waiter rmtree.
+
+18. IMPLEMENTATION SPEC (observed only)
+S01 gate: fail-fast off-matrix. In none. Out cont/exit. Build bake tuple+msg.
+ Runtime first. Deps sys/os/struct/platform. Precede unpack. Exact compare,
+ stderr+flush, _exit. Patchable. Trivial. Non-portable; machine string
+ AMD64 vs x86_64.
+S02 indirection: scanner evasion. names->callables. Build int-lists+
+ __import__/getattr. Prologue. builtins. Signature. Negligible. Pure py.
+S03 outer: hide stage2. stage2->literals. Build lzma>sub>XOR>b85>chunk.
+ Reverse. base64/lzma. Keys in file. 135 KB fast. latin-1 critical.
+S04 inner: hide native. zlib(native)->tuple+table+order+hash. Build
+ zlib>sha>b85>split>permute>table. Reverse+verify. base64/hashlib/zlib.
+ In file. 121 KB fast. latin-1+256 B table exact.
+S05 delivery: stealth load. blob->module. Build per-matrix pyd. memfd else
+ O_EXCL 0600 ExtensionFileLoader. memfd optional, importlib. Fallback disk
+ artifact. 297 KB once. Win pyd here; memfd Linux-only; O_* via getattr.
+S06 hash: evidence. compressed->bool. Store hex. Pre-decompress. hashlib.
+ Patchable unsigned. One hash.
+S07 bridge: expose native. mod->globals+host_g. getattr. Explicit map.
+ Re-import guarded.
+S08 cleanup: remove artifact. fd/path->none. Embed waiter. atexit/immediate/
+ detached. atexit/shutil/subprocess/ctypes-kernel32. Destructive racy,
+ frozen-skips. urandom+100x rmtree costly. nt/posix diverge.
+S09 NYSER1: hide code. blobs->code. Serialize custom. .replace from lambda.
+ CPython code API. Version-locked 3.14, hookable. CPython-only.
+S10 hygiene: drop stray hooks. none->cleared. Emit 2 lines pre-call. Before
+ staged call. No detect. Safe everywhere.
+
+19. DEPENDENCIES/COMPATIBILITY
+Py 3.14 exact (version_info, cp314 tag, version guard, Code.replace). Else
+fail. OS nt exact (KERNEL32/VCRUNTIME/api-ms, OpenProcess/Wait, O_*,
+python314.dll). memfd branch portable code but pyd PE => Win-only artifact.
+Arch AMD64+64-bit (calcsize, 0x8664). x86/ARM fail. Stdlib sys/os/struct/
+platform/base64/lzma/zlib/hashlib/tempfile/atexit/mach-util/shutil/
+subprocess/ctypes. No third-party py; native VCRUNTIME140. CPython-only
+(ExtensionFileLoader, Code.replace, memfd, /proc/self/fd). PyPy/Graal/
+Frozen (skips waiter) likely break. Zip/frozen change spec.
+
+20. NOT PRESENT
+Python (stage0+1): eval, compile, marshal, CodeType/FunctionType, AST,
+bytecode rewrite, gettrace/getprofile checks, inspect/_getframe, setattr/
+locals/dict (only getattr/globals), proc/parent scan, debugger names,
+timing thresholds, VM/sandbox strings, file/path/user/env/net beyond gate,
+remote config, kill-switch, expiry, license, flags beyond matrix, sig.
+Native (strings/imports): Marshal API yes but no plain marshal py call;
+IsDebuggerPresent/QueryPerformanceCounter imports yes but calls/resp
+unconfirmed — not working anti-debug w/o disasm. No CheckRemote/NtQuery/
+OutputDebug, VBox/VMware/HyperV/QEMU/Frida/Wireshark/Procmon, URLs/secrets.
+General: no flattening/opaque/junk (except _nyzo), self-integrity,
+anti-hook/patch in Python.
+
+21. PROTECTION CHECKLIST (copy-paste)
+[ ] Pin matrix first, stderr+flush, _exit; accept non-portability.
+[ ] latin-1 if high-byte literals.
+[ ] Hide imports __import__+getattr+bytes list (scanner-only).
+[ ] Rename loader locals+alias; drop dead aliases.
+[ ] Outer lzma>sub>XOR>b85 chunked '..'+'..'; keys in file = recoverable.
+[ ] exec(blob.decode(),globals()) adjacent trigger.
+[ ] Inner zlib>sha>b85>splitN>permute>translate; store order+table+hash.
+[ ] Verify sha pre-decompress, empty raise.
+[ ] memfd if present else mkdtemp+O_EXCL 0600+ExtensionFileLoader/spec/exec.
+[ ] Purge stale prefix; atexit.close memfd; remove/rmdir temp; Win detached
+    OpenProcess/Wait+urandom+rmtree waiter; warn destructive.
+[ ] Harvest getattr allow-list to globals; host_g=globals; zero buffer var.
+[ ] settrace/setprofile None pre-call (hygiene).
+[ ] try _entry(_DATA,_HDR) finally pass, _entry native-only.
+[ ] Per-matrix Cython pyd + single/re-import guards.
+[ ] Custom serializer (NYSER1+.replace lambda, no globals); version-lock.
+[ ] Split logic (tuple_blobs,header); advance/layer/str/func + optional
+    heartbeat/verify/hwid/integrity/kill.
+[ ] Wire debugger/timers to response or drop; test IAT patch.
+[ ] Assume exec boundary dump — delay+forensics, not unbreakable.
+================================================================================
+END companion. See obf-test-deep-analysis.txt (511 lines) for full literals.
+Dynamic dump on isolated matching Windows VM only path to _MF plaintext.
+================================================================================

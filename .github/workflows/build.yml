@@ -1,0 +1,136 @@
+name: Nixon Build Pipeline
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Python deps
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Lint Python
+        run: pip install pyflakes && make lint
+      - name: Run Python tests
+        run: python3 -m pytest tests/ -v
+      - name: Obfuscate test payload
+        run: python3 scripts/build.py --payload tests/fixtures/test_payload.py --skip-relay --no-cfg-flatten
+      - name: Fuzz smoke (60s per target)
+        # cargo-fuzz needs nightly; the fuzz crate builds on stable via
+        # `cargo test --no-run`, but libfuzzer execution requires nightly.
+        # Best-effort: short libFuzzer runs catch parser crashes without
+        # blocking the pipeline (continue-on-error; crashes upload below).
+        continue-on-error: true
+        run: |
+          rustup toolchain install nightly --component rust-src 2>/dev/null || true
+          cargo +nightly fuzz run config_parse -- -max_total_time=60 2>&1 | tail -5 || true
+          cargo +nightly fuzz run fuzz_target_1 -- -max_total_time=60 2>&1 | tail -5 || true
+        working-directory: relay/fuzz
+      - name: Upload fuzz crashers
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashers
+          path: relay/fuzz/artifacts/
+          if-no-files-found: ignore
+
+  build-linux:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            relay/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+          targets: x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu, aarch64-unknown-linux-gnu
+      - name: Build Rust relay
+        run: make relay
+      - name: Run pipeline (full)
+        run: python3 scripts/build.py --payload tests/fixtures/test_payload.py --skip-relay
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbital-relay-linux
+          path: build/orbital-relay
+          if-no-files-found: warn
+
+  build-win:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            relay/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+          targets: x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu, aarch64-unknown-linux-gnu
+      - name: Install MinGW
+        continue-on-error: true
+        run: sudo apt-get update && sudo apt-get install -y mingw-w64
+      - name: Cross-compile for Windows
+        continue-on-error: true
+        run: make relay-win
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbital-relay-win
+          path: build/orbital-relay-win.exe
+          if-no-files-found: warn
+
+  build-linux-arm:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            relay/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+          targets: x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu, aarch64-unknown-linux-gnu
+      - name: Install ARM64 GCC
+        continue-on-error: true
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Cross-compile for ARM64
+        continue-on-error: true
+        run: make relay-linux-arm
+      - name: Upload ARM64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orbital-relay-linux-arm
+          path: build/orbital-relay-linux-arm
+          if-no-files-found: warn

@@ -4,7 +4,7 @@ __pycache__/
 
 # Rust
 target/
-orbital-relay/target/
+relay/target/
 *.pyo
 *.egg-info/
 dist/
@@ -44,6 +44,8 @@ binaries.tar
 socks_proxies.txt
 http_proxies.txt
 orbital-relay.json
+config/relay.json
+native/payload.h
 .build_tmp_*
 
 # Environments
@@ -61,9 +63,31 @@ env/
 .DS_Store
 Thumbs.db
 
+# Build artifacts
+build/*.so
+build/*.o
+build/orbital-relay*
+*.build_tmp*
+
 # Nuitka/Cython
 *.build/
 *.dist/
 
 # GitHub Actions workflow (generated)
 .github/workflows/nuitka.yml
+
+# Shadow Compiler
+irgen/__pycache__/
+llvmgen/__pycache__/
+encrypt/__pycache__/
+runtime/__pycache__/
+*.ir
+*.ll
+*.s
+*.o
+*.bc
+seeds/
+builds/
+
+# Build configuration (contains secrets)
+config/

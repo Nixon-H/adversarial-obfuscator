@@ -1,0 +1,511 @@
+================================================================================
+DEEP STATIC ANALYSIS — obf-test.py (NO EXECUTION)
+Workspace: /home/nixon/Projects/adversarial-obfuscator/obf-test.py
+Date (UTC): 2026-09-04
+Method: Read + ast.parse/literal_eval of literals only + b85/translate/
+        decompress AS DATA (never exec/eval/compile/load) + strings +
+        llvm-objdump --private-headers (listing only) + PE header parsing.
+        obf-test.py was NEVER run. Native .pyd was NEVER imported/executed.
+        Decoded artifacts held in /tmp/stage2.py and /tmp/native.so as DATA.
+================================================================================
+
+0. FILE IDENTITY
+--------------------------------------------------------------------------------
+Path: /home/nixon/Projects/adversarial-obfuscator/obf-test.py
+Total bytes: 3012358
+Total lines: 40 (39 content + trailing newline)
+SHA256(outer file): 8399d59acd52d0c604a0053c74ee5985e4af93d6561cc0d1326c1b69faf6caea
+Per-line byte lengths:
+  line 1: 70      line 2: 25      line 3: 95      line 4: 39
+  line 5: 145     line 6: 28      line 7: 8       line 8: 387
+  line 9: 33      line 10: 21     line 11: 12     line 12: 22
+  line 13: 31     line 14: 20     line 15: 35     line 16: 44
+  line 17: 39     line 18: 55     line 19: 56     line 20: 172871
+  line 21: 51     line 22: 51     line 23: 22     line 24: 22
+  line 25: 22     line 26: 60     line 27: 66     line 28: 67
+  line 29: 95     line 30: 15     line 31: 0      line 32: 777
+  line 33: 2836944 line 34: 19    line 35: 21     line 36: 4
+  line 37: 31     line 38: 8      line 39: 8      line 40: 0
+Two giant lines dominate: line 20 (_g container, 172871 B) and
+line 33 (_MF tuple, 2836944 B). Everything else is short loader glue.
+
+1. OUTER FILE VERBATIM (SHORT LINES) + STRUCTURE OF GIANT LINES
+--------------------------------------------------------------------------------
+Line 1: # This file has been obfuscated with <3 by discord.nyami.cc | nyami.cc
+  -> Attribution / builder tag. YARA-able IOC. Not a defense.
+Line 2: # -*- coding: latin-1 -*-
+  -> REQUIRED. Payload strings contain bytes 0x80-0xFF. Without latin-1,
+     Python UTF-8 decode of the source fails. Evidence: _MF/_016a3abc
+     contain chars like U+00B9, U+00BB, U+00C6 etc. latin-1 gives 1:1
+     byte<->char round-trip for .encode('latin-1').
+Line 3: import sys as _nyk_z_sys, os as _nyk_z_os, struct as _nyk_z_struct, platform as _nyk_z_platform
+  -> All four imports aliased to _nyk_z_* names. Only used for env gate.
+Line 4: _nyk_z_req = (3, 14, 'nt', 64, 'AMD64')
+  -> Pinned build matrix. See section 2.
+Line 5: _nyk_z_cur = (_nyk_z_sys.version_info[0], _nyk_z_sys.version_info[1], _nyk_z_os.name, _nyk_z_struct.calcsize('P') * 8, _nyk_z_platform.machine())
+  -> Current runtime tuple. calcsize('P')*8 = pointer bits (64 on x64).
+Line 6: if _nyk_z_cur != _nyk_z_req:
+Line 7:     try:
+Line 8:         _nyk_z_sys.stderr.write('This protected build requires Python %d.%d on os=%s %d-bit arch=%s; the current runtime is Python %d.%d on os=%s %d-bit arch=%s. Rebuild with the matching interpreter, OS, and architecture.' % (_nyk_z_req[0], _nyk_z_req[1], _nyk_z_req[2], _nyk_z_req[3], _nyk_z_req[4], _nyk_z_cur[0], _nyk_z_cur[1], _nyk_z_cur[2], _nyk_z_cur[3], _nyk_z_cur[4]) + chr(10))
+  -> Note chr(10) used instead of '\n' literal (tiny obfuscation).
+     Message leaks expected matrix — helpful to analyst.
+Line 9:         _nyk_z_sys.stderr.flush()
+Line 10:     except Exception:
+Line 11:         pass
+Line 12:     _nyk_z_os._exit(1)
+  -> Hard exit, skips atexit/finally. os._exit (not sys.exit).
+Line 13: import sys as _syz, os as _nyzo
+  -> _syz used lines 34-35 (settrace/setprofile). _nyzo NEVER used again
+     (count _nyzo==1, _syz==3). Dead import — evidence of template.
+Line 14: def _2d02bb92a24e():
+Line 15:     _a=lambda _b:bytes(_b).decode()
+  -> bytes(list_of_ints).decode() with default utf-8 (ASCII subset, safe).
+Line 16:     _c=__import__(_a([98,97,115,101,54,52]))
+  -> [98,97,115,101,54,52] = b'a' 's' 'e' '6' '4' = "base64".
+Line 17:     _d=__import__(_a([108,122,109,97]))
+  -> "lzma".
+Line 18:     _e=__import__(_a([98,117,105,108,116,105,110,115]))
+  -> "builtins".
+Line 19:     _f=getattr(_c,_a([98,56,53,100,101,99,111,100,101]))
+  -> "b85decode" from base64.
+Line 20:     _g=('rXg2x@...' + 'S&gH0...' + ... )  [1076 single-quoted chunks joined by +]
+  -> len(line)=172871, num '+'=3044, num single-quotes=2152.
+     Extracted chunk count via regex '([^']*)': 1076 chunks.
+     Joined _g_str len chars = 169635.
+     Head: 'rXg2x@0u~sAn0Xt;+mv+u6;NnDezHG<WCd9p3`Yo0A3;y_g1CxMZ>R{yS#>5-?C>=7EPK^Q{UMc>U0vIyQ}mX(3Ia?r$nByMr+z1o+bgOd(E<hpR=>$j1>O}JS)rzll294zYsg`^M!9+H4+DC7v79$aFEQEsBq5Dr#ej={B^iXym4S7utciM#M4#(2D%d70D)b0-nGfX8mo;PqVOCK#4{Zz9;C1=_F!~~D^zEh)KSs%zV~Bvli1NTUV?W=)NTomOHcw06>z@A>K'
+     Tail: 'lwwf05zgbE77@(WNB+psi8'+'cl5Qk)Y}T7}``kL^AKYI-0{Z*(QN3&m3jrf0+mn!euprI!G_iDV+MN-|WR^shwO0huUnPQ_r0ipmXc1v#NDJ0ZDq$MlO@')'
+     This is base85 text (alphabet includes alphanumeric + punctuation).
+Line 21:     _h=('vzHTo+vA|p2S&4N6@@NHVV(oX*@Se7@*@m+$CuaD')
+  -> 40 chars. b85decodes to 32 bytes (_k, XOR key).
+Line 22:     _i=('7=OyQ+If)~LD(YF^&e?4v*SDJ;HAy_HPbH1Tj#z{')
+  -> 40 chars. b85decodes to 32 bytes (_l, SUB key).
+Line 23:     _j=_f(_g.encode())
+  -> b85decode(_g_str) len = 135708 bytes.
+Line 24:     _k=_f(_h.encode())
+  -> len 32.
+Line 25:     _l=_f(_i.encode())
+  -> len 32.
+Line 26:     _m=bytes((_q^_k[_p%len(_k)]) for _p,_q in enumerate(_j))
+  -> Repeating-key XOR.
+Line 27:     _n=bytes(((_s-_l[_r%len(_l)])&255) for _r,_s in enumerate(_m))
+  -> Modular subtraction (Vigenere on bytes).
+Line 28:     _o=getattr(_d,_a([100,101,99,111,109,112,114,101,115,115]))(_n)
+  -> "decompress" from lzma. _n head = fd 37 7a 58 5a 00 ... = XZ magic
+     (lzma .xz container). Decompressed len = 235691 bytes/chars.
+Line 29:     getattr(_e,_a([101,120,101,99]))(_o.decode(),getattr(_e,_a([103,108,111,98,97,108,115]))())
+  -> "exec" + "globals": exec(_o.decode(), globals()).
+     Runs stage2 with host globals as namespace.
+Line 30: _2d02bb92a24e()
+  -> Immediate call. No guard.
+Line 31: (blank)
+Line 32: _ITB=b'\x00...' (777 chars source, 256 bytes value)
+  -> Full hex (256 B):
+     0000000000000000000000000000000000000000000000000000000000000000
+     343e0000530000000000006a646f000038557d0000004b7c007b3f61370000
+     25577400002b00000000000000000000003300000028000000004600000040
+     76000000003d72773c5900000000585f000000520030007a000047454d2326
+     43320000000000000000000000000000000000000000000000000000000000
+     00000000000065005e4e5a6c0060000044000062660071697000734a006821
+     006e0000000000000000006d7500000000000000004f6b003b490000000000
+     000056410000002435004c360054000000000078000031007e480039630079
+     5100422a2967502d
+     Stats: unique byte values 86, zeros 171. First 32 bytes all zero
+     (possible header/reserved), then mixed binary + ASCII ("4>", "S",
+     "jdo", "8U}", "K|", "{?a7", "%Wt", "+", "3", "(", "F", "@v",
+     "=rw<Y", "X_", "R", "0", "z", "GEM#&C2", then zero pad, then
+     UTF-16LE-ish tail ("e\x00^NZl\x00..."). Exact semantics unknown
+     without native execution; treat as stage header/key blob.
+Line 33: _MF=('...','...',...) [4322 elements, source len 2836944]
+  -> Commas 37879 (includes commas inside strings? approx), '+' 33692
+     (many elements themselves are NOT '+'-joined; plus signs are inside
+     string contents).
+     Tuple element count via ast.parse: 4322.
+     Lengths: min 73, max 999, avg 653.39, total chars 2823972.
+     Histogram by 100s: 0:1, 300:613, 400:578, 500:639, 600:591,
+                        700:628, 800:660, 900:612.
+     First element len 301, head: '¹¯Ae<z}à0Ð®æàú¶æàµò?»«¸þ±»à¶±$l¡ÒA¦ÒÆ¥?<]yï^Y@9¦¦Å¤Å1meÜ¸ú?f~Û±ûõY1¸{µgÆ0,...'
+     First-element alphabet size 81. Union across first 500 elements: 85
+     distinct chars: ' !$+,-012679:;<?@ADPTY]^cdefglmqsuxyz{|}~¡£¤¥¦¨«®¯±²³µ¶¸¹»ÅÆÏÐÒÓÛÜàáãäæìïñòôõ÷øúûüýþÿ'
+     -> Custom 85-char alphabet (base85-like after translate). Each
+        element is one encrypted stage chunk. Order/semantics controlled
+        by native _1a8828... function.
+Line 34: _syz.settrace(None)
+Line 35: _syz.setprofile(None)
+  -> Clears debugger/profiler hooks. No detection (no gettrace check).
+Line 36: try:
+Line 37:     _0ebd5b6386f5490b(_MF,_ITB)
+  -> _0ebd... undefined in outer source; defined by stage2 native harvest
+     as alias of native _1a8828de96759fe2. Must run after stage2.
+Line 38: finally:
+Line 39:     pass
+  -> No-op finally. Template residue.
+
+Keyword sweep (outer file raw text, includes blobs so blob coincidences
+possible — filtered by location where noted):
+  __import__:3, getattr:4, settrace:1, setprofile:1, platform:3.
+  eval:0, compile:0, marshal:0, FunctionType:0, CodeType:0, importlib:0,
+  setattr:0, globals(:1 (line29) +1 in stage2 bridge, locals(:0,
+  __dict__:0, inspect:0, _getframe:0, hashlib:0, hmac:0, ctypes:0,
+  subprocess:0, socket:0, urllib:0. 'md5:1' and 'vm:23' hits are inside
+  high-entropy blobs, NOT code — disregarded.
+
+2. ENV GATE (M01) — COMPLETE
+--------------------------------------------------------------------------------
+Expected: (3, 14, 'nt', 64, 'AMD64').
+Current: (sys.version_info[0], version_info[1], os.name,
+          struct.calcsize('P')*8, platform.machine()).
+Compare exact tuple equality. Mismatch -> stderr message + flush (guarded
+by try/except pass) + os._exit(1).
+Why each field:
+  3,14 pins CPython 3.14 (native is cp314, Code.replace semantics).
+  'nt' pins Windows (native links KERNEL32/python314.dll, PE32+).
+  64 pins pointer width (PE x64, ImageBase 0x180000000).
+  'AMD64' pins platform.machine() string (Windows reports AMD64; Linux
+  reports x86_64, so Linux fails even on x64).
+Strength: moderate gate, very weak security. One-line patch.
+Note: current Linux host reports posix/x86_64 -> gate WOULD exit if run.
+  This is why file was not run here.
+
+3. OUTER CRYPTO/ENCODING PIPELINE (M05) — COMPLETE WITH RECOMPUTED VALUES
+--------------------------------------------------------------------------------
+Chain: _g_str (169635 chars, 1076 chunks) -> b85decode -> 135708 B (_j)
+  -> XOR each byte with _k[i%32] -> _m
+  -> subtract _l[i%32] mod 256 -> _n (XZ container, magic fd377a585a00)
+  -> lzma.decompress -> 235691 B (_o) -> .decode() -> stage2 source.
+_h 40 chars -> b85 -> 32 B. _i 40 chars -> b85 -> 32 B.
+Classification: base85 = encoding; XOR + modular-sub = reversible
+obfuscation with in-file keys (NOT encryption with secret); lzma =
+compression. No salt/IV/KDF. All keys recoverable (they are literals).
+Recomputed here as DATA (no exec): lengths above match implementation.
+Stage2 SHA (outer stage): no hash check at this layer (only inner layer
+has sha256). Tampering _g/_h/_i corrupts lzma/XZ and raises lzma error.
+
+4. STAGE2 SOURCE (DECODED, 235691 chars, 101 lines) — FULL SHORT LINES
+--------------------------------------------------------------------------------
+SHA256(stage2 text): 4073f53d6feb65452a12a889f8e26532f95254b268fab41b016a2f4c537d46e9
+Num lines: 101. defs: ['_6776404f'] only. classes: none.
+Imports (verbatim):
+  line 1: import zlib as _e6c59bea, os as _15c89504, tempfile as _1be87d4f, hashlib as _e324d130, atexit as _cdd0e35e
+  line 2: import base64 as _0d29c960
+  line 3: import importlib.machinery as _b27fa0e4, shutil as _af3b0a12
+  line 39 (inside func): import importlib.util as _49f08213
+  line 63 (inside nt branch): import sys as _633f7d3d, subprocess as _edc3debc
+Line 4: def _6776404f():
+Line 5:     _016a3abc=( ... 5 string literals ... )
+  -> Tuple lens [38675, 103332, 100, 7165, 2070], joined in order
+     _e065a9ac=[0, 4, 3, 2, 1] (line 6) to 151342 chars.
+     Chunks joined with plain tuple-parentheses adjacency? Actually
+     stored as 5-tuple, NOT '+'-joined; order list permutes.
+     Head of joined: ':ù6¤î§§ÐéÛYÏÞ®tüN®ÊRT«~Ðö÷üS¾kS#íUmü/ûÅQ/#¬¤ ®nÊHKcYÐ#ðÐÏ%[#ÛÅ÷úÇ®.~_4 ¾_Ç§nÝ÷ÕmNùRÑN4ü§ú:Ú:4¥¢Ý R¾ÕÕôÇ<9«öOMùáÙö_öùàNùiU®¼¼Q¬¢[®Ù¬*¾.Ð=îÔÏnÇ«m¨!bfú_.4Ô¨~ùbÅKMúfSRú!æYÞö«Ö_á÷Kp=ÇS«<[Q÷¥QÛÏ/òQNÆåtSY¾¨ù...'
+Line 6:     _e065a9ac=[0, 4, 3, 2, 1]
+Line 7:     _e1ec06c9=_0d29c960.b85decode("".join(_016a3abc[_96f7a715] for _96f7a715 in _e065a9ac).encode('latin-1').translate(b'\x00...52\x00b...' [256 bytes]).encode? no: .translate(table))
+  -> Full translate table len 256, 85 non-zero. Decoded mapping sample
+     (byte->mapped): 32->53('5'), 33->50('2'), 35->98('b'), 37->37('%'),
+     38->96('`'), 42->67('C'), 43->90('Z'), ... (85 entries total; full
+     table bytes in source line 7, 893 chars line length).
+     After .encode('latin-1').translate(table): 151342 bytes, head
+     b'c-ri}33!vm^EjR+O<RtTas&!eDO#k0#bPNIOQnGpQb?i5Rgt4AU^!bL!E%FbmGD~SR8&w95kwS3ghD_I<-Tu<9O3~c6c9W(h5Tk__dSxlseV7-@Bewe-{<-JNRzzp?(FRB?Ck8!>}*EgSsI;2qX~w89*;&-qGA7~X#T~2K^jesMw@DA)>S#sxFpDWpmEQfp<|=+#^k;-'
+     b85decode -> 121073 bytes, sha256 f5c82a82c47b39612b90e7541ec62157e634ad3969e3208b896686a08412469f (MATCHES line 8).
+Line 8:     if _e324d130.sha256(_e1ec06c9).hexdigest()!="f5c82a82c47b39612b90e7541ec62157e634ad3969e3208b896686a08412469f":
+Line 9:         raise RuntimeError("")
+  -> Empty message. Only integrity check in Python.
+Line 10:     _470322f9=_e6c59bea.decompress(_e1ec06c9)
+  -> zlib -> 297472 bytes, head 4d5a9000... = MZ PE. See section 5.
+Line 11:     _42114ab3="_6976a7f8f71b4023a6cc"
+  -> Module name (also PyInit_ name, pyd filename stem).
+Line 12:     _ca667b23=_b27fa0e4.EXTENSION_SUFFIXES[0]
+  -> e.g. '.cp314-win_amd64.pyd' on target.
+Line 13-15:     _5402133a=None / _10589403=None / _387b1542=None
+  -> memfd fd / path / tempdir.
+Line 16:     if hasattr(_15c89504,"memfd_create"):
+Line 18:             _5402133a=_15c89504.memfd_create(_42114ab3,_15c89504.MFD_CLOEXEC)
+Line 19:             _15c89504.write(_5402133a,_470322f9)
+Line 20:             _10589403="/proc/self/fd/%d"%_5402133a
+  -> Linux anonymous fileless path. No disk artifact.
+Lines 21-23: except -> None,None.
+Line 24:     if _10589403 is None:
+Line 25:         _b37b7e29=_1be87d4f.gettempdir()
+Lines 27-29:             for _3afa3b5f in _15c89504.listdir(_b37b7e29):
+Line 28:                 if _3afa3b5f.startswith("_0x"):
+Line 29:                     _af3b0a12.rmtree(...join(_b37b7e29,_3afa3b5f),ignore_errors=True)
+  -> Stale _0x* purge. Destructive to matching dirs — analyze copies.
+Line 32:         _387b1542=_1be87d4f.mkdtemp(prefix="_0x")
+Line 33:         _10589403=_15c89504.path.join(_387b1542,_42114ab3+_ca667b23)
+Line 34:         _d6404efe=_15c89504.open(_10589403,_15c89504.O_RDWR|_15c89504.O_CREAT|_15c89504.O_EXCL|getattr(_15c89504,"O_NOINHERIT",0)|getattr(_15c89504,"O_BINARY",0),0o600)
+  -> Exclusive 0600. O_NOINHERIT/O_BINARY via getattr default 0 (portable).
+Lines 35-38: try: write(_470322f9) finally: close(_d6404efe)
+Line 40:     _039d12e6=_49f08213.spec_from_file_location(_42114ab3,_10589403,loader=_b27fa0e4.ExtensionFileLoader(_42114ab3,_10589403))
+Line 41-42:     if _039d12e6 is None or _039d12e6.loader is None: raise ImportError("")
+Line 43:     _5ee0ebc0=_49f08213.module_from_spec(_039d12e6)
+Line 44:     _039d12e6.loader.exec_module(_5ee0ebc0)
+  -> Native import. Single hook point to dump module + blob.
+Line 45:     _c1e1c757=getattr(_5ee0ebc0,"_40ca8e0f24006212")
+  -> Cleanup callback for posix-tempfile path.
+Lines 46-47:     if _5402133a is not None: _cdd0e35e.register(_15c89504.close,_5402133a)
+Lines 48-60:     elif _387b1542 is not None:
+Line 49:         if _15c89504.name!="nt":
+Lines 51:                 _c1e1c757(_387b1542)
+Lines 53-60:             except: try remove(_10589403) except OSError pass; try rmdir(_387b1542) except pass
+Lines 61-69 (else nt):
+Line 64:                 import sys as _633f7d3d, subprocess as _edc3debc
+Line 65:                 if not getattr(_633f7d3d,"frozen",False):
+Line 66:                     _8d76bd2f=getattr(_633f7d3d,"_base_executable",None) or _633f7d3d.executable
+Line 67 (751 chars verbatim key part):
+  _edc3debc.Popen([_8d76bd2f,"-c","import os,sys,time,shutil,ctypes\np=int(sys.argv[1]);d=sys.argv[2]\nk=ctypes.WinDLL('kernel32',use_last_error=True)\nh=k.OpenProcess(1048576,False,p)\nif h:\n k.WaitForSingleObject(h,0xffffffff);k.CloseHandle(h)\nfor _ in range(100):\n try:\n  for rt,dd,ff in os.walk(d):\n   for fn in ff:\n    try:\n     fp=os.path.join(rt,fn);sz=os.path.getsize(fp)\n     with open(fp,'wb') as wf:\n      wf.write(os.urandom(sz))\n    except OSError:\n     pass\n  shutil.rmtree(d,ignore_errors=False);break\n except OSError:\n  time.sleep(0.1)\n",str(_15c89504.getpid()),_387b1542],stdin=DEVNULL,stdout=DEVNULL,stderr=DEVNULL,close_fds=True,creationflags=0x00000008|0x00000200)
+  -> 0x8=DETACHED_PROCESS, 0x200=CREATE_NEW_PROCESS_GROUP. 1048576=0x100000=SYNCHRONIZE.
+     Waits for parent death, overwrites each file with urandom(sz), rmtree
+     x100 with 0.1s sleeps. Anti-forensic self-delete. DESTRUCTIVE.
+Line 68:             except (OSError,ValueError,ImportError): pass
+Line 70:     return _5ee0ebc0,_470322f9
+Line 71: _5ee0ebc0,_470322f9=_6776404f()
+  -> Runs at import (during outer exec). Unpacks immediately.
+Lines 72-98 (28 harvests, verbatim pattern globals()["_<py>"]=getattr(_5ee0ebc0,"_<native>")):
+  _1d4a8e9f1e4dddae <- _9a19bc8d16ac328a
+  _65ff1c1ff8aebc17 <- _49388c10b2ad3825
+  _777956c426a4d40b <- _3493eeb740d9e2a2
+  _f433917ed5290fba <- _8bc2bdcf0056c8f2
+  _2e168ac769ba4c94 <- _03daad8b89173ad4
+  _85572e9dc5e4b68f <- _37523a0166a41518
+  _41b7ebbfa83c99b7 <- _f800a3f02b9bebb0
+  _2dfc254d4c1dcd87 <- _a4f794a7fda49c6a
+  _bc2da40f3a6741b1 <- _af3ef3f17bdec156
+  _07b9c00c895c601c <- nyser_loads
+  _a952550534ab11ee <- _nyk_advance_stage
+  _c041c6b05401e597 <- _nyk_get_stage_key
+  _1535331763d81458 <- _nyk_heartbeat
+  _1ab0dfe96d15fd91 <- _nyk_verify_heartbeat
+  _14bc57de0adfd93d <- _nyk_layer_key
+  _0996216aa1d3e5bf <- _nyk_input
+  _cd60e845fd350a88 <- _nyk_print
+  _4a11e5853c06c5a0 <- _nyk_open_file
+  _36fcc3c9715efc62 <- _nyk_strdec
+  _0857176bc0b8bfd3 <- _nyk_hwid_open
+  _e4e80f8ba7319e43 <- _nyk_kill
+  _572fccf53691ab29 <- _nyk_integrity
+  _d351962a7bbdeab5 <- _nyk_funcdec
+  _e4b823cda869e669 <- _aad4b6cec12eccc3
+  _0ebd5b6386f5490b <- _1a8828de96759fe2   (== outer line 37 entry)
+  _87edf157be814f35 <- _63b0e5761299e075
+  _d7be161c50c4c6c7 <- _40ca8e0f24006212   (== cleanup cb)
+Line 99: _5ee0ebc0._nyk_host_g=globals()
+  -> Gives native access to host namespace.
+Line 100: _470322f9=b""
+  -> Clears reference (bytes immutable; memory may retain copy).
+
+5. NATIVE BINARY (297472 bytes, DATA ONLY — never imported)
+--------------------------------------------------------------------------------
+SHA256(native): 436896605da45c7b5e13144610a22f9ce6d3630d49d15f474fc1de88d14c8456
+MD5: e92b914fcd47059191453c7ed1004e31
+Compressed (stage2 _e1ec06c9): 121073 bytes, sha256 f5c82a... (verified).
+Decompressed: 297472 bytes. Head hex 4d5a90000300000004000000ffff0000b8...,
+  ASCII "MZ...This program cannot be run in DOS mode." = Windows PE.
+  e_lfanew=256, PE sig 50 45 00 00, machine 0x8664 (x64), num_sections 6,
+  timedate 1788040109 (Sun Aug 30 03:18:29 2026 per llvm-objdump),
+  size_opt 240, characteristics 0x2022 (executable, large-address-aware, DLL).
+  Optional magic 0x20b (PE32+), ImageBase 0x180000000, Subsystem 2
+  (Windows GUI), DllCharacteristics 0x160 (HIGH_ENTROPY_VA|DYNAMIC_BASE|
+  NX_COMPAT), SizeOfImage 0x4e000, EntryPoint 0x3e1ec.
+Sections (name, vsize, vaddr, rawsz, rawptr, flags, entropy, sha8):
+  .text 252952 @0x1000 raw 253440 @0x400 flags 0x60000020 entropy 6.057 sha bf8624e129f171e0
+  .rdata 29028 @0x3f000 raw 29184 @0x3e200 flags 0x40000040 entropy 5.722 sha da9b7d86dad43221
+  .data 11344 @0x47000 raw 6656 @0x45400 flags 0xc0000040 entropy 1.620 sha 40fcb11120c310bf
+  .pdata 5256 @0x4a000 raw 5632 @0x46e00 flags 0x40000040 entropy 5.286 sha 40f5b5ca7991ef50
+  .rsrc 248 @0x4c000 raw 512 @0x48400 flags 0x40000040 entropy 2.527 sha 573814a24c14fd77
+  .reloc 520 @0x4d000 raw 1024 @0x48600 flags 0x42000040 entropy 3.527 sha ba7c6a39e66e01ee
+Data dirs: export 0x444f0/124, import 0x4456c/120, resource 0x4c000/248,
+  except 0x4a000/5256, reloc 0x4d000/520, debug 0x429c0/28,
+  loadcfg 0x42880/320, IAT 0x3f000/1920. cert/tls/bound/delay/clr zero.
+Export: 1 func, base 1: ord1 RVA 0x2ea10 PyInit__6976a7f8f71b4023a6cc,
+  dll name "_6976a7f8f71b4023a6cc.cp314-win_amd64.pyd".
+Imports (236 total: 206 python314 + 13 KERNEL32 + 6 VCRUNTIME + 1 filesystem
+  + 9 runtime + 1 export-row artifact):
+  python314.dll (206): PyObject_GenericGetAttr, PyTraceBack_Here,
+   PyList_SetSlice, PyExc_RuntimeError, PyMethod_New,
+   PyObject_SetAttrString, PyLong_FromLong, PyObject_GC_UnTrack,
+   PyObject_Hash, PyUnicode_Concat, PyNumber_Xor, PyExc_UnboundLocalError,
+   PyErr_SetNone, PyDict_GetItemWithError, PyInterpreterState_GetID,
+   PyLong_FromUnsignedLongLong, PyObject_GetAttr, PyModule_GetName,
+   PyDict_Contains, PyUnicode_AsLatin1String, PyLong_AsUnsignedLongLong,
+   PyBytes_AsStringAndSize, _Py_NoneStruct, PyTuple_New,
+   PySequence_Contains, PyObject_GenericSetDict,
+   PyObject_VisitManagedDict, PyDict_SetItemString, PyDict_Size,
+   PyLong_FromLongLong, PyDict_SetDefaultRef, PyFloat_FromDouble,
+   PyGC_Disable, PyExc_AttributeError, PyTuple_GetSlice, PyUnicode_New,
+   PyNumber_Multiply, PyErr_SetString, PyMarshal_ReadObjectFromString,
+   PyExc_ZeroDivisionError, PyObject_CallFunction, PyErr_WriteUnraisable,
+   PyObject_GetIter, PyNumber_Add, PyErr_WarnFormat, PyExc_ValueError,
+   PyUnicode_InternInPlace, PyLong_FromUnsignedLong, PyDict_Next,
+   PyErr_Format, PyDict_Type, PyThreadState_GetUnchecked,
+   PyObject_RichCompare, PyExc_BaseException, PyTuple_Type,
+   _Py_FalseStruct, PyImport_GetModule, PyNumber_InPlaceAdd,
+   PyFloat_Type, PyModule_NewObject, PyMethod_Type, PyLong_Type,
+   PyType_IsSubtype, PyNumber_Subtract, PyUnicode_Join,
+   PyExc_OverflowError, _Py_Dealloc, PyTuple_GetItem,
+   PyImport_GetModuleDict, PyModule_GetDict, PyObject_Format,
+   PySequence_GetSlice, PyErr_ExceptionMatches,
+   PyObject_ClearManagedDict, PyUnicode_FindChar, PyNumber_And,
+   PyObject_GC_Del, PyObject_CallFunctionObjArgs, PyLong_AsLong,
+   PyObject_GenericGetDict, PyObject_ClearWeakRefs, PyObject_Init,
+   PyObject_Vectorcall, PyNumber_Remainder, Py_Version, PyList_New,
+   PyNumber_Rshift, PySlice_New, PyObject_GC_IsFinalized, PyType_Ready,
+   PyObject_GetAttrString, Py_CompileStringExFlags, PyExc_EOFError,
+   PyErr_Clear, PyList_Append, PyBytes_Type, PyObject_RichCompareBool,
+   PyException_SetTraceback, PyObject_VectorcallDict, PyDict_SetItem,
+   PyDict_New, PyUnicode_Type, PyObject_CallFinalizerFromDealloc,
+   _PyDict_GetItem_KnownHash, PyObject_VectorcallMethod,
+   PyObject_IsInstance, PyNumber_Index, PyMem_Free, PyExc_StopIteration,
+   PyObject_GetOptionalAttr, PyFrozenSet_New,
+   PyUnstable_Object_IsUniquelyReferenced, PyCMethod_New,
+   PyNumber_Negative, PyList_Type, PyErr_NoMemory, PyDict_GetItemString,
+   PyExc_OSError, PyObject_GetItem, PyComplex_Type, PyModuleDef_Init,
+   PyObject_GC_Track, PyBytes_FromStringAndSize, PyNumber_InPlaceXor,
+   PyUnstable_Code_NewWithPosOnlyArgs, PyDict_GetItemRef,
+   PyObject_IsSubclass, PyExc_TypeError, PyNumber_Lshift, PyMem_Realloc,
+   PyType_FromMetaclass, PyObject_IsTrue, PyDict_Copy, PyObject_Str,
+   PyExc_NameError, PyTuple_Pack, _PyByteArray_empty_string,
+   PyCallable_Check, PyMem_Malloc, PyList_AsTuple, PyExc_IndexError,
+   Py_EnterRecursiveCall, PyExc_ImportError, _Py_TrueStruct,
+   PyArg_UnpackTuple, PyMemoryView_FromMemory, PyExc_SystemError,
+   PyObject_SetItem, _PyObject_GC_New, PyException_SetCause,
+   PyNumber_TrueDivide, PyTraceBack_Type, PyExc_GeneratorExit, PyNumber_Or,
+   PyRange_Type, PyUnicode_FromString, PyObject_Size, PyObject_Call,
+   PyByteArray_Type, PyType_Type, PySequence_Tuple, PyUnicode_Substring,
+   PyUnicode_FromStringAndSize, PyIter_Check, _PyObject_GetDictPtr,
+   PyUnicode_DecodeUTF8, PyLong_FromSsize_t,
+   PyArg_ValidateKeywordArguments, PyErr_Occurred, PyObject_SelfIter,
+   PyErr_NormalizeException, PyImport_ImportModuleLevelObject,
+   PyBytes_AsString, PyImport_ImportModule, PyImport_AddModuleRef,
+   Py_LeaveRecursiveCall, PyExc_KeyError, PyExc_DeprecationWarning,
+   PyLong_AsSsize_t, PyFrame_New, PyThreadState_GetFrame,
+   PyExc_RuntimeWarning, PyErr_WarnEx, PyLong_AsUnsignedLong,
+   PyErr_GivenExceptionMatches, PyObject_HasAttrWithError,
+   PyCode_NewEmpty, PyDict_SetDefault, PyErr_SetObject,
+   PyException_GetTraceback, PyExc_Exception, PyThreadState_Get,
+   PyOS_snprintf, PyCFunction_Type, PyUnicode_InternFromString,
+   PyObject_SetAttr, PyGC_Enable, PyBaseObject_Type, PyByteArray_Resize,
+   PySequence_List, PyUnstable_Object_EnableDeferredRefcount,
+   PyUnicode_CopyCharacters, PyEval_EvalCode, PyFrozenSet_Type,
+   PyUnicode_FromFormat, PyUnicode_AsEncodedString.
+   KEY OBSERVATION: PyEval_EvalCode + Py_CompileStringExFlags +
+   PyMarshal_ReadObjectFromString + PyUnstable_Code_NewWithPosOnlyArgs +
+   PyCode_NewEmpty + PyFrame_New = native CAN compile/eval/rebuild code
+   objects (dynamic execution INSIDE native, not visible in Python).
+   PyNumber_Xor/InPlaceXor = native XOR stage. PyTraceBack_Here etc =
+   Cython exception machinery, not custom anti-debug.
+  KERNEL32.dll (13): RtlLookupFunctionEntry, QueryPerformanceCounter,
+   GetCurrentProcessId, GetCurrentThreadId, GetSystemTimeAsFileTime,
+   DisableThreadLibraryCalls, InitializeSListHead, RtlCaptureContext,
+   RtlVirtualUnwind, IsDebuggerPresent, UnhandledExceptionFilter,
+   SetUnhandledExceptionFilter, IsProcessorFeaturePresent.
+   IsDebuggerPresent + QueryPerformanceCounter present as IMPORTS; calls
+   unconfirmed without disassembly. No CheckRemoteDebuggerPresent,
+   NtQueryInformationProcess, OutputDebugString, AddVectoredExceptionHandler.
+  VCRUNTIME140.dll (6): memcpy, memset, __std_type_info_destroy_list,
+   __C_specific_handler, strrchr, memcmp.
+  api-ms-win-crt-filesystem-l1-1-0.dll (1): remove.
+  api-ms-win-crt-runtime-l1-1-0.dll (8+1): _seh_filter_dll,
+   _configure_narrow_argv, _initialize_narrow_environment, _initterm_e,
+   _initterm, _execute_onexit_table, _cexit, _Exit,
+   _initialize_onexit_table.
+Cython evidence: strings cython_runtime, CythonUnboundCMethod,
+  _cython_3_2_8 (x16 hits), CyFunction messages, generator messages,
+  "compile time Python version %d.%d of module '%.100s' %s runtime
+  version %d.%d" guard, "Interpreter change detected - this module can
+  only be loaded into one interpreter per process.",
+  "Module '_6976a7f8f71b4023a6cc' has already been imported.
+  Re-initialisation is not supported."
+Build leak: C:/Users/karma/AppData/Local/Temp/aiUilne7z6v\_6976a7f8f71b4023a6cc.c
+  (builder user 'karma', temp dir). Manifest: <?xml ...><assembly
+  xmlns='urn:schemas-microsoft-com:asm.v1' ...>.
+NYSER1 docstring (verbatim from binary):
+  "Reconstruct a code object from NYSER1 bytes.\n\n    Self-contained by
+  design (see module docstring): this function is embedded\n    verbatim
+  into the fallback deserializer template and the Cython kernel, so it\n
+  must not reference module globals. ``_template`` is the code object
+  whose\n    ``.replace`` rebuilds each node; when ``None`` a template is
+  captured from a\n    freshly-defined lambda, which is unhookable via
+  attribute rebinding.\n    "
+  Helpers: nyser_loads, .need, .r_u32, .r_blob, .r_str, .r_strtuple(.genexpr),
+  .r_int, .r_value(.genexpr), .r_code(.genexpr), _reconstruct,
+  _reconstruct_parts, _verify_eval, _template. Marker NYSER1 count 1,
+  nyser count 14.
+Exported Python names observed in strings (54 nyk-hits, unique ~27):
+  nyser_loads, _nyk_advance_stage, _nyk_get_stage_key, _nyk_layer_key,
+  _nyk_input, _nyk_print, _nyk_open_file, _nyk_cc_qr, _nyk_strdec,
+  _nyk_hwid_open, _nyk_kill, _nyk_integrity, _nyk_funcdec,
+  _nyk_heartbeat, _nyk_verify_heartbeat, _9a19bc8d16ac328a,
+  _49388c10b2ad3825, _3493eeb740d9e2a2, _8bc2bdcf0056c8f2,
+  _03daad8b89173ad4, _37523a0166a41518, _f800a3f02b9bebb0,
+  _a4f794a7fda49c6a, _af3ef3f17bdec156, _aad4b6cec12eccc3,
+  _1a8828de96759fe2, _63b0e5761299e075, _40ca8e0f24006212,
+  plus _fail_pf.
+VM/sandbox sweep: strings | grep -i debug/trace/hook/patch/vm/virtual/
+  sandbox/frida/vbox/vmware/hwid/machine/guid/serial/license/expir/kill/
+  integrity/heartbeat/stage/nyser -> ONLY generic hits listed above
+  (IsDebuggerPresent, QueryPerformanceCounter, RtlVirtualUnwind,
+  TraceBack APIs which are Cython/CPython, NOT custom VM checks).
+  No VBox/VMware/HyperV/QEMU/KVM/Frida/Procmon/Wireshark/x64dbg/Olly/IDA/
+  WinDbg/Breakpoint/CheckRemote/NtQuery strings. Conclusion: NO VM/sandbox
+  detection strings in binary.
+Network sweep: no http/https accumulating? actually quick scan found no
+  'http' URLs, no discord/nyami API hosts in binary (only outer comment).
+Crypto sweep: no AES/ChaCha/Salsa/RSA/SHA-strings beyond hashlib use in
+  stage2; only 'xored', PyNumber_Xor/InPlaceXor, zlib. Treat _MF as custom
+  XOR/sub-style stream, NOT standard cipher (unconfirmed bodies).
+Total printable strings (len>=4): 3605. Total strings (all): 3713.
+
+6. WHAT WAS *NOT* RECOVERED — THE REMAINING SOURCE CODE GAP
+--------------------------------------------------------------------------------
+Recovered: outer loader (100%), stage2 loader (100% as source), native
+binary (100% as bytes + headers/imports/strings), _MF/_ITB containers
+(100% as data + stats).
+NOT recovered: original pre-obfuscation application logic hidden INSIDE
+_MF/_ITB. Those 4322 blobs are arguments to native _1a8828... staged
+machine (_advance_stage/_get_stage_key/_layer_key/_heartbeat/_strdec/
+_funcdec/nyser_loads). Decryption requires EXECUTING native code with
+matching Windows Python 3.14 AMD64, which was deliberately NOT done here
+(per no-run constraint + destructive self-delete + wrong host OS).
+Therefore NO claim is made about final app behavior (no invented
+functions, URLs, license logic). Any report claiming full app source
+without dynamic dump on matching Windows VM is hallucinating.
+Safe next step (isolated Windows 11 x64 VM, py3.14, snapshot, offline,
+copies only): patch gate print, hook exec/exec_module to save stage2 +
+native, then wrap exported _nyk_* to log (_MF index, key, plaintext)
+during _1a88 call; dump NYSER1 -> disassemble with `dis` (never run
+waiter on host; stub Popen/remove/rmdir/atexit).
+
+7. CONFIDENCE LABELS
+--------------------------------------------------------------------------------
+Definitely present: M01 gate, M02/M03 int-list imports, M04 renaming,
+M05 outer b85/XOR/sub/lzma+exec(globals), M07 settrace clear, M08 deferred
+call, M09 _ITB/_MF blobs, M10 reorder/translate/b85, M11 sha256,
+M12 zlib+memfd/tempfile+ExtensionFileLoader, M13 harvest+host_g,
+M14 forensic cleanup/waiter, M15 Cython+NYSER1, M16 wrapper NAMES,
+PE metadata/imports/exports/hashes above.
+Probably present (use unconfirmed): IsDebuggerPresent/QueryPerformanceCounter
+as active guards; _heartbeat as timing/liveness; _hwid as machine lock;
+_kill as destructive guard.
+Not detected: eval/compile/marshal/CodeType/AST/bytecode in Python,
+gettrace checks, timing thresholds, VM/sandbox strings, network/license/
+expiry, self-hash/signature in Python.
+All section-5 import/func lists are literal; all behavioral claims about
+native internals beyond names are marked inference.
+
+8. REPRODUCE (SAFE, NO EXEC)
+--------------------------------------------------------------------------------
+# sizes
+python3 -c "import pathlib; p=pathlib.Path('obf-test.py'); d=p.read_bytes(); print(len(d))"
+# outer short lines: Read file (lines >2000 chars truncate — use ast/regex
+# to extract _h/_i, never exec).
+# stage2 as data (THIS DOES NOT EXEC):
+#   parse line20 chunks via re, b85decode, XOR, sub, lzma.decompress,
+#   write /tmp/stage2.py, inspect text only.
+# native as data:
+#   reorder [0,4,3,2,1], translate(256B table), b85decode, sha256 check,
+#   zlib.decompress, write /tmp/native.so, strings/llvm-objdump only.
+# NEVER: python obf-test.py | python -c "exec(open(...).read())" |
+#   importlib load of /tmp/native.so | calling _1a88... on host.
+================================================================================
+END. Static ceiling reached. Dynamic dump on matching isolated Windows
+VM is the only path to remaining _MF plaintext.
+================================================================================

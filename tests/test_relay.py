@@ -2,14 +2,15 @@ import sys
 import subprocess
 import pytest
 
-OBFUSCATOR_PATH = "15(14).py"
+OBFUSCATOR_PATH = "obfuscator/core/utils.py"
+OBFUSCATOR_CLI_PATH = "obfuscator/core/pipeline.py"
 
 
 def test_imports_work_via_subprocess():
     code = """
 import sys
 sys.path.insert(0, '.')
-with open('15(14).py') as f:
+with open('obfuscator/core/utils.py') as f:
   source = f.read()
 
 import ast
@@ -34,7 +35,7 @@ def test_socks5_proxy_format():
     code = """
 import sys
 sys.path.insert(0, '.')
-with open('15(14).py') as f:
+with open('obfuscator/core/utils.py') as f:
   source = f.read()
 
 import ast
@@ -78,8 +79,8 @@ else:
 
 
 def test_cli_argparse_exists():
-    """Verify that 15(14).py uses argparse for CLI."""
-    with open(OBFUSCATOR_PATH, encoding="utf-8") as f:
+    """Verify that obfuscator/core/pipeline.py uses argparse for CLI."""
+    with open(OBFUSCATOR_CLI_PATH, encoding="utf-8") as f:
         source = f.read()
     assert "argparse" in source
     lines = source.splitlines()

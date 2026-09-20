@@ -1,6 +1,9 @@
 import os
+import sys
 import tempfile
 import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 @pytest.fixture
@@ -22,3 +25,27 @@ def build_dir():
     if not os.path.isdir(bd):
         pytest.skip(f"build directory not found at {bd}")
     return os.path.abspath(bd)
+
+
+@pytest.fixture(autouse=True)
+def reset_ir_counter():
+    from irgen.compile import IrValue
+    IrValue.reset_counter()
+
+
+@pytest.fixture
+def ir_module():
+    from irgen.compile import IrModule, IrFunction, IrType
+    mod = IrModule("test_mod")
+    func = IrFunction("test_func", IrType.i32())
+    entry = func.new_block("entry")
+    mod.functions.append(func)
+    return mod
+
+
+@pytest.fixture
+def ir_func():
+    from irgen.compile import IrFunction, IrType
+    func = IrFunction("test_func", IrType.i32())
+    func.new_block("entry")
+    return func

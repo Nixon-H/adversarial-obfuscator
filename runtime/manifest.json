@@ -1,0 +1,25 @@
+{
+  "version": "1.0.0",
+  "payload_type": "python",
+  "features": [
+    "antidbg",
+    "integrity",
+    "encrypt",
+    "memguard",
+    "selfdestruct"
+  ],
+  "build_seed": "9dbadfd20bc2b8baf1ab2484d2dc6d57513caf74976621453ce9b2d62fb05641",
+  "encryption": {
+    "algorithm": "aes-256-ctr",
+    "key_derivation": "sha256(seed + block_index)"
+  },
+  "integrity": {
+    "algorithm": "crc32",
+    "check_at": "startup"
+  },
+  "self_destruct": {
+    "on_exit": true,
+    "on_detach": true,
+    "memory_scrub": true
+  }
+}

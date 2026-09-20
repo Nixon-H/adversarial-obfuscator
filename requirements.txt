@@ -6,21 +6,16 @@
 # ─── Core ────────────────────────────────────────────────────────────────────
 requests==2.32.3         # GitHub API (build farms, repo mgmt, artifact download)
 urllib3==2.4.0           # HTTP retry adapter (used by CloudBuilder with requests)
-websockets==14.2         # WebSocket client — payload comms layer
 numpy==2.2.4             # Optional — HAS_NUMPY check; used if present for numeric obf
 
-# ─── Obfuscator (AST transforms, generated payload deps) ─────────────────────
-zstandard==0.23.0        # Compression in Nuitka-based payloads
-ordered-set==4.1.0       # Ordered set for opcode obfuscation internals
-
-# ─── Relay (orbital-relay.py — SOCKS5 / Cloudflare / Tor bridge) ────────────
-#   (relay also imports `requests` and `websockets` from Core above)
-
-# ─── Build (GitHub build farm, cross-compile toolchain) ──────────────────────
-nuitka==2.6.4            # Python-to-native cross-compiler (Win/Lin/macOS/Android)
+# ─── Build (C extension compilation) ─────────────────────────────────────────
 Cython==3.0.12           # C extension compilation (GitHubBuildFarm → .pyd/.so/.dylib)
 
-# ─── Dev / Support ───────────────────────────────────────────────────────────
+# ─── Test (SMT-backed suites: test_metrics, test_smt_validation, proof
+# soundness, vm_correctness, watermark_survivability, etc. — 15 modules
+# import z3 via scripts/metrics/resilience.py and scripts/validation/)
+# ─────────────────────────────────────────────────────────────────────────────
+z3-solver==5.1.0.0       # scripts/metrics/resilience.py, scripts/validation/*
 #   No additional third-party deps beyond the above.
 #   All other imports (hashlib, base64, ctypes, marshal, lzma, struct, etc.)
 #   are Python stdlib — no pip needed.

@@ -1,0 +1,67 @@
+name: Shadow Compiler Build
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: 'Build seed (hex). Leave empty for random.'
+        required: false
+        default: ''
+
+jobs:
+  shadow-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y llvm clang lld
+      
+      - name: Print Build Info
+        run: |
+          echo "Build ID: $(date +%s)-$(git rev-parse --short HEAD)"
+          echo "Seed: ${{ github.event.inputs.seed || 'random' }}"
+          echo "Stages: obfuscate → irgen → llvmgen → encrypt → relay → runtime"
+      
+      - name: Stage 1 - Obfuscate
+        run: python3 obfuscator/core.py obfuscate payload.py -o build/obfuscated.py
+      
+      - name: Stage 2 - IR Compile
+        run: python3 -m irgen build/obfuscated.py -o build/program.ir
+      
+      - name: Stage 3 - LLVM Codegen
+        run: python3 -m llvmgen build/program.ir -o build/program.o --bcf --fla --sub
+      
+      - name: Stage 4 - Block Encryption
+        run: python3 -m encrypt build/program.o -o build/encrypted.o --seed "${{ github.event.inputs.seed }}"
+      
+      - name: Stage 5 - Link Relay
+        run: make relay
+      
+      - name: Generate Build Manifest
+        run: |
+          echo "{
+            \"build_time\": \"$(date -Iseconds)\",
+            \"git_hash\": \"$(git rev-parse HEAD)\",
+            \"seed\": \"${{ github.event.inputs.seed || 'random' }}\",
+            \"stages\": [\"obfuscate\",\"irgen\",\"llvmgen\",\"encrypt\",\"relay\"]
+          }" > build/build-manifest.json
+      
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: shadow-build
+          path: build/
+          retention-days: 30

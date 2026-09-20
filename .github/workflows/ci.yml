@@ -1,0 +1,36 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Version matrix (py_matrix.py SUPPORTED): NYSER1 fields, loader
+        # bytecodes and C-API offsets drift per minor — a skew bug would
+        # otherwise ship silently (CI previously pinned 3.12 only).
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Python tests
+        run: python3 -m pytest tests/ -v
+      - name: Rust runtime tests
+        run: cd runtime && cargo test
+      - name: Rust relay tests
+        run: cd relay && cargo test
+      - name: Build check runtime
+        run: cd runtime && cargo check
+      - name: Build check relay
+        run: cd relay && cargo check
+      - name: Static analysis
+        run: python3 -m py_compile obfuscator/*.py irgen/*.py llvmgen/*.py scripts/*.py vm/*.py encrypt/*.py tests/*.py
+      - name: Build C shared libs
+        run: make core

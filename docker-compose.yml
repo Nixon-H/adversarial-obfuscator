@@ -1,0 +1,22 @@
+version: "3.9"
+services:
+  builder:
+    build:
+      context: .
+      target: builder
+    volumes:
+      - ./build:/build/build
+    environment:
+      - BUILD_ID
+      - MASTER_KEY
+
+  tester:
+    build:
+      context: .
+      target: tester
+    volumes:
+      - ./build:/build/build
+      - ./tests:/build/tests
+    environment:
+      - BUILD_ID
+      - MASTER_KEY
