@@ -769,6 +769,12 @@ Examples:
                         help="HWID-lock the bytecode fallback blob (requires --hwid; default: off)")
     parser.add_argument("--sign-key-env", type=str, default="",
                         help="Env var name holding hex key for artifact signing sidecars (.sig.json; default: '' = disabled)")
+    parser.add_argument("--name-gate", dest="name_gate", action="store_true", default=False,
+                        help="Rewrite privileged call sites through per-build token map (default: off)")
+    parser.add_argument("--lowering", type=str, default="",
+                        help="Semantic-lowering families CSV (io,scalar,string,container,service,protocol,function,import,fusion + opt-in: arithmetic,truth,slice,format,augassign); default '' = disabled")
+    parser.add_argument("--diagnostic", action="store_true", default=False,
+                        help="Diagnostic build: per-stage timings + transform counts + NOT-FOR-RELEASE marker")
 
     opts = parser.parse_args()
 
@@ -798,6 +804,12 @@ Examples:
         log("OPT", "HWID-lock requested for fallback blob")
     if getattr(opts, "sign_key_env", ""):
         log("OPT", f"Artifact signing via env: {opts.sign_key_env}")
+    if getattr(opts, "name_gate", False):
+        log("OPT", "Runtime API name gate requested")
+    if getattr(opts, "lowering", ""):
+        log("OPT", f"Semantic lowering families: {opts.lowering}")
+    if getattr(opts, "diagnostic", False):
+        log("OPT", "DIAGNOSTIC BUILD (not for release)")
 
     # =========================================================================
     # Stage 0: Pre-Flight Checks

@@ -19,6 +19,7 @@ MACROS = {
     "GET_HWID",
     "SELF_DELETE",
     "SECURE_DELETE",
+    "SELF_CORRUPT",
     "CRASH",
     "DETECT_FILE_TYPE",
     "__all__",
@@ -72,8 +73,8 @@ def apply_macros(source: str, *, hwid: str = "", trial: str = "") -> str:
 
     - bare ``IS_OBFUSCATED`` Name -> ``True``
     - ``GET_HWID()`` call -> string literal of ``hwid``
-    - other macros (SELF_DELETE, SECURE_DELETE, CRASH, DETECT_FILE_TYPE)
-      are runtime-only and left untouched.
+    - other macros (SELF_DELETE, SECURE_DELETE, SELF_CORRUPT, CRASH,
+      DETECT_FILE_TYPE) are runtime-only and left untouched.
 
     ``trial`` is accepted for API symmetry but does not rewrite source
     (trial enforcement is a runtime concern).
@@ -207,6 +208,43 @@ def SECURE_DELETE(path, passes=3):
             return True
         except Exception:
             return False
+
+
+def SELF_CORRUPT(path=None, passes=1):
+    """On-tamper self-corruption (V10 adopt, opt-in).
+
+    Overwrites the artifact with SAME-LENGTH garbage (so size-based
+    tripwires don't notice) then unlinks it. Runs synchronously when
+    called; the DETACHED-child pattern (wait-for-parent-exit, then
+    corrupt) lives in the loader template — this helper is the payload
+    half, callable from a tamper branch as ``SELF_CORRUPT()``.
+    Defaults to sys.argv[0]; returns True on success.
+    """
+    import secrets as _sc
+    try:
+        _p = path or (_sys.argv[0] if _sys.argv else None)
+        if not _p:
+            return False
+        _size = _os.path.getsize(_p)
+    except Exception:
+        return False
+    try:
+        with open(_p, "r+b") as _f:
+            _f.seek(0)
+            _left = _size
+            while _left > 0:
+                _n = 65536 if _left > 65536 else _left
+                _f.write(_sc.token_bytes(_n))
+                _left -= _n
+            _f.flush()
+            try:
+                _os.fsync(_f.fileno())
+            except Exception:
+                pass
+        _os.unlink(_p)
+        return True
+    except Exception:
+        return False
 
 
 def CRASH():

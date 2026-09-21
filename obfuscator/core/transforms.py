@@ -78,6 +78,11 @@ class SymbolRenamer(ast.NodeTransformer):
         self.protected_functions = set()
         self.current_function = None
         self._rename_log = []
+        # V10 kwargs fix: when False (default), function PARAMETER names and
+        # keyword-argument names are never renamed (call-site contracts).
+        # Set rename_params=True only for whole-program builds where every
+        # caller is rewritten consistently (not yet implemented).
+        self.rename_params = False
         self.reserved = {
             'sum', 'min', 'max', 'abs', 'round', 'pow', 'divmod',
             'chr', 'ord', 'hex', 'oct', 'bin', 'ascii', 'repr',
@@ -153,17 +158,51 @@ class SymbolRenamer(ast.NodeTransformer):
         old_function = self.current_function
         self.current_function = node.name
         if node.name not in self.protected_functions and not node.name.startswith("__") and not node.name.startswith("_") and node.name not in self.reserved:
-            node.name = self.get_new_name(node.name)        
+            # V10 super() fix: zero-arg super() and method overrides depend
+            # on the METHOD NAME surviving (override dispatch + implicit
+            # __class__ cell). Never rename a method defined inside a class
+            # body — track nesting via a depth counter (module-level
+            # functions still rename; nested closures keep names too,
+            # conservative and safe).
+            _depth = getattr(self, '_class_depth', 0)
+            _is_method = _depth > 0
+            if not _is_method:
+                node.name = self.get_new_name(node.name)
+        # V10 kwargs fix: parameter names are call-site contracts. Unless
+        # rename_params is explicitly enabled (whole-program builds only),
+        # record this function's params as NO-RENAME for the Store AND
+        # Load paths below, and leave the definition's arg nodes alone.
+        _param_names = set()
+        if not getattr(self, 'rename_params', False):
+            _param_names = {a.arg for a in list(node.args.posonlyargs) + list(node.args.args) + list(node.args.kwonlyargs)}
+            if node.args.vararg is not None:
+                _param_names.add(node.args.vararg.arg)
+            if node.args.kwarg is not None:
+                _param_names.add(node.args.kwarg.arg)
+        _prev_params = getattr(self, '_local_params', None)
+        _accum = set(_prev_params) if _prev_params else set()
+        _accum.update(_param_names)
+        self._local_params = _accum
         self.generic_visit(node)
+        self._local_params = _prev_params
         self.current_function = old_function
         return node
     def visit_ClassDef(self, node):
         if node.name not in self.reserved and not node.name.startswith("__") and not node.name.startswith("_"):
             node.name = self.get_new_name(node.name)
+        _prev_depth = getattr(self, '_class_depth', 0)
+        self._class_depth = _prev_depth + 1
         self.generic_visit(node)
+        self._class_depth = _prev_depth
         return node
     def visit_Name(self, node):
         if self.current_function in self.protected_functions:
+            return node
+        # V10 kwargs fix: names bound as function parameters are
+        # call-site contracts — skip them on BOTH Store and Load paths
+        # (the _local_params set is built per-FunctionDef above).
+        _params = getattr(self, '_local_params', None)
+        if _params is not None and node.id in _params:
             return node
         if isinstance(node.ctx, (ast.Load, ast.Store, ast.Del)) and not node.id.startswith("__") and not node.id.startswith("_") and node.id not in self.reserved:
             node.id = self.get_new_name(node.id)
@@ -171,8 +210,18 @@ class SymbolRenamer(ast.NodeTransformer):
     def visit_arg(self, node):
         if self.current_function in self.protected_functions:
             return node
-        if not node.arg.startswith("__") and not node.arg.startswith("_") and node.arg not in self.reserved:
-            node.arg = self.get_new_name(node.arg)
+        # V10 kwargs fix: keyword argument NAMES are part of the call
+        # contract (f(1, c=2), dict(a=1), keyword-only args, **kwargs).
+        # Renaming a parameter without rewriting every call site breaks
+        # binding. The renamer has no whole-program call graph here, so
+        # parameter names are NEVER renamed — only locals/globals are.
+        return node
+    def visit_keyword(self, node):
+        # V10 kwargs fix (part 2): keyword ARGUMENT names at call sites
+        # (f(1, c=2), dict(a=1)) are resolved against parameter names at
+        # runtime — renaming them breaks binding exactly like renaming
+        # visit_arg definitions. NEVER rename keyword.arg (None = **kwargs
+        # splash, nothing to rename).
         return node
     def visit_Nonlocal(self, node):
         if self.current_function in self.protected_functions:
@@ -328,8 +377,13 @@ class VariableCapture(ast.NodeVisitor):
         self.global_vars = set()
         self.params = set()
         if hasattr(function_node, 'args'):
-            for arg in function_node.args.args:
+            _a = function_node.args
+            for arg in list(_a.posonlyargs) + list(_a.args) + list(_a.kwonlyargs):
                 self.params.add(arg.arg)
+            if _a.vararg is not None:
+                self.params.add(_a.vararg.arg)
+            if _a.kwarg is not None:
+                self.params.add(_a.kwarg.arg)
         for node in ast.walk(function_node):
             if isinstance(node, ast.Nonlocal):
                 self.nonlocal_vars.update(node.names)
@@ -854,6 +908,13 @@ class CallGraphObfuscator(ast.NodeTransformer):
         self.generic_visit(node)
         if isinstance(node.func, ast.Name) and random.random() < 0.3:
             func_name = node.func.id
+            # V10 kwargs fix (part 4): indirecting a call through a table
+            # preserves positional binding but DESTROYS keyword binding
+            # whenever the callee is renamed (or the table holds a renamed
+            # alias): f(1, c=2) looks up the wrong name. Never indirect
+            # calls that pass keywords.
+            if node.keywords:
+                return node
             blacklist = ['print', 'len', 'str', 'int', 'float', 'list', 'dict', 'set', 'tuple',
                 'range', 'open', 'type', 'isinstance', 'getattr', 'setattr', 'hasattr',
                 'super', 'exec', 'eval', 'compile', 'globals', 'locals', 'vars',
@@ -1410,6 +1471,13 @@ class FunctionTransformer(ast.NodeTransformer):
         if len(node.body) <= 5:
             return node
         if random.random() >= 0.25:
+            return node
+        # V10 kwargs fix (part 3): outlining is unsafe for functions with
+        # keyword-callable signatures (posonly/kwonly/vararg/kwarg/defaults).
+        # The outlined fragment passes everything positionally, which breaks
+        # keyword binding exactly like the renamer bug. Skip such functions.
+        _fa = node.args
+        if _fa.posonlyargs or _fa.kwonlyargs or _fa.vararg is not None or _fa.kwarg is not None or _fa.defaults or _fa.kw_defaults:
             return node
         var_capture = VariableCapture(node)
         split_point = random.randint(2, len(node.body) - 2)

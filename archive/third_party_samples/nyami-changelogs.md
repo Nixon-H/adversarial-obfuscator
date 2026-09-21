@@ -244,3 +244,25 @@ General Updates:
 Build Time: ~15% faster (outer compression contest parallelized via ThreadPoolExecutor — C compressors release the GIL; per-byte XOR → C-level big-int XOR, byte-identical; per-function compression contest parallelized).
 Added: Kernel Driver Detection [BETA].
 ("the update itself is much bigger btw, these are the only ones I kept track of in the 27+ hours of actively working on Nyami this update has been sponsored by my insomnia")
+
+## Version 10 (announced, details pending as of 2026-09-20)
+
+Past announcement summary (Discord `#announcements`, author JustManiak):
+"biggest update Nyami has seen in a long time", claimed "something no
+python obfuscator ever did before". Core claim: **"removal of python
+inside of python"** — "everything you remember as default python thing
+will be turned into something like this, for example `a + b` will become
+`xyzw(a,b)` which function `xyzw` is never stored inside of python".
+Author confirms: "if you use PYTOC he never will" (i.e. PYTOC path hides
+the helpers natively). Community guess recorded in chat: the `xyzw`-style
+helpers live in the `.pyd`s as custom decryption/dispatch.
+
+Context notes (ours, not vendor claims):
+- This reads as: Python-level operators/builtins lowered to calls into
+  native (Cython `.pyd`) helpers — i.e. a **native intrinsic-dispatch /
+  operator-lowering** layer on top of their existing PYTOC path.
+- Business context in the same announcement: crackmes now require funding
+  (paid in Nyami subscriptions unless the community brings buyers);
+  author says hosting/crackmes came out of pocket.
+- No changelog detail yet ("more info on that tomorrow"). Treat the above
+  as a pre-release claim, not established behavior.

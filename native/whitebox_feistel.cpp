@@ -69,11 +69,19 @@ const uint8_t WB_AES_SBOX[256] = {
     0x8c,0xa1,0x89,0x0d,0xbf,0xe6,0x42,0x68,0x41,0x99,0x2d,0x0f,0xb0,0x54,0xbb,0x16
 };
 void wb_derive_tables(const uint8_t key16[16], uint64_t salt, WbTables& t) {
+    // Round count randomized per build from the salt (8–12). The salt is
+    // per-object random (see core.cpp), so two builds of the same key
+    // differ structurally — V10 round-range parity.
+    uint8_t saltmix[8];
+    for (int i = 0; i < 8; ++i) saltmix[i] = (uint8_t)(salt >> (8 * i));
+    uint8_t rhash[32];
+    wb_sha256(saltmix, 8, rhash);
+    t.rounds = WB_ROUNDS_MIN + (rhash[0] % (WB_ROUNDS_MAX - WB_ROUNDS_MIN + 1));
     uint8_t seed[24];
     for (int i = 0; i < 16; ++i) seed[i] = key16[i];
     for (int i = 0; i < 8; ++i) seed[16+i] = (uint8_t)(salt >> (8*i));
     uint8_t stream[32];
-    static uint8_t pool[WB_ROUNDS * 2 * 256 + WB_ROUNDS * WB_BLOCK];
+    static uint8_t pool[WB_ROUNDS_MAX * 2 * 256 + WB_ROUNDS_MAX * WB_BLOCK];
     size_t got = 0, ctr = 0;
     while (got < sizeof(pool)) {
         uint8_t in[28];
@@ -86,7 +94,7 @@ void wb_derive_tables(const uint8_t key16[16], uint64_t salt, WbTables& t) {
         got += take; ctr++;
     }
     size_t p = 0;
-    for (int r = 0; r < WB_ROUNDS; ++r) {
+    for (int r = 0; r < t.rounds; ++r) {
         for (int k = 0; k < 2; ++k) {
             uint8_t perm[256];
             for (int i = 0; i < 256; ++i) perm[i] = (uint8_t)i;
@@ -112,7 +120,7 @@ void wb_feistel_block(const WbTables& t, uint8_t blk[WB_BLOCK], bool invert) {
     uint8_t L[8], R[8];
     for (int i = 0; i < 8; ++i) { L[i] = blk[i]; R[i] = blk[8+i]; }
     if (!invert) {
-        for (int r = 0; r < WB_ROUNDS; ++r) {
+        for (int r = 0; r < t.rounds; ++r) {
             uint8_t F[8];
             for (int i = 0; i < 8; ++i) {
                 uint8_t x = R[i] ^ t.diffmask[r][i];
@@ -126,7 +134,7 @@ void wb_feistel_block(const WbTables& t, uint8_t blk[WB_BLOCK], bool invert) {
             for (int i = 0; i < 8; ++i) { L[i] = nL[i]; R[i] = nR[i]; }
         }
     } else {
-        for (int r = WB_ROUNDS - 1; r >= 0; --r) {
+        for (int r = t.rounds - 1; r >= 0; --r) {
             // Forward step produced (nL,nR) = (R, L^F(R,mask_r)).
             // Invert with current (L,R)=(nL,nR): R_prev = L, L_prev = R ^ F(L).
             uint8_t F[8];

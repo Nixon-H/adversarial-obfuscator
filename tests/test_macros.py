@@ -16,8 +16,27 @@ from obfuscator.macros import (
 def test_macros_set():
     assert MACROS == {
         "IS_OBFUSCATED", "GET_HWID", "SELF_DELETE", "SECURE_DELETE",
-        "CRASH", "DETECT_FILE_TYPE", "__all__",
+        "SELF_CORRUPT", "CRASH", "DETECT_FILE_TYPE", "__all__",
     }
+
+
+def test_self_corrupt_macro():
+    # Collected like the other runtime macros; never executed at build.
+    assert "SELF_CORRUPT" in collect_macros("SELF_CORRUPT()\n")
+    assert "SELF_CORRUPT" in collect_macros("SELF_CORRUPT('/x')\n")
+    ns: dict = {}
+    exec(compile(emit_runtime_helpers(), "<h>", "exec"), ns)
+    assert callable(ns["SELF_CORRUPT"])
+    # Missing file -> False, never raises.
+    assert ns["SELF_CORRUPT"]("/nonexistent_nixon_artifact_xyz") is False
+    # Real file -> same-length garbage then unlink.
+    import tempfile
+    fd, path = tempfile.mkstemp(prefix="_nx_test_corrupt_")
+    os.close(fd)
+    with open(path, "wb") as f:
+        f.write(b"A" * 100000)
+    assert ns["SELF_CORRUPT"](path) is True
+    assert not os.path.exists(path)
 
 
 def test_collect_finds_each_macro():

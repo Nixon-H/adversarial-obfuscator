@@ -941,6 +941,21 @@ def prepare_obfuscated_source(source_path, ast_opts=None):
             source_code = _apply_macros(source_code, hwid=_hwid)
     except Exception:
         pass
+    # V10 name gate (opt-in): privileged call sites resolve through a
+    # per-build token map instead of appearing as literals.
+    try:
+        if ast_opts.get('name_gate', False):
+            from obfuscator.name_gate import (
+                build_mapping as _ng_build,
+                emit_gate_snippet as _ng_emit,
+                rewrite_calls as _ng_rewrite,
+            )
+            import os as _ng_os
+            _ng_seed = str(ast_opts.get('build_id', '') or '').encode() or _ng_os.urandom(16)
+            _ng_map = _ng_build(_ng_seed)
+            source_code = _ng_emit(_ng_map) + _ng_rewrite(source_code, _ng_map)
+    except Exception:
+        pass
     print("    [+] Pre-obfuscating source for native build...")
     \
     protected_code, _ = apply_ast_mutation(source_code, options=ast_opts)
