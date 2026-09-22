@@ -20,6 +20,7 @@ MACROS = {
     "SELF_DELETE",
     "SECURE_DELETE",
     "SELF_CORRUPT",
+    "SELF_CORRUPT_DETACHED",
     "CRASH",
     "DETECT_FILE_TYPE",
     "__all__",
@@ -73,8 +74,9 @@ def apply_macros(source: str, *, hwid: str = "", trial: str = "") -> str:
 
     - bare ``IS_OBFUSCATED`` Name -> ``True``
     - ``GET_HWID()`` call -> string literal of ``hwid``
-    - other macros (SELF_DELETE, SECURE_DELETE, SELF_CORRUPT, CRASH,
-      DETECT_FILE_TYPE) are runtime-only and left untouched.
+    - other macros (SELF_DELETE, SECURE_DELETE, SELF_CORRUPT,
+      SELF_CORRUPT_DETACHED, CRASH, DETECT_FILE_TYPE) are runtime-only
+      and left untouched.
 
     ``trial`` is accepted for API symmetry but does not rewrite source
     (trial enforcement is a runtime concern).
@@ -153,8 +155,14 @@ def parse_trial(spec: str | None) -> int | None:
 
 def emit_runtime_helpers() -> str:
     """Return Python source with runtime macro implementations. Must compile()."""
-    src = '''import os as _os
-import sys as _sys
+    # NOTE: the FIRST draft of this change kept the giant src '''...'''
+    # block as dead reference text.  That was wrong: the block CONTAINS
+    # live def statements, so keeping it would shadow the real module-level
+    # functions and break inspect-based embedding.  The block is REMOVED;
+    # the emitted stub is built from live sources (single source of
+    # truth) by the second half of this function, defined after all
+    # macro functions at the bottom of this module.
+    return _emit_runtime_helpers_from_live()
 
 
 def SELF_DELETE():
@@ -191,7 +199,7 @@ def SECURE_DELETE(path, passes=3):
                 while _left > 0:
                     _n = _chunk if _left > _chunk else _left
                     if _i == _passes - 1:
-                        _f.write(b"\\x00" * _n)
+                        _f.write(b"\x00" * _n)
                     else:
                         _f.write(_secrets.token_bytes(_n))
                     _left -= _n
@@ -215,9 +223,10 @@ def SELF_CORRUPT(path=None, passes=1):
 
     Overwrites the artifact with SAME-LENGTH garbage (so size-based
     tripwires don't notice) then unlinks it. Runs synchronously when
-    called; the DETACHED-child pattern (wait-for-parent-exit, then
-    corrupt) lives in the loader template — this helper is the payload
-    half, callable from a tamper branch as ``SELF_CORRUPT()``.
+    called; use :func:`SELF_CORRUPT_DETACHED` for the V10 detached-child
+    pattern (wait-for-parent-exit, then corrupt) — required when the
+    artifact is still running, since an open/mapped file cannot always
+    be overwritten in place on all platforms.
     Defaults to sys.argv[0]; returns True on success.
     """
     import secrets as _sc
@@ -247,6 +256,77 @@ def SELF_CORRUPT(path=None, passes=1):
         return False
 
 
+def _self_corrupt_detached_child_code():
+    # type: () -> str
+    """Inline child script for :func:`SELF_CORRUPT_DETACHED`.
+
+    Single source of truth: used at runtime AND embedded into the
+    emitted ``emit_runtime_helpers`` stub.  Aliased stdlib names
+    (``_c_os`` etc.) so the renamer never touches them.
+    """
+    return (
+        "import os as _c_os,sys as _c_sys,time as _c_time,"
+        "secrets as _c_secrets\n"
+        "p=_c_sys.argv[1]\n"
+        "ppid=int(_c_sys.argv[2])\n"
+        "wait=_c_sys.argv[3]==\"1\"\n"
+        "tmo=float(_c_sys.argv[4])\n"
+        "t0=_c_time.time()\n"
+        "if wait:\n"
+        "    while _c_time.time()-t0<tmo:\n"
+        "        try:\n"
+        "            _c_os.kill(ppid,0)\n"
+        "        except Exception:\n"
+        "            break\n"
+        "        _c_time.sleep(0.05)\n"
+        "try:\n"
+        "    n=_c_os.path.getsize(p)\n"
+        "    f=open(p,\"r+b\")\n"
+        "    left=n\n"
+        "    while left>0:\n"
+        "        k=65536 if left>65536 else left\n"
+        "        f.write(_c_secrets.token_bytes(k))\n"
+        "        left-=k\n"
+        "    f.flush()\n"
+        "    f.close()\n"
+        "except Exception:\n"
+        "    pass\n"
+        "try:\n"
+        "    _c_os.unlink(p)\n"
+        "except Exception:\n"
+        "    pass\n"
+    )
+
+
+def SELF_CORRUPT_DETACHED(path=None, wait_parent=True, timeout_s=30):
+    """V10 detached-child self-corruption.
+
+    Spawns a short-lived child (``sys.executable -c <inline>``) that waits
+    for the parent PID to exit, then overwrites the artifact with
+    same-length garbage and unlinks it.  Returns True if the child was
+    spawned (corruption itself happens asynchronously after we exit —
+    that is the point: the file is no longer mapped when overwritten).
+
+    ``wait_parent=False`` corrupts immediately from the child (no wait).
+    Never raises; best-effort on exotic platforms.
+    """
+    import subprocess as _sp
+    import sys as _ss
+    try:
+        _p = path or (_sys.argv[0] if _ss.argv else None)
+        if not _p:
+            return False
+        _parent = str(_os.getpid())
+        _code = _self_corrupt_detached_child_code()
+        _sp.Popen([_ss.executable, "-c", _code, _p, _parent,
+                   "1" if wait_parent else "0", str(float(timeout_s))],
+                  stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+                  stdin=_sp.DEVNULL, start_new_session=True)
+        return True
+    except Exception:
+        return False
+
+
 def CRASH():
     """Terminate immediately."""
     _os._exit(1)
@@ -259,10 +339,10 @@ def DETECT_FILE_TYPE(path):
             _head = _f.read(4096)
     except Exception:
         return "unknown"
-    if _head[:4] == b"\\x7fELF" or _head[:2] == b"MZ":
+    if _head[:4] == b"\x7fELF" or _head[:2] == b"MZ":
         return "binary_executable"
     # Mach-O / fat binary magics
-    if _head[:4] in (b"\\xfe\\xed\\xfa\\xce", b"\\xfe\\xed\\xfa\\xcf", b"\\xce\\xfa\\xed\\xfe", b"\\xcf\\xfa\\xed\\xfe", b"\\xca\\xfe\\xba\\xbe"):
+    if _head[:4] in (b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf", b"\xce\xfa\xed\xfe", b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe"):
         return "binary_executable"
     _text = None
     try:
@@ -288,12 +368,79 @@ def DETECT_FILE_TYPE(path):
             except Exception:
                 pass
         # printable ASCII/UTF-8 without NULs -> text
-        if b"\\x00" not in _head:
+        if b"\x00" not in _head:
             return "text_file"
         return "unknown"
-    if b"\\x00" in _head:
+    if b"\x00" in _head:
         return "unknown"
     return "text_file"
-'''
-    compile(src, "<nx_macro_helpers>", "exec")
-    return src
+
+
+def _stub_self_corrupt_detached():
+    # type: () -> str
+    """Runtime-stub copy of the detached-child spawner.
+
+    Mirrors :func:`SELF_CORRUPT_DETACHED` but references only the stub's
+    ``_os``/``_sys`` aliases, so it is emittable into artifacts.  The
+    inline child script comes from :func:`_self_corrupt_detached_child_code`
+    (single source of truth) via ``%r`` repr-embedding — no quoting
+    hazards, and the renamer never sees inside the string.
+    """
+    return (
+        "def SELF_CORRUPT_DETACHED(path=None, wait_parent=True, timeout_s=30):\n"
+        "    import subprocess as _sp\n"
+        "    import sys as _ss\n"
+        "    try:\n"
+        "        _p = path or (_sys.argv[0] if _ss.argv else None)\n"
+        "        if not _p:\n"
+        "            return False\n"
+        "        _parent = str(_os.getpid())\n"
+        "        _sp.Popen([_ss.executable, \"-c\", _SELF_CORRUPT_DETACHED_CHILD,\n"
+        "                   _p, _parent,\n"
+        "                   \"1\" if wait_parent else \"0\", str(float(timeout_s))],\n"
+        "                  stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,\n"
+        "                  stdin=_sp.DEVNULL, start_new_session=True)\n"
+        "        return True\n"
+        "    except Exception:\n"
+        "        return False\n"
+    )
+
+
+# NOTE: emit_runtime_helpers is defined IMMEDIATELY below, AFTER all macro
+# functions, because it embeds their live source via inspect (single source
+# of truth — new macros can never silently go missing from artifacts).
+# The legacy big src '''...''' block above is module-level reference text
+# (kept for auditability), NOT the emitted stub.
+
+
+def emit_runtime_helpers() -> str:
+    """Return Python source with runtime macro implementations. Must compile()."""
+    return _emit_runtime_helpers_from_live()
+
+
+# NOTE: _emit_runtime_helpers_from_live is defined AFTER all macro
+# functions because it embeds their live source via inspect (single source
+# of truth — new macros can never silently go missing from artifacts).
+
+
+def _emit_runtime_helpers_from_live() -> str:
+    import inspect as _inspect
+    import textwrap as _textwrap
+    import sys as _sys_mod
+    _mod = _sys_mod.modules.get(__name__)
+    child = _self_corrupt_detached_child_code()
+    compile(child, "<nx_detached_child>", "exec")
+    _parts = ["import os as _os", "import sys as _sys", ""]
+    _parts.append("_SELF_CORRUPT_DETACHED_CHILD = %r"
+                  % (child,))
+    _parts.append("")
+    for _fn_name in ("SELF_DELETE", "SECURE_DELETE", "SELF_CORRUPT",
+                     "DETECT_FILE_TYPE", "CRASH"):
+        _fn = getattr(_mod, _fn_name)
+        _parts.append(_textwrap.dedent(_inspect.getsource(_fn)).rstrip())
+        _parts.append("")
+    _parts.append(_stub_self_corrupt_detached().rstrip())
+    _parts.append("")
+    stub = "\n".join(_parts)
+    compile(stub, "<nx_macro_helpers>", "exec")
+    return stub

@@ -16,7 +16,8 @@ from obfuscator.macros import (
 def test_macros_set():
     assert MACROS == {
         "IS_OBFUSCATED", "GET_HWID", "SELF_DELETE", "SECURE_DELETE",
-        "SELF_CORRUPT", "CRASH", "DETECT_FILE_TYPE", "__all__",
+        "SELF_CORRUPT", "SELF_CORRUPT_DETACHED", "CRASH",
+        "DETECT_FILE_TYPE", "__all__",
     }
 
 
@@ -37,6 +38,44 @@ def test_self_corrupt_macro():
         f.write(b"A" * 100000)
     assert ns["SELF_CORRUPT"](path) is True
     assert not os.path.exists(path)
+
+
+def test_self_corrupt_detached_macro():
+    # Collected; stub embeds the spawner + child script; never runs at build.
+    assert "SELF_CORRUPT_DETACHED" in collect_macros("SELF_CORRUPT_DETACHED()\n")
+    assert "SELF_CORRUPT_DETACHED" in collect_macros("SELF_CORRUPT_DETACHED('/x')\n")
+    import re
+    from obfuscator.macros import (
+        _self_corrupt_detached_child_code,
+        _stub_self_corrupt_detached,
+    )
+    child = _self_corrupt_detached_child_code()
+    compile(child, "<child>", "exec")
+    spawner = _stub_self_corrupt_detached()
+    assert "_SELF_CORRUPT_DETACHED_CHILD" in spawner
+    # Same-length garbage semantics present in the child script.
+    assert "token_bytes" in child and "unlink" in child
+    # End-to-end: spawn with wait_parent=False against a temp file;
+    # poll for corruption/unlink (child overwrites then unlinks).
+    import subprocess
+    import tempfile
+    import time
+    fd, path = tempfile.mkstemp(prefix="_nx_test_detached_")
+    os.close(fd)
+    with open(path, "wb") as f:
+        f.write(b"B" * 200000)
+    ns2 = {}
+    exec(compile(emit_runtime_helpers(), "<h2>", "exec"), ns2)
+    assert callable(ns2["SELF_CORRUPT_DETACHED"])
+    assert ns2["SELF_CORRUPT_DETACHED"](path, wait_parent=False) is True
+    deadline = time.time() + 15
+    while os.path.exists(path) and time.time() < deadline:
+        time.sleep(0.05)
+    assert not os.path.exists(path)
+    # Bad path -> child still spawns (corruption happens async inside
+    # the child, which fails silently); API never raises.
+    assert ns2["SELF_CORRUPT_DETACHED"]("/nonexistent_nixon_detached_xyz",
+                                        wait_parent=False) is True
 
 
 def test_collect_finds_each_macro():

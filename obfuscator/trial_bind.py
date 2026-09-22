@@ -11,10 +11,13 @@ plus a sealed token::
 - when ``--hwid`` is given (or ``--hwid-lock``), the fingerprint is that
   HWID string — moving the build to another machine breaks the trial
   rather than extending it;
-- otherwise a best-effort machine-stable fallback is collected both at
-  build time and at runtime: ``platform.node() + "|" + hex(uuid.getnode())``
+- otherwise a machine-stable composite fallback is collected both at
+  build time and at runtime: ``platform.node()``, ``uuid.getnode()`` MAC,
+  Linux ``machine-id``, and ``platform.system()/machine()``
   (see :func:`fallback_fingerprint`).  Documented caveat: without ``--hwid``
-  the binding is best-effort (hostname/MAC can change or be spoofed).
+  the binding is OS-surface-derived (a reimaged box reads as a new machine;
+  a determined attacker can spoof components) — pass ``--hwid`` for a
+  strong binding.
 
 Runtime (emitted snippet, see :func:`emit_trial_snippet`): re-derive the
 fingerprint, recompute the HMAC with constant-time compare, and refuse to
@@ -59,13 +62,33 @@ _TRIAL_DOMAIN = b"nx-trial-v1"
 _LASTSEEN_DOMAIN = b"nx-trial-lastseen-v1"
 
 
+def _read_first(path):
+    # type: (str) -> str
+    try:
+        with open(path, "r", errors="ignore") as _f:
+            return _f.read().strip()
+    except Exception:
+        return ""
+
+
 def fallback_fingerprint():
     # type: () -> str
-    """Best-effort machine-stable fingerprint (no --hwid configured).
+    """Machine-stable fingerprint (no --hwid configured).
 
-    ``platform.node()`` + ``uuid.getnode()`` MAC, collected at BOTH build
-    and runtime.  Documented best-effort: hostnames/MACs can change or be
-    spoofed; pass ``--hwid`` for a strong binding.
+    Composite of ``platform.node()``, ``uuid.getnode()`` MAC,
+    Linux ``/etc/machine-id`` (or ``/var/lib/dbus/machine-id`` fallback),
+    and ``platform.machine()`` + ``platform.system()``.  Every component
+    is collected at BOTH build time and runtime with per-component
+    try/except, so missing files never break the check — the fingerprint
+    simply has fewer components on restricted hosts.
+
+    Rationale: hostname+MAC alone is trivially spoofed (one ioctl /
+    one config edit each).  ``machine-id`` is a 128-bit random value
+    minted at install time — stable across reboots, but changed on
+    reinstall/reimage (acceptable: a reimaged box is a new machine for
+    licensing purposes).  An attacker must spoof ALL components at once
+    to transplant a trial, vs one before.  Pass ``--hwid`` for a strong
+    binding (PBKDF2-derived key material, not just a comparison string).
     """
     try:
         node = str(platform.node() or "")
@@ -75,7 +98,13 @@ def fallback_fingerprint():
         mac = format(int(uuid.getnode()), "x")
     except Exception:
         mac = "0"
-    return "%s|%s" % (node, mac)
+    mid = _read_first("/etc/machine-id") or \
+        _read_first("/var/lib/dbus/machine-id")
+    try:
+        plat = "%s|%s" % (platform.system(), platform.machine())
+    except Exception:
+        plat = ""
+    return "%s|%s|%s|%s" % (node, mac, mid, plat)
 
 
 def resolve_fingerprint(hwid=""):
@@ -318,7 +347,7 @@ def emit_trial_snippet(deadline_epoch, token_hex, build_key_hex,
 
     ``hwid_hint``: when the build used ``--hwid``, pass that string so the
     runtime checks the explicit HWID; otherwise the snippet re-derives the
-    best-effort ``platform.node + uuid.getnode`` fallback itself.
+    composite fallback (node + MAC + machine-id + platform) itself.
 
     All literals are embedded via ``repr`` (hex/hmac digests contain only
     ``[0-9a-f]``; no quoting hazards).  Stdlib only.
@@ -363,7 +392,22 @@ def emit_trial_snippet(deadline_epoch, token_hex, build_key_hex,
         + "            _tb_mac = format(int(_tb_uuid.getnode()), \"x\")\n"
         + "        except Exception:\n"
         + "            _tb_mac = \"0\"\n"
-        + "        _tb_fp = \"%s|%s\" % (_tb_node, _tb_mac)\n"
+        + "        try:\n"
+        + "            with open(\"/etc/machine-id\", \"r\", errors=\"ignore\") as _tb_f:\n"
+        + "                _tb_mid = _tb_f.read().strip()\n"
+        + "        except Exception:\n"
+        + "            _tb_mid = \"\"\n"
+        + "        if not _tb_mid:\n"
+        + "            try:\n"
+        + "                with open(\"/var/lib/dbus/machine-id\", \"r\", errors=\"ignore\") as _tb_f:\n"
+        + "                    _tb_mid = _tb_f.read().strip()\n"
+        + "            except Exception:\n"
+        + "                _tb_mid = \"\"\n"
+        + "        try:\n"
+        + "            _tb_plat = \"%s|%s\" % (_tb_platform.system(), _tb_platform.machine())\n"
+        + "        except Exception:\n"
+        + "            _tb_plat = \"\"\n"
+        + "        _tb_fp = \"%s|%s|%s|%s\" % (_tb_node, _tb_mac, _tb_mid, _tb_plat)\n"
         + "    try:\n"
         + "        _tb_msg = b\"nx-trial-v1|\" + str(_tb_fp).encode(\"utf-8\") + b\"|\" + str(int(_tb_deadline)).encode(\"ascii\")\n"
         + "        _tb_exp = _tb_hmac.new(_tb_key, _tb_msg, _tb_hashlib.sha256).hexdigest()\n"
