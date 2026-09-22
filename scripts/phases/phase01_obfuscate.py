@@ -89,6 +89,8 @@ def phase_obfuscate(payload, output, opts):
             extra_opts['decoy_api_count'] = getattr(opts, 'decoy_api_count', 5)
         if getattr(opts, 'adaptive_adversarial', False):
             extra_opts['adaptive_rewrite'] = True
+        if getattr(opts, 'rename_internal', False):
+            extra_opts['rename_internal'] = True
         result = build_pipeline(source, mba_validator=mba_opt, extra_options=extra_opts)
 
         # LLM-Resilient passes

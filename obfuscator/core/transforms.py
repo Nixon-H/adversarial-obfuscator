@@ -83,6 +83,15 @@ class SymbolRenamer(ast.NodeTransformer):
         # Set rename_params=True only for whole-program builds where every
         # caller is rewritten consistently (not yet implemented).
         self.rename_params = False
+        # V10 internal-rename (opt-in, default OFF): proven-internal
+        # method/attribute renames. Default = safe: every public method
+        # defined in a class body is preserved (external API intact).
+        # Opt in via allow_internal_rename(names) with the
+        # find_internal_methods() proof set: only those names rename,
+        # and their *attribute* uses (self.m / obj.m) are rewritten
+        # consistently. visit_Attribute honors the same set so renames
+        # never desync defs from call sites.
+        self.allow_internal_rename = set()
         self.reserved = {
             'sum', 'min', 'max', 'abs', 'round', 'pow', 'divmod',
             'chr', 'ord', 'hex', 'oct', 'bin', 'ascii', 'repr',
@@ -136,6 +145,19 @@ class SymbolRenamer(ast.NodeTransformer):
             '__all__',
             'NATIVE_BLOBS', 'FALLBACK_BLOB', 'BLOB_KEY',
         }
+    def allow_internal_rename_names(self, names):
+        """Opt-in helper (V10 internal-rename): allow proven-internal methods.
+
+        ``names`` is an iterable of method/attribute names already proven
+        internal-only by obfuscator.internal_rename.find_internal_methods.
+        Additive: never removes reserved entries; ignores bad input.
+        """
+        try:
+            for _n in (names or []):
+                if isinstance(_n, str) and _n:
+                    self.allow_internal_rename.add(_n)
+        except Exception:
+            pass
     def reserve_all_names(self, names):
         """Additive helper (GAP #64): reserve __all__ export names.
 
@@ -185,9 +207,13 @@ class SymbolRenamer(ast.NodeTransformer):
             # body — track nesting via a depth counter (module-level
             # functions still rename; nested closures keep names too,
             # conservative and safe).
+            # V10 internal-rename (opt-in): proven-internal methods
+            # (allow_internal_rename set, from find_internal_methods)
+            # DO rename — the proof guarantees every use rewrites too.
             _depth = getattr(self, '_class_depth', 0)
             _is_method = _depth > 0
-            if not _is_method:
+            _allowed = node.name in getattr(self, 'allow_internal_rename', set())
+            if not _is_method or _allowed:
                 node.name = self.get_new_name(node.name)
         # V10 kwargs fix: parameter names are call-site contracts. Unless
         # rename_params is explicitly enabled (whole-program builds only),
@@ -263,6 +289,25 @@ class SymbolRenamer(ast.NodeTransformer):
         for alias in node.names:
             if alias.asname:
                 alias.asname = self.get_new_name(alias.asname)
+        return node
+    def visit_AsyncFunctionDef(self, node):
+        # Same policy as FunctionDef (async methods preserve by default,
+        # rename only when proven internal + opted in).
+        return self.visit_FunctionDef(node)
+    def visit_Attribute(self, node):
+        # V10 internal-rename: attribute uses (self.m / obj.m) rewrite
+        # consistently ONLY for proven-internal names; everything else is
+        # left untouched (external API / third-party attributes safe).
+        self.generic_visit(node)
+        try:
+            _allowed = node.attr in getattr(self, 'allow_internal_rename', set())
+        except Exception:
+            _allowed = False
+        if _allowed and node.attr not in self.reserved:
+            try:
+                node.attr = self.get_new_name(node.attr)
+            except Exception:
+                pass
         return node
 class StringLiteralObfuscator(ast.NodeTransformer):
     # AUDIT GAP #55 (additive): optional ChaCha20 string mode lives alongside
@@ -1268,7 +1313,28 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
             '_NX_WATERMARK_TAG', '_NX_WATERMARK_MARKER',
             '__all__',
         }
-        self._use_safe_mode = True 
+        self._use_safe_mode = True
+        # V10 internal-rename (opt-in, default OFF): proven-internal
+        # method/attribute renames. Default = safe: every public method
+        # defined in a class body is preserved. Opt in via
+        # allow_internal_rename_names() — the encoder then renames only
+        # those names (defs + attribute uses), consistently: _encode_name
+        # maps old->new deterministically so defs and self.m/obj.m uses
+        # stay in sync.
+        self.allow_internal_rename = set()
+    def allow_internal_rename_names(self, names):
+        """Opt-in helper (V10 internal-rename): allow proven-internal methods.
+
+        ``names`` is an iterable of method/attribute names already proven
+        internal-only by obfuscator.internal_rename.find_internal_methods.
+        Additive: never removes reserved entries; ignores bad input.
+        """
+        try:
+            for _n in (names or []):
+                if isinstance(_n, str) and _n:
+                    self.allow_internal_rename.add(_n)
+        except Exception:
+            pass
     def reserve_all_names(self, names):
         """Additive helper (GAP #64): reserve __all__ export names."""
         try:
@@ -1277,8 +1343,13 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
                     self.reserved.add(_n)
         except Exception:
             pass
+    def _is_internal_allowed(self, name):
+        try:
+            return name in self.allow_internal_rename and name not in self.reserved
+        except Exception:
+            return False
     def _encode_name(self, name):
-        if name in self.reserved or name.startswith('_'): 
+        if name in self.reserved or name.startswith('_'):
             return name
         if name in self.encoded_map: 
             return self.encoded_map[name]
@@ -1314,19 +1385,46 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
         self.generic_visit(node)
         return node
     def visit_FunctionDef(self, node):
+        # V10 internal-rename: default = safe (class-body methods
+        # preserved); only proven-internal names (allow set) encode.
+        # Module-level functions keep legacy behavior (always encode).
+        try:
+            _depth = getattr(self, '_class_depth', 0)
+        except Exception:
+            _depth = 0
+        if _depth > 0 and not self._is_internal_allowed(node.name):
+            self.generic_visit(node)
+            return node
         node.name = self._encode_name(node.name)
         self.generic_visit(node)
         return node
     def visit_ClassDef(self, node):
         node.name = self._encode_name(node.name)
-        self.generic_visit(node)
+        _prev = getattr(self, '_class_depth', 0)
+        try:
+            self._class_depth = _prev + 1
+            self.generic_visit(node)
+        finally:
+            self._class_depth = _prev
         return node
     def visit_arg(self, node):
         node.arg = self._encode_name(node.arg)
         return node
     def visit_AsyncFunctionDef(self, node):
-        node.name = self._encode_name(node.name)
+        # Same policy as FunctionDef (async methods preserve by default,
+        # encode only when proven internal + opted in).
+        return self.visit_FunctionDef(node)
+    def visit_Attribute(self, node):
+        # V10 internal-rename: attribute uses rewrite ONLY for
+        # proven-internal names (def/use stay in sync via _encode_name).
+        # Everything else is left untouched (external API + third-party
+        # attributes safe, e.g. obj.append / sys.exit survive).
         self.generic_visit(node)
+        try:
+            if self._is_internal_allowed(node.attr):
+                node.attr = self._encode_name(node.attr)
+        except Exception:
+            pass
         return node
     def visit_Nonlocal(self, node):
         node.names = [self._encode_name(n) for n in node.names]

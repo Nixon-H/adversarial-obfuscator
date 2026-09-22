@@ -419,6 +419,23 @@ def apply_ast_mutation(source_code, options=None):
                 '_NX_WATERMARK_GATE', '_NX_WATERMARK_KEY', '_NX_WATERMARK_MSG',
                 '_NX_WATERMARK_TAG', '_NX_WATERMARK_MARKER',
             })
+            # V10 internal-rename (opt-in, default OFF): prove internal-only
+            # methods first, then allow the renamer to rename exactly those
+            # (defs + attribute uses rewrite consistently; __all__ exports
+            # are excluded inside the proof itself).
+            if options.get('rename_internal'):
+                try:
+                    from obfuscator.internal_rename import find_internal_methods as _find_internal
+                    _internal_pairs = _find_internal(tree, _all_names)
+                    _internal_names = sorted({m for _, m in _internal_pairs})
+                    # Never fight reserved markers/exports: the proof
+                    # already excludes __all__, but belt-and-suspenders
+                    # against loader markers costs nothing.
+                    _internal_names = [n for n in _internal_names if n not in renamer.reserved]
+                    if _internal_names:
+                        renamer.allow_internal_rename_names(_internal_names)
+                except Exception:
+                    pass
             dyn_unbounds = set(_nonlocal_vars)
             if unsafe:
                 for _, u_vars in unsafe:
@@ -448,6 +465,19 @@ def apply_ast_mutation(source_code, options=None):
                 '_NX_WATERMARK_TAG', '_NX_WATERMARK_MARKER',
             })
             encoder.reserved.update(_nonlocal_vars)
+            # V10 internal-rename (opt-in, default OFF): same proof set as
+            # the renamer so unicode encoding renames exactly the proven
+            # internal methods (defs + attribute uses stay in sync).
+            if options.get('rename_internal'):
+                try:
+                    from obfuscator.internal_rename import find_internal_methods as _find_internal_u
+                    _pairs_u = _find_internal_u(tree, _all_names)
+                    _names_u = sorted({m for _, m in _pairs_u})
+                    _names_u = [n for n in _names_u if n not in encoder.reserved]
+                    if _names_u:
+                        encoder.allow_internal_rename_names(_names_u)
+                except Exception:
+                    pass
             tree = encoder.visit(tree)
         if options.get('strip_meta'):
             meta_strip = MetadataStripper()

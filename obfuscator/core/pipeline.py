@@ -1998,6 +1998,7 @@ def _VERIFY_INTEGRITY(): return True
         'hostguard': bool(getattr(args, 'hostguard', False)),
         'hwid_lock': bool(getattr(args, 'hwid_lock', False)),
         'name_gate': bool(getattr(args, 'name_gate', False)),
+        'rename_internal': bool(getattr(args, 'rename_internal', False)),
         'lowering': str(getattr(args, 'lowering', '') or ''),
         'blockchain_contract': deployed_contract or getattr(args, 'contract', '') or '',
         'blockchain_rpc': deployed_rpc or getattr(args, 'rpc', '') or '',
@@ -2665,6 +2666,8 @@ if __name__ == "__main__":
             obfuscate.add_argument('--mba-subs', action='store_true', help='MBA expression substitution')
             obfuscate.add_argument('--unicode-ids', action='store_true', help='Rename symbols to Unicode')
             obfuscate.add_argument('--fragment-strings', action='store_true', help='Fragment string constants')
+            obfuscate.add_argument('--rename-internal', dest='rename_internal', action='store_true',
+                                   help='Rename proven-internal public methods/attributes (opt-in, default: off)')
 
             bf_desc = "Trigger a build-farm workflow on GitHub Actions and wait for artifacts."
             bf = subparsers.add_parser('build-farm', help='Trigger cloud build farm', description=bf_desc, formatter_class=custom_fmt, add_help=False)
@@ -2995,6 +2998,7 @@ if __name__ == "__main__":
                     'unicode_ids': args.unicode_ids, 'fragment_strings': args.fragment_strings,
                     'strip_meta': True, 'split_vars': True, 'unfold_constants': True,
                     'symbol_rename': True, 'obf_calls': True, 'func_transform': True,
+                    'rename_internal': bool(getattr(args, 'rename_internal', False)),
                 }
                 obfuscated, _ = apply_ast_mutation(source, opts)
                 if args.output:

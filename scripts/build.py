@@ -784,6 +784,9 @@ Examples:
                         help="Env var name holding hex key for artifact signing sidecars (.sig.json; default: '' = disabled)")
     parser.add_argument("--name-gate", dest="name_gate", action="store_true", default=False,
                         help="Rewrite privileged call sites through per-build token map (default: off)")
+    parser.add_argument("--rename-internal", dest="rename_internal", action="store_true", default=False,
+                        help="Rename proven-internal public methods/attributes (used only "
+                             "inside their own class; opt-in, default: off)")
     parser.add_argument("--lowering", type=str, default="",
                         help="Semantic-lowering families CSV (io,scalar,string,container,service,protocol,function,import,fusion + opt-in: arithmetic,truth,slice,format,augassign); default '' = disabled")
     parser.add_argument("--diagnostic", action="store_true", default=False,
@@ -821,6 +824,8 @@ Examples:
         log("OPT", f"Artifact signing via env: {opts.sign_key_env}")
     if getattr(opts, "name_gate", False):
         log("OPT", "Runtime API name gate requested")
+    if getattr(opts, "rename_internal", False):
+        log("OPT", "Proven-internal method rename requested")
     if getattr(opts, "lowering", ""):
         log("OPT", f"Semantic lowering families: {opts.lowering}")
     if getattr(opts, "diagnostic", False):
