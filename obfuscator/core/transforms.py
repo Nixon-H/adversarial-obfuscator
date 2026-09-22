@@ -139,9 +139,23 @@ class SymbolRenamer(ast.NodeTransformer):
             '_NX_HWID_LOCK', '_NX_HWID_STATIC', '_NX_TRIAL_GATE', '_NX_TRIAL_SECONDS',
             '_NX_TRIAL_KEY', '_NX_TRIAL_DEADLINE', '_NX_TRIAL_TOKEN',
             '_NX_TRIAL_HWID_HINT', '_NX_KOD_ARMED', '_NX_VM_THRESHOLD',
+            # V10 kernel-driver gate (SAFE read-only gate): helper + marker
+            # must survive renames or the armed gate breaks at runtime.
+            '_nx_driver_stem', '_nx_driver_armed', '_nx_enum_drivers',
+            '_nx_driver_hits', '_nx_driver_watch', 'driver_check',
+            '_NX_DRIVER_BLOCKED', '_NX_DRIVER_ARMED_BUILD',
+            '_NX_DRIVER_ARMED_VALUES', '_NX_DRIVER_INTERVAL',
+            '_NX_DRIVER_VAR', '_NX_DRIVER_CHECK_ARMED',
             '_nx_watermark_gate',
             '_NX_WATERMARK_GATE', '_NX_WATERMARK_KEY', '_NX_WATERMARK_MSG',
             '_NX_WATERMARK_TAG', '_NX_WATERMARK_MARKER',
+            # V10 split-bootstrap (opt-in): fragmented-decoder helpers +
+            # stub fragment markers must survive renames or the armed
+            # lazy-activate path breaks at runtime.
+            '_nx_sb_collect', '_nx_sb_combine', '_nx_sb_activate',
+            '_NX_SB_HEAD', '_NX_SB_TRAIL', '_NX_SB_SALT', '_NX_SB_KEY',
+            '_NX_SB_THIRD', '_NX_SPLIT_BOOTSTRAP',
+            '_NX_SPLIT_BOOTSTRAP_ARMED', 'BLOB_KEY_SB',
             '__all__',
             'NATIVE_BLOBS', 'FALLBACK_BLOB', 'BLOB_KEY',
         }
@@ -1308,9 +1322,27 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
             'True', 'False', 'None', 'NotImplemented', 'Ellipsis',
             'path', 'fd', 'blob_key', 'ext', 'system', 'blobs',
             'encrypted_blob', 'blob_data', 'spec', 'module', 'fpath',
+            '_nx_hwid_unlock', '_nx_trial_gate',
+            '_NX_HWID_LOCK', '_NX_HWID_STATIC', '_NX_TRIAL_GATE', '_NX_TRIAL_SECONDS',
+            '_NX_TRIAL_KEY', '_NX_TRIAL_DEADLINE', '_NX_TRIAL_TOKEN',
+            '_NX_TRIAL_HWID_HINT', '_NX_KOD_ARMED', '_NX_VM_THRESHOLD',
+            # V10 kernel-driver gate (SAFE read-only gate): helper + marker
+            # names must survive unicode encoding or the armed gate breaks.
+            '_nx_driver_stem', '_nx_driver_armed', '_nx_enum_drivers',
+            '_nx_driver_hits', '_nx_driver_watch', 'driver_check',
+            '_NX_DRIVER_BLOCKED', '_NX_DRIVER_ARMED_BUILD',
+            '_NX_DRIVER_ARMED_VALUES', '_NX_DRIVER_INTERVAL',
+            '_NX_DRIVER_VAR', '_NX_DRIVER_CHECK_ARMED',
             '_nx_watermark_gate',
             '_NX_WATERMARK_GATE', '_NX_WATERMARK_KEY', '_NX_WATERMARK_MSG',
             '_NX_WATERMARK_TAG', '_NX_WATERMARK_MARKER',
+            # V10 split-bootstrap (opt-in): fragmented-decoder helpers +
+            # stub fragment markers must survive unicode encoding or the
+            # armed lazy-activate path breaks.
+            '_nx_sb_collect', '_nx_sb_combine', '_nx_sb_activate',
+            '_NX_SB_HEAD', '_NX_SB_TRAIL', '_NX_SB_SALT', '_NX_SB_KEY',
+            '_NX_SB_THIRD', '_NX_SPLIT_BOOTSTRAP',
+            '_NX_SPLIT_BOOTSTRAP_ARMED', 'BLOB_KEY_SB',
             '__all__',
         }
         self._use_safe_mode = True

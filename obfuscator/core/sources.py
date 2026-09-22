@@ -408,6 +408,16 @@ def apply_ast_mutation(source_code, options=None):
                 '_NX_TRIAL_KEY', '_NX_TRIAL_DEADLINE', '_NX_TRIAL_TOKEN',
                 '_NX_TRIAL_HWID_HINT', '_NX_KOD_ARMED', '_NX_VM_THRESHOLD',
             })
+            # V10 kernel-driver gate (SAFE read-only gate): helper + marker
+            # names must survive whole-artifact renames (same shape as
+            # #52/#75) or the armed gate breaks at runtime.
+            renamer.reserved.update({
+                '_nx_driver_stem', '_nx_driver_armed', '_nx_enum_drivers',
+                '_nx_driver_hits', '_nx_driver_watch', 'driver_check',
+                '_NX_DRIVER_BLOCKED', '_NX_DRIVER_ARMED_BUILD',
+                '_NX_DRIVER_ARMED_VALUES', '_NX_DRIVER_INTERVAL',
+                '_NX_DRIVER_VAR', '_NX_DRIVER_CHECK_ARMED',
+            })
             # AUDIT GAP #64 (C11): public exports survive the renamer.
             renamer.reserved.update({'__all__'})
             if _all_names:
@@ -418,6 +428,14 @@ def apply_ast_mutation(source_code, options=None):
                 '_nx_watermark_gate',
                 '_NX_WATERMARK_GATE', '_NX_WATERMARK_KEY', '_NX_WATERMARK_MSG',
                 '_NX_WATERMARK_TAG', '_NX_WATERMARK_MARKER',
+            })
+            # V10 split-bootstrap (opt-in): fragmented-decoder helpers +
+            # stub fragment markers survive whole-artifact renames.
+            renamer.reserved.update({
+                '_nx_sb_collect', '_nx_sb_combine', '_nx_sb_activate',
+                '_NX_SB_HEAD', '_NX_SB_TRAIL', '_NX_SB_SALT', '_NX_SB_KEY',
+                '_NX_SB_THIRD', '_NX_SPLIT_BOOTSTRAP',
+                '_NX_SPLIT_BOOTSTRAP_ARMED', 'BLOB_KEY_SB',
             })
             # V10 internal-rename (opt-in, default OFF): prove internal-only
             # methods first, then allow the renamer to rename exactly those
@@ -454,6 +472,15 @@ def apply_ast_mutation(source_code, options=None):
                 '_NX_TRIAL_KEY', '_NX_TRIAL_DEADLINE', '_NX_TRIAL_TOKEN',
                 '_NX_TRIAL_HWID_HINT', '_NX_KOD_ARMED', '_NX_VM_THRESHOLD',
             })
+            # V10 kernel-driver gate: same helper/marker set for the
+            # encoder path (unicode encoding must not touch the gate).
+            encoder.reserved.update({
+                '_nx_driver_stem', '_nx_driver_armed', '_nx_enum_drivers',
+                '_nx_driver_hits', '_nx_driver_watch', 'driver_check',
+                '_NX_DRIVER_BLOCKED', '_NX_DRIVER_ARMED_BUILD',
+                '_NX_DRIVER_ARMED_VALUES', '_NX_DRIVER_INTERVAL',
+                '_NX_DRIVER_VAR', '_NX_DRIVER_CHECK_ARMED',
+            })
             # AUDIT GAP #64 (C11): public exports survive unicode encoding.
             encoder.reserved.update({'__all__'})
             if _all_names:
@@ -463,6 +490,14 @@ def apply_ast_mutation(source_code, options=None):
                 '_nx_watermark_gate',
                 '_NX_WATERMARK_GATE', '_NX_WATERMARK_KEY', '_NX_WATERMARK_MSG',
                 '_NX_WATERMARK_TAG', '_NX_WATERMARK_MARKER',
+            })
+            # V10 split-bootstrap (opt-in): same helpers/markers for the
+            # encoder path (unicode encoding must not touch the decoder).
+            encoder.reserved.update({
+                '_nx_sb_collect', '_nx_sb_combine', '_nx_sb_activate',
+                '_NX_SB_HEAD', '_NX_SB_TRAIL', '_NX_SB_SALT', '_NX_SB_KEY',
+                '_NX_SB_THIRD', '_NX_SPLIT_BOOTSTRAP',
+                '_NX_SPLIT_BOOTSTRAP_ARMED', 'BLOB_KEY_SB',
             })
             encoder.reserved.update(_nonlocal_vars)
             # V10 internal-rename (opt-in, default OFF): same proof set as

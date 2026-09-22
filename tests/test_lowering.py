@@ -5,10 +5,11 @@ from obfuscator import lowering, lowering_shim
 
 
 def test_registry_shape():
-    assert len(lowering.FAMILIES) == 14
+    assert len(lowering.FAMILIES) == 20
     on = {n for n, f in lowering.FAMILIES.items() if f["default_on"]}
     assert on == {"io", "scalar", "string", "container", "service",
-                  "protocol", "function", "import", "fusion"}
+                  "protocol", "function", "import", "fusion",
+                  "list", "dict", "set", "tuple", "bytes", "range"}
     assert set(lowering.FAMILIES) - on == {"arithmetic", "truth", "slice",
                                            "format", "augassign"}
 

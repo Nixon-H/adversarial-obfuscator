@@ -43,27 +43,64 @@ import tempfile
 
 # Ops the native kernel implements (must stay in sync with lowering_shim).
 # Dotted ops (str.join) become method-style helpers (sep, it).
+# 140 callable ops + the "fuse" dispatch = 141 total entries.
 NATIVE_OPS: tuple[str, ...] = (
     # io
     "print", "input", "open",
-    # scalar
+    # scalar (bare builtins: original entries first, order untouched)
     "int", "float", "str", "bool", "chr", "ord", "hex", "oct", "bin",
     "abs", "round", "len",
+    # scalar numeric methods
+    "int.bit_length", "int.to_bytes",
+    "float.hex", "float.as_integer_ratio",
+    "complex.conjugate",
     # string (method-style)
     "str.join", "str.split", "str.format", "str.encode", "str.decode",
     "str.upper", "str.lower",
+    "str.strip", "str.lstrip", "str.rstrip", "str.replace",
+    "str.find", "str.rfind", "str.index", "str.count",
+    "str.startswith", "str.endswith", "str.partition", "str.rpartition",
+    "str.splitlines", "str.zfill", "str.ljust", "str.rjust", "str.center",
+    "str.swapcase",
+    "str.isalnum", "str.isspace", "str.maketrans",
+    "str.removeprefix", "str.removesuffix",
     # container
     "list", "tuple", "dict", "set", "frozenset", "sorted", "reversed",
     "enumerate", "zip",
+    # list methods
+    "list.append", "list.extend", "list.insert", "list.remove",
+    "list.pop", "list.clear", "list.index", "list.count", "list.sort",
+    "list.reverse", "list.copy",
+    # dict methods
+    "dict.get", "dict.keys", "dict.values", "dict.items", "dict.pop",
+    "dict.popitem", "dict.setdefault", "dict.update", "dict.clear",
+    "dict.copy", "dict.fromkeys",
+    # set methods
+    "set.add", "set.discard", "set.remove", "set.pop", "set.clear",
+    "set.union", "set.intersection", "set.difference",
+    "set.symmetric_difference", "set.issubset", "set.issuperset",
+    "set.copy",
+    # tuple methods
+    "tuple.count", "tuple.index",
+    # bytes methods
+    "bytes.decode", "bytes.hex", "bytes.fromhex",
     # service
     "getattr", "setattr", "hasattr", "isinstance", "issubclass",
     "callable", "id", "hash",
+    # service extra
+    "vars", "dir", "globals", "locals", "compile", "eval", "exec",
+    "memoryview",
     # protocol
     "iter", "next", "repr", "bytes",
+    # range family
+    "range", "aiter", "anext", "ascii", "format", "slice",
     # function
     "map", "filter", "any", "all", "sum", "min", "max",
+    # function extra
+    "pow", "divmod", "complex",
     # import
-    "__import__",
+    "__import__", "breakpoint", "help", "copyright", "credits",
+    "license",
     # fusion
     "fuse",
 )
@@ -96,6 +133,13 @@ def _impl_body(op: str, impl: str) -> str:
         recv, meth = op.split(".", 1)
         if op == "str.join":
             return f"def {impl}(sep, it):\n    return sep.join(it)\n"
+        if op in ("str.maketrans", "dict.fromkeys", "bytes.fromhex",
+                  "int.from_bytes"):
+            return (
+                f"def {impl}(*a, **k):\n"
+                f"    import builtins as _bi\n"
+                f"    return getattr(_bi.{recv}, {meth!r})(*a, **k)\n"
+            )
         return f"def {impl}(s, *a, **k):\n    return s.{meth}(*a, **k)\n"
     if op == "fuse":
         return (

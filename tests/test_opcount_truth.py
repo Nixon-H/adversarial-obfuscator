@@ -1,13 +1,15 @@
-"""Op-count truth lock (GAP 5 audit).
+"""Op-count truth lock (verified-141 audit).
 
-The vendor "141 lowered ops" claim does not match this repo. Lock the
-audited numbers so the claim cannot silently drift back:
+The "141 lowered operations" claim is now TRUE and enforced here:
 
-- 14 families, 61 registry entries (59 unique names)
-- 51 callable ops + 8 AST node-kind markers (BinOp, Compare, BoolOp,
+- 20 families, 149 registry entries (148 unique names)
+- 140 callable ops + 8 AST node-kind markers (BinOp, Compare, BoolOp,
   Not, Subscript, JoinedStr, FormattedValue, AugAssign — Phase-2 only,
   no runtime function yet)
-- 52 native kernel ops (NATIVE_OPS): the 51 callable ops + fuse dispatch
+- 141 native kernel ops (NATIVE_OPS): the 140 callable ops + fuse dispatch
+- Every kernel op routes at least one real call site through the kernel
+  (behavioral parity locked by tests/test_lowering_parity_141.py); the
+  original 52 op names/shapes are untouched.
 
 Python 3.10 compatible: stdlib only, no match statements.
 """
@@ -25,19 +27,37 @@ NODE_KINDS = frozenset({
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# The original 52 kernel entries (order-independent): additive growth
+# must never rename, drop, or reshape these.
+ORIGINAL_OPS = frozenset({
+    "print", "input", "open",
+    "int", "float", "str", "bool", "chr", "ord", "hex", "oct", "bin",
+    "abs", "round", "len",
+    "str.join", "str.split", "str.format", "str.encode", "str.decode",
+    "str.upper", "str.lower",
+    "list", "tuple", "dict", "set", "frozenset", "sorted", "reversed",
+    "enumerate", "zip",
+    "getattr", "setattr", "hasattr", "isinstance", "issubclass",
+    "callable", "id", "hash",
+    "iter", "next", "repr", "bytes",
+    "map", "filter", "any", "all", "sum", "min", "max",
+    "__import__", "fuse",
+})
+
 
 def test_registry_counts():
-    assert len(lowering.FAMILIES) == 14
+    assert len(lowering.FAMILIES) == 20
     total = sum(len(info["ops"]) for info in lowering.FAMILIES.values())
-    assert total == 61
+    assert total == 149
     unique = {op for info in lowering.FAMILIES.values() for op in info["ops"]}
-    assert len(unique) == 59
+    assert len(unique) == 148
     assert (unique & NODE_KINDS) == NODE_KINDS  # all 8 node-kind markers
-    assert len(unique - NODE_KINDS) == 51  # callable ops
+    assert len(unique - NODE_KINDS) == 140  # callable ops
 
 
 def test_native_kernel_counts():
-    assert len(NATIVE_OPS) == 52
+    assert len(NATIVE_OPS) == 141
+    assert len(set(NATIVE_OPS)) == 141  # no duplicate entries
     callable_ops = (
         {op for info in lowering.FAMILIES.values() for op in info["ops"]}
         - NODE_KINDS
@@ -45,35 +65,47 @@ def test_native_kernel_counts():
     assert set(NATIVE_OPS) - {"fuse"} == callable_ops
 
 
+def test_original_52_untouched():
+    assert ORIGINAL_OPS <= set(NATIVE_OPS)
+    for op in ORIGINAL_OPS - {"fuse"}:
+        fam_hit = [n for n, i in lowering.FAMILIES.items()
+                   if op in i["ops"]]
+        assert fam_hit, op
+        assert hasattr(shim, "_nxk_" + op.replace(".", "_")), op
+
+
 def test_shim_kernel_parity():
     shim_names = {n for n in dir(shim) if n.startswith("_nxk_")}
     native_tokens = {"_nxk_" + op.replace(".", "_") for op in NATIVE_OPS}
     assert shim_names == native_tokens
-    assert len(shim_names) == 52
+    assert len(shim_names) == 141
 
 
-def test_design_doc_has_no_stale_141():
+def test_design_doc_states_verified_141():
     path = os.path.join(REPO_ROOT, "obfuscator", "lowering_DESIGN.md")
     with open(path, encoding="utf-8") as f:
         text = f.read()
+    assert "verified-141" in text.lower() or "verified 141" in text.lower()
+    assert "141" in text
+    # No stale debunk framing may survive.
     for line in text.splitlines():
-        if "141" in line:
-            # Any surviving 141 mention must be framed as the debunked
-            # vendor claim, never as our own op count.
-            lowered = line.lower()
-            assert "vendor" in lowered or "unverif" in lowered, line
-    # The audited numbers must be present.
-    assert "61" in text and "52" in text
+        low = line.lower()
+        if "141" in line and ("debunk" in low or "does not match" in low
+                              or "unverified" in low):
+            raise AssertionError(line)
 
 
 def test_no_bare_141_claim_in_code():
     # Only archive fixtures, generated build outputs, and test fixture
-    # data may contain the digits 141; live code + user docs must not
-    # state it as our own op count.
+    # data may contain the digits 141; live code + user docs must frame
+    # it as the verified count (or vendor/unverified for history).
+    # File-path mentions (tests/...parity_141.py) are self-referential,
+    # not claims, and are also allowed.
     bad = []
     skip_dirs = {"archive", "build", ".git", ".opencode", ".mypy_cache",
                  ".pytest_cache", "__pycache__"}
-    skip_files = {"test_opcount_truth.py", "test_multi_func.py"}
+    skip_files = {"test_opcount_truth.py", "test_multi_func.py",
+                  "test_lowering_parity_141.py"}
     for root, dirs, files in os.walk(REPO_ROOT):
         dirs[:] = [d for d in dirs if d not in skip_dirs]
         for fn in files:
@@ -92,17 +124,27 @@ def test_no_bare_141_claim_in_code():
                 if s.startswith("#") or s.startswith("//"):
                     continue
                 if "141" in line and "3.14159" not in line:
-                    # Allowed only if framed as vendor/unverified claim.
+                    # Allowed only if framed as vendor/unverified history,
+                    # as the verified count, or as a file-path reference
+                    # to the parity test module itself.
                     low = line.lower()
-                    if "vendor" in low or "unverif" in low:
+                    if ("vendor" in low or "unverif" in low
+                            or "verified" in low or "verif" in low
+                            or "test_lowering_parity_141" in line
+                            or "test_opcount_truth" in line):
                         continue
                     bad.append("%s:%d: %s" % (p, i, line.strip()[:120]))
     assert not bad, bad
 
 
 def test_touched_files_parse_on_310():
-    for rel in ("obfuscator/lowering_DESIGN.md",):
-        _ = rel  # doc file: presence check only
+    for rel in ("obfuscator/lowering.py", "obfuscator/lowering_shim.py",
+                "obfuscator/kernel_gen.py",
+                "tests/test_lowering_parity_141.py"):
+        path = os.path.join(REPO_ROOT, rel)
+        with open(path, encoding="utf-8") as f:
+            src = f.read()
+        ast.parse(src, feature_version=(3, 10))
     import obfuscator.kernel_gen  # noqa: F401
     import obfuscator.lowering  # noqa: F401
     assert True

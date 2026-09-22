@@ -793,6 +793,14 @@ Examples:
                         help="Diagnostic build: per-stage timings + transform counts + NOT-FOR-RELEASE marker")
     parser.add_argument("--no-audit-hook-plant", dest="audit_hook_plant_off", action="store_true", default=False,
                         help="Omit the site-packages audit-hook plant detector from the loader (default: detector ON)")
+    parser.add_argument("--driver-check", dest="driver_check", action="store_true", default=False,
+                        help="Bake the V10 kernel-driver gate into the loader (fail-closed on "
+                             "known-vulnerable BYOVD drivers only when armed; default: off, "
+                             "also armable at runtime via NIXON_DRIVER_CHECK=1)")
+    parser.add_argument("--split-bootstrap", dest="split_bootstrap", action="store_true", default=False,
+                        help="V10 kernel split-bootstrap: Shamir (n=3,k=2) threshold key + "
+                             "fragmented decoder in the loader instead of the single embedded "
+                             "key path (opt-in until battle-tested; default: off)")
 
     opts = parser.parse_args()
 
@@ -832,6 +840,10 @@ Examples:
         log("OPT", "DIAGNOSTIC BUILD (not for release)")
     if getattr(opts, "audit_hook_plant_off", False):
         log("OPT", "Audit-hook plant detector disabled (--no-audit-hook-plant)")
+    if getattr(opts, "driver_check", False):
+        log("OPT", "Kernel-driver gate baked into loader (--driver-check; also armable via NIXON_DRIVER_CHECK=1)")
+    if getattr(opts, "split_bootstrap", False):
+        log("OPT", "Split-bootstrap threshold key + fragmented decoder baked into loader (--split-bootstrap)")
 
     # =========================================================================
     # Stage 0: Pre-Flight Checks

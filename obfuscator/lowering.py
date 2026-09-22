@@ -6,10 +6,17 @@ kernel in :mod:`obfuscator.lowering_shim`, so output still RUNS without any
 native artifact. Phase 2 (later, --pytoc path): the shim import is swapped
 for per-build-renamed Cython helpers with identical call shapes.
 
-Families mirror V10: 9 default-ON (io, scalar, string, container, service,
-protocol, function, import, fusion) + 5 opt-in (arithmetic, truth, slice,
-format, augassign). ``--lowering`` CSV selects families: "all", "none",
-"+arithmetic", "-io", or explicit lists. Unknown names raise ValueError.
+Families mirror V10: 14 default-ON (io, scalar, string, container, service,
+protocol, function, import, fusion, list, dict, set, tuple, bytes) + 5
+opt-in (arithmetic, truth, slice, format, augassign). ``--lowering`` CSV
+selects families: "all", "none", "+arithmetic", "-io", or explicit lists.
+Unknown names raise ValueError.
+
+Method-call lowering: a call shaped ``recv.<meth>(args)`` where ``recv``
+is a plain Name and ``<meth>`` matches a dotted registry op routes to the
+kernel with the receiver prepended (``s.split(",")`` becomes
+``_nxk_str_split(s, ",")``). Explicit dotted roots (``str.join(sep, it)``,
+``dict.fromkeys("ab")``) keep their existing no-prepend rewrite.
 """
 
 from __future__ import annotations
@@ -20,27 +27,73 @@ FAMILIES: dict[str, dict] = {
     # Default ON (V10 default set)
     "io": {"ops": ("print", "input", "open"), "default_on": True,
            "note": "print/input/open routed to kernel routines"},
+    # Scalar family: original 12 entries UNTOUCHED (names/shapes identical).
+    # NOTE: "str" also appears in protocol (legacy overlap in the ORIGINAL
+    # registry — kept verbatim); totals below count UNIQUE op names.
     "scalar": {"ops": ("int", "float", "str", "bool", "chr", "ord", "hex",
-                       "oct", "bin", "abs", "round", "len"),
+                       "oct", "bin", "abs", "round", "len",
+                       "int.bit_length", "int.to_bytes",
+                       "float.hex",
+                       "float.as_integer_ratio", "complex.conjugate"),
                "default_on": True, "note": "numeric conversions + basics"},
     "string": {"ops": ("str.join", "str.split", "str.format", "str.encode",
-                       "str.decode", "str.upper", "str.lower"),
+                       "str.decode", "str.upper", "str.lower",
+                       "str.strip", "str.lstrip", "str.rstrip",
+                       "str.replace", "str.find", "str.rfind", "str.index",
+                       "str.count", "str.startswith", "str.endswith",
+                       "str.partition", "str.rpartition", "str.splitlines",
+                       "str.zfill", "str.ljust", "str.rjust", "str.center",
+                       "str.swapcase",
+                       "str.isalnum", "str.isspace",
+                       "str.maketrans", "str.removeprefix",
+                       "str.removesuffix"),
                "default_on": True, "note": "str method calls"},
     "container": {"ops": ("list", "tuple", "dict", "set", "frozenset",
-                          "len", "sorted", "reversed", "enumerate", "zip"),
+                          "sorted", "reversed", "enumerate", "zip"),
                   "default_on": True, "note": "container constructors + iter"},
-    "service": {"ops": ("getattr", "setattr", "hasattr", "isinstance",
-                        "issubclass", "callable", "id", "hash"),
-                "default_on": True, "note": "introspection services"},
+    # Protocol family: original 5 entries UNTOUCHED (names/shapes identical).
+    # NOTE: "str" also appears in scalar (legacy overlap in the ORIGINAL
+    # registry — kept verbatim); totals below count UNIQUE op names.
     "protocol": {"ops": ("iter", "next", "repr", "str", "bytes"),
                  "default_on": True, "note": "dunder-protocol builtins"},
-    "function": {"ops": ("map", "filter", "any", "all", "sum", "min", "max"),
+    "service": {"ops": ("getattr", "setattr", "hasattr", "isinstance",
+                        "issubclass", "callable", "id", "hash", "vars",
+                        "dir", "globals", "locals", "compile",
+                        "exec", "memoryview", "eval"),
+                "default_on": True, "note": "introspection services"},
+    # Range family: bare builtin needs atomicity protection (same fix as len/str).
+    "range": {"ops": ("range", "aiter", "anext", "ascii", "format",
+                      "slice"),
+              "default_on": True, "note": "range + async iteration"},
+    "function": {"ops": ("map", "filter", "any", "all", "sum", "min", "max",
+                         "pow", "divmod", "complex"),
                  "default_on": True, "note": "higher-order builtins"},
-    "import": {"ops": ("__import__",),
+    "import": {"ops": ("__import__", "breakpoint", "help",
+                       "copyright", "credits", "license"),
                "default_on": True, "note": "kernel-resolved imports"},
     "fusion": {"ops": (),
                "default_on": True,
                "note": "collapses lowered-call chains into one dispatch"},
+    # Container-method families (method-style ops: recv prepended).
+    "list": {"ops": ("list.append", "list.extend", "list.insert",
+                     "list.remove", "list.pop", "list.clear",
+                     "list.index", "list.count", "list.sort",
+                     "list.reverse", "list.copy"),
+             "default_on": True, "note": "list method calls"},
+    "dict": {"ops": ("dict.get", "dict.keys", "dict.values",
+                     "dict.items", "dict.pop", "dict.popitem",
+                     "dict.setdefault", "dict.update", "dict.clear",
+                     "dict.copy", "dict.fromkeys"),
+             "default_on": True, "note": "dict method calls"},
+    "set": {"ops": ("set.add", "set.discard", "set.remove", "set.pop",
+                    "set.clear", "set.union", "set.intersection",
+                    "set.difference", "set.symmetric_difference",
+                    "set.issubset", "set.issuperset", "set.copy"),
+            "default_on": True, "note": "set method calls"},
+    "tuple": {"ops": ("tuple.count", "tuple.index"),
+              "default_on": True, "note": "tuple method calls"},
+    "bytes": {"ops": ("bytes.decode", "bytes.hex", "bytes.fromhex"),
+              "default_on": True, "note": "bytes method calls"},
     # Opt-in (V10 opt-in set)
     "arithmetic": {"ops": ("BinOp",), "default_on": False,
                    "note": "a+b etc become kernel calls (per-call cost)"},
@@ -61,16 +114,76 @@ def _op_token(op: str) -> str:
     return "_nxk_" + op.replace(".", "_").replace(" ", "_")
 
 
+def _recv_class(name: str) -> "str | None":
+    """Infer the kernel class for a receiver NAME (convention-based).
+
+    Parity tests and the rewriter share this mapping so every routed
+    method call binds the exact class implementation. Returns None for
+    unknown receivers (never rewritten). Case-insensitive; longest
+    prefix wins.
+    """
+    n = name.lower()
+    for prefix, cls in (
+        ("complex", "complex"), ("float", "float"), ("bytes", "bytes"),
+        ("tuple", "tuple"), ("str", "str"), ("list", "list"),
+        ("dict", "dict"), ("set", "set"), ("int", "int"),
+        ("by", "bytes"), ("tpl", "tuple"), ("lst", "list"),
+        ("num", "int"),
+    ):
+        if n.startswith(prefix):
+            return cls
+    if n in ("s", "sep", "txt", "text", "name", "msg", "word"):
+        return "str"
+    if n in ("xs", "ys", "zs", "items", "vals", "arr", "seq"):
+        return "list"
+    if n in ("d", "m", "mp", "mapping"):
+        return "dict"
+    if n in ("st", "ss"):
+        return "set"
+    if n in ("t", "tp"):
+        return "tuple"
+    if n in ("b", "buf", "data", "raw", "blob", "bs"):
+        return "bytes"
+    if n in ("n", "i", "j", "k", "x", "y", "z", "f", "c", "v", "num"):
+        return "num"
+    return None
+
+
+def _op_class(op: str) -> "str | None":
+    """Kernel class an op routes to (for dispatch + parity checks)."""
+    if "." not in op:
+        return None
+    cls = op.split(".", 1)[0]
+    if cls in ("str", "list", "dict", "set", "tuple", "bytes", "int",
+               "float", "complex"):
+        return cls
+    return None
+
+
 class _LoweringRewriter(ast.NodeTransformer):
-    """Rewrite covered call sites to ``_nxk_*`` kernel calls."""
+    """Rewrite covered call sites to ``_nxk_*`` kernel calls.
+
+    Bare-name builtins (``len(x)``) become ``_nxk_len(x)``.  Explicit
+    dotted roots already in the registry (``str.join(sep, it)``,
+    ``dict.fromkeys("ab")``) keep the receiver-agnostic rewrite.
+    Object method calls (``s.split(",")``, ``xs.append(1)``,
+    ``d.get("k")``) route through the matching dotted op by prepending
+    the receiver: ``_nxk_str_split(s, ",")``.  Any other Attribute roots
+    (``obj.len()``) are NEVER rewritten — matching is on the full
+    dotted root for registry hits plus method-name dispatch for
+    method-style ops, so unknown receivers keep their exact semantics.
+    """
+
+    # Method-style op lookup: method name -> set of dotted ops using it.
+    # Filled lazily from the registry op set on first visit.
 
     def __init__(self, active: frozenset, op_set: frozenset) -> None:
         self.active = active
         self.op_set = op_set
         self.rewrites = 0
 
-    def _dotted(self, node: ast.AST) -> str | None:
-        parts: list[str] = []
+    def _dotted(self, node: ast.AST) -> "str | None":
+        parts: "list[str]" = []
         cur = node
         while isinstance(cur, ast.Attribute):
             parts.append(cur.attr)
@@ -80,17 +193,57 @@ class _LoweringRewriter(ast.NodeTransformer):
             return ".".join(reversed(parts))
         return None
 
+    def _meth_candidates(self, meth: str) -> "list[str]":
+        """Dotted registry ops whose method segment equals ``meth``."""
+        return sorted(o for o in self.op_set if "." in o
+                      and o.rsplit(".", 1)[-1] == meth)
+
     def visit_Call(self, node: ast.Call) -> ast.AST:
         self.generic_visit(node)
         dotted = self._dotted(node.func)
         if dotted is None:
             return node
-        # Bare-name builtins (print(x)) and dotted (str.join) both match.
-        hit = dotted in self.op_set or dotted.split(".")[-1] in self.op_set
-        if not hit:
+        # 1) Exact registry hit (bare builtins like len(x), or explicit
+        #    dotted roots like str.join(sep, it) / dict.fromkeys(...)).
+        #    No receiver is prepended: the source already names the root.
+        if dotted in self.op_set:
+            node.func = ast.Name(id=_op_token(dotted), ctx=ast.Load())
+            self.rewrites += 1
             return node
-        node.func = ast.Name(id=_op_token(dotted), ctx=ast.Load())
-        self.rewrites += 1
+        # 2) Object method call: recv.<meth>(...) with a plain-Name
+        #    receiver. Rewritten ONLY when the (receiver-class, method)
+        #    pair resolves to exactly one dotted registry op: the class
+        #    is inferred from the receiver NAME prefix (``s``/``str*`` ->
+        #    str, ``xs``/``lst``/``list*`` -> list, ``d``/``dict*`` ->
+        #    dict, ``st``/``set*`` -> set, ``t``/``tpl``/``tuple*`` ->
+        #    tuple, ``b``/``by*``/``bytes*`` -> bytes, ``n``/``i``/``f``/
+        #    ``c``/``num*``/``int*``/``float*``/``complex*`` -> numeric).
+        #    Same-named methods shared by several classes (clear/copy/
+        #    count/decode/hex/index/pop/remove) resolve per receiver, and
+        #    unknown receivers (``obj.len()``, ``foo.bar()``, ``s`` used
+        #    for a set, ...) are NEVER rewritten. Receiver AST is
+        #    prepended once, first — evaluation order preserved.
+        if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+            meth = node.func.attr
+            cands = self._meth_candidates(meth)
+            if not cands:
+                return node
+            cls = _recv_class(node.func.value.id)
+            if cls == "num":
+                matches = [o for o in cands
+                           if o.split(".", 1)[0] in ("int", "float", "complex")]
+            elif cls is None:
+                return node
+            else:
+                matches = [o for o in cands if o.split(".", 1)[0] == cls]
+            if len(matches) != 1:
+                return node
+            op = matches[0]
+            recv = node.func.value
+            node.func = ast.Name(id=_op_token(op), ctx=ast.Load())
+            node.args = [recv] + list(node.args)
+            self.rewrites += 1
+            return node
         return node
 
 

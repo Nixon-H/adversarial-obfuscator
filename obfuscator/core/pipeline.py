@@ -1075,7 +1075,8 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
                                    hwid='', trial_seconds=None, vm_threshold=50.0,
                                    kod=False, hostguard=False, hwid_lock=False,
                                    build_id=None, watermark=None,
-                                   watermark_key=None):
+                                   watermark_key=None, driver_check=False,
+                                   split_bootstrap=False):
     # Phase-4 wiring: all new kwargs default to current behavior (no change
     # when absent). vm/secure-temp snippets are always appended (report-only,
     # safe); hostguard only when requested (changes exec semantics).
@@ -1101,6 +1102,71 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         _phase4_suffix += _emit_vm(_vm_thr) + "\n"
     except Exception:
         pass
+    # V10 kernel-driver gate (SAFE read-only defensive gate: enumeration +
+    # blocklist comparison only; no driver loading, no ring-0). Opt-in via
+    # driver_check=True (--driver-check) which bakes the snippet + sets the
+    # _NX_DRIVER_CHECK_ARMED marker; runtime env NIXON_DRIVER_CHECK=1 also
+    # arms. Disarmed: enumerate + return hits, never exit, no thread.
+    try:
+        from obfuscator.driver_blocklist import emit_driver_snippet as _emit_drv
+        _phase4_suffix += _emit_drv(bool(driver_check)) + "\n"
+    except Exception:
+        pass
+    try:
+        _phase4_suffix += ("_NX_DRIVER_CHECK_ARMED = %r\n" % (bool(driver_check),))
+    except Exception:
+        pass
+    # V10 split-bootstrap (opt-in, default OFF): Shamir threshold key +
+    # fragmented decoder (obfuscator/split_bootstrap.py). Best-effort:
+    # never break builds — any failure falls back to the single-key path.
+    # Modeled on the --driver-check plumbing (marker + snippet suffix).
+    # NOTE: the split path salts with the per-build build_id, so build_id
+    # must be minted BEFORE splitting (the canonical mint lives below;
+    # duplicate it here — same os.urandom/uuid fallback chain — so the
+    # salt baked into the SB snippet always equals the emitted
+    # _NX_BUILD_ID. Un-minted here, the snippet would salt with "None").
+    if build_id is None:
+        try:
+            build_id = os.urandom(8).hex()
+        except Exception:
+            build_id = uuid.uuid4().hex[:16]
+    build_id = str(build_id)
+    _split_bootstrap_on = False
+    try:
+        _split_bootstrap_on = bool(split_bootstrap)
+    except Exception:
+        _split_bootstrap_on = False
+    try:
+        _phase4_suffix += ("_NX_SPLIT_BOOTSTRAP = %r\n" % (_split_bootstrap_on,))
+    except Exception:
+        pass
+    if _split_bootstrap_on:
+        try:
+            from obfuscator.split_bootstrap import (
+                emit_bootstrap_snippet as _sb_emit,
+                split_bootstrap_key as _sb_split,
+            )
+            _sb_key = bytes.fromhex(key_hex)
+            _sb_out = _sb_split(_sb_key)
+            _phase4_suffix += _sb_emit(_sb_out["fragments"],
+                                       _sb_out["k"], str(build_id)) + "\n"
+            _phase4_suffix += (
+                "_NX_SPLIT_BOOTSTRAP_ARMED = True\n"
+                "try:\n"
+                "    BLOB_KEY_SB = _nx_sb_activate()\n"
+                "except Exception:\n"
+                "    BLOB_KEY_SB = None\n"
+            )
+        except Exception:
+            try:
+                _phase4_suffix += "_NX_SPLIT_BOOTSTRAP_ARMED = False\n"
+            except Exception:
+                pass
+    else:
+        try:
+            _phase4_suffix += "_NX_SPLIT_BOOTSTRAP_ARMED = False\n"
+        except Exception:
+            pass
     _phase4_suffix += ("_NX_KOD_ARMED = %r\n" % (bool(kod),))
     _phase4_suffix += ("_NX_TRIAL_SECONDS = %r\n" % (trial_seconds,))
     # AUDIT GAPS #52/#75: MAC-bound trial deadline + clock-rollback gate.
@@ -1813,12 +1879,16 @@ def build_project(args):
             _w_kod = bool(getattr(args, 'kod', False))
             _w_hostguard = bool(getattr(args, 'hostguard', False))
             _w_hwid_lock = bool(getattr(args, 'hwid_lock', False))
+            _w_driver_check = bool(getattr(args, 'driver_check', False))
+            _w_split_bootstrap = bool(getattr(args, 'split_bootstrap', False))
             fallback_opts['hwid'] = _w_hwid
             fallback_opts['trial_seconds'] = _w_trial_seconds
             fallback_opts['vm_threshold'] = _w_vm_threshold
             fallback_opts['kod'] = _w_kod
             fallback_opts['hostguard'] = _w_hostguard
             fallback_opts['hwid_lock'] = _w_hwid_lock
+            fallback_opts['driver_check'] = _w_driver_check
+            fallback_opts['split_bootstrap'] = _w_split_bootstrap
             _bc_ok = False
             for _bc_try in range(3):
                 try:
@@ -1876,6 +1946,8 @@ def build_project(args):
                 hwid=_w_hwid, trial_seconds=_w_trial_seconds,
                 vm_threshold=_w_vm_threshold, kod=_w_kod, hostguard=_w_hostguard,
                 hwid_lock=(_w_hwid_lock and bool(_w_hwid)),
+                driver_check=_w_driver_check,
+                split_bootstrap=_w_split_bootstrap,
             )
             args._real_native_blobs = real_blobs_dict
             args._real_fallback_blob = real_fallback_str
@@ -1996,6 +2068,8 @@ def _VERIFY_INTEGRITY(): return True
         'vm_threshold': _bp_vm_threshold,
         'kod': bool(getattr(args, 'kod', False)),
         'hostguard': bool(getattr(args, 'hostguard', False)),
+        'driver_check': bool(getattr(args, 'driver_check', False)),
+        'split_bootstrap': bool(getattr(args, 'split_bootstrap', False)),
         'hwid_lock': bool(getattr(args, 'hwid_lock', False)),
         'name_gate': bool(getattr(args, 'name_gate', False)),
         'rename_internal': bool(getattr(args, 'rename_internal', False)),
