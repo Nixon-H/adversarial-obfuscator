@@ -685,13 +685,24 @@ class OpaquePredicateInjector(ast.NodeTransformer):
                     right=ast.Constant(value=_nonce + 1),
                 )]
             )
+            # Dead-branch marker: must NEVER execute. The modular cond
+            # above is actually FALSE for 3 <= n <= 30 (n*n % (n+1) = 1,
+            # n % (n+1) = n), so the print in `orelse` RUNS — a real
+            # output-changing bug (V10-diversity failure). Fix: use a
+            # trivially-TRUE nonce-based cond with the marker in `body`
+            # and Pass in `orelse` (still per-build unique via _nonce).
             dead = [ast.Expr(value=ast.Call(
                 func=ast.Name(id='print', ctx=ast.Load()),
                 args=[ast.Constant(value=f"SIG_{_nonce:x}_OK")],
                 keywords=[]
             ))]
+            _true_cond = ast.Compare(
+                left=ast.Constant(value=_nonce),
+                ops=[ast.Eq()],
+                comparators=[ast.Constant(value=_nonce)],
+            )
             if node.body:
-                node.body.insert(0, ast.If(test=cond, body=[ast.Pass()], orelse=dead))
+                node.body.insert(0, ast.If(test=_true_cond, body=[ast.Pass()], orelse=dead))
             
         if len(node.body) > 2 and random.random() < 0.60:
             _has_scope_decl = any(isinstance(ch, (ast.Nonlocal, ast.Global)) for ch in ast.walk(node))
