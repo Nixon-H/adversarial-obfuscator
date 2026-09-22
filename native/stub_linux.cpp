@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <time.h>
 #include <stdbool.h>
+#include "crash_suppress.h"  /* Batch-B #34: SIGPIPE ignore + silent _exit(137) fatal handler */
 
 #ifdef __cplusplus
 extern "C" {
@@ -195,6 +196,10 @@ bool run_anti_debug_checks(void) {
 
 void apply_protections(void) {
     prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
+
+    /* Batch-B #34: SIGPIPE ignored; fatal signals -> silent _exit(137).
+       (PR_SET_DUMPABLE(0) stays here; the header does not duplicate it.) */
+    nixon_suppress_crash_dialogs();
 
     struct sigaction sa;
     sa.sa_sigaction = sigtrap_handler;

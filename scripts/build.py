@@ -775,6 +775,8 @@ Examples:
                         help="Semantic-lowering families CSV (io,scalar,string,container,service,protocol,function,import,fusion + opt-in: arithmetic,truth,slice,format,augassign); default '' = disabled")
     parser.add_argument("--diagnostic", action="store_true", default=False,
                         help="Diagnostic build: per-stage timings + transform counts + NOT-FOR-RELEASE marker")
+    parser.add_argument("--no-audit-hook-plant", dest="audit_hook_plant_off", action="store_true", default=False,
+                        help="Omit the site-packages audit-hook plant detector from the loader (default: detector ON)")
 
     opts = parser.parse_args()
 
@@ -810,6 +812,8 @@ Examples:
         log("OPT", f"Semantic lowering families: {opts.lowering}")
     if getattr(opts, "diagnostic", False):
         log("OPT", "DIAGNOSTIC BUILD (not for release)")
+    if getattr(opts, "audit_hook_plant_off", False):
+        log("OPT", "Audit-hook plant detector disabled (--no-audit-hook-plant)")
 
     # =========================================================================
     # Stage 0: Pre-Flight Checks

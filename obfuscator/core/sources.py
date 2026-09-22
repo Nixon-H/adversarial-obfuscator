@@ -5387,6 +5387,7 @@ if _nixon_システム시스템.version_info[:2] != _REQUIRED_VERSION and not (_
     _nixon_システム시스템.exit(1)
 {VAR_IS_DEBUG} = {is_debug_val}
 {VAR_CANARY_URL} = "{canary_url_enc}"
+{audit_hook_source}
 def {FUNC_LOG}(msg):
     if {VAR_IS_DEBUG}:
         _nixon_システム시스템.stdout.write(str(msg) + "\n")
