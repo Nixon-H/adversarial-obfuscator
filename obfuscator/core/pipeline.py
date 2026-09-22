@@ -956,6 +956,26 @@ def prepare_obfuscated_source(source_path, ast_opts=None):
             source_code = _ng_emit(_ng_map) + _ng_rewrite(source_code, _ng_map)
     except Exception:
         pass
+    # V10 semantic lowering (opt-in via --lowering CSV): rewrite covered
+    # call sites to _nxk_* kernel calls + prepend the shim import. The
+    # --pytoc path later swaps the shim import for the native kernel
+    # module (same call shapes, per-build renamed impl symbols).
+    try:
+        _low_spec = str(ast_opts.get('lowering', '') or '')
+        if _low_spec:
+            from obfuscator.lowering import (
+                emit_shim_import as _low_import,
+                lower_source as _low_src,
+                resolve_families as _low_resolve,
+            )
+            _low_active = _low_resolve(_low_spec)
+            if _low_active:
+                _low_body, _low_n = _low_src(source_code, _low_active)
+                _low_imp = _low_import(_low_active)
+                if _low_n:
+                    source_code = (_low_imp + _low_body) if _low_imp else _low_body
+    except Exception:
+        pass
     print("    [+] Pre-obfuscating source for native build...")
     \
     protected_code, _ = apply_ast_mutation(source_code, options=ast_opts)
@@ -1822,6 +1842,8 @@ def _VERIFY_INTEGRITY(): return True
         'kod': bool(getattr(args, 'kod', False)),
         'hostguard': bool(getattr(args, 'hostguard', False)),
         'hwid_lock': bool(getattr(args, 'hwid_lock', False)),
+        'name_gate': bool(getattr(args, 'name_gate', False)),
+        'lowering': str(getattr(args, 'lowering', '') or ''),
         'blockchain_contract': deployed_contract or getattr(args, 'contract', '') or '',
         'blockchain_rpc': deployed_rpc or getattr(args, 'rpc', '') or '',
         'key_shard_urls': [s.strip() for s in getattr(args, 'shards', '').split(',') if s.strip()] if getattr(args, 'shards', None) else [],

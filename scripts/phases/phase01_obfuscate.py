@@ -130,6 +130,27 @@ def phase_obfuscate(payload, output, opts):
             tree = protector.protect(tree)
             result = ast.unparse(tree)
 
+        # V10 semantic lowering (opt-in via --lowering CSV): rewrite covered
+        # call sites to _nxk_* kernel calls + prepend the shim import.
+        # Runs AFTER the main pipeline so lowering sees final call shapes.
+        if getattr(opts, "lowering", ""):
+            import ast as _ast_low
+            try:
+                from obfuscator.lowering import (
+                    emit_shim_import as _low_import,
+                    lower_source as _low_src,
+                    resolve_families as _low_resolve,
+                )
+                _low_active = _low_resolve(getattr(opts, "lowering", ""))
+                if _low_active:
+                    _low_body, _low_n = _low_src(result, _low_active)
+                    _low_imp = _low_import(_low_active)
+                    if _low_n:
+                        result = (_low_imp + _low_body) if _low_imp else _low_body
+                        log("LOWERING", f"Semantic lowering: {len(_low_active)} families, {_low_n} call sites")
+            except Exception as _le:
+                log("LOWERING", f"lowering skipped (non-fatal): {_le}")
+
         with open(output, "w", encoding="utf-8") as f:
             f.write(result)
 

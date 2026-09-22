@@ -2098,12 +2098,58 @@ Examples:
 
     # =========================================================================
     # Batch-2: REAL --pytoc native-extension path (best-effort, never fails)
+    # V10 Phase 2: when --lowering is also set, the native lowering kernel
+    # is built first and the lowered output's shim import is swapped for
+    # the native module import (identical call shapes, per-build symbols).
     # =========================================================================
     if getattr(opts, "pytoc", False):
         try:
             _pytoc_src = obfuscated_output
             if not os.path.exists(_pytoc_src):
                 _pytoc_src = os.path.join(BUILD_DIR, obfuscated_name)
+            _low_spec = str(getattr(opts, "lowering", "") or "")
+            if _low_spec:
+                try:
+                    from obfuscator.kernel_gen import (
+                        build_kernel as _kb,
+                        cythonize_kernel as _kc,
+                        derive_symbols as _kd,
+                        emit_native_import as _ke,
+                    )
+                    from obfuscator.lowering import resolve_families as _kr
+                    import ast as _ka
+                    _kseed_src = str(getattr(opts, "build_id", "") or "") or None
+                    import os as _ko
+                    _kseed = (_kseed_src.encode() if _kseed_src
+                              else _ko.urandom(16))
+                    _k_active = _kr(_low_spec)
+                    _k_tmp = os.path.join(BUILD_DIR, "nxk_build")
+                    _k_pyx, _k_mod, _k_map = _kb(_k_tmp, _kseed)
+                    _k_so, _k_msg = _kc(_k_pyx, BUILD_DIR)
+                    log("PYTOC", f"lowering kernel: {_k_msg}")
+                    if _k_so:
+                        # Swap the shim import for the native module import.
+                        # Both expose identical _nxk_* names; only the
+                        # provider changes (shim .py -> native .so).
+                        with open(_pytoc_src, encoding="utf-8") as _kf:
+                            _k_src = _kf.read()
+                        _k_tokens = sorted({
+                            _t.id for _t in _ka.walk(_ka.parse(_k_src))
+                            if isinstance(_t, ast.Name) and _t.id.startswith("_nxk_")
+                        })
+                        _k_new = _k_src.replace(
+                            "from lowering_shim import",
+                            f"from {_k_mod} import",
+                        )
+                        if _k_new == _k_src and _k_tokens:
+                            # No shim import line (shim inlined?) — prepend.
+                            _k_new = _ke(_k_mod, _k_tokens) + _k_src
+                        if _k_new != _k_src:
+                            with open(_pytoc_src, "w", encoding="utf-8") as _kf:
+                                _kf.write(_k_new)
+                            log("PYTOC", f"kernel swap: {_k_mod} provides {len(_k_tokens)} ops")
+                except Exception as _ke2:
+                    log("PYTOC", f"kernel swap skipped (non-fatal): {_ke2}")
             _pytoc_out = getattr(opts, "pytoc_out", "") or None
             if not _pytoc_out:
                 _base, _ = os.path.splitext(_pytoc_src)
