@@ -139,8 +139,11 @@ def test_e2e_stripped_watermark_refuses(tmp_path):
     src = src.replace(m.group(0), "_NX_WATERMARK_MARKER = 'STRIPPED'", 1)
     src += "\n_ns_wm_out = _exec_fallback()\n"
     proc = _write_and_run_loader(src, tmp_path, "wm_stripped.py")
-    assert proc.returncode != 0, proc.stdout[-2000:] + proc.stderr[-2000:]
-    assert "watermark" in (proc.stdout + proc.stderr).lower()
+    # Kill ladder: stripped watermark funnels through _nx_kill (silent,
+    # exit 137, no output) — same shape as the migrated audit-hook and
+    # driver gates.
+    assert proc.returncode == 137, proc.stdout[-2000:] + proc.stderr[-2000:]
+    assert "SHOULD_NOT_PRINT" not in proc.stdout
 
 
 def test_e2e_tampered_watermark_refuses(tmp_path):
@@ -160,8 +163,10 @@ def test_e2e_tampered_watermark_refuses(tmp_path):
                       "_wm_msg = 'attacker-msg'", 1)
     src += "\n_ns_wm_out = _exec_fallback()\n"
     proc = _write_and_run_loader(src, tmp_path, "wm_tampered.py")
-    assert proc.returncode != 0, proc.stdout[-2000:] + proc.stderr[-2000:]
-    assert "watermark" in (proc.stdout + proc.stderr).lower()
+    # Kill ladder: tampered watermark funnels through _nx_kill (silent,
+    # exit 137, no output).
+    assert proc.returncode == 137, proc.stdout[-2000:] + proc.stderr[-2000:]
+    assert "SHOULD_NOT_PRINT" not in proc.stdout
 
 
 def test_e2e_unmarked_artifact_unaffected(tmp_path):
@@ -195,5 +200,7 @@ def test_e2e_wrong_key_refuses(tmp_path):
                       "_wm_key = bytes.fromhex(%r)" % (wrong,), 1)
     src += "\n_ns_wm_out = _exec_fallback()\n"
     proc = _write_and_run_loader(src, tmp_path, "wm_wrongkey.py")
-    assert proc.returncode != 0, proc.stdout[-2000:] + proc.stderr[-2000:]
-    assert "watermark" in (proc.stdout + proc.stderr).lower()
+    # Kill ladder: wrong-key watermark funnels through _nx_kill (silent,
+    # exit 137, no output).
+    assert proc.returncode == 137, proc.stdout[-2000:] + proc.stderr[-2000:]
+    assert "SHOULD_NOT_PRINT" not in proc.stdout

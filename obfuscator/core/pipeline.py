@@ -1076,7 +1076,8 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
                                    kod=False, hostguard=False, hwid_lock=False,
                                    build_id=None, watermark=None,
                                    watermark_key=None, driver_check=False,
-                                   split_bootstrap=False):
+                                   split_bootstrap=False, snapshot_off=False,
+                                   stdlib_audit_off=False):
     # Phase-4 wiring: all new kwargs default to current behavior (no change
     # when absent). vm/secure-temp snippets are always appended (report-only,
     # safe); hostguard only when requested (changes exec semantics).
@@ -1169,6 +1170,96 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
             pass
     _phase4_suffix += ("_NX_KOD_ARMED = %r\n" % (bool(kod),))
     _phase4_suffix += ("_NX_TRIAL_SECONDS = %r\n" % (trial_seconds,))
+    # Runtime integrity: frozen stdlib file snapshots. Default ON unless
+    # snapshot_off=True (--no-snapshot); runtime env NIXON_SNAPSHOT_OFF
+    # also disables. Version-bound: enforced only when the target
+    # interpreter tag matches the build tag, else DISABLED/report-only.
+    try:
+        _snapshot_on = not bool(snapshot_off)
+    except Exception:
+        _snapshot_on = True
+    if _snapshot_on:
+        try:
+            from obfuscator.frozen_snapshot import (
+                build_snapshot_context as _ss_ctx,
+                emit_snapshot_snippet as _ss_emit,
+            )
+            _ss_build = _ss_ctx()
+            _ss_files = dict(_ss_build.get("files", {}))
+            _ss_tag = str(_ss_build.get("tag", ""))
+            _phase4_suffix += ("_NX_SNAPSHOT_TAG = %r\n" % (_ss_tag,))
+            _phase4_suffix += ("_NX_SNAPSHOT_FILES = %r\n" % (_ss_files,))
+            if _ss_files and _ss_tag:
+                _phase4_suffix += _ss_emit(_ss_files, _ss_tag) + "\n"
+                _phase4_suffix += (
+                    "_NX_SNAPSHOT_GATE = _nx_snapshot_gate()\n"
+                    "if _NX_SNAPSHOT_GATE == \"mismatch\":\n"
+                    "    _nx_kill(\"integrity-snapshot\")\n"
+                )
+            else:
+                _phase4_suffix += "_NX_SNAPSHOT_GATE = \"DISABLED\"\n"
+        except SystemExit:
+            raise
+        except Exception:
+            try:
+                _phase4_suffix += "_NX_SNAPSHOT_GATE = \"DISABLED\"\n"
+            except Exception:
+                pass
+    else:
+        try:
+            _phase4_suffix += "_NX_SNAPSHOT_GATE = \"DISABLED\"\n"
+        except Exception:
+            pass
+    # Runtime integrity: stdlib function audit (bytecode compare).
+    # Default ON unless stdlib_audit_off=True (--no-stdlib-audit);
+    # runtime env NIXON_STDLIB_AUDIT_OFF also disables. Same
+    # version-binding as snapshots: mismatch -> DISABLED/report-only.
+    try:
+        _stdlib_on = not bool(stdlib_audit_off)
+    except Exception:
+        _stdlib_on = True
+    if _stdlib_on:
+        try:
+            from obfuscator.stdlib_audit import (
+                build_audit_context as _sa_ctx,
+                emit_audit_snippet as _sa_emit,
+            )
+            _sa_build = _sa_ctx()
+            _sa_runtime = dict(_sa_build.get("runtime", {}))
+            _sa_tag = str(_sa_build.get("tag", ""))
+            _phase4_suffix += ("_NX_STDLIB_TAG = %r\n" % (_sa_tag,))
+            _phase4_suffix += ("_NX_STDLIB_FUNCS = %r\n" % (_sa_runtime,))
+            if _sa_runtime and _sa_tag:
+                _phase4_suffix += _sa_emit(_sa_runtime, _sa_tag) + "\n"
+                _phase4_suffix += (
+                    "_NX_STDLIB_GATE = _nx_stdlib_gate()\n"
+                    "if _NX_STDLIB_GATE == \"mismatch\":\n"
+                    "    _nx_kill(\"stdlib-tamper\")\n"
+                )
+            else:
+                _phase4_suffix += "_NX_STDLIB_GATE = \"DISABLED\"\n"
+        except SystemExit:
+            raise
+        except Exception:
+            try:
+                _phase4_suffix += "_NX_STDLIB_GATE = \"DISABLED\"\n"
+            except Exception:
+                pass
+    else:
+        try:
+            _phase4_suffix += "_NX_STDLIB_GATE = \"DISABLED\"\n"
+        except Exception:
+            pass
+    # Kill ladder (V10 single failure path): every enforcement gate in the
+    # emitted loader funnels through _nx_kill (wipe + silent exit 137).
+    # Emitted ONCE, AFTER the integrity gates above (they call _nx_kill)
+    # and BEFORE the trial/watermark gates below; best-effort so a ladder
+    # import failure can never break builds.
+    try:
+        from obfuscator.kill_ladder import emit_kill_snippet as _kl_emit
+        _phase4_suffix += _kl_emit() + "\n"
+    except Exception:
+        pass
     # AUDIT GAPS #52/#75: MAC-bound trial deadline + clock-rollback gate.
     # Additive: only when trial_seconds is set; None/0 keeps current
     # behavior (plain _NX_TRIAL_SECONDS marker, no gate). The gate is a
@@ -1205,10 +1296,11 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
                 "_NX_TRIAL_GATE = _nx_trial_gate(%r)\n"
                 % (str(hwid or ""),)
             )
+            # Kill-ladder mapping: expired/rollback/tampered verdicts funnel
+            # through _nx_kill (reason codes match kill_ladder.REASON_CODES).
             _phase4_suffix += (
                 "if _NX_TRIAL_GATE != \"ok\":\n"
-                "    import sys as _nx_trial_sys\n"
-                "    _nx_trial_sys.exit(\"trial \" + str(_NX_TRIAL_GATE))\n"
+                "    _nx_kill(\"trial-\" + str(_NX_TRIAL_GATE))\n"
             )
         else:
             _phase4_suffix += "_NX_TRIAL_GATE = \"DISABLED\"\n"
@@ -1254,8 +1346,7 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
             )
             _phase4_suffix += (
                 "if _NX_WATERMARK_GATE != \"ok\":\n"
-                "    import sys as _nx_watermark_sys\n"
-                "    _nx_watermark_sys.exit(\"watermark \" + str(_NX_WATERMARK_GATE))\n"
+                "    _nx_kill(\"watermark-\" + str(_NX_WATERMARK_GATE))\n"
             )
         else:
             _phase4_suffix += "_NX_WATERMARK_GATE = \"DISABLED\"\n"
@@ -1881,6 +1972,8 @@ def build_project(args):
             _w_hwid_lock = bool(getattr(args, 'hwid_lock', False))
             _w_driver_check = bool(getattr(args, 'driver_check', False))
             _w_split_bootstrap = bool(getattr(args, 'split_bootstrap', False))
+            _w_snapshot_off = bool(getattr(args, 'snapshot_off', False))
+            _w_stdlib_audit_off = bool(getattr(args, 'stdlib_audit_off', False))
             fallback_opts['hwid'] = _w_hwid
             fallback_opts['trial_seconds'] = _w_trial_seconds
             fallback_opts['vm_threshold'] = _w_vm_threshold
@@ -1889,6 +1982,8 @@ def build_project(args):
             fallback_opts['hwid_lock'] = _w_hwid_lock
             fallback_opts['driver_check'] = _w_driver_check
             fallback_opts['split_bootstrap'] = _w_split_bootstrap
+            fallback_opts['snapshot_off'] = _w_snapshot_off
+            fallback_opts['stdlib_audit_off'] = _w_stdlib_audit_off
             _bc_ok = False
             for _bc_try in range(3):
                 try:
@@ -1948,6 +2043,8 @@ def build_project(args):
                 hwid_lock=(_w_hwid_lock and bool(_w_hwid)),
                 driver_check=_w_driver_check,
                 split_bootstrap=_w_split_bootstrap,
+                snapshot_off=_w_snapshot_off,
+                stdlib_audit_off=_w_stdlib_audit_off,
             )
             args._real_native_blobs = real_blobs_dict
             args._real_fallback_blob = real_fallback_str

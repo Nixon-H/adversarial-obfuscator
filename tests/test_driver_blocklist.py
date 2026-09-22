@@ -179,7 +179,8 @@ def test_snippet_mentions_gate_and_exit():
     assert ARM_VAR in src
     assert "NIXON_DRIVER_CHECK" in src
     assert "driver_check" in src
-    assert "os._exit(1)" in src or "_os._exit(1)" in src
+    # Kill ladder: single failure path via _nx_kill (exit 137), not raw _exit.
+    assert "_nx_kill(" in src
     assert "/proc/modules" in src
     assert "EnumDeviceDrivers" in src
     assert "daemon=True" in src  # continuous background re-check
@@ -222,10 +223,13 @@ def test_gate_armed_exits_on_bad_driver(monkeypatch):
 
     monkeypatch.setattr(_os, "_exit", fake_exit)
     # The snippet did "import os as _os": patch its reference too.
+    # NOTE: the kill ladder embeds its own "import os as _nx_os" INSIDE
+    # _nx_kill, so patch _nx_os as well.
     monkeypatch.setitem(ns, "_os", _os)
+    monkeypatch.setitem(ns, "_nx_os", _os)
     with pytest.raises(SystemExit):
         ns["driver_check"](["RTCore64.sys"])
-    assert exited.get("code") == 1
+    assert exited.get("code") == 137
 
 
 def test_gate_armed_env_only_exits(monkeypatch):
@@ -241,9 +245,10 @@ def test_gate_armed_env_only_exits(monkeypatch):
 
     monkeypatch.setattr(_os, "_exit", fake_exit)
     monkeypatch.setitem(ns, "_os", _os)
+    monkeypatch.setitem(ns, "_nx_os", _os)
     with pytest.raises(SystemExit):
         ns["driver_check"](["WinRing0x64.sys"])
-    assert exited.get("code") == 1
+    assert exited.get("code") == 137
 
 
 def test_gate_armed_clean_names_no_exit(monkeypatch):

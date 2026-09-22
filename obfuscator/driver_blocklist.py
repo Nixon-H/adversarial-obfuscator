@@ -294,10 +294,14 @@ def emit_driver_snippet(armed=False, interval_s=60):
     if _interval <= 0:
         _interval = 60
     blocked_json = json.dumps(sorted(BLOCKED_DRIVERS), sort_keys=True)
+    from obfuscator.kill_ladder import emit_kill_snippet as _kl_emit
+    _kl_src = _kl_emit()
     src = (
         "import os as _os\n"
         + "import platform as _platform\n"
         + "\n"
+        + _kl_src +
+        "\n"
         + "_NX_DRIVER_ARMED_BUILD = %r\n" % (_armed,)
         + "_NX_DRIVER_BLOCKED = %s\n" % (blocked_json,)
         + "_NX_DRIVER_ARMED_VALUES = %r\n" % (tuple(_ARMED_TRUE),)
@@ -407,12 +411,7 @@ def emit_driver_snippet(armed=False, interval_s=60):
         + "    \"\"\"Enumerate drivers, return blocked-stem hits; exit iff armed.\"\"\"\n"
         + "    _hits = _nx_driver_hits(_names)\n"
         + "    if _hits and _nx_driver_armed():\n"
-        + "        try:\n"
-        + "            _os._exit(1)\n"
-        + "        except Exception:\n"
-        + "            pass\n"
-        + "        import sys as _nx_driver_sys\n"
-        + "        _nx_driver_sys.exit(1)\n"
+        + "        _nx_kill(\"driver-blocked\")\n"
         + "    return _hits\n"
         + "\n"
         + "\n"

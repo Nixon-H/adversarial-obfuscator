@@ -149,6 +149,10 @@ class SymbolRenamer(ast.NodeTransformer):
             '_nx_watermark_gate',
             '_NX_WATERMARK_GATE', '_NX_WATERMARK_KEY', '_NX_WATERMARK_MSG',
             '_NX_WATERMARK_TAG', '_NX_WATERMARK_MARKER',
+            # V10 unified kill ladder: single-failure-path wipe+exit helper.
+            # _nx_kill must survive renames or every migrated gate breaks
+            # at runtime.
+            '_nx_kill',
             # V10 split-bootstrap (opt-in): fragmented-decoder helpers +
             # stub fragment markers must survive renames or the armed
             # lazy-activate path breaks at runtime.
@@ -156,6 +160,12 @@ class SymbolRenamer(ast.NodeTransformer):
             '_NX_SB_HEAD', '_NX_SB_TRAIL', '_NX_SB_SALT', '_NX_SB_KEY',
             '_NX_SB_THIRD', '_NX_SPLIT_BOOTSTRAP',
             '_NX_SPLIT_BOOTSTRAP_ARMED', 'BLOB_KEY_SB',
+            # Runtime integrity (frozen snapshots + stdlib audit): gate
+            # helpers + marker literals must survive renames or the
+            # armed gates break at runtime.
+            '_nx_snapshot_gate', '_nx_stdlib_gate',
+            '_NX_SNAPSHOT_GATE', '_NX_SNAPSHOT_TAG', '_NX_SNAPSHOT_FILES',
+            '_NX_STDLIB_GATE', '_NX_STDLIB_TAG', '_NX_STDLIB_FUNCS',
             '__all__',
             'NATIVE_BLOBS', 'FALLBACK_BLOB', 'BLOB_KEY',
         }
@@ -1336,6 +1346,10 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
             '_nx_watermark_gate',
             '_NX_WATERMARK_GATE', '_NX_WATERMARK_KEY', '_NX_WATERMARK_MSG',
             '_NX_WATERMARK_TAG', '_NX_WATERMARK_MARKER',
+            # V10 unified kill ladder: single-failure-path wipe+exit helper.
+            # _nx_kill must survive unicode encoding or the migrated gates
+            # break at runtime.
+            '_nx_kill',
             # V10 split-bootstrap (opt-in): fragmented-decoder helpers +
             # stub fragment markers must survive unicode encoding or the
             # armed lazy-activate path breaks.
@@ -1343,6 +1357,12 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
             '_NX_SB_HEAD', '_NX_SB_TRAIL', '_NX_SB_SALT', '_NX_SB_KEY',
             '_NX_SB_THIRD', '_NX_SPLIT_BOOTSTRAP',
             '_NX_SPLIT_BOOTSTRAP_ARMED', 'BLOB_KEY_SB',
+            # Runtime integrity (frozen snapshots + stdlib audit): gate
+            # helpers + markers must survive unicode encoding or the
+            # armed gates break at runtime.
+            '_nx_snapshot_gate', '_nx_stdlib_gate',
+            '_NX_SNAPSHOT_GATE', '_NX_SNAPSHOT_TAG', '_NX_SNAPSHOT_FILES',
+            '_NX_STDLIB_GATE', '_NX_STDLIB_TAG', '_NX_STDLIB_FUNCS',
             '__all__',
         }
         self._use_safe_mode = True

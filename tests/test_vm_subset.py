@@ -37,9 +37,11 @@ def _exec_snippet(threshold=50.0):
 
 def test_weights_in_sync():
     d = dict(SIGNALS)
-    # Existing weights unchanged.
+    # Existing weights unchanged (clock_bias is ADDITIVE: +10, timing
+    # family; no existing weight touched).
     for name, w in (("cpuid_hypervisor", 25), ("dmi_strings", 20),
-                    ("mac_prefix", 20), ("sysinfo", 10)):
+                    ("mac_prefix", 20), ("sysinfo", 10),
+                    ("timing", 10), ("clock_bias", 10)):
         assert _SUBSET_WEIGHTS[name] == w
     # Subset weights match SIGNALS for the same names.
     for name, w in _SUBSET_WEIGHTS.items():
@@ -70,7 +72,7 @@ def test_all_linux_signals_wired():
         assert name in src, name
     for fn in ("_nx_has_vm_processes", "_nx_has_vm_drivers", "_nx_has_vm_fs",
                "_nx_has_vm_net", "_nx_has_vm_services", "_nx_has_steal_time",
-               "_nx_has_hw_constraints"):
+               "_nx_has_hw_constraints", "_nx_has_clock_bias"):
         assert callable(ns[fn]), fn
     # vm_check + vm_score_percent consult every subset signal (exec the
     # snippet source has no retrievable file, so check src text instead).
@@ -264,10 +266,12 @@ def test_kod_armed_exits(monkeypatch):
 
     monkeypatch.setattr(_os, "_exit", fake_exit)
     # Need the snippet's _os reference patched too (it imported os as _os).
+    # The kill ladder embeds its own "import os as _nx_os" INSIDE _nx_kill.
     monkeypatch.setitem(ns, "_os", _os)
+    monkeypatch.setitem(ns, "_nx_os", _os)
     with pytest.raises(SystemExit):
         ns["vm_check"]()
-    assert exited.get("code") == 1
+    assert exited.get("code") == 137
 
 
 def test_end_to_end_consistent_with_build_time(monkeypatch):
@@ -298,9 +302,10 @@ def test_end_to_end_consistent_with_build_time(monkeypatch):
         "timing": ns["_nx_has_steal_time"](),
         "sysinfo": ns["_nx_has_sysvirt"](),
         "hw_constraints": ns["_nx_has_hw_constraints"](),
+        "clock_bias": ns["_nx_has_clock_bias"](),
     }
     sub_total = sum(_SUBSET_WEIGHTS.values())
-    # build-time score uses full 225 total; rescale to subset for comparison.
+    # build-time score uses full 235 total; rescale to subset for comparison.
     subset_hit = sum(_SUBSET_WEIGHTS[k] for k, v in findings.items() if v)
     expected = (subset_hit / sub_total * 100.0) if sub_total else 0.0
     assert abs(pct - expected) < 1e-9

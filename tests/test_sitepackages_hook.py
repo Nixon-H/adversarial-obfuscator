@@ -44,7 +44,8 @@ def test_snippet_compiles_py310():
 def test_snippet_mentions_opt_out_and_exit():
     src = emit_snippet()
     assert OPT_OUT_VAR in src
-    assert "os._exit(1)" in src or "_os._exit(1)" in src
+    # Kill ladder: single failure path via _nx_kill (exit 137), not raw _exit.
+    assert "_nx_kill(" in src
     assert "site-packages" in src
     assert "dist-packages" in src
 
@@ -105,8 +106,9 @@ def test_planted_hook_from_fake_sitepackages_detected():
         "exec(_code)",
         "print('SHOULD-NOT-REACH')",
     ])
-    # Plant path calls os._exit(1): no output, exit code 1, no traceback.
-    assert proc.returncode == 1, (proc.returncode, proc.stdout, proc.stderr[-2000:])
+    # Plant path funnels through the kill ladder: silent, exit code 137,
+    # no output, no traceback.
+    assert proc.returncode == 137, (proc.returncode, proc.stdout, proc.stderr[-2000:])
     assert "SHOULD-NOT-REACH" not in proc.stdout
 
 
@@ -122,7 +124,7 @@ def test_dist_packages_also_detected():
         "exec(_code)",
         "print('SHOULD-NOT-REACH')",
     ])
-    assert proc.returncode == 1, (proc.returncode, proc.stdout, proc.stderr[-2000:])
+    assert proc.returncode == 137, (proc.returncode, proc.stdout, proc.stderr[-2000:])
     assert "SHOULD-NOT-REACH" not in proc.stdout
 
 

@@ -437,6 +437,14 @@ def apply_ast_mutation(source_code, options=None):
                 '_NX_SB_THIRD', '_NX_SPLIT_BOOTSTRAP',
                 '_NX_SPLIT_BOOTSTRAP_ARMED', 'BLOB_KEY_SB',
             })
+            # Runtime integrity (frozen snapshots + stdlib audit): gate
+            # helpers + marker literals must survive whole-artifact
+            # renames (same shape as #52/#75) or the armed gates break.
+            renamer.reserved.update({
+                '_nx_snapshot_gate', '_nx_stdlib_gate',
+                '_NX_SNAPSHOT_GATE', '_NX_SNAPSHOT_TAG', '_NX_SNAPSHOT_FILES',
+                '_NX_STDLIB_GATE', '_NX_STDLIB_TAG', '_NX_STDLIB_FUNCS',
+            })
             # V10 internal-rename (opt-in, default OFF): prove internal-only
             # methods first, then allow the renamer to rename exactly those
             # (defs + attribute uses rewrite consistently; __all__ exports
@@ -498,6 +506,13 @@ def apply_ast_mutation(source_code, options=None):
                 '_NX_SB_HEAD', '_NX_SB_TRAIL', '_NX_SB_SALT', '_NX_SB_KEY',
                 '_NX_SB_THIRD', '_NX_SPLIT_BOOTSTRAP',
                 '_NX_SPLIT_BOOTSTRAP_ARMED', 'BLOB_KEY_SB',
+            })
+            # Runtime integrity: same gate helpers/markers for the
+            # encoder path (unicode encoding must not touch the gates).
+            encoder.reserved.update({
+                '_nx_snapshot_gate', '_nx_stdlib_gate',
+                '_NX_SNAPSHOT_GATE', '_NX_SNAPSHOT_TAG', '_NX_SNAPSHOT_FILES',
+                '_NX_STDLIB_GATE', '_NX_STDLIB_TAG', '_NX_STDLIB_FUNCS',
             })
             encoder.reserved.update(_nonlocal_vars)
             # V10 internal-rename (opt-in, default OFF): same proof set as

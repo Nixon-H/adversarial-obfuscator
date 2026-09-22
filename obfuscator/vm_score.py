@@ -4,6 +4,15 @@ Build-time helpers (:func:`score`, :func:`verdict`) mirror the documented
 VM indicator weights. :func:`emit_loader_snippet` produces the runtime
 subset for loaders (registry-free, Linux-safe): every SIGNALS entry except
 the two Windows-only ones (registry_keys, wmi_bios).
+
+The ``clock_bias`` signal (weight 10, in the ``timing=10`` family) is the
+clock-interrupt-bias side-channel detector (V10 REAL signal; algorithm in
+``obfuscator/clock_bias.py``, native counterpart in
+``runtime/src/timing.rs``): tight-loop delta distribution, flag iff
+p99/median > 50x AND tail (>10x median) fraction > 0.5%. Existing signal
+weights are unchanged; ``clock_bias`` is ADDITIVE (build-time total
+225 -> 235). Loader-wired ON by default (report tier: KOD default-OFF,
+Monitor semantics -- no kill path unless NIXON_KOD is armed).
 """
 
 import json
@@ -22,6 +31,7 @@ SIGNALS = [
     ("sysinfo", 10),
     ("hw_constraints", 10),
     ("dmi_strings", 20),
+    ("clock_bias", 10),
 ]
 
 _TOTAL = sum(w for _, w in SIGNALS)
@@ -30,6 +40,8 @@ _TOTAL = sum(w for _, w in SIGNALS)
 # emit_loader_snippet() serializes this dict into the snippet via json.dumps,
 # so the embedded weights match by construction. registry_keys + wmi_bios are
 # Windows-only and stay build-time-only (documented in the snippet NOTE).
+# clock_bias (10, timing family) is loader-wired ON by default via the
+# _nx_has_clock_bias() fragment from obfuscator/clock_bias.py.
 _SUBSET_WEIGHTS = {
     "cpuid_hypervisor": 25,
     "vm_processes": 25,
@@ -42,6 +54,7 @@ _SUBSET_WEIGHTS = {
     "timing": 10,
     "sysinfo": 10,
     "hw_constraints": 10,
+    "clock_bias": 10,
 }
 
 
@@ -94,6 +107,10 @@ def emit_loader_snippet(threshold: float = 50.0) -> str:
       - timing (10): /proc/stat cpu steal > 0 over two samples
       - sysinfo (10): systemd-detect-virt (exit 0 => virtualized)
       - hw_constraints (10): cpu count <= 2 AND total mem < 2 GiB
+      - clock_bias (10): clock-interrupt-bias side-channel
+        (_nx_has_clock_bias from obfuscator/clock_bias.py:
+        tight perf_counter_ns loop, flag iff p99/median > 50x AND
+        tail fraction > 0.5%; Monitor/report tier, default ON)
 
     Windows-only signals registry_keys (20) and wmi_bios (20) are NOT
     implemented in this Linux snippet; they stay build-time-only. Their
@@ -111,6 +128,17 @@ def emit_loader_snippet(threshold: float = 50.0) -> str:
     """
     thr = float(threshold)
     weights_json = json.dumps(_SUBSET_WEIGHTS, sort_keys=True)
+    from obfuscator.kill_ladder import emit_kill_snippet as _kl_emit
+    _kl_src = _kl_emit()
+    try:
+        from obfuscator.clock_bias import loader_snippet_fragment as _cb_frag
+        _cb_src = _cb_frag()
+    except Exception:
+        _cb_src = (
+            "def _nx_has_clock_bias(_samples=2000, _timer=None,"
+            " _deltas=None):\n"
+            "    return False\n"
+        )
     src = (
         "import os as _os\n"
         "import time as _time\n"
@@ -358,6 +386,12 @@ def emit_loader_snippet(threshold: float = 50.0) -> str:
         "    return False\n"
         "\n"
         "\n"
+        + _cb_src +
+        "\n"
+        "\n"
+        + _kl_src +
+        "\n"
+        "\n"
         "def vm_check(threshold=None):\n"
         "    \"\"\"Compute runtime VM percent; exit only if KOD armed."
         " Returns 'VM'/'CLEAN'.\"\"\"\n"
@@ -374,13 +408,14 @@ def emit_loader_snippet(threshold: float = 50.0) -> str:
         "        \"timing\": _nx_has_steal_time(),\n"
         "        \"sysinfo\": _nx_has_sysvirt(),\n"
         "        \"hw_constraints\": _nx_has_hw_constraints(),\n"
+        "        \"clock_bias\": _nx_has_clock_bias(),\n"
         "    }\n"
         "    _hit = sum(_NX_VM_WEIGHTS[_k] for _k, _v in _findings.items() if _v)\n"
         "    _total = sum(_NX_VM_WEIGHTS.values())\n"
         "    _pct = (_hit / _total * 100.0) if _total else 0.0\n"
         "    _verdict = \"VM\" if _pct >= _thr else \"CLEAN\"\n"
         "    if _verdict == \"VM\" and _os.environ.get(\"NIXON_KOD\", \"0\") != \"0\":\n"
-        "        _os._exit(1)\n"
+        "        _nx_kill(\"vm-detect\")\n"
         "    return _verdict\n"
         "\n"
         "\n"
@@ -397,6 +432,7 @@ def emit_loader_snippet(threshold: float = 50.0) -> str:
         "        \"timing\": _nx_has_steal_time(),\n"
         "        \"sysinfo\": _nx_has_sysvirt(),\n"
         "        \"hw_constraints\": _nx_has_hw_constraints(),\n"
+        "        \"clock_bias\": _nx_has_clock_bias(),\n"
         "    }\n"
         "    _hit = sum(_NX_VM_WEIGHTS[_k] for _k, _v in _findings.items() if _v)\n"
         "    _total = sum(_NX_VM_WEIGHTS.values())\n"

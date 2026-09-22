@@ -128,7 +128,7 @@ stub-win:
 	@echo "  WIN32CC native/stub_win.cpp"
 	@if command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then \
 		if echo '#include <Python.h>' | x86_64-w64-mingw32-gcc -E -x c - >/dev/null 2>&1; then \
-			x86_64-w64-mingw32-gcc -o native/stub_win_test.exe native/stub_win.cpp -lz; \
+			x86_64-w64-mingw32-gcc -o native/stub_win_test.exe native/stub_win.cpp -lz -lpsapi; \
 		else \
 			echo "  SKIP: Python.h not found for mingw cross-compiler"; \
 		fi \

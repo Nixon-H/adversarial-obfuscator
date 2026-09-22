@@ -1,0 +1,180 @@
+"""Unified kill-ladder tests (V10 single failure path).
+
+- nx_kill validates reason codes, wipes mutable holders, deletes key
+  globals, exits 137 (subprocess), silent by default, NIXON_LADDER_DEBUG
+  diagnostics opt-in, dry_run seam returns the action list.
+- emit_kill_snippet compiles, 3.10-parses, kills via 137 with no literals
+  leaked.
+- Migrated gates (vm, driver, audit-hook, trial, watermark) all funnel
+  through _nx_kill: no direct os._exit remains in their snippets.
+"""
+import ast
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from obfuscator.kill_ladder import (
+    DEBUG_VAR,
+    KEY_GLOBALS,
+    KILL_CODE,
+    REASON_CODES,
+    emit_kill_snippet,
+    nx_kill,
+)
+
+
+def test_kill_code_is_137():
+    assert KILL_CODE == 137
+
+
+def test_reason_codes_cover_gates():
+    for r in ("vm-detect", "driver-blocked", "audit-plant", "audit-timing",
+              "trial-expired",
+              "trial-tampered", "trial-rollback", "watermark-tampered",
+              "watermark-missing", "integrity-snapshot", "stdlib-tamper"):
+        assert r in REASON_CODES, r
+
+
+def test_unknown_reason_rejected():
+    try:
+        nx_kill("bogus-reason", dry_run=True)
+    except ValueError:
+        return
+    raise AssertionError("unknown reason must raise ValueError")
+
+
+def test_dry_run_wipes_and_lists_exit():
+    buf = bytearray(b"supersecretkeymaterial1234567890")
+    view = memoryview(bytearray(b"anotherkeybuffer87654321"))
+    ns = {"BLOB_KEY": b"immutable-bytes-key", "other": 1}
+    actions = nx_kill("vm-detect", key_holders=[buf, view, ns], dry_run=True)
+    assert all(v == 0 for v in buf)
+    assert all(v == 0 for v in view)
+    assert "BLOB_KEY" not in ns
+    assert ns["other"] == 1
+    assert actions[-1] == "exit:137"
+    assert any(a.startswith("wipe:bytearray:") for a in actions)
+    assert any(a.startswith("del:BLOB_KEY") for a in actions)
+
+
+def test_dry_run_empty_holders():
+    actions = nx_kill("trial-expired", dry_run=True)
+    assert actions == ["exit:137"]
+
+
+def test_real_exit_is_137_silent():
+    code = (
+        "import sys; sys.path.insert(0, %r);"
+        "from obfuscator.kill_ladder import nx_kill;"
+        "nx_kill('driver-blocked')" % (
+            os.path.join(os.path.dirname(__file__), ".."),)
+    )
+    proc = subprocess.run([sys.executable, "-c", code],
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 137, (proc.returncode, proc.stdout, proc.stderr)
+    assert proc.stdout == ""
+    assert proc.stderr == ""
+
+
+def test_debug_var_prints_reason():
+    code = (
+        "import sys; sys.path.insert(0, %r);"
+        "from obfuscator.kill_ladder import nx_kill;"
+        "nx_kill('audit-plant')" % (
+            os.path.join(os.path.dirname(__file__), ".."),)
+    )
+    env = dict(os.environ)
+    env[DEBUG_VAR] = "1"
+    proc = subprocess.run([sys.executable, "-c", code],
+                          capture_output=True, text=True, timeout=60, env=env)
+    assert proc.returncode == 137
+    assert "nx-kill:audit-plant" in proc.stderr
+
+
+def test_snippet_compiles_and_310():
+    src = emit_kill_snippet()
+    compile(src, "<nx_kill_ladder>", "exec")
+    ast.parse(src, feature_version=(3, 10))
+    assert "def _nx_kill(" in src
+    assert "_exit(137)" in src
+
+
+def test_snippet_kills_137():
+    src = emit_kill_snippet()
+    code = src + "\n_nx_kill('vm-detect')\n"
+    proc = subprocess.run([sys.executable, "-c", code],
+                          capture_output=True, text=True, timeout=60)
+    assert proc.returncode == 137, (proc.returncode, proc.stdout, proc.stderr)
+    assert proc.stdout == ""
+
+
+def _no_direct_exit(path, extra_allowed=()):
+    src = open(path).read()
+    # Kill-ladder migration: gate EMITTED snippets must not call os._exit
+    # directly; the only exit primitive is _nx_kill (which itself wraps
+    # os._exit). Docstrings/comments may still mention the old primitive.
+    # So check string LITERALS that reach the emitted snippet: any line
+    # containing _exit that is NOT inside the kill-ladder import block and
+    # NOT a docstring/comment line is a violation.
+    violations = []
+    in_docstring = False
+    for ln in src.splitlines():
+        s = ln.strip()
+        if s.startswith('"""') or s.startswith("'''"):
+            if s.count('"""') == 2 or s.count("'''") == 2:
+                continue
+            in_docstring = not in_docstring
+            continue
+        if in_docstring or s.startswith("#"):
+            continue
+        if "_nx_kill" in ln or "kill_ladder" in ln or "kill ladder" in ln.lower():
+            continue
+        # Emitted-snippet string lines look like: + "    _os._exit(1)\n"
+        if "_exit(" in ln and ('"' in ln or "'" in ln):
+            violations.append(ln.strip()[:100])
+    assert not violations, (path, violations)
+
+
+def _repo(rel):
+    return os.path.join(os.path.dirname(__file__), "..", rel)
+
+
+def test_vm_snippet_uses_ladder():
+    from obfuscator.vm_score import emit_loader_snippet
+    src = emit_loader_snippet()
+    assert "_nx_kill(" in src
+    assert '"vm-detect"' in src or "'vm-detect'" in src
+    _no_direct_exit(_repo("obfuscator/vm_score.py"))
+
+
+def test_driver_snippet_uses_ladder():
+    from obfuscator.driver_blocklist import emit_driver_snippet
+    src = emit_driver_snippet(armed=True)
+    assert "_nx_kill(" in src
+    _no_direct_exit(_repo("obfuscator/driver_blocklist.py"))
+
+
+def test_audit_snippet_uses_ladder():
+    from obfuscator.audit_hook import emit_snippet
+    src = emit_snippet()
+    assert "_nx_kill(" in src
+    _no_direct_exit(_repo("obfuscator/audit_hook.py"))
+
+
+def test_pipeline_trial_watermark_use_ladder():
+    src = open(_repo("obfuscator/core/pipeline.py")).read()
+    assert '_nx_kill(\\"trial-\\"' in src
+    assert '_nx_kill(\\"watermark-\\"' in src
+    # No direct sys.exit enforcement strings remain for the gates.
+    assert "_nx_trial_sys.exit" not in src
+    assert "_nx_watermark_sys.exit" not in src
+
+
+def test_pipeline_integrity_gates_use_ladder():
+    src = open(_repo("obfuscator/core/pipeline.py")).read()
+    assert '_nx_kill(\\"integrity-snapshot\\")' in src
+    assert '_nx_kill(\\"stdlib-tamper\\")' in src
+    _no_direct_exit(_repo("obfuscator/frozen_snapshot.py"))
+    _no_direct_exit(_repo("obfuscator/stdlib_audit.py"))

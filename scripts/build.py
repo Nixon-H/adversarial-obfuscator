@@ -801,6 +801,12 @@ Examples:
                         help="V10 kernel split-bootstrap: Shamir (n=3,k=2) threshold key + "
                              "fragmented decoder in the loader instead of the single embedded "
                              "key path (opt-in until battle-tested; default: off)")
+    parser.add_argument("--no-snapshot", dest="snapshot_off", action="store_true", default=False,
+                        help="Omit the frozen-stdlib snapshot gate from the loader (default: gate ON; "
+                             "also disarmable at runtime via NIXON_SNAPSHOT_OFF=1)")
+    parser.add_argument("--no-stdlib-audit", dest="stdlib_audit_off", action="store_true", default=False,
+                        help="Omit the stdlib function-audit gate from the loader (default: gate ON; "
+                             "also disarmable at runtime via NIXON_STDLIB_AUDIT_OFF=1)")
 
     opts = parser.parse_args()
 
@@ -844,6 +850,10 @@ Examples:
         log("OPT", "Kernel-driver gate baked into loader (--driver-check; also armable via NIXON_DRIVER_CHECK=1)")
     if getattr(opts, "split_bootstrap", False):
         log("OPT", "Split-bootstrap threshold key + fragmented decoder baked into loader (--split-bootstrap)")
+    if getattr(opts, "snapshot_off", False):
+        log("OPT", "Frozen-stdlib snapshot gate disabled (--no-snapshot)")
+    if getattr(opts, "stdlib_audit_off", False):
+        log("OPT", "Stdlib function-audit gate disabled (--no-stdlib-audit)")
 
     # =========================================================================
     # Stage 0: Pre-Flight Checks

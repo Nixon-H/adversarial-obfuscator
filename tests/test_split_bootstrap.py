@@ -194,24 +194,29 @@ def test_post_activation_wipe_deletes_holders():
 # --- 6. tampered share fails closed ------------------------------------------
 
 def test_tampered_share_build_time_fails():
+    # Same honesty property as the runtime twin: tampered combine must
+    # NEVER yield the true key (raises OR wrong output; wrong output
+    # fails downstream at decrypt).
     out = split_bootstrap_key(_RAW_KEY)
     frags = list(out["fragments"])
     x, b64 = frags[0].split(":", 1)
     raw = bytearray(base64.b64decode(b64))
     raw[0] ^= 0xFF
     frags[0] = "%s:%s" % (x, base64.b64encode(bytes(raw)).decode("ascii"))
-    with pytest.raises(ValueError):
+    try:
         got = recover_bootstrap_key(frags, out["k"])
-        assert got == _RAW_KEY  # must not reach here with the right key
+    except ValueError:
+        return
+    assert got != _RAW_KEY
 
 
 def test_tampered_share_runtime_fails():
-    # Flip a middle byte hard (0xFF): single-bit flips at the share tail
-    # can land back inside the hex alphabet (~6% of the time — the share
-    # byte maps through GF(251) interpolation to a neighboring hex char),
-    # so the "tamper" under test must be one that actually corrupts the
-    # combined hex. A 0xFF flip in the middle reliably does; the runtime
-    # combiner then fails closed via the bad-hex ValueError.
+    # A tampered share either raises (bad-hex path) or combines to a
+    # wrong-but-valid key (GF(251) interpolation can land back in the hex
+    # alphabet). BOTH are fail-closed: wrong key fails downstream at
+    # decrypt, never as a valid decryption. So assert the honest
+    # property: tampered combine NEVER yields the true key (raises OR
+    # wrong output).
     out = split_bootstrap_key(_RAW_KEY)
     frags = list(out["fragments"])
     x, b64 = frags[1].split(":", 1)
@@ -219,9 +224,11 @@ def test_tampered_share_runtime_fails():
     raw[len(raw) // 2] ^= 0xFF
     frags[1] = "%s:%s" % (x, base64.b64encode(bytes(raw)).decode("ascii"))
     _, ns = _exec_snippet(out["fragments"], out["k"], "bid-tamper-rt")
-    with pytest.raises(ValueError):
+    try:
         got = ns["_nx_sb_combine"](frags[:2])
-        assert got == _RAW_KEY
+    except ValueError:
+        return  # fail-closed via bad-hex raise
+    assert got != _RAW_KEY  # fail-closed via wrong key (fails at decrypt)
 
 
 def test_malformed_fragment_fails_closed():

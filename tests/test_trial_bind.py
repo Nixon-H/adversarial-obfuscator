@@ -318,11 +318,22 @@ def test_loader_expired_trial_refuses_import(tmp_path, monkeypatch):
     src = src.replace("_tb_token = '%s'" % (old_tok_hex,),
                       "_tb_token = '%s'" % (past_token,), 1)
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    import os as _os
+    exited = {}
+
+    def _fake_exit(code):
+        exited["code"] = code
+        raise SystemExit(code)
+
+    monkeypatch.setattr(_os, "_exit", _fake_exit)
     ns = {"__name__": "trial_exp_loader"}
     try:
         exec(compile(src, "<trial_exp_loader>", "exec"), ns)
     except SystemExit as e:
-        assert "expired" in str(e.code), e.code
+        # Kill ladder: expired trial funnels through _nx_kill (silent,
+        # exit 137 — os._exit patched in-process; SystemExit surfaces).
+        assert exited.get("code") == 137, exited
+        assert e.code == 137, e.code
         return
     raise AssertionError("expired trial should SystemExit at import")
 
@@ -427,6 +438,8 @@ def test_e2e_expired_trial_nonzero_exit(tmp_path):
     proc = subprocess.run([sys.executable, target],
                           capture_output=True, text=True, timeout=60,
                           cwd=str(tmp_path), env=env)
-    assert proc.returncode != 0, proc.stdout[-2000:] + proc.stderr[-2000:]
-    assert "expired" in (proc.stdout + proc.stderr).lower()
+    # Kill ladder: expired trial funnels through _nx_kill (silent,
+    # exit 137, no output) — same shape as the migrated audit-hook and
+    # watermark gates.
+    assert proc.returncode == 137, proc.stdout[-2000:] + proc.stderr[-2000:]
     assert "SHOULD_NOT_PRINT" not in proc.stdout

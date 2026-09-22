@@ -9,8 +9,10 @@ from obfuscator.vm_score import SIGNALS, emit_loader_snippet, score, verdict
 def test_signals_total_is_220():
     # NOTE: the weights as specified in the task sum to 225, not 220
     # (25*2 + 20*5 + 15*3 + 10*3 = 225). We keep the specified weights
-    # verbatim; total is derived from SIGNALS.
-    assert sum(w for _, w in SIGNALS) == 225
+    # verbatim; total is derived from SIGNALS. The additive V10
+    # clock_bias signal (+10, timing family, existing weights unchanged)
+    # brings the build-time total to 235.
+    assert sum(w for _, w in SIGNALS) == 235
 
 
 def test_signals_names_and_weights():
@@ -28,6 +30,7 @@ def test_signals_names_and_weights():
     assert d["sysinfo"] == 10
     assert d["hw_constraints"] == 10
     assert d["dmi_strings"] == 20
+    assert d["clock_bias"] == 10  # V10 additive signal, timing family
 
 
 def test_scoring_math():
@@ -93,7 +96,8 @@ def test_snippet_returns_clean_without_exiting():
 def test_snippet_kod_gating_present():
     src = emit_loader_snippet()
     assert "NIXON_KOD" in src
-    assert "os._exit(1)" in src or "_os._exit(1)" in src
+    # Kill ladder: single failure path via _nx_kill (exit 137).
+    assert "_nx_kill(" in src
     # Default-OFF: gate requires env != '0'.
     assert '!= "0"' in src or "!='0'" in src or '!= \'0\'' in src
     # Registry-free Linux checks present.

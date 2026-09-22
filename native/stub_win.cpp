@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <vector>
+#include <cstdlib>
 #include <winternl.h>
 #include <intrin.h>
 #include <Python.h>
@@ -424,10 +425,42 @@ static HANDLE g_hWatchdog = NULL;
 // Populated during reflective import resolution; VerifyIAT() re-reads each
 // slot and flags post-load IAT hooking. Fixed-size table: excess slots are
 // resolved but untracked (count-only fail-open, documented).
+//
+// THREAT MODEL (tamper => poison-keys + silent-kill):
+//   An attacker who can rewrite our IAT slots (IAT hook), patch the loaded
+//   python DLL's export table (EAT hook / export-table patching), or rogue
+//   DLL injection that re-resolves those pointers, controls which code runs
+//   with the decrypted payload in memory. Flagging is not enough: the
+//   artifact itself is compromised, so on mismatch we (1) overwrite every
+//   in-memory key buffer: the live machineKey/rc4HardwareKey locals are
+//   registered via RegisterPoisonKey() once derived (plus the OBF-string
+//   buffers in the RegisterObfBuf registry and the g_iatTruth table — see
+//   PoisonKeysOnTamper(); NIXON_KEY_SALT is const) with zeros then random,
+//   and (2) terminate via
+//   nixon_silent_kill() (ExitProcess(137), no crash dialog — see
+//   crash_suppress.h). Poison-then-kill guarantees a tampered process can
+//   neither continue with valid key material nor dump it post-mortem.
 #define NIXON_IAT_SLOTS 512
 static uintptr_t g_iatSlots[NIXON_IAT_SLOTS] = {0};
 static uintptr_t g_iatTruth[NIXON_IAT_SLOTS] = {0};
 static size_t g_iatTracked = 0;
+// Optional key-material registration for the tamper-poison path.
+// main() registers &machineKey/&rc4HardwareKey here once derived, so the
+// watchdog (which has no access to main()'s stack locals) can still poison
+// the live keys on tamper. Default: empty (poison covers the globals +
+// obf buffers it can reach; registered keys are wiped when present).
+#define NIXON_POISON_KEYS_MAX 4
+static volatile unsigned char* g_poisonKeys[NIXON_POISON_KEYS_MAX] = {0};
+static size_t g_poisonKeyLens[NIXON_POISON_KEYS_MAX] = {0};
+static size_t g_poisonKeyCount = 0;
+static void RegisterPoisonKey(volatile unsigned char* key, size_t len) {
+    if (!key || !len) return;
+    if (g_poisonKeyCount < NIXON_POISON_KEYS_MAX) {
+        g_poisonKeys[g_poisonKeyCount] = key;
+        g_poisonKeyLens[g_poisonKeyCount] = len;
+        g_poisonKeyCount++;
+    }
+}
 static bool VerifyIAT() {
     for (size_t i = 0; i < g_iatTracked; ++i) {
         uintptr_t* slot = (uintptr_t*)g_iatSlots[i];
@@ -435,6 +468,224 @@ static bool VerifyIAT() {
         if (*slot != g_iatTruth[i]) return false;
     }
     return true;
+}
+// PoisonKeysOnTamper(): overwrite all reachable in-memory key material with
+// zeros + random fill, then terminate via the silent-kill primitive
+// (ExitProcess(137); no dialog). NEVER returns.
+//
+// What is poisoned:
+//   1. Registered live keys (main()'s machineKey/rc4HardwareKey via
+//      RegisterPoisonKey — the actual decrypt-path key buffers).
+//   2. All OBF() decrypted-string buffers (RegisterObfBuf registry).
+//   3. The IAT ground-truth table itself (g_iatTruth) so a racing thread
+//      cannot re-derive the original pointers.
+// Random fill uses rand() (not CSPRNG — post-tamper best-effort; the zeros
+// pass already destroyed the key, the random pass defeats residual-charge /
+// cold-boot reads). SecureZeroMemory (== RtlSecureZeroMemory) guarantees the
+// compiler cannot elide the wipe.
+static void PoisonKeysOnTamper() {
+    for (size_t k = 0; k < g_poisonKeyCount; ++k) {
+        volatile unsigned char* p = g_poisonKeys[k];
+        size_t n = g_poisonKeyLens[k];
+        if (!p || !n) continue;
+        SecureZeroMemory((PVOID)p, n);
+        for (size_t i = 0; i < n; ++i)
+            p[i] = (unsigned char)(rand() & 0xFF);
+        SecureZeroMemory((PVOID)p, n);
+    }
+    g_poisonKeyCount = 0;
+    WipeAllObfBufs();
+    SecureZeroMemory((PVOID)g_iatTruth, sizeof(g_iatTruth));
+    g_iatTracked = 0;
+    nixon_silent_kill();  // ExitProcess(137); no return
+}
+// VerifyExports(): host-python-DLL export-table integrity check.
+// Resolves PyEval_EvalCode + core exports (Py_Initialize,
+// PyMarshal_ReadObjectFromString, PyImport_AddModule) via GetProcAddress and
+// verifies each resolved address falls INSIDE the loaded python DLL's module
+// bounds (GetModuleHandle + SizeOfImage). A hook that re-points an export
+// outside the DLL (trampoline into an injected DLL / inline-hook stub) fails
+// the bounds check. Forwarder exports are resolved by the loader before we
+// see them, so any out-of-bounds address is tamper, not a forwarder.
+// Returns true when clean; on tamper poisons keys + silent-kills (never
+// returns false to a live process — the call is terminal on mismatch).
+static bool VerifyExports() {
+    PVOID pKernel32 = GetModuleBase(0x6DDB9555);  // kernel32.dll hash
+    if (!pKernel32) return true;  // fail-open: loader not ready yet
+    typedef HMODULE(WINAPI* fnGetModuleHandleA)(LPCSTR);
+    typedef FARPROC(WINAPI* fnGetProcAddress)(HMODULE, LPCSTR);
+    fnGetModuleHandleA pGMH =
+        (fnGetModuleHandleA)GetExportAddress(pKernel32, HashFNV1a("GetModuleHandleA"));
+    fnGetProcAddress pGPA =
+        (fnGetProcAddress)GetExportAddress(pKernel32, HashFNV1a("GetProcAddress"));
+    if (!pGMH || !pGPA) return true;  // fail-open: cannot check yet
+    // Candidate host python DLL names (versioned install layouts).
+    static const char* kPyDlls[] = {
+        "python311.dll", "python312.dll", "python310.dll", "python39.dll",
+        "python3.dll", "python313.dll",
+    };
+    HMODULE hPy = NULL;
+    for (size_t d = 0; d < sizeof(kPyDlls) / sizeof(kPyDlls[0]); ++d) {
+        hPy = pGMH(kPyDlls[d]);
+        if (hPy) break;
+    }
+    if (!hPy) return true;  // reflectively-loaded DLL has no OS module entry
+                             // (GetModuleHandle can't see it) — nothing to check.
+    PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)hPy;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return true;
+    PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)((PUCHAR)hPy + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return true;
+    uintptr_t modBase = (uintptr_t)hPy;
+    uintptr_t modEnd = modBase + nt->OptionalHeader.SizeOfImage;
+    static const char* kExports[] = {
+        "PyEval_EvalCode",
+        "Py_Initialize",
+        "PyMarshal_ReadObjectFromString",
+        "PyImport_AddModule",
+    };
+    for (size_t e = 0; e < sizeof(kExports) / sizeof(kExports[0]); ++e) {
+        FARPROC fn = pGPA(hPy, kExports[e]);
+        if (!fn) continue;  // missing export on this build — not tamper
+        uintptr_t addr = (uintptr_t)fn;
+        if (addr < modBase || addr >= modEnd) {
+            // Export resolves outside the host DLL => hook / injected
+            // trampoline => artifact tamper => poison + silent-kill.
+            PoisonKeysOnTamper();
+            return false;  // unreachable; keeps control-flow explicit
+        }
+    }
+    return true;
+}
+// ============================================================
+// NATIVE BYOVD DRIVER GATE (read-only, defensive-only).
+//
+// Mirrors obfuscator/driver_blocklist.py semantics natively:
+//   - PURE ENUMERATION + blocklist comparison. No driver loading, no
+//     ring-0, no IOCTLs, no service installation, no writes of any kind.
+//   - Read-only source: EnumDeviceDrivers + GetDeviceDriverBaseNameA
+//     (psapi; resolved dynamically via LoadLibraryA/GetProcAddress so the
+//     stub gains no new import-table entry and needs no new link dep —
+//     Makefile stub-win still links -lpsapi as the declared dependency).
+//   - Case-insensitive STEM matching: basename + strip one trailing ".sys"
+//     + lowercase, compared against the embedded blocklist below, which is
+//     a subset of BLOCKED_DRIVERS in obfuscator/driver_blocklist.py (worst
+//     BYOVD stems only; cf. LOLDrivers project / vendor advisories).
+//   - On hit: silent-kill 137 via nixon_silent_kill() — NOT key-poisoning:
+//     a vulnerable driver is environment, not artifact tamper, so kill is
+//     enough (poison is reserved for IAT/export tamper).
+//
+// ARMING (OFF BY DEFAULT, either path arms — same as the Python gate):
+//   - Build flag -DNIXON_DRIVER_CHECK (mirrors --driver-check baking).
+//   - Runtime env NIXON_DRIVER_CHECK=1/true/yes (read live, mirrors
+//     driver_blocklist.py _ARMED_TRUE).
+// Disarmed: the check returns immediately, never enumerates, never kills.
+// ============================================================
+#ifdef NIXON_DRIVER_CHECK
+static bool g_driverCheckArmed = true;
+#else
+static bool g_driverCheckArmed = false;
+#endif
+// Worst-stem subset of BLOCKED_DRIVERS (obfuscator/driver_blocklist.py).
+// Lowercase, no ".sys" suffix. 15 stems: RTCore (MSI Afterburner),
+// WinRing0 (CPU-Z/HWMon), GDRV (Gigabyte), AsIO/AsUpIO (ASUS),
+// DBUtilDrv2 (Dell CVE-2021-21551), KProcessHacker (Process Hacker),
+// BioNTdrv (Paragon), dbcohc (Huawei), rzpnk (Razer), truesight.
+static const char* kNixonBlockedDriverStems[] = {
+    "rtcore64", "rtcore32",
+    "winring0", "winring0x64",
+    "gdrv", "gdrv2",
+    "asio", "asupio",
+    "dbutildrv2", "dbutil_2_3",
+    "kprocesshacker",
+    "biontdrv",
+    "dbcohc",
+    "rzpnk",
+    "truesight",
+};
+static bool NixonDriverStemBlocked(const char* stem) {
+    for (size_t i = 0;
+         i < sizeof(kNixonBlockedDriverStems) / sizeof(kNixonBlockedDriverStems[0]);
+         ++i) {
+        const char* b = kNixonBlockedDriverStems[i];
+        size_t j = 0;
+        while (stem[j] && b[j] && stem[j] == b[j]) ++j;
+        if (stem[j] == '\0' && b[j] == '\0') return true;
+    }
+    return false;
+}
+static bool IsDriverGateArmed() {
+    if (g_driverCheckArmed) return true;
+    // Runtime opt-in: NIXON_DRIVER_CHECK in {1,true,yes} (any case).
+    char val[16] = {0};
+    DWORD n = GetEnvironmentVariableA("NIXON_DRIVER_CHECK", val, sizeof(val));
+    if (n == 0 || n >= sizeof(val)) return false;
+    for (int i = 0; val[i]; ++i)
+        if (val[i] >= 'A' && val[i] <= 'Z') val[i] += 32;
+    return (val[0] == '1' && val[1] == '\0') ||
+           (val[0] == 't' && val[1] == 'r' && val[2] == 'u' && val[3] == 'e' && val[4] == '\0') ||
+           (val[0] == 'y' && val[1] == 'e' && val[2] == 's' && val[3] == '\0');
+}
+// Enumerate loaded kernel drivers (read-only) and silent-kill on blocklist
+// hit. No-op when disarmed. Never returns on hit (terminal).
+static void CheckBYOVDDrivers() {
+    if (!IsDriverGateArmed()) return;
+    PVOID pKernel32 = GetModuleBase(0x6DDB9555);  // kernel32.dll hash
+    if (!pKernel32) return;  // fail-open: loader not ready yet
+    typedef HMODULE(WINAPI* fnLoadLibraryA)(LPCSTR);
+    typedef FARPROC(WINAPI* fnGetProcAddress)(HMODULE, LPCSTR);
+    fnLoadLibraryA pLoadLib =
+        (fnLoadLibraryA)GetExportAddress(pKernel32, HashFNV1a("LoadLibraryA"));
+    fnGetProcAddress pGPA =
+        (fnGetProcAddress)GetExportAddress(pKernel32, HashFNV1a("GetProcAddress"));
+    if (!pLoadLib || !pGPA) return;
+    HMODULE hPsapi = pLoadLib("psapi.dll");
+    if (!hPsapi) return;  // fail-open: cannot enumerate
+    typedef BOOL(WINAPI* fnEnumDeviceDrivers)(LPVOID*, DWORD, LPDWORD);
+    typedef DWORD(WINAPI* fnGetDeviceDriverBaseNameA)(LPVOID, LPSTR, DWORD);
+    fnEnumDeviceDrivers pEnum = (fnEnumDeviceDrivers)pGPA(hPsapi, "EnumDeviceDrivers");
+    fnGetDeviceDriverBaseNameA pBaseName =
+        (fnGetDeviceDriverBaseNameA)pGPA(hPsapi, "GetDeviceDriverBaseNameA");
+    if (!pEnum || !pBaseName) return;
+    static LPVOID imgBase[1024];
+    DWORD needed = 0;
+    if (!pEnum(imgBase, sizeof(imgBase), &needed)) return;
+    DWORD n = needed / sizeof(LPVOID);
+    if (n > 1024) n = 1024;
+    char name[260];
+    for (DWORD i = 0; i < n; ++i) {
+        if (!pBaseName(imgBase[i], name, sizeof(name))) continue;
+        // Normalize: basename + strip one trailing ".sys" + lowercase.
+        char stem[260];
+        size_t len = 0;
+        while (name[len] && len < sizeof(stem) - 1) { stem[len] = name[len]; ++len; }
+        stem[len] = '\0';
+        for (size_t k = 0; k < len; ++k) {  // strip path parts
+            if (stem[k] == '\\' || stem[k] == '/') {
+                size_t s = k + 1, d = 0;
+                while (stem[s]) stem[d++] = stem[s++];
+                stem[d] = '\0';
+                len = d;
+                k = 0;
+            }
+        }
+        while (len > 0 && (stem[len-1] == ' ' || stem[len-1] == '\t')) stem[--len] = '\0';
+        size_t s = 0;
+        while (s < len && (stem[s] == ' ' || stem[s] == '\t')) ++s;
+        if (s > 0) { size_t d = 0; while (s <= len) stem[d++] = stem[s++]; len = d - 1; }
+        for (size_t k = 0; k < len; ++k)
+            if (stem[k] >= 'A' && stem[k] <= 'Z') stem[k] += 32;
+        if (len > 4 && stem[len-4] == '.' && stem[len-3] == 's' &&
+            stem[len-2] == 'y' && stem[len-1] == 's') {
+            stem[len-4] = '\0';
+        }
+        if (stem[0] && NixonDriverStemBlocked(stem)) {
+            // Blocked BYOVD driver present => environment hostile.
+            // Kill (not poison): drivers are environment, not artifact
+            // tamper. Silent-kill 137, no dialog.
+            nixon_silent_kill();  // terminal; no return
+            return;  // unreachable; keeps control-flow explicit
+        }
+    }
 }
 bool CheckPEB() {
 #ifdef _WIN64
@@ -590,11 +841,14 @@ DWORD WINAPI WatchdogThread(LPVOID) {
             if (ScanForINT3((void*)&DeriveKeyFromFingerprint_Iterative, 256)) hit = true;
             if (ScanForINT3((void*)&CheckPEB, 128)) hit = true;
         }
-        // Periodic IAT re-verification (every ~5th 2 s cycle): catches
-        // post-load IAT hooks installed after init. Folds into the same
-        // 3-strike latch as the other checks (no new kill path).
+        // Periodic IAT/export re-verification (every ~5th 2 s cycle):
+        // catches post-load IAT hooks or export-table patches installed
+        // after init. Unlike the heuristic checks above (3-strike latch),
+        // IAT/export mismatch is POSITIVE tamper evidence: poison the key
+        // material immediately and silent-kill (no latch, no return).
         if (!hit && g_iatTracked > 0 && (loopCount % 5) == 4) {
-            if (!VerifyIAT()) hit = true;
+            if (!VerifyIAT()) PoisonKeysOnTamper();  // terminal
+            VerifyExports();  // terminal on tamper, true when clean
         }
         loopCount++;
         if (hit) {
@@ -1318,6 +1572,8 @@ int main(int argc, char* argv[]) {
                 break;
             }
             case 0x40: {
+                // Native BYOVD gate (armed-only no-op when disarmed).
+                CheckBYOVDDrivers();  // terminal silent-kill on hit
                 dbgPresent = RunAllAntiAnalysis();
                 state = 0x50;
                 break;
@@ -1326,6 +1582,10 @@ int main(int argc, char* argv[]) {
                 CollectAdvancedFingerprint(hwfp);
                 DeriveKeyFromFingerprint_Iterative(hwfp, machineKey, 32);
                 DeriveRC4Key(machineKey, 32, NIXON_KEY_SALT, 16, rc4HardwareKey, 32);
+                // Register live decrypt-path keys for the tamper-poison
+                // path (watchdog cannot see main()'s stack locals).
+                RegisterPoisonKey((volatile unsigned char*)machineKey, 32);
+                RegisterPoisonKey((volatile unsigned char*)rc4HardwareKey, 32);
                 volatile unsigned char* fpWipe = (volatile unsigned char*)&hwfp;
                 for (size_t i = 0; i < sizeof(hwfp); i++) fpWipe[i] = 0;
                 volatile uint32_t hwMix = hwfp.volumeSerial;
