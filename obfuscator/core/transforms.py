@@ -126,8 +126,29 @@ class SymbolRenamer(ast.NodeTransformer):
             'platform', 'lower', 'ANDROID_ROOT', 'environ',
             'cleanup', 'target_path',
             '_load_native', '_exec_fallback', '_xor_decrypt',
+            '_nx_hwid_unlock', '_nx_trial_gate',
+            '_NX_HWID_LOCK', '_NX_HWID_STATIC', '_NX_TRIAL_GATE', '_NX_TRIAL_SECONDS',
+            '_NX_TRIAL_KEY', '_NX_TRIAL_DEADLINE', '_NX_TRIAL_TOKEN',
+            '_NX_TRIAL_HWID_HINT', '_NX_KOD_ARMED', '_NX_VM_THRESHOLD',
+            '_nx_watermark_gate',
+            '_NX_WATERMARK_GATE', '_NX_WATERMARK_KEY', '_NX_WATERMARK_MSG',
+            '_NX_WATERMARK_TAG', '_NX_WATERMARK_MARKER',
+            '__all__',
             'NATIVE_BLOBS', 'FALLBACK_BLOB', 'BLOB_KEY',
         }
+    def reserve_all_names(self, names):
+        """Additive helper (GAP #64): reserve __all__ export names.
+
+        ``names`` is an iterable of statically known public-export names
+        (see obfuscator.all_preserve.extract_all_names). Never removes
+        existing reserved entries; ignores non-string input safely.
+        """
+        try:
+            for _n in (names or []):
+                if isinstance(_n, str) and _n:
+                    self.reserved.add(_n)
+        except Exception:
+            pass
     def get_new_name(self, old_name):
         if hasattr(self, 'dynamic_unbounds') and old_name in self.dynamic_unbounds:
             if old_name not in self.mapping:
@@ -244,11 +265,36 @@ class SymbolRenamer(ast.NodeTransformer):
                 alias.asname = self.get_new_name(alias.asname)
         return node
 class StringLiteralObfuscator(ast.NodeTransformer):
-    def __init__(self):
+    # AUDIT GAP #55 (additive): optional ChaCha20 string mode lives alongside
+    # the legacy single-byte XOR path. Default mode stays "xor" so existing
+    # builds/golden outputs are unchanged; opt in via
+    #   StringLiteralObfuscator(mode="chacha20", allowlist=[...])
+    # or via apply_ast_mutation options {"string_crypto": "chacha20",
+    # "string_allowlist": [...]}. Per-string nonces (secrets.token_bytes)
+    # make every build unique; tampered seals raise ValueError at runtime.
+    def __init__(self, mode="xor", allowlist=None, string_key=None):
         self.string_table = {}
         self.generated_vars = set()
         self.decoder_name = self._generate_babel_name()
-        self.xor_key = secrets.randbelow(255) + 1 
+        self.xor_key = secrets.randbelow(255) + 1
+        self._chacha_key = None
+        self._allowlist = list(allowlist) if allowlist else []
+        try:
+            from obfuscator.string_crypto import (
+                LEGACY_MODE as _LEGACY, normalize_mode as _norm_mode)
+            self.mode = _norm_mode(mode) if mode else _LEGACY
+        except Exception:
+            self.mode = "xor"
+        if self.mode == "chacha20":
+            try:
+                from obfuscator.string_crypto import make_session as _mk
+                self._session = _mk(string_key)
+                self._chacha_key = self._session["key"]
+            except Exception:
+                self.mode = "xor"
+                self._session = None
+        else:
+            self._session = None
     def _generate_babel_name(self):
         return get_random_var_name("STR_DEC")
     def visit_JoinedStr(self, node):
@@ -264,6 +310,31 @@ class StringLiteralObfuscator(ast.NodeTransformer):
             if node.value.startswith("_NX_PART_"): return node
             if "PLACEHOLDER" in node.value: return node
             original = node.value
+            if getattr(self, "mode", "xor") == "chacha20" and self._session is not None:
+                # ChaCha20 path: allowlisted strings stay plaintext (additive).
+                try:
+                    from obfuscator.string_crypto import is_allowlisted as _allowed
+                    if _allowed(original, self._allowlist):
+                        return node
+                except Exception:
+                    pass
+                try:
+                    seal = self._session["encrypt"](original, self._allowlist)
+                except Exception:
+                    return node
+                if seal is None:
+                    return node
+                if original in self.string_table:
+                    var_name = self.string_table[original]
+                else:
+                    var_name = self._generate_babel_name()
+                    self.string_table[original] = var_name
+                node._nx_chacha_seal = seal
+                return ast.Call(
+                    func=ast.Name(id=self.decoder_name, ctx=ast.Load()),
+                    args=[ast.Name(id=var_name, ctx=ast.Load())],
+                    keywords=[]
+                )
             if original in self.string_table:
                 var_name = self.string_table[original]
             else:
@@ -278,6 +349,28 @@ class StringLiteralObfuscator(ast.NodeTransformer):
     def visit_Str(self, node):
         return self.visit_Constant(ast.Constant(value=node.s))
     def get_preamble(self):
+        # GAP #55: ChaCha20 mode emits the self-contained AEAD stub; the
+        # legacy XOR preamble is preserved verbatim in _get_xor_preamble.
+        if getattr(self, "mode", "xor") == "chacha20" and self._session is not None:
+            try:
+                from obfuscator.string_crypto import (
+                    emit_decoder_source as _emit, is_allowlisted as _allowed)
+                stub = _emit(self.decoder_name, self._chacha_key)
+            except Exception:
+                return self._get_xor_preamble()
+            lines = [stub]
+            for original, var_name in self.string_table.items():
+                try:
+                    if _allowed(original, self._allowlist):
+                        continue
+                    seal = self._session["encrypt"](original, self._allowlist)
+                    if seal is None:
+                        continue
+                    lines.append(f"{var_name} = '{seal}'")
+                except Exception: pass
+            return '\n'.join(lines)
+        return self._get_xor_preamble()
+    def _get_xor_preamble(self):
         lines = []
         lines.append(f"def {self.decoder_name}(_s):")
         lines.append(f"    try:")
@@ -1170,8 +1263,20 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
             'True', 'False', 'None', 'NotImplemented', 'Ellipsis',
             'path', 'fd', 'blob_key', 'ext', 'system', 'blobs',
             'encrypted_blob', 'blob_data', 'spec', 'module', 'fpath',
+            '_nx_watermark_gate',
+            '_NX_WATERMARK_GATE', '_NX_WATERMARK_KEY', '_NX_WATERMARK_MSG',
+            '_NX_WATERMARK_TAG', '_NX_WATERMARK_MARKER',
+            '__all__',
         }
         self._use_safe_mode = True 
+    def reserve_all_names(self, names):
+        """Additive helper (GAP #64): reserve __all__ export names."""
+        try:
+            for _n in (names or []):
+                if isinstance(_n, str) and _n:
+                    self.reserved.add(_n)
+        except Exception:
+            pass
     def _encode_name(self, name):
         if name in self.reserved or name.startswith('_'): 
             return name

@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Python 3.11+
+- Python 3.10+ (payloads support 3.10–3.14 per obfuscator/nyser.py; builder floor is 3.10)
 - Rust toolchain (rustup)
 - g++ (for native C++ extensions)
 - LLVM (`llc` for LLVM IR compilation)

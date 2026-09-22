@@ -46,9 +46,14 @@ class ObfuscationTransformer:
             'attention_poison': False,
             'decoy_apis': False,
             'adaptive_rewrite': False,
+            # Batch C GAP 2 (#28): randomized fixed-literal residue pass.
+            # Default ON, deterministic under seed (additive: explicit
+            # residue_random=False disables; never raises the build).
+            'residue_random': True,
         }
         if options is None:
             options = {}
+        _caller_options = options
         # Batch-2 OPT-LEVEL ENFORCEMENT (additive, defaults preserve current
         # behavior): when the caller passes 'opt_level', resolve the 17
         # canonical flags via obfuscator.opt_levels and fill in ONLY flags
@@ -99,9 +104,44 @@ class ObfuscationTransformer:
             result, _ = apply_ast_mutation(source, options)
             self._unpatch_secrets(_patch)
             random.setstate(_state)
+            result = self._apply_residue(result, options)
+            try:
+                _caller_options['residue_map'] = options.get('residue_map', {})
+            except Exception:
+                pass
             return result
         result, _ = apply_ast_mutation(source, options)
+        result = self._apply_residue(result, options)
+        try:
+            _caller_options['residue_map'] = options.get('residue_map', {})
+        except Exception:
+            pass
         return result
+
+    def _apply_residue(self, result, options):
+        """Batch C GAP 2 (#28): per-build fixed-literal residue shuffle.
+
+        Runs after payload assembly; default ON, deterministic under the
+        transform seed (options['residue_seed'] pins it, else self.seed).
+        Best-effort: any failure returns the input unchanged. The build
+        map is stashed on options['residue_map'] so tests/callers can
+        resolve randomized tokens back to canonical families.
+        """
+        try:
+            if not options.get('residue_random', True):
+                return result
+            from obfuscator.residue_random import apply_residue as _apply_rr
+            _rr_seed = options.get('residue_seed', self.seed)
+            if _rr_seed is None:
+                return result
+            new_result, _rr_map = _apply_rr(result, _rr_seed, enabled=True)
+            try:
+                options['residue_map'] = _rr_map
+            except Exception:
+                pass
+            return new_result
+        except Exception:
+            return result
 
 STRING_CACHE = {}
 STRING_TABLES = {'A': [], 'B': [], 'C': [], 'D': []}
@@ -1034,7 +1074,8 @@ setup(
 def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, native_only=False,
                                    hwid='', trial_seconds=None, vm_threshold=50.0,
                                    kod=False, hostguard=False, hwid_lock=False,
-                                   build_id=None):
+                                   build_id=None, watermark=None,
+                                   watermark_key=None):
     # Phase-4 wiring: all new kwargs default to current behavior (no change
     # when absent). vm/secure-temp snippets are always appended (report-only,
     # safe); hostguard only when requested (changes exec semantics).
@@ -1062,6 +1103,103 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         pass
     _phase4_suffix += ("_NX_KOD_ARMED = %r\n" % (bool(kod),))
     _phase4_suffix += ("_NX_TRIAL_SECONDS = %r\n" % (trial_seconds,))
+    # AUDIT GAPS #52/#75: MAC-bound trial deadline + clock-rollback gate.
+    # Additive: only when trial_seconds is set; None/0 keeps current
+    # behavior (plain _NX_TRIAL_SECONDS marker, no gate). The gate is a
+    # self-contained snippet from obfuscator.trial_bind (stdlib only):
+    # HMAC(deadline || fingerprint, build_key) + sealed last-seen state.
+    # _NX_TRIAL_GATE emits "DISABLED" when no trial is configured so
+    # artifacts without --trial never pay for (or risk) the check.
+    try:
+        from obfuscator.trial_bind import (
+            build_trial_context as _tb_ctx,
+            emit_trial_snippet as _tb_emit,
+        )
+        _tb_trial_secs = None
+        try:
+            _tb_trial_secs = (None if trial_seconds is None
+                              else float(trial_seconds))
+        except Exception:
+            _tb_trial_secs = None
+        if _tb_trial_secs and _tb_trial_secs > 0:
+            _tb_build_ctx = _tb_ctx(_tb_trial_secs, hwid=str(hwid or ""))
+            _tb_key_hex = bytes(_tb_build_ctx["build_key"]).hex()
+            _tb_snippet = _tb_emit(int(_tb_build_ctx["deadline"]),
+                                   str(_tb_build_ctx["token"]),
+                                   _tb_key_hex)
+            _phase4_suffix += ("_NX_TRIAL_KEY = %r\n" % (_tb_key_hex,))
+            _phase4_suffix += ("_NX_TRIAL_DEADLINE = %r\n" % (
+                int(_tb_build_ctx["deadline"]),))
+            _phase4_suffix += ("_NX_TRIAL_TOKEN = %r\n" % (
+                str(_tb_build_ctx["token"]),))
+            _phase4_suffix += ("_NX_TRIAL_HWID_HINT = %r\n" % (
+                str(hwid or ""),))
+            _phase4_suffix += _tb_snippet + "\n"
+            _phase4_suffix += (
+                "_NX_TRIAL_GATE = _nx_trial_gate(%r)\n"
+                % (str(hwid or ""),)
+            )
+            _phase4_suffix += (
+                "if _NX_TRIAL_GATE != \"ok\":\n"
+                "    import sys as _nx_trial_sys\n"
+                "    _nx_trial_sys.exit(\"trial \" + str(_NX_TRIAL_GATE))\n"
+            )
+        else:
+            _phase4_suffix += "_NX_TRIAL_GATE = \"DISABLED\"\n"
+    except SystemExit:
+        raise
+    except Exception:
+        try:
+            _phase4_suffix += "_NX_TRIAL_GATE = \"DISABLED\"\n"
+        except Exception:
+            pass
+    # AUDIT GAP #71: runtime watermark refuse-to-run gate. Additive: only
+    # when watermark is set; None/"" keeps current behavior (plain
+    # _NX_WATERMARK_GATE marker = DISABLED, no gate). The gate is a
+    # self-contained snippet from obfuscator.watermark_gate (stdlib only):
+    # HMAC(message, build_key) + sealed presence marker. A stripped or
+    # tampered watermark fails closed via sys.exit (same shape as the
+    # trial gate above), before any payload runs.
+    try:
+        from obfuscator.watermark_gate import (
+            build_watermark_context as _wm_ctx,
+        )
+        _wm_message = str(watermark) if watermark is not None else ""
+        if _wm_message:
+            _wm_build_ctx = _wm_ctx(_wm_message, build_key=watermark_key)
+            _wm_key_hex = bytes(_wm_build_ctx["build_key"]).hex()
+            from obfuscator.watermark_gate import (
+                emit_watermark_snippet as _wm_emit,
+            )
+            _wm_snippet = _wm_emit(str(_wm_build_ctx["message"]),
+                                   str(_wm_build_ctx["tag"]),
+                                   _wm_key_hex,
+                                   str(_wm_build_ctx["marker"]))
+            _phase4_suffix += ("_NX_WATERMARK_KEY = %r\n" % (_wm_key_hex,))
+            _phase4_suffix += ("_NX_WATERMARK_MSG = %r\n" % (
+                str(_wm_build_ctx["message"]),))
+            _phase4_suffix += ("_NX_WATERMARK_TAG = %r\n" % (
+                str(_wm_build_ctx["tag"]),))
+            _phase4_suffix += ("_NX_WATERMARK_MARKER = %r\n" % (
+                str(_wm_build_ctx["marker"]),))
+            _phase4_suffix += _wm_snippet + "\n"
+            _phase4_suffix += (
+                "_NX_WATERMARK_GATE = _nx_watermark_gate()\n"
+            )
+            _phase4_suffix += (
+                "if _NX_WATERMARK_GATE != \"ok\":\n"
+                "    import sys as _nx_watermark_sys\n"
+                "    _nx_watermark_sys.exit(\"watermark \" + str(_NX_WATERMARK_GATE))\n"
+            )
+        else:
+            _phase4_suffix += "_NX_WATERMARK_GATE = \"DISABLED\"\n"
+    except SystemExit:
+        raise
+    except Exception:
+        try:
+            _phase4_suffix += "_NX_WATERMARK_GATE = \"DISABLED\"\n"
+        except Exception:
+            pass
     # Batch-3 build-id salt (additive, safe default): when None, mint a
     # fresh random id so identical payload+key pairs still emit different
     # blobs/loaders per build. Pass a fixed string for deterministic tests.
@@ -1074,7 +1212,24 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
     # HWID-lock marker: the lock pack itself travels INSIDE the fallback blob
     # (locked bytes are the payload), so the loader only needs an on/off flag
     # to decide whether to JSON-parse + unlock the decompressed bytes.
+    # GAP #33 static fingerprint: when --hwid is a canonical 'HWID:<64 hex>'
+    # static fingerprint, validate + canonicalize it here (fail closed on
+    # malformed 'HWID:' values) and embed it as _NX_HWID_STATIC so the
+    # inline unlock uses it verbatim instead of dynamic uuid.getnode()
+    # collection. PBKDF2 derivation downstream is unchanged. Empty hwid
+    # (or non-static hwid) keeps the dynamic path byte-identical to before.
+    _static_hwid = ""
+    try:
+        from obfuscator.hwid_lock import normalize_static_hwid as _norm_static
+        _hwid_str = str(hwid or "")
+        if _hwid_str.startswith("HWID:"):
+            _static_hwid = _norm_static(_hwid_str)
+    except ValueError:
+        raise
+    except Exception:
+        _static_hwid = ""
     _phase4_suffix += ("_NX_HWID_LOCK = %r\n" % ("ENABLED" if hwid_lock else "DISABLED",))
+    _phase4_suffix += ("_NX_HWID_STATIC = %r\n" % (_static_hwid,))
     _phase4_suffix += (
         "def _nx_hwid_unlock(blob_bytes):\n"
         "    import hashlib as _hl_hashlib, json as _hl_json, uuid as _hl_uuid\n"
@@ -1087,7 +1242,7 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         "        _enc = bytes.fromhex(_pack[\"data\"])\n"
         "    except Exception:\n"
         "        raise ValueError(\"bad hwid lock pack\")\n"
-        "    _hwid = format(_hl_uuid.getnode(), \"x\")\n"
+        "    _hwid = _NX_HWID_STATIC if _NX_HWID_STATIC else format(_hl_uuid.getnode(), \"x\")\n"
         "    _key = _hl_hashlib.pbkdf2_hmac(\"sha256\", _hwid.encode(), _salt, 100000, dklen=32)\n"
         "    def _ks(_k, _n, _ln):\n"
         "        _out = bytearray()\n"

@@ -380,9 +380,45 @@ def apply_ast_mutation(source_code, options=None):
         for _n in ast.walk(tree):
             if isinstance(_n, ast.Nonlocal):
                 _nonlocal_vars.update(_n.names)
+        # AUDIT GAP #64 (C11): __all__ preservation. Read module-level
+        # __all__ from the AST BEFORE SymbolRenamer runs and reserve the
+        # statically known export names so public exports survive
+        # obfuscation. Dynamic __all__ (computed) -> warn, no rewrite.
+        _all_names = []  # type: list
+        _all_dynamic = False
+        try:
+            from obfuscator.all_preserve import extract_all_names as _extract_all
+            _all_names, _all_dynamic = _extract_all(tree)
+        except Exception:
+            _all_names, _all_dynamic = [], False
+        if _all_dynamic:
+            try:
+                from obfuscator.all_preserve import warning_comment as _all_warn
+                print("    [!] Warning: %s" % (_all_warn(_all_names, True),))
+            except Exception:
+                print("    [!] Warning: dynamic __all__ detected; left untouched")
         if options.get('symbol_rename'):
             renamer = SymbolRenamer()
             renamer.reserved.update({'NATIVE_BLOBS', 'FALLBACK_BLOB', 'BLOB_KEY'})
+            # AUDIT GAPS #52/#75: trial-gate + hwid-unlock loader helpers and
+            # their _NX_* markers must survive whole-artifact renames.
+            renamer.reserved.update({
+                '_nx_hwid_unlock', '_nx_trial_gate',
+                '_NX_HWID_LOCK', '_NX_HWID_STATIC', '_NX_TRIAL_GATE', '_NX_TRIAL_SECONDS',
+                '_NX_TRIAL_KEY', '_NX_TRIAL_DEADLINE', '_NX_TRIAL_TOKEN',
+                '_NX_TRIAL_HWID_HINT', '_NX_KOD_ARMED', '_NX_VM_THRESHOLD',
+            })
+            # AUDIT GAP #64 (C11): public exports survive the renamer.
+            renamer.reserved.update({'__all__'})
+            if _all_names:
+                renamer.reserved.update(_all_names)
+            # AUDIT GAP #71: the watermark gate helpers/markers must
+            # survive whole-artifact renames (same shape as #52/#75).
+            renamer.reserved.update({
+                '_nx_watermark_gate',
+                '_NX_WATERMARK_GATE', '_NX_WATERMARK_KEY', '_NX_WATERMARK_MSG',
+                '_NX_WATERMARK_TAG', '_NX_WATERMARK_MARKER',
+            })
             dyn_unbounds = set(_nonlocal_vars)
             if unsafe:
                 for _, u_vars in unsafe:
@@ -395,6 +431,22 @@ def apply_ast_mutation(source_code, options=None):
         if options.get('unicode_ids'):
             encoder = UnicodeIdentifierEncoder()
             encoder.reserved.update({'NATIVE_BLOBS', 'FALLBACK_BLOB', 'BLOB_KEY'})
+            encoder.reserved.update({
+                '_nx_hwid_unlock', '_nx_trial_gate',
+                '_NX_HWID_LOCK', '_NX_HWID_STATIC', '_NX_TRIAL_GATE', '_NX_TRIAL_SECONDS',
+                '_NX_TRIAL_KEY', '_NX_TRIAL_DEADLINE', '_NX_TRIAL_TOKEN',
+                '_NX_TRIAL_HWID_HINT', '_NX_KOD_ARMED', '_NX_VM_THRESHOLD',
+            })
+            # AUDIT GAP #64 (C11): public exports survive unicode encoding.
+            encoder.reserved.update({'__all__'})
+            if _all_names:
+                encoder.reserved.update(_all_names)
+            # AUDIT GAP #71: same gate helpers/markers for the encoder path.
+            encoder.reserved.update({
+                '_nx_watermark_gate',
+                '_NX_WATERMARK_GATE', '_NX_WATERMARK_KEY', '_NX_WATERMARK_MSG',
+                '_NX_WATERMARK_TAG', '_NX_WATERMARK_MARKER',
+            })
             encoder.reserved.update(_nonlocal_vars)
             tree = encoder.visit(tree)
         if options.get('strip_meta'):
@@ -442,7 +494,19 @@ def apply_ast_mutation(source_code, options=None):
             chk_inj = CodeChecksumInjector()
             tree = chk_inj.visit(tree)
         if options.get('fragment_strings'):
-            str_obf = StringLiteralObfuscator()
+            # GAP #55 (additive): string_crypto="chacha20" selects the
+            # authenticated ChaCha20 string mode; default stays legacy XOR.
+            # string_allowlist=[...] keeps matching strings plaintext.
+            # string_key=<32 bytes> pins the build key (tests/determinism).
+            try:
+                from obfuscator.string_crypto import normalize_mode as _nx_norm
+                _nx_mode = _nx_norm(options.get('string_crypto', 'xor'))
+            except Exception:
+                _nx_mode = 'xor'
+            str_obf = StringLiteralObfuscator(
+                mode=_nx_mode,
+                allowlist=options.get('string_allowlist'),
+                string_key=options.get('string_key'))
             tree = str_obf.visit(tree)
             preamble = str_obf.get_preamble()
         else: preamble = ""

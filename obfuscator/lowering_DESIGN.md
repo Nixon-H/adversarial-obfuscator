@@ -7,11 +7,21 @@ future work on the `--pytoc` path — see Phase 5 below.
 ## What V10 does (vendor claim, unverified)
 
 Call sites for Python builtins replaced with native implementations in
-the protection kernel: 14 families, 141 ops, registry-driven, default-ON
+the protection kernel: vendor claims 14 families / 141 ops (UNVERIFIED),
+registry-driven, default-ON
 families (I/O, scalar, string, container, service, protocol, function,
 import, fusion) + opt-in (arithmetic, truth, slice, format, augassign).
 Per-build kernel symbols; fusion collapses lowered chains; 0.19x–1.56x
 of CPython 3.12 measured.
+
+Audited truth (2026-09, enforced by tests/test_opcount_truth.py): the
+vendor "141 ops" number does NOT match this repo. 14 families hold 61
+registry entries (59 unique names): 51 callable ops + 8 AST node-kind
+markers (BinOp, Compare, BoolOp, Not, Subscript, JoinedStr,
+FormattedValue, AugAssign — Phase-2 only, no runtime function yet).
+The native kernel implements 52 ops (``NATIVE_OPS`` in
+obfuscator/kernel_gen.py): those 51 callable ops + the ``fuse``
+dispatch, with identical call shapes in ``obfuscator/lowering_shim.py``.
 
 ## Our architecture (additive, staged)
 

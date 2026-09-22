@@ -12,7 +12,7 @@ JIT generation, ROP chains, hardware integration, formal proofs, etc.).
 Architectural Role:
 Orchestrator. This file is the CLI entry point that:
   1. Parses 200+ CLI flags controlling every protection feature.
-  2. Validates system dependencies (Python >= 3.11, cargo, g++, llc, Python.h).
+  2. Validates system dependencies (Python >= 3.10, cargo, g++, llc, Python.h).
   3. Runs conflict detection among requested protections.
   4. Sequentially invokes phase functions imported from scripts/phases/.
 
@@ -189,7 +189,7 @@ def validate_dependencies() -> bool:
 
     Purpose:
     Check all system-level prerequisites before the pipeline starts:
-      - Python >= 3.11
+      - Python >= 3.10
       - cargo (Rust toolchain)
       - g++ (C++ compiler)
       - llc (LLVM static compiler)
@@ -200,8 +200,13 @@ def validate_dependencies() -> bool:
     """
     ok = True
 
-    if sys.version_info < (3, 11):
-        print(f"ERROR: Python >= 3.11 required, got {sys.version_info.major}.{sys.version_info.minor}")
+    # Compat floor: 3.10 (matches nyser/py_matrix payload range 3.10-3.14
+    # and CI matrix). Recon 2026-09: no match statements, no tomllib,
+    # no except*, no 3.11-only stdlib APIs in the build import closure
+    # (whole-tree ast.parse(feature_version=(3,10)) passes); version-gated
+    # paths use sys.version_info branches, not syntax gates.
+    if sys.version_info < (3, 10):
+        print(f"ERROR: Python >= 3.10 required, got {sys.version_info.major}.{sys.version_info.minor}")
         print("Install: https://www.python.org/downloads/")
         ok = False
 
@@ -756,7 +761,13 @@ Examples:
 
     # Phase-4 tested-but-unwired modules: additive opt-in flags (all default OFF / empty).
     parser.add_argument("--hwid", type=str, default="",
-                        help="HWID string for GET_HWID() macro expansion and HWID-locked fallback (default: '')")
+                        help="HWID string for GET_HWID() macro expansion and HWID-locked fallback. "
+                             "Dynamic (default): any opaque string; the loader collects "
+                             "format(uuid.getnode(), 'x') at runtime. Static (GAP #33): "
+                             "canonical 'HWID:<64 hex chars>' fingerprint (case-insensitive, "
+                             "lowercased) binding the artifact to a known value instead of "
+                             "dynamic collection (documented in obfuscator/hwid_lock.py; "
+                             "default: '')")
     parser.add_argument("--trial", type=str, default="",
                         help="Trial period spec, e.g. '7d', '1w2d' (parsed via obfuscator.macros.parse_trial; default: '')")
     parser.add_argument("--vm-threshold", type=float, default=50.0,
@@ -766,7 +777,9 @@ Examples:
     parser.add_argument("--hostguard", action="store_true", default=False,
                         help="Prepend hostguard snippet (bind_host/check_host/isolated_exec) to loader (default: off)")
     parser.add_argument("--hwid-lock", dest="hwid_lock", action="store_true", default=False,
-                        help="HWID-lock the bytecode fallback blob (requires --hwid; default: off)")
+                        help="HWID-lock the bytecode fallback blob (requires --hwid; static "
+                             "'HWID:<64 hex>' fingerprints unlock via the embedded value, "
+                             "dynamic HWIDs via uuid.getnode(); default: off)")
     parser.add_argument("--sign-key-env", type=str, default="",
                         help="Env var name holding hex key for artifact signing sidecars (.sig.json; default: '' = disabled)")
     parser.add_argument("--name-gate", dest="name_gate", action="store_true", default=False,
