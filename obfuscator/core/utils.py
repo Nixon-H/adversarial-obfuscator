@@ -421,10 +421,44 @@ class ConfigManager:
             if acc:self.set("cf_account",acc)
         self.save()
         print("\n[*] Setup Complete. You can now run builds automatically.")
+#: Default Tor SOCKS proxy (``host:port``).  Overridable per-process via
+#: the ``NIXON_TOR_PROXY`` env var (e.g. ``"127.0.0.1:9150"`` for Tor
+#: Browser's default port).  Read at farm ``__init__`` time so tests can
+#: monkeypatch ``os.environ`` without a reload.
+DEFAULT_TOR_PROXY = "127.0.0.1:9050"
+
+
+def resolve_tor_proxy(explicit=None):
+    # type: (object) -> str
+    """Return the Tor proxy endpoint as ``"host:port"``.
+
+    Precedence: explicit ``tor_proxy`` argument > ``NIXON_TOR_PROXY``
+    env var > :data:`DEFAULT_TOR_PROXY`.  Malformed values fall back to
+    the default (never raise — proxy misconfig must not fail a build;
+    ``requests`` will surface connectivity errors instead).
+    """
+    raw = explicit or os.environ.get("NIXON_TOR_PROXY") or DEFAULT_TOR_PROXY
+    try:
+        host, _, port = str(raw).strip().partition(":")
+        port_i = int(port)
+        if not host or not (1 <= port_i <= 65535):
+            raise ValueError("bad tor proxy %r" % (raw,))
+        return "%s:%d" % (host, port_i)
+    except Exception:
+        return DEFAULT_TOR_PROXY
+
+
+def tor_proxies(explicit=None):
+    # type: (object) -> dict
+    """``requests``-style proxies dict for the resolved Tor endpoint."""
+    ep = resolve_tor_proxy(explicit)
+    url = "socks5h://%s" % (ep,)
+    return {"http": url, "https": url}
 class GitHubBuildFarm:
-    def __init__(self,token, use_tor=False):
+    def __init__(self,token, use_tor=False, tor_proxy=None):
         self.token=token
-        self.proxies={'http':'socks5h://127.0.0.1:9050','https':'socks5h://127.0.0.1:9050'}if use_tor else None
+        self.tor_proxy = resolve_tor_proxy(tor_proxy) if use_tor else None
+        self.proxies=tor_proxies(tor_proxy) if use_tor else None
         self.headers={"Authorization":f"token {token}","Accept":"application/vnd.github.v3+json"}
         self.base_url="https://api.github.com"
         if use_tor:self.base_url=self._resolve_doh("api.github.com")
@@ -687,10 +721,11 @@ jobs:
         requests.delete(url, headers=self.headers, proxies=self.proxies, verify=False)
         UI.dot_item("Cleanup", "Repository Nuked", "SCORCHED")
 class GitHubNuitkaFarm:
-    def __init__(self, token, is_public=False, use_tor=False):
+    def __init__(self, token, is_public=False, use_tor=False, tor_proxy=None):
         self.is_public = is_public
         self.token = token
-        self.proxies = {'http':'socks5h://127.0.0.1:9050','https':'socks5h://127.0.0.1:9050'} if use_tor else None
+        self.tor_proxy = resolve_tor_proxy(tor_proxy) if use_tor else None
+        self.proxies = tor_proxies(tor_proxy) if use_tor else None
         self.headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
         self.base_url = "https://api.github.com"
         self.repo_name = "nixon-build-farm-nuitka" 

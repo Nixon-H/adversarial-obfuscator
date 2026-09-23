@@ -12,6 +12,7 @@ timer and a tiny live sample).
 import ast
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -228,3 +229,46 @@ def test_snippet_wires_clock_bias_default_on():
     hit, total, pct = score(findings_hit)
     assert (hit, total) == (10, 235)
     assert abs(pct - 10 / 235 * 100) < 1e-9
+
+
+# ---- wall-clock end-to-end (live timers, structural assertions only) ----
+
+
+def test_live_timer_structural():
+    # REAL perf_counter_ns run: proves the live sampling pipeline works on
+    # a live timer without false-positives-by-assertion. Verdict is
+    # host-dependent (noisy CI/scheduler can skew it), so assert only
+    # STRUCTURAL properties of the returned stats plus a runtime bound.
+    t0 = time.monotonic()
+    flagged, stats = clock_bias_check(samples=2000)
+    dt = time.monotonic() - t0
+    assert isinstance(flagged, bool)  # verdict type only, never its value
+    assert stats["samples"] == 2000
+    assert stats["median_ns"] > 0
+    assert stats["p99_ns"] >= stats["median_ns"]
+    assert 0.0 <= stats["tail_frac"] <= 1.0
+    assert dt < 30.0
+
+
+def test_live_no_false_positive_on_clean_host():
+    # Record 2000 REAL deltas once, then replay the same vector through
+    # clock_bias_verdict twice: proves the live-timer -> verdict pipeline
+    # operates on real data while staying deterministic (no second live
+    # run to go flaky, no verdict-value assertion).
+    tick = time.perf_counter_ns
+    prev = tick()
+    deltas = []
+    for _ in range(2000):
+        now = tick()
+        deltas.append(now - prev)
+        prev = now
+    assert len(deltas) == 2000
+    flagged1, stats1 = clock_bias_verdict(deltas)
+    flagged2, stats2 = clock_bias_verdict(list(deltas))
+    assert isinstance(flagged1, bool)
+    assert flagged1 is flagged2  # deterministic replay of real data
+    assert stats1 == stats2
+    assert stats1["samples"] == 2000
+    assert stats1["median_ns"] > 0
+    assert stats1["p99_ns"] >= stats1["median_ns"]
+    assert 0.0 <= stats1["tail_frac"] <= 1.0

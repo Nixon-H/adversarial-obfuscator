@@ -62,6 +62,71 @@ _TRIAL_DOMAIN = b"nx-trial-v1"
 _LASTSEEN_DOMAIN = b"nx-trial-lastseen-v1"
 
 
+def _lock_state_file(path):
+    # type: (str) -> object
+    """Best-effort POSIX exclusive lock for the trial state file.
+
+    Returns an open fd holding ``LOCK_EX`` (caller must pass it to
+    :func:`_unlock_state_file`), or ``None`` when locking is unavailable
+    or failed.  Blocking ``LOCK_EX`` (not ``LOCK_NB``): the critical
+    section is a tiny read-modify-write, so a contender waits
+    milliseconds; on failure/unsupported platform we proceed anyway —
+    a stale rollback window is benign (monotonic HMAC writes; worst
+    case the rollback check degrades for one run, the absolute
+    deadline still holds).
+
+    POSIX-only: on Windows this is a no-op returning ``None``.
+    ``msvcrt.locking`` is NOT equivalent to ``fcntl.flock`` (mandatory
+    byte-range semantics vs advisory whole-file), so we deliberately
+    skip locking there rather than fake it.
+    """
+    if not path:
+        return None
+    if os.name == "nt":
+        return None
+    try:
+        import fcntl as _fcntl
+    except ImportError:
+        return None
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            _fcntl.flock(fd, _fcntl.LOCK_EX)
+        except Exception:
+            try:
+                os.close(fd)
+            except Exception:
+                pass
+            return None
+        return fd
+    except Exception:
+        return None
+
+
+def _unlock_state_file(fd):
+    # type: (object) -> None
+    """Release an fd from :func:`_lock_state_file`.  Never raises."""
+    if fd is None:
+        return
+    try:
+        try:
+            import fcntl as _fcntl
+            try:
+                _fcntl.flock(fd, _fcntl.LOCK_UN)
+            except Exception:
+                pass
+        except ImportError:
+            pass
+    finally:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+
+
 def _read_first(path):
     # type: (str) -> str
     try:
@@ -259,6 +324,13 @@ def check_and_update(build_key, fingerprint, deadline_epoch, token,
     degrades for that run).  A missing/corrupt state file is treated as
     first run (sealed at ``now``); deleting the state file therefore
     resets the rollback window but never extends the absolute deadline.
+
+    Concurrency: the state read-modify-write runs under a best-effort
+    POSIX ``fcntl.flock(LOCK_EX)`` (see :func:`_lock_state_file`; no-op
+    on Windows).  Contending runs serialize; if the lock cannot be
+    taken we proceed anyway — stale-window outcome is benign (monotonic
+    HMAC writes; worst case rollback detection degrades for one run,
+    the absolute deadline still holds).
     """
     moment = float(now) if now is not None else time.time()
     verdict = check_trial(build_key, fingerprint, deadline_epoch, token,
@@ -271,69 +343,78 @@ def check_and_update(build_key, fingerprint, deadline_epoch, token,
         tol = ROLLBACK_TOLERANCE_S
     path = state_path
     last_seen = None
-    if path:
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                sealed = fh.read().strip()
-            if sealed:
-                last_seen = unseal_last_seen(build_key, sealed)
-        except FileNotFoundError:
-            last_seen = None
-        except (IOError, OSError):
-            last_seen = None
-        except ValueError:
-            # Tampered state file: fail closed (attacker edited last_seen).
-            return "tampered"
-        except Exception:
-            last_seen = None
-    if last_seen is not None:
-        try:
-            if moment < float(last_seen) - tol:
-                return "rollback"
-        except Exception:
-            pass
-    if path:
-        try:
-            parent = os.path.dirname(path)
-            if parent:
-                os.makedirs(parent, exist_ok=True)
-            _data = seal_last_seen(build_key, moment).encode("utf-8")
+    # Best-effort POSIX LOCK_EX around the read-modify-write below:
+    # serializes concurrent artifact runs; on lock failure (or Windows)
+    # _lock_state_file returns None and we proceed anyway — a stale
+    # rollback window is benign (monotonic HMAC writes; worst case the
+    # rollback check degrades for one run, the absolute deadline holds).
+    _lock_fd = _lock_state_file(path) if path else None
+    try:
+        if path:
             try:
-                _flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-                _fd = os.open(path, _flags | getattr(os, "O_NOFOLLOW", 0),
-                              0o600)
-            except (AttributeError, OSError) as _e:
-                import errno as _errno
-                if getattr(_e, "errno", None) in (
-                        getattr(_errno, "ELOOP", 40),
-                        getattr(_errno, "EMLINK", 31)):
-                    # Symlink (or link-loop) at state path: refuse to
-                    # follow; degrade rollback protection for this run.
-                    return "ok"
-                with open(path, "w", encoding="utf-8") as fh:
-                    fh.write(seal_last_seen(build_key, moment))
-                return "ok"
-            else:
+                with open(path, "r", encoding="utf-8") as fh:
+                    sealed = fh.read().strip()
+                if sealed:
+                    last_seen = unseal_last_seen(build_key, sealed)
+            except FileNotFoundError:
+                last_seen = None
+            except (IOError, OSError):
+                last_seen = None
+            except ValueError:
+                # Tampered state file: fail closed (attacker edited last_seen).
+                return "tampered"
+            except Exception:
+                last_seen = None
+        if last_seen is not None:
+            try:
+                if moment < float(last_seen) - tol:
+                    return "rollback"
+            except Exception:
+                pass
+        if path:
+            try:
+                parent = os.path.dirname(path)
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
+                _data = seal_last_seen(build_key, moment).encode("utf-8")
                 try:
+                    _flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+                    _fd = os.open(path, _flags | getattr(os, "O_NOFOLLOW", 0),
+                                  0o600)
+                except (AttributeError, OSError) as _e:
+                    import errno as _errno
+                    if getattr(_e, "errno", None) in (
+                            getattr(_errno, "ELOOP", 40),
+                            getattr(_errno, "EMLINK", 31)):
+                        # Symlink (or link-loop) at state path: refuse to
+                        # follow; degrade rollback protection for this run.
+                        return "ok"
+                    with open(path, "w", encoding="utf-8") as fh:
+                        fh.write(seal_last_seen(build_key, moment))
+                    return "ok"
+                else:
                     try:
-                        _st = os.fstat(_fd)
-                        _uid = getattr(_st, "st_uid", None)
-                        _me = os.geteuid() if hasattr(os, "geteuid") else None
-                        if (_uid is not None and _me is not None
-                                and _uid != _me):
-                            raise OSError("state file owner mismatch")
-                    except OSError:
-                        raise
-                    except Exception:
-                        pass
-                    os.write(_fd, _data)
-                finally:
-                    try:
-                        os.close(_fd)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                        try:
+                            _st = os.fstat(_fd)
+                            _uid = getattr(_st, "st_uid", None)
+                            _me = os.geteuid() if hasattr(os, "geteuid") else None
+                            if (_uid is not None and _me is not None
+                                    and _uid != _me):
+                                raise OSError("state file owner mismatch")
+                        except OSError:
+                            raise
+                        except Exception:
+                            pass
+                        os.write(_fd, _data)
+                    finally:
+                        try:
+                            os.close(_fd)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+    finally:
+        _unlock_state_file(_lock_fd)
     return "ok"
 
 
@@ -381,6 +462,16 @@ def emit_trial_snippet(deadline_epoch, token_hex, build_key_hex,
     ``hwid_hint``: when the build used ``--hwid``, pass that string so the
     runtime checks the explicit HWID; otherwise the snippet re-derives the
     composite fallback (node + MAC + machine-id + platform) itself.
+
+    Locking note: unlike build-time :func:`check_and_update`, the emitted
+    snippet intentionally takes NO ``fcntl.flock`` around its state
+    read-modify-write.  A correct flock needs lock-acquire (import fcntl
+    + makedirs + os.open + LOCK_EX + failure fallback) plus
+    unlock/close — 9+ emitted lines even semicolon-golfed, over budget
+    for the artifact cold path where contention is essentially
+    impossible (single artifact run per boot; concurrent same-artifact
+    runs would merely risk one stale rollback window, which is benign —
+    monotonic HMAC writes, absolute deadline still holds).
 
     All literals are embedded via ``repr`` (hex/hmac digests contain only
     ``[0-9a-f]``; no quoting hazards).  Stdlib only.

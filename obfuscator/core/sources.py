@@ -2462,9 +2462,17 @@ class {HW_PERF_CLS}:
 '''
 TOR_CLIENT_SOURCE = r'''
 class {TOR_CLIENT_CLS}:
-    def __init__(self, proxy_host="127.0.0.1", proxy_port=9050):
-        self.host = proxy_host
-        self.port = proxy_port
+    # Tor SOCKS endpoint: explicit args > NIXON_TOR_PROXY ("host:port") > default.
+    def __init__(self, proxy_host=None, proxy_port=None):
+        import os as _tor_os
+        _env = (_tor_os.environ.get("NIXON_TOR_PROXY") or "").strip()
+        _ehost, _, _eport = _env.partition(":")
+        try:
+            _eport_i = int(_eport)
+        except Exception:
+            _eport_i = None
+        self.host = proxy_host or (_ehost or "127.0.0.1")
+        self.port = proxy_port if proxy_port is not None else (_eport_i or 9050)
     def request(self, url, method="GET", data=None, headers=None):
         import socket, ssl
         try:

@@ -127,8 +127,22 @@ def derive_symbols(seed: bytes, ops=None) -> tuple[str, dict[str, str]]:
     return mod_name, op_map
 
 
-def _impl_body(op: str, impl: str) -> str:
-    """Cython body for one op: thin typed passthrough to the real builtin."""
+def _impl_body(op: str, impl: str, fast: bool = False) -> str:
+    """Cython body for one op: thin typed passthrough to the real builtin.
+
+    When fast=True and the op has a hand-optimized body in
+    obfuscator.kernel_fast, emit that instead (same impl symbol, same
+    public token scheme). The kernel_fast import is lazy so a missing
+    module never breaks the default path.
+    """
+    if fast:
+        try:
+            from obfuscator.kernel_fast import fast_body as _fb
+            _body = _fb(op, impl)
+            if _body is not None:
+                return _body
+        except Exception:
+            pass
     if "." in op:
         recv, meth = op.split(".", 1)
         if op == "str.join":
@@ -158,14 +172,29 @@ def _impl_body(op: str, impl: str) -> str:
     return f"def {impl}(*a, **k):\n    import builtins as _bi\n    return _bi.{op}(*a, **k)\n"
 
 
-def render_pyx(seed: bytes, ops=None) -> tuple[str, str, dict[str, str]]:
-    """Render kernel source. Returns (pyx_text, mod_name, op_map)."""
+def render_pyx(seed: bytes, ops=None, fast=None) -> tuple[str, str, dict[str, str]]:
+    """Render kernel source. Returns (pyx_text, mod_name, op_map).
+
+    fast: None (default) -> byte-identical legacy output; any non-None
+    set/list/tuple of op names -> those ops use the hand-optimized
+    kernel_fast bodies (unknown names ignored). Public tokens and impl
+    symbols are unchanged either way.
+    """
     ops = tuple(ops) if ops is not None else NATIVE_OPS
+    fast_set = set(fast) if fast is not None else set()
     mod_name, op_map = derive_symbols(seed, ops)
     parts = [_PYX_PREAMBLE,
              f'"""Native lowering kernel {mod_name} (per-build symbols)."""\n']
+    if fast_set:
+        try:
+            from obfuscator.kernel_fast import _FAST_CIMPORTS as _fc
+            parts.append(_fc)
+        except Exception:
+            pass
+        parts.append("_nxk_fast_missing = object()\n")
     for op in ops:
-        parts.append(_impl_body(op, op_map[_token(op)]))
+        parts.append(_impl_body(op, op_map[_token(op)],
+                               fast=(op in fast_set)))
     # Public aliases: IDENTICAL names to the shim so lowered call sites
     # keep working with a swapped import line.
     parts.append("\n# Public aliases (stable call shapes, swapped import)\n")
@@ -174,9 +203,12 @@ def render_pyx(seed: bytes, ops=None) -> tuple[str, str, dict[str, str]]:
     return "".join(parts), mod_name, op_map
 
 
-def build_kernel(build_dir: str, seed: bytes, ops=None) -> tuple[str, str, dict[str, str]]:
-    """Write ``<mod_name>.pyx`` into build_dir. Returns (pyx_path, mod, map)."""
-    text, mod_name, op_map = render_pyx(seed, ops)
+def build_kernel(build_dir: str, seed: bytes, ops=None, fast=None) -> tuple[str, str, dict[str, str]]:
+    """Write ``<mod_name>.pyx`` into build_dir. Returns (pyx_path, mod, map).
+
+    fast is passed through to render_pyx (None = legacy passthrough).
+    """
+    text, mod_name, op_map = render_pyx(seed, ops, fast=fast)
     os.makedirs(build_dir, exist_ok=True)
     pyx_path = os.path.join(build_dir, mod_name + ".pyx")
     with open(pyx_path, "w", encoding="utf-8") as f:

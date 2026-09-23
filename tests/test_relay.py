@@ -1,6 +1,9 @@
+import os
 import sys
 import subprocess
 import pytest
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 OBFUSCATOR_PATH = "obfuscator/core/utils.py"
 OBFUSCATOR_CLI_PATH = "obfuscator/core/pipeline.py"
@@ -24,14 +27,19 @@ print('OK')
 """
     result = subprocess.run(
         [sys.executable, "-c", code],
-        capture_output=True, text=True, cwd="/home/nixon/Desktop/2",
+        capture_output=True, text=True, cwd=REPO_ROOT,
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
     assert "OK" in result.stdout
 
 
 def test_socks5_proxy_format():
-    """GitHubBuildFarm constructs SOCKS5 proxy URLs."""
+    """GitHubBuildFarm constructs SOCKS5 proxy URLs (default 127.0.0.1:9050).
+
+    Accepts either the legacy inline literal or the NIXON_TOR_PROXY
+    helper path (tor_proxies()/DEFAULT_TOR_PROXY); the default endpoint
+    must remain 127.0.0.1:9050 in both cases.
+    """
     code = """
 import sys
 sys.path.insert(0, '.')
@@ -56,9 +64,20 @@ class BuilderFinder(ast.NodeVisitor):
                             break
             if proxies_node:
                 source_seg = ast.get_source_segment(source, proxies_node)
-                if source_seg:
-                    assert 'socks5h://127.0.0.1:9050' in source_seg
+                if source_seg and ('proxies' in source_seg or 'tor' in source_seg.lower()):
+                    if 'socks5h://' in source_seg:
+                        assert 'socks5h://127.0.0.1:9050' in source_seg
                     print('OK')
+            else:
+                # Refactored path: __init__ delegates to tor_proxies() and
+                # the default lives in resolve_tor_proxy/DEFAULT_TOR_PROXY.
+                seg = ast.get_source_segment(source, node) or ""
+                assert 'tor_proxies' in seg or 'resolve_tor_proxy' in seg, (
+                    "proxies assignment missing and no tor helper in __init__")
+                assert ("DEFAULT_TOR_PROXY" in source
+                        and "127.0.0.1:9050" in source), (
+                    "default Tor endpoint 127.0.0.1:9050 missing from utils.py")
+                print('OK')
 
 finder = BuilderFinder()
 for node in ast.iter_child_nodes(tree):
@@ -72,7 +91,7 @@ else:
 """
     result = subprocess.run(
         [sys.executable, "-c", code],
-        capture_output=True, text=True, cwd="/home/nixon/Desktop/2",
+        capture_output=True, text=True, cwd="/home/nixon/Projects/adversarial-obfuscator",
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
     assert "OK" in result.stdout

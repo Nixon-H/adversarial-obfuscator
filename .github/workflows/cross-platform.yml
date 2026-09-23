@@ -25,6 +25,13 @@ jobs:
       - run: cargo test --manifest-path runtime/Cargo.toml
       - run: python3 -m pytest tests/ -q --tb=short
 
+  # NOTE (python pins): test-linux-arm64 and test-windows-x86_64 pin a
+  # single python (3.11) intentionally — they are cargo-check-only
+  # cross-compile smoke jobs where the interpreter version is irrelevant
+  # (setup-python just provides a hermetic python for build scripts).
+  # The real version matrix (3.10-3.14) lives in test-linux-x86_64 above
+  # and in ci.yml; multiplying these cross jobs x5 would burn runner
+  # minutes for zero signal.
   test-linux-arm64:
     runs-on: ubuntu-24.04
     steps:
@@ -86,3 +93,43 @@ jobs:
           else
             echo "STUB-WIN-SKIPPED (no mingw Python.h on runner)"
           fi
+
+  # Real stub_win.cpp compile with native MSVC on a Windows runner.
+  # Payload.h is gitignored/generated: generate a tiny one first via
+  # scripts/generate_payload_h.py (stdlib+zlib only, no full build), then
+  # compile stub_win.cpp with cl.exe using CPython + zlib includes.
+  # windows-latest ships MSVC cl.exe + Windows SDK out of the box;
+  # zlib/Python headers are the fragile part, so provisioning steps are
+  # best-effort (continue-on-error) but the cl.exe compile itself is a
+  # hard gate once headers resolve.
+  stub-win-msvc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install zlib (best-effort)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          vcpkg install zlib:x64-windows
+      - name: Generate tiny payload.h (gitignored, required by stub)
+        shell: pwsh
+        run: |
+          "print('stub-win-msvc payload probe')" | Out-File -Encoding ascii tiny_probe.py
+          python scripts/generate_payload_h.py --obfuscated-py tiny_probe.py --output native/payload.h
+          Get-Item native/payload.h
+      - name: Compile stub_win.cpp with MSVC cl.exe
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" || call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+          for /f "delims=" %%P in ('python -c "import sysconfig; print(sysconfig.get_paths()['include'])"') do set PYINC=%%P
+          for /f "delims=" %%L in ('python -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))"') do set PYLIBDIR=%%L
+          echo Python include: %PYINC%
+          if exist "C:\vcpkg\installed\x64-windows\include\zlib.h" (set ZINC=C:\vcpkg\installed\x64-windows\include) else (set ZINC=%VCPKG_INSTALLATION_ROOT%\installed\x64-windows\include)
+          if exist "C:\vcpkg\installed\x64-windows\lib\zlib.lib" (set ZLIB=C:\vcpkg\installed\x64-windows\lib\zlib.lib) else (set ZLIB=%VCPKG_INSTALLATION_ROOT%\installed\x64-windows\lib\zlib.lib)
+          echo zlib include: %ZINC%
+          cl.exe /nologo /EHsc /O2 /I "%PYINC%" /I "%ZINC%" /I native /c native\stub_win.cpp /Fo:stub_win.obj
+          link.exe /nologo stub_win.obj "%ZLIB%" /OUT:stub_win_test.exe
+          if exist stub_win_test.exe (echo STUB-WIN-MSVC-OK) else (echo STUB-WIN-MSVC-FAILED & exit 1)

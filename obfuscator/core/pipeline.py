@@ -2851,7 +2851,8 @@ if __name__ == "__main__":
             mode_group.add_argument('--native-only', dest='native_only', action='store_true', help='Strict Native Mode: Cloud Farm Cython Compilation (No Fallback)')
             build.add_argument('--auto', nargs='?', const='cf,nk', help='Automation: cf=Cloudflare, nk=Nuitka (Defaults to cf,nk if no value)')
             build.add_argument('--stego', action='store_true', help='Steganography wrapping')
-            build.add_argument('--tor', action='store_true', help='Route build traffic through Tor (127.0.0.1:9050)')
+            build.add_argument('--tor', action='store_true', help='Route build traffic through Tor (default 127.0.0.1:9050; override via --tor-proxy or NIXON_TOR_PROXY)')
+            build.add_argument('--tor-proxy', default=None, help='Tor SOCKS endpoint host:port (default 127.0.0.1:9050; env NIXON_TOR_PROXY)')
             build.add_argument('--compile', action='store_true', help='Compile FINAL loader with Nuitka (Creates EXE/ELF)')
             build.add_argument('--watermark', help='Lock to HWID')
             build.add_argument('--one-shot', action='store_true', help='Self-destruct')
@@ -2913,6 +2914,8 @@ if __name__ == "__main__":
             bf.add_argument('--exclude-android', action='store_true', help='Skip Android build')
             bf.add_argument('--python', default=f"{sys.version_info.major}.{sys.version_info.minor}", help='Python version for GitHub Actions')
             bf.add_argument('--public', action='store_true', help='Public repo mode')
+            bf.add_argument('--tor', action='store_true', help='Route build-farm traffic through Tor')
+            bf.add_argument('--tor-proxy', default=None, help='Tor SOCKS endpoint host:port (env NIXON_TOR_PROXY)')
 
             version_desc = "Show version information and exit."
             version = subparsers.add_parser('version', help='Show version', description=version_desc, formatter_class=custom_fmt, add_help=False)
@@ -3068,7 +3071,7 @@ if __name__ == "__main__":
                                 if not gh_token:
                                     UI.fail("GitHub token required for Nuitka cloud build.")
                                 else:
-                                    nk_farm = GitHubNuitkaFarm(gh_token, is_public=getattr(args, 'public', False), use_tor=getattr(args, 'tor', False))
+                                    nk_farm = GitHubNuitkaFarm(gh_token, is_public=getattr(args, 'public', False), use_tor=getattr(args, 'tor', False), tor_proxy=getattr(args, 'tor_proxy', None))
                                     try:
                                         resume_id = getattr(args, 'resume', None)
                                         if resume_id:
@@ -3248,7 +3251,7 @@ if __name__ == "__main__":
                 if not gh_token:
                     UI.fatal("GitHub token required for build farm. Run setup first.")
                     sys.exit(1)
-                farm = GitHubNuitkaFarm(gh_token, is_public=args.public)
+                farm = GitHubNuitkaFarm(gh_token, is_public=args.public, use_tor=getattr(args, 'tor', False), tor_proxy=getattr(args, 'tor_proxy', None))
                 resume_id = getattr(args, 'resume', None)
                 if resume_id:
                     farm.trigger_and_wait(resume_run_id=int(resume_id), exclude_android=args.exclude_android)

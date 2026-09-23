@@ -154,6 +154,7 @@ Default-ON vs default-OFF matrix:
 | Audit timing enforcement | `NIXON_AUDIT_TIMING=<any non-"0" value>` arms at runtime |
 | `--lowering` itself | `--lowering <csv>` |
 | Opt-in lowering families (`arithmetic,truth,slice,format,augassign`) | `+fam` / bare names / `all` |
+| Tor SOCKS endpoint for `--tor` build-farm traffic | `NIXON_TOR_PROXY=<host:port>` (default `127.0.0.1:9050`); or `--tor-proxy`; also read at runtime by the emitted Tor client |
 
 ## Security model + honest limitations
 
