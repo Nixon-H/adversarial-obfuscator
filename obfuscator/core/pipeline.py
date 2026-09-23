@@ -1439,6 +1439,36 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         "    return _data\n"
     )
     loader_template = r'''# -*- coding: utf-8 -*-
+# Traceback suppression (V10 v6.0 parity: sys.tracebacklimit = 0 +
+# excepthook override): loader tracebacks leak host paths + loader
+# internals. Installed FIRST so every later failure is silent. Opt-out
+# at runtime via NIXON_TRACEBACKS=1 (diagnostics).
+import sys as _nx_tb_sys
+import os as _nx_tb_os
+try:
+    if _nx_tb_os.environ.get("NIXON_TRACEBACKS", "0") == "0":
+        _nx_tb_sys.tracebacklimit = 0
+        def _nx_quiet_excepthook(_t, _v, _tb, _s=_nx_tb_sys):
+            try:
+                _s.stderr.write("fatal error\n")
+            except Exception:
+                pass
+            try:
+                _s.exit(1)
+            except Exception:
+                pass
+        _nx_tb_sys.excepthook = _nx_quiet_excepthook
+except Exception:
+    pass
+del _nx_tb_sys
+try:
+    del _nx_tb_os
+except Exception:
+    pass
+try:
+    del _nx_quiet_excepthook
+except Exception:
+    pass
 import sys, platform, base64, zlib, bz2, lzma, tempfile, os, importlib.util
 import ctypes as _ct_loader
 _ctypes_pythonapi = _ct_loader.pythonapi

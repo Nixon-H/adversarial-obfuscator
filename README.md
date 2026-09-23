@@ -77,6 +77,7 @@ Notes:
 | `--pyinstaller-spec` (best-effort) | writes `.spec` next to output; never fails the build | `tests/test_pyinstaller_spec.py` |
 | Artifact signing `--sign-key-env VAR` | signs packaged payload to `<file>.sig.json` (best-effort) | `tests/test_artifact_sign.py` |
 | Audit-timing enforcement (opt-in env) | `NIXON_AUDIT_TIMING` arms timing-kill in audit hook | `tests/test_audit_timing.py` |
+| Loader traceback suppression (default ON) | `tracebacklimit=0` + quiet excepthook ("fatal error", no paths); diagnostics via `NIXON_TRACEBACKS=1` | `tests/test_traceback_suppression.py` |
 
 Measured numbers (host-specific, reproducible in-repo):
 
