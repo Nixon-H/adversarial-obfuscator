@@ -131,8 +131,42 @@ class PathORAM:
                 self.tree[level][bucket_idx] = None
         return blocks
 
+    def _bucket_on_path(self, block_leaf: int, level: int, bucket_idx: int) -> bool:
+        """
+        Check whether bucket (level, bucket_idx) lies on the root-to-leaf
+        path for block_leaf. A block may only reside in a bucket shared by
+        its own leaf path and the eviction path (standard Path-ORAM
+        placement invariant).
+        """
+        return (block_leaf >> (self.tree_height - level)) == bucket_idx
+
     def _write_path(self, leaf: int, path_blocks: List[Dict]) -> None:
-        pass
+        """
+        Greedy Path-ORAM write-back (eviction) along the path to leaf.
+
+        path_blocks were already merged into the stash by access(); evict
+        from the stash: walk buckets leaf-to-root and place the first
+        stash block legally allowed in each empty bucket. Blocks that do
+        not fit remain in the stash (bounded by O(log N) w.h.p.).
+
+        Security note: this is the O(log N) write step. Every access
+        writes back exactly one full path, so read and write accesses
+        are indistinguishable to an observer.
+        """
+        # path_blocks is intentionally unused: its contents were moved
+        # into self.stash by access() before this call; eviction below
+        # drains the stash back into the tree.
+        _ = path_blocks
+        path = self._get_path(leaf)
+        for level, bucket_idx in reversed(path):
+            if self.tree[level][bucket_idx] is not None:
+                continue
+            for i, block in enumerate(self.stash):
+                block_leaf = self.position_map.get(block["id"], leaf)
+                if self._bucket_on_path(block_leaf, level, bucket_idx):
+                    self.tree[level][bucket_idx] = block
+                    del self.stash[i]
+                    break
 
     def access(self, address: int, new_data: Optional[Any] = None) -> Optional[Any]:
         """
@@ -170,8 +204,10 @@ class PathORAM:
         if old_data is None:
             new_block = {"id": address, "data": new_data}
             self.stash.append(new_block)
-        else:
-            self.position_map[address] = uuid.uuid4().int % self.num_leaves
+        # Remap on every access (not only on stash hit): repeated accesses
+        # to the same address must take different paths, otherwise the
+        # adversary can link accesses by path identity.
+        self.position_map[address] = uuid.uuid4().int % self.num_leaves
 
         self._write_path(old_leaf, path_blocks)
 

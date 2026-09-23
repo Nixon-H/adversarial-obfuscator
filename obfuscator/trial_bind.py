@@ -297,8 +297,41 @@ def check_and_update(build_key, fingerprint, deadline_epoch, token,
             parent = os.path.dirname(path)
             if parent:
                 os.makedirs(parent, exist_ok=True)
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(seal_last_seen(build_key, moment))
+            _data = seal_last_seen(build_key, moment).encode("utf-8")
+            try:
+                _flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+                _fd = os.open(path, _flags | getattr(os, "O_NOFOLLOW", 0),
+                              0o600)
+            except (AttributeError, OSError) as _e:
+                import errno as _errno
+                if getattr(_e, "errno", None) in (
+                        getattr(_errno, "ELOOP", 40),
+                        getattr(_errno, "EMLINK", 31)):
+                    # Symlink (or link-loop) at state path: refuse to
+                    # follow; degrade rollback protection for this run.
+                    return "ok"
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(seal_last_seen(build_key, moment))
+                return "ok"
+            else:
+                try:
+                    try:
+                        _st = os.fstat(_fd)
+                        _uid = getattr(_st, "st_uid", None)
+                        _me = os.geteuid() if hasattr(os, "geteuid") else None
+                        if (_uid is not None and _me is not None
+                                and _uid != _me):
+                            raise OSError("state file owner mismatch")
+                    except OSError:
+                        raise
+                    except Exception:
+                        pass
+                    os.write(_fd, _data)
+                finally:
+                    try:
+                        os.close(_fd)
+                    except Exception:
+                        pass
         except Exception:
             pass
     return "ok"
@@ -343,7 +376,7 @@ def emit_trial_snippet(deadline_epoch, token_hex, build_key_hex,
 
         _verdict = _nx_trial_gate()
         if _verdict != "ok":
-            sys.exit("trial " + _verdict)  # or silent sys.exit(1)
+            _nx_kill("trial-" + str(_verdict))  # wipe + silent exit 137
 
     ``hwid_hint``: when the build used ``--hwid``, pass that string so the
     runtime checks the explicit HWID; otherwise the snippet re-derives the
@@ -372,8 +405,9 @@ def emit_trial_snippet(deadline_epoch, token_hex, build_key_hex,
         + "    import os as _tb_os\n"
         + "    import platform as _tb_platform\n"
         + "    import sys as _tb_sys\n"
-        + "    import time as _tb_time\n"
-        + "    import uuid as _tb_uuid\n"
+         + "    import time as _tb_time\n"
+         + "    import uuid as _tb_uuid\n"
+         + "    import errno as _tb_errno\n"
         + "    _tb_deadline = %r\n" % (deadline,)
         + "    _tb_token = %r\n" % (token,)
         + "    _tb_key = bytes.fromhex(%r)\n" % (key_hex,)
@@ -485,10 +519,36 @@ def emit_trial_snippet(deadline_epoch, token_hex, build_key_hex,
         + "        _tb_parent = _tb_os.path.dirname(_tb_path)\n"
         + "        if _tb_parent:\n"
         + "            _tb_os.makedirs(_tb_parent, exist_ok=True)\n"
-        + "        _tb_body2 = repr(float(_tb_now))\n"
-        + "        _tb_mac3 = _tb_hmac.new(_tb_key, b\"nx-trial-lastseen-v1|\" + _tb_body2.encode(\"utf-8\"), _tb_hashlib.sha256).hexdigest()\n"
-        + "        with open(_tb_path, \"w\", encoding=\"utf-8\") as _tb_fh2:\n"
-        + "            _tb_fh2.write(\"%s:%s\" % (_tb_body2, _tb_mac3))\n"
+         + "        _tb_body2 = repr(float(_tb_now))\n"
+         + "        _tb_mac3 = _tb_hmac.new(_tb_key, b\"nx-trial-lastseen-v1|\" + _tb_body2.encode(\"utf-8\"), _tb_hashlib.sha256).hexdigest()\n"
+         + "        _tb_data = (\"%s:%s\" % (_tb_body2, _tb_mac3)).encode(\"utf-8\")\n"
+         + "        try:\n"
+         + "            _tb_flags = _tb_os.O_WRONLY | _tb_os.O_CREAT | _tb_os.O_TRUNC\n"
+         + "            _tb_nofollow = getattr(_tb_os, \"O_NOFOLLOW\", 0)\n"
+         + "            _tb_fd = _tb_os.open(_tb_path, _tb_flags | _tb_nofollow, 0o600)\n"
+         + "        except (AttributeError, OSError) as _tb_e:\n"
+         + "            if getattr(_tb_e, \"errno\", None) in (getattr(_tb_errno, \"ELOOP\", 40), getattr(_tb_errno, \"EMLINK\", 31)):\n"
+         + "                raise\n"
+         + "            with open(_tb_path, \"w\", encoding=\"utf-8\") as _tb_fh2:\n"
+         + "                _tb_fh2.write(\"%s:%s\" % (_tb_body2, _tb_mac3))\n"
+         + "        else:\n"
+         + "            try:\n"
+         + "                try:\n"
+         + "                    _tb_st = _tb_os.fstat(_tb_fd)\n"
+         + "                    _tb_uid = getattr(_tb_st, \"st_uid\", None)\n"
+         + "                    _tb_me = _tb_os.geteuid() if hasattr(_tb_os, \"geteuid\") else None\n"
+         + "                    if _tb_uid is not None and _tb_me is not None and _tb_uid != _tb_me:\n"
+         + "                        raise OSError(\"state file owner mismatch\")\n"
+         + "                except OSError:\n"
+         + "                    raise\n"
+         + "                except Exception:\n"
+         + "                    pass\n"
+         + "                _tb_os.write(_tb_fd, _tb_data)\n"
+         + "            finally:\n"
+         + "                try:\n"
+         + "                    _tb_os.close(_tb_fd)\n"
+         + "                except Exception:\n"
+         + "                    pass\n"
         + "    except Exception:\n"
         + "        pass\n"
         + "    return \"ok\"\n"

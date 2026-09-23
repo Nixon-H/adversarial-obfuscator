@@ -1,4 +1,7 @@
 import os
+
+os.environ.setdefault("NIXON_LOG_REDIRECT", "0")
+
 import sys
 import tempfile
 import pytest

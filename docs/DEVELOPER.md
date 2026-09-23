@@ -41,11 +41,9 @@ make test
 ## Testing
 
 ```bash
-make test           # Full test suite
-make test-python    # Python tests only
-make test-rust      # Rust tests only
+make test           # Full test suite (pytest + runtime/relay cargo tests)
 pytest tests/test_encrypt.py -v  # Specific test file
-cargo test -p nixon-runtime      # Specific Rust crate
+cd runtime && cargo test  # Specific Rust crate (relay: cd relay && cargo test)
 ```
 
 ## Cross-Compilation

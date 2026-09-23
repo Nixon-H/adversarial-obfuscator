@@ -122,7 +122,7 @@ def emit_loader_snippet(threshold: float = 50.0) -> str:
     registry/driver/VM-vendor angle on Windows.
 
     Computes percent with the SAME weights subset (_SUBSET_WEIGHTS,
-    embedded by value) and calls os._exit(1) only if percent >=
+    embedded by value) and calls _nx_kill("vm-detect") (exit 137) only if percent >=
     threshold AND env var NIXON_KOD != '0' (default: report only,
     no kill - KOD default-OFF).
     """

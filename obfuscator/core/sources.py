@@ -934,7 +934,7 @@ _VARS_MAP = {
 }
 VARS = {k: get_random_var_name(v) for k, v in _VARS_MAP.items()}
 VARS["MAGIC"] = b"NIXON_ENC"
-VARS["STR_KEY"] = random.randint(1, 255)
+VARS["STR_KEY"] = secrets.randbelow(255) + 1
 VARS.update({
     "FUNC_NEXT_H": FUNC_NEXT_H,
     "FUNC_REM_ENT": FUNC_REM_ENT,

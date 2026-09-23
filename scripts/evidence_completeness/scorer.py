@@ -50,6 +50,23 @@ CLAIM_PATTERNS = [
     "cannot be reversed",
 ]
 
+# Precompiled claim matchers — compiled once at import time instead of
+# calling re.search(re.escape(...)) per pattern per line during scans.
+_CLAIM_REGEXES = [re.compile(re.escape(p)) for p in CLAIM_PATTERNS]
+
+# Files larger than this are skipped during scans. Generated artifacts such
+# as archive/artifacts/invariant_engine_report.json (~81MB, ~1.9M lines)
+# otherwise make full-repo scans hang.
+_MAX_SCAN_FILE_BYTES = 5 * 1024 * 1024
+
+
+def _is_too_large(file_path: str) -> bool:
+    """Return True if a file should be skipped for being oversized."""
+    try:
+        return os.path.getsize(file_path) > _MAX_SCAN_FILE_BYTES
+    except OSError:
+        return True
+
 
 @dataclass
 class ClaimEvidence:
@@ -134,12 +151,14 @@ class EvidenceCompletenessScorer:
         List of (line_number, text) tuples for each match.
         """
         matches = []
+        if _is_too_large(file_path):
+            return matches
         try:
             with open(file_path, encoding="utf-8", errors="ignore") as f:
                 for i, line in enumerate(f, 1):
                     line_lower = line.lower()
-                    for pattern in CLAIM_PATTERNS:
-                        if re.search(re.escape(pattern), line_lower):
+                    for rx in _CLAIM_REGEXES:
+                        if rx.search(line_lower):
                             matches.append((i, line.strip()[:150]))
                             break
         except (UnicodeDecodeError, OSError):
@@ -159,7 +178,7 @@ class EvidenceCompletenessScorer:
         Outputs:
         True if the directory should be skipped.
         """
-        skip = {".git", ".svn", "__pycache__", "node_modules", ".venv", "venv", ".tox", ".pytest_cache", ".eggs", "eggs", "dist", "build", "relay", ".agents", ".claude"}
+        skip = {".git", ".svn", "__pycache__", "node_modules", ".venv", "venv", ".tox", ".pytest_cache", ".eggs", "eggs", "dist", "build", "relay", ".agents", ".claude", "archive", "target", ".mypy_cache", ".pytest_cache", "fixtures", "test_data"}
         return dir_name in skip or dir_name.startswith(".")
 
     def _scan_directory_for_claims(self) -> list[tuple[str, int, str]]:
@@ -208,6 +227,8 @@ class EvidenceCompletenessScorer:
             for f in files:
                 if f.endswith((".py", ".rs", ".c", ".h")):
                     file_path = os.path.join(root, f)
+                    if _is_too_large(file_path):
+                        continue
                     try:
                         with open(file_path, encoding="utf-8", errors="ignore") as fh:
                             content = fh.read()
@@ -302,6 +323,8 @@ class EvidenceCompletenessScorer:
             for f in files:
                 if f.endswith((".prof", ".trace", ".log", ".csv", ".json")):
                     file_path = os.path.join(root, f)
+                    if _is_too_large(file_path):
+                        continue
                     try:
                         with open(file_path, encoding="utf-8", errors="ignore") as fh:
                             content = fh.read()
@@ -332,6 +355,8 @@ class EvidenceCompletenessScorer:
             for f in files:
                 if "audit" in f.lower() or "audit" in root.lower():
                     file_path = os.path.join(root, f)
+                    if _is_too_large(file_path):
+                        continue
                     try:
                         with open(file_path, encoding="utf-8", errors="ignore") as fh:
                             content = fh.read()

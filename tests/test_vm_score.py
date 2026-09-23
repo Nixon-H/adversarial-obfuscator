@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from obfuscator.vm_score import SIGNALS, emit_loader_snippet, score, verdict
 
 
-def test_signals_total_is_220():
+def test_signals_total_is_235():
     # NOTE: the weights as specified in the task sum to 225, not 220
     # (25*2 + 20*5 + 15*3 + 10*3 = 225). We keep the specified weights
     # verbatim; total is derived from SIGNALS. The additive V10

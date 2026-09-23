@@ -6,11 +6,11 @@ kernel in :mod:`obfuscator.lowering_shim`, so output still RUNS without any
 native artifact. Phase 2 (later, --pytoc path): the shim import is swapped
 for per-build-renamed Cython helpers with identical call shapes.
 
-Families mirror V10: 14 default-ON (io, scalar, string, container, service,
-protocol, function, import, fusion, list, dict, set, tuple, bytes) + 5
+Families mirror V10: 15 default-ON (io, scalar, string, container, service,
+protocol, function, import, fusion, list, dict, set, tuple, bytes, range) + 5
 opt-in (arithmetic, truth, slice, format, augassign). ``--lowering`` CSV
-selects families: "all", "none", "+arithmetic", "-io", or explicit lists.
-Unknown names raise ValueError.
+selects families: "all", "none", "+arithmetic", "-io", or bare names (which
+ADD to the defaults). Unknown names raise ValueError.
 
 Method-call lowering: a call shaped ``recv.<meth>(args)`` where ``recv``
 is a plain Name and ``<meth>`` matches a dotted registry op routes to the
@@ -250,9 +250,10 @@ class _LoweringRewriter(ast.NodeTransformer):
 def resolve_families(spec: str) -> frozenset:
     """Parse --lowering CSV into an active family set.
 
-    "" (empty) -> no lowering. "all" -> all 14. "none" -> empty.
-    "+arithmetic" adds, "-io" removes from defaults; bare names form an
-    explicit list. Unknown names raise ValueError.
+    "" (empty) -> no lowering. "all" -> all 20. "none" -> empty.
+    "+arithmetic" adds, "-io" removes from defaults; bare names ADD to
+    the defaults (they are NOT an explicit list). Unknown names raise
+    ValueError.
     """
     spec = (spec or "").strip()
     if not spec:

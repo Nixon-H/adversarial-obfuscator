@@ -1130,6 +1130,10 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         _phase4_suffix += ("_NX_DRIVER_CHECK_ARMED = %r\n" % (bool(driver_check),))
     except Exception:
         pass
+    # NOTE: _NX_DRIVER_CHECK_ARMED is an informational / reserved build-
+    # manifest literal (golden tests assert its bytes). It is NOT read at
+    # runtime: the live driver gate reads env NIXON_DRIVER_CHECK (see the
+    # emitted driver snippet).
     # V10 split-bootstrap (opt-in, default OFF): Shamir threshold key +
     # fragmented decoder (obfuscator/split_bootstrap.py). Best-effort:
     # never break builds — any failure falls back to the single-key path.
@@ -1183,6 +1187,11 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
             pass
     _phase4_suffix += ("_NX_KOD_ARMED = %r\n" % (bool(kod),))
     _phase4_suffix += ("_NX_TRIAL_SECONDS = %r\n" % (trial_seconds,))
+    # NOTE: _NX_KOD_ARMED / _NX_TRIAL_SECONDS above are informational /
+    # reserved build-manifest literals (golden tests assert their bytes).
+    # They are NOT read at runtime: the live KOD switch is env NIXON_KOD
+    # (see vm_score snippet) and the live trial gate is the emitted
+    # _nx_trial_gate snippet + _NX_TRIAL_* literals below.
     # Runtime integrity: frozen stdlib file snapshots. Default ON unless
     # snapshot_off=True (--no-snapshot); runtime env NIXON_SNAPSHOT_OFF
     # also disables. Version-bound: enforced only when the target
@@ -1329,8 +1338,8 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
     # _NX_WATERMARK_GATE marker = DISABLED, no gate). The gate is a
     # self-contained snippet from obfuscator.watermark_gate (stdlib only):
     # HMAC(message, build_key) + sealed presence marker. A stripped or
-    # tampered watermark fails closed via sys.exit (same shape as the
-    # trial gate above), before any payload runs.
+    # tampered watermark fails closed via _nx_kill (exit 137; same shape
+    # as the trial gate above), before any payload runs.
     try:
         from obfuscator.watermark_gate import (
             build_watermark_context as _wm_ctx,
@@ -2113,9 +2122,16 @@ def build_project(args):
         if deployed_url:
             deployed_rpc = deployed_url
             CRITICAL_PAYLOAD = f"""
-global _RUNTIME_KEY, _VERIFY_INTEGRITY
+global _RUNTIME_KEY, _VERIFY_INTEGRITY, _RUNTIME_DIGEST
 _RUNTIME_KEY = bytes.fromhex('{runtime_key}')
-def _VERIFY_INTEGRITY(): return True
+import hashlib as _nx_hashlib
+_RUNTIME_DIGEST = _nx_hashlib.sha256(_RUNTIME_KEY).hexdigest()
+# Legacy network-payload path: real check (never unconditional True).
+def _VERIFY_INTEGRITY():
+    try:
+        return bool(_nx_hashlib.sha256(_RUNTIME_KEY).hexdigest() == _RUNTIME_DIGEST)
+    except Exception:
+        return False
 """
             code_obj = compile(CRITICAL_PAYLOAD, '<network>', 'exec')
             bytecode_hex = "0x" + marshal.dumps(code_obj).hex()
@@ -2127,9 +2143,16 @@ def _VERIFY_INTEGRITY(): return True
             args._bytecode_hex = bytecode_hex
     if bytecode_hex is None and runtime_key:
          CRITICAL_PAYLOAD = f"""
-global _RUNTIME_KEY, _VERIFY_INTEGRITY
+global _RUNTIME_KEY, _VERIFY_INTEGRITY, _RUNTIME_DIGEST
 _RUNTIME_KEY = bytes.fromhex('{runtime_key}')
-def _VERIFY_INTEGRITY(): return True
+import hashlib as _nx_hashlib
+_RUNTIME_DIGEST = _nx_hashlib.sha256(_RUNTIME_KEY).hexdigest()
+# Legacy offline-payload path: real check (never unconditional True).
+def _VERIFY_INTEGRITY():
+    try:
+        return bool(_nx_hashlib.sha256(_RUNTIME_KEY).hexdigest() == _RUNTIME_DIGEST)
+    except Exception:
+        return False
 """
          code_obj = compile(CRITICAL_PAYLOAD, '<network>', 'exec')
          bytecode_hex = "0x" + marshal.dumps(code_obj).hex()

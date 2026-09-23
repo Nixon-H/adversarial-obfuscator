@@ -29,7 +29,7 @@ Arming (OFF BY DEFAULT, two independent paths, either arms):
 
 When disarmed the emitted ``driver_check()`` enumerates and returns hits
 but NEVER exits. When armed, a non-empty hit list fails closed via
-``os._exit(1)`` (same primitive as the vm_score snippet).
+``_nx_kill("driver-blocked")`` (exit 137; same ladder as vm_score).
 
 V10 asks for "at load time and continuously afterwards": the emitted
 snippet runs ``driver_check()`` once at import AND starts a lightweight

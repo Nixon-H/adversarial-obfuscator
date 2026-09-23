@@ -11,7 +11,14 @@ numpy==2.2.4             # Optional — HAS_NUMPY check; used if present for num
 # ─── Build (C extension compilation) ─────────────────────────────────────────
 Cython==3.0.12           # C extension compilation (GitHubBuildFarm → .pyd/.so/.dylib)
 
-# ─── Test (SMT-backed suites: test_metrics, test_smt_validation, proof
+# ─── Crypto (primary: cryptography → AES-CTR; fallback: pycryptodome; else XOR) ──
+cryptography==46.0.7     # pipeline.py _check_aes_ctr tries cryptography first
+# pycryptodome kept as fallback branch in pipeline.py — intentionally not required.
+
+# ─── Test ────────────────────────────────────────────────────────────────────
+pytest==9.0.2             # test runner
+pytest-benchmark==5.3.0    # bench_* suites (benchmark fixture)
+# ─── SMT-backed suites (test_metrics, test_smt_validation, proof
 # soundness, vm_correctness, watermark_survivability, etc. — 15 modules
 # import z3 via scripts/metrics/resilience.py and scripts/validation/)
 # ─────────────────────────────────────────────────────────────────────────────

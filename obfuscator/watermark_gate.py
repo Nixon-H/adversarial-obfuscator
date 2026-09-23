@@ -14,9 +14,10 @@ the watermark was removed -> refuse.
 
 Fail-closed semantics follow the project's standard tamper termination:
 the emitted snippet ends with an enforcement block that calls
-``sys.exit("watermark " + verdict)`` (same shape as the trial gate in
+``_nx_kill("watermark-" + verdict)`` (wipe + silent exit 137; same shape
+as the trial gate in
 ``obfuscator/core/pipeline.py::generate_hybrid_loader_script``), so a
-stripped/tampered watermark is a non-zero exit before any payload runs.
+stripped/tampered watermark never reaches any payload.
 
 When no watermark was configured at build time the emitted gate is the
 literal ``_NX_WATERMARK_GATE = "DISABLED"`` and the artifact runs
@@ -137,7 +138,7 @@ def emit_watermark_snippet(message, tag_hex, build_key_hex, marker,
 
         _NX_WATERMARK_GATE = _nx_watermark_gate()
         if _NX_WATERMARK_GATE != "ok":
-            sys.exit("watermark " + str(_NX_WATERMARK_GATE))
+            _nx_kill("watermark-" + str(_NX_WATERMARK_GATE))  # exit 137
 
     All literals are embedded via ``repr`` (hex digests / marker contain
     only ``[0-9a-fA-F-]``; no quoting hazards).  Stdlib only.

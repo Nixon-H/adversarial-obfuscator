@@ -806,6 +806,8 @@ Examples:
     parser.add_argument("--no-stdlib-audit", dest="stdlib_audit_off", action="store_true", default=False,
                         help="Omit the stdlib function-audit gate from the loader (default: gate ON; "
                              "also disarmable at runtime via NIXON_STDLIB_AUDIT_OFF=1)")
+    parser.add_argument("--build-id", dest="build_id", type=str, default="",
+                        help="stable build id (reproducible builds; default: random per build)")
 
     opts = parser.parse_args()
 

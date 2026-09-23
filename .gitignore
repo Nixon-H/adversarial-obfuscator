@@ -19,6 +19,7 @@ build/
 *.dll
 *.so
 *.dylib
+native/*_test
 
 # Generated build outputs
 payload.h

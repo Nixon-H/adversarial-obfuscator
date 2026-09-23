@@ -96,8 +96,8 @@ Measured numbers (host-specific, reproducible in-repo):
 --no-cfg-flatten | --no-opaque-predicates | --no-bogus-exceptions | --no-mba-subs
     | --no-fragment-strings | --no-unicode-ids
 --opt-level {0,1,2,3,4,5}   Protection ladder, default 4 (recommended)
---lowering LOWERING   Family CSV (default '' = disabled). Bare names are an
-                      explicit list; +fam/-fam add/remove vs defaults; "all"/"none"
+--lowering LOWERING   Family CSV (default '' = disabled). Bare names ADD to
+                      the 15 defaults; -fam removes; none = empty; "all" = all 20
 --diagnostic          Per-stage timings + transform counts + NOT-FOR-RELEASE marker
 --pytoc [--pytoc-out PATH]  Cython native-extension compile (best-effort, never fails build)
 --pyinstaller-spec    Write best-effort PyInstaller .spec (never fails build)
@@ -147,9 +147,9 @@ Default-ON vs default-OFF matrix:
 | `--rename-internal` | flag |
 | `--split-bootstrap` | flag |
 | KOD kill-on-detect (VM + audit-hook timing) | `NIXON_KOD=1` at runtime (report-only otherwise) |
-| Audit timing enforcement | `NIXON_AUDIT_TIMING=<seconds>` at runtime |
+| Audit timing enforcement | `NIXON_AUDIT_TIMING=<any non-"0" value>` arms at runtime |
 | `--lowering` itself | `--lowering <csv>` |
-| Opt-in lowering families (`arithmetic,truth,slice,format,augassign`) | `+fam` / explicit names / `all` |
+| Opt-in lowering families (`arithmetic,truth,slice,format,augassign`) | `+fam` / bare names / `all` |
 
 ## Security model + honest limitations
 

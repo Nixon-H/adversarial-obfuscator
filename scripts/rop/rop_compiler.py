@@ -9,10 +9,19 @@ Classes:
 
 import ast
 import json
+import logging
 import os
 import random
 import struct
 import sys
+
+logger = logging.getLogger(__name__)
+
+# Gadget placeholder emitted for unhandled AST nodes: int3 (0xCC) trap.
+# A faulting placeholder is fail-loud by design — executing a chain that
+# reaches an uncompiled construct raises SIGTRAP instead of silently
+# running the wrong semantics.
+TRAP_PLACEHOLDER = 0xCC
 
 
 # ──────────────────────────────────────────────
@@ -427,6 +436,11 @@ class RopCompiler:
         self._chain = RopChain()
         self._var_map: dict[str, int] = {}
         self._label_counter = 0
+        # Unhandled AST node types seen by _fallback_compile. Each entry
+        # records the node class name; fallback_count counts emissions.
+        self.warnings: list[str] = []
+        self.fallback_count = 0
+        self.strict = False
 
     # ── public API ────────────────────────────────────────────
 
@@ -434,6 +448,8 @@ class RopCompiler:
         self._chain = RopChain(source_func=func_def.name)
         self._var_map = {}
         self._label_counter = 0
+        self.warnings = []
+        self.fallback_count = 0
 
         for node in func_def.body:
             self._compile_stmt(node)
@@ -485,7 +501,24 @@ class RopCompiler:
             self._fallback_compile(node)
 
     def _fallback_compile(self, node: ast.AST):
-        pass
+        """Fail-loud fallback for unhandled AST nodes.
+
+        Records the node type in self.warnings, bumps self.fallback_count,
+        logs loudly, and emits an int3 trap placeholder so the output chain
+        is never silently wrong. In strict mode raises instead of emitting.
+        """
+        node_type = type(node).__name__
+        self.warnings.append(node_type)
+        self.fallback_count += 1
+        logger.warning(
+            "RopCompiler: unhandled AST node %s in %r — emitting trap placeholder",
+            node_type, getattr(self._chain, "source_func", ""),
+        )
+        if self.strict:
+            raise NotImplementedError(
+                f"RopCompiler strict mode: unhandled AST node {node_type}"
+            )
+        self._chain.append_imm(TRAP_PLACEHOLDER)
 
     # ── Assign ────────────────────────────────────────────────
 
@@ -527,6 +560,8 @@ class RopCompiler:
     def _compile_expr(self, node: ast.AST):
         if isinstance(node, ast.Call):
             self._compile_call_expr(node)
+        else:
+            self._fallback_compile(node)
 
     def _compile_call_expr(self, node: ast.Call):
         func_name = self._get_call_name(node)

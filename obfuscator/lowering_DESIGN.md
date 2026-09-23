@@ -54,17 +54,17 @@ Why this staging is honest: the AST transform is testable TODAY
 artifact with its own ABI/API/version story. V10's perf numbers
 (0.19x–1.56x) only make sense natively — our Phase-1 stubs add call
 overhead, documented per family, and families default exactly as V10
-specifies (14 on, 5 opt-in).
+specifies (15 on, 5 opt-in).
 
 ## Operation registry (20 families)
 
-Default ON (14): io, scalar, string, container, service, protocol,
-function, import, fusion, list, dict, set, tuple, bytes.
+Default ON (15): io, scalar, string, container, service, protocol,
+function, import, fusion, list, dict, set, tuple, bytes, range.
 Opt-in (5): arithmetic, truth, slice, format, augassign.
 
 Each family entry: {ops: [dotted names / node kinds], default_on: bool,
 note: str}. `resolve_families(spec)` parses the `--lowering` CSV
-("all", "none", "+arithmetic", "-io", explicit lists).
+("all", "none", "+arithmetic", "-io", bare names which ADD to defaults).
 
 ### Method-call routing (receiver handling)
 
