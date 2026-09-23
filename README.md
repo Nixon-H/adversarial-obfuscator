@@ -24,6 +24,9 @@ audit-hook plant detection, optional kernel-driver gate).
 
 The `-o/--output` path is a staging path: the final artifact is always
 packaged as `build/<payload>_obfuscated.py` (`scripts/phases/phase06_package.py`).
+`-o` outside the build dir is refused unless `--force-output` is passed
+(path-traversal guard: silent overwrites of arbitrary files are a
+footgun for a local build tool).
 Without `NIXON_LOG_REDIRECT=0`, stdout/stderr go to `build.log`
 (`obfuscator/core/utils.py`; the default is `1`, and `scripts/build.py`
 itself calls `setdefault("0")`, so plain `python3 scripts/build.py ...`
@@ -90,6 +93,7 @@ Measured numbers (host-specific, reproducible in-repo):
 ```text
 --payload PAYLOAD     Python script to obfuscate (required)
 -o, --output OUTPUT   Staging output path; final artifact lands in build/<name>_obfuscated.py
+--force-output        Allow -o outside the build dir (default: refused)
 --cross CROSS         Cross-compile targets: win,linux,macos,linux-arm
 --skip-obfuscate | --skip-irgen | --skip-llvmgen | --skip-encrypt | --skip-relay | --skip-extras
 --include-original    Include original payload in build/

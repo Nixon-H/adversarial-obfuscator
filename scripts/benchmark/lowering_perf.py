@@ -176,32 +176,36 @@ def _cases():
     C = []  # type: List[Dict[str, Any]]
 
     def add(family, op, plain, shimed, check=None, slow=False,
-            quiet=False):
-        # type: (str, str, Callable, Callable, Any, bool, bool) -> None
+            quiet=False, nativargs=None, nativkwargs=None):
+        # type: (str, str, Callable, Callable, Any, bool, bool, Any, Any) -> None
+        # nativargs/nativkwargs: explicit (args, kwargs) for the --native
+        # arm (same call shape as the shim for bare builtins). Only set on
+        # bare-builtin cases; method-style ops leave them None (skipped).
         C.append({"family": family, "op": op, "plain": plain,
                   "shim": shimed,
                   "check": check if check is not None else _eq,
-                  "slow": slow, "quiet": quiet})
+                  "slow": slow, "quiet": quiet, "nativargs": nativargs,
+                  "nativkwargs": nativkwargs})
 
     # io (print only; stdout suppressed in both arms)
     add("io", "print", lambda: print("hi"),
         lambda: nx._nxk_print("hi"), quiet=True)
 
     # scalar bare builtins
-    add("scalar", "int", lambda: int("42"), lambda: nx._nxk_int("42"))
+    add("scalar", "int", lambda: int("42"), lambda: nx._nxk_int("42"), nativargs=("42",))
     add("scalar", "float", lambda: float("1.5"),
-        lambda: nx._nxk_float("1.5"))
-    add("scalar", "str", lambda: str(42), lambda: nx._nxk_str(42))
-    add("scalar", "bool", lambda: bool(1), lambda: nx._nxk_bool(1))
-    add("scalar", "chr", lambda: chr(65), lambda: nx._nxk_chr(65))
-    add("scalar", "ord", lambda: ord("A"), lambda: nx._nxk_ord("A"))
-    add("scalar", "hex", lambda: hex(255), lambda: nx._nxk_hex(255))
-    add("scalar", "oct", lambda: oct(8), lambda: nx._nxk_oct(8))
-    add("scalar", "bin", lambda: bin(5), lambda: nx._nxk_bin(5))
-    add("scalar", "abs", lambda: abs(-3), lambda: nx._nxk_abs(-3))
+        lambda: nx._nxk_float("1.5"), nativargs=("1.5",))
+    add("scalar", "str", lambda: str(42), lambda: nx._nxk_str(42), nativargs=(42,))
+    add("scalar", "bool", lambda: bool(1), lambda: nx._nxk_bool(1), nativargs=(1,))
+    add("scalar", "chr", lambda: chr(65), lambda: nx._nxk_chr(65), nativargs=(65,))
+    add("scalar", "ord", lambda: ord("A"), lambda: nx._nxk_ord("A"), nativargs=("A",))
+    add("scalar", "hex", lambda: hex(255), lambda: nx._nxk_hex(255), nativargs=(255,))
+    add("scalar", "oct", lambda: oct(8), lambda: nx._nxk_oct(8), nativargs=(8,))
+    add("scalar", "bin", lambda: bin(5), lambda: nx._nxk_bin(5), nativargs=(5,))
+    add("scalar", "abs", lambda: abs(-3), lambda: nx._nxk_abs(-3), nativargs=(-3,))
     add("scalar", "round", lambda: round(1.567, 2),
-        lambda: nx._nxk_round(1.567, 2))
-    add("scalar", "len", lambda: len(_XS), lambda: nx._nxk_len(_XS))
+        lambda: nx._nxk_round(1.567, 2), nativargs=(1.567, 2,))
+    add("scalar", "len", lambda: len(_XS), lambda: nx._nxk_len(_XS), nativargs=(_XS,))
     # scalar numeric methods
     add("scalar", "int.bit_length", lambda: _N.bit_length(),
         lambda: nx._nxk_int_bit_length(_N))
@@ -280,54 +284,54 @@ def _cases():
 
     # container bare builtins
     add("container", "list", lambda: list((1, 2)),
-        lambda: nx._nxk_list((1, 2)))
+        lambda: nx._nxk_list((1, 2)), nativargs=((1, 2),))
     add("container", "tuple", lambda: tuple([1, 2]),
-        lambda: nx._nxk_tuple([1, 2]))
+        lambda: nx._nxk_tuple([1, 2]), nativargs=([1, 2],))
     add("container", "dict", lambda: dict(a=1),
-        lambda: nx._nxk_dict(a=1))
+        lambda: nx._nxk_dict(a=1), nativkwargs={'a': 1})
     add("container", "set", lambda: set([1, 2, 2]),
-        lambda: nx._nxk_set([1, 2, 2]))
+        lambda: nx._nxk_set([1, 2, 2]), nativargs=([1, 2, 2],))
     add("container", "frozenset", lambda: frozenset([1, 2]),
-        lambda: nx._nxk_frozenset([1, 2]))
+        lambda: nx._nxk_frozenset([1, 2]), nativargs=([1, 2],))
     add("container", "sorted", lambda: sorted([3, 1, 2]),
-        lambda: nx._nxk_sorted([3, 1, 2]))
+        lambda: nx._nxk_sorted([3, 1, 2]), nativargs=([3, 1, 2],))
     add("container", "reversed", lambda: reversed([1, 2, 3]),
-        lambda: nx._nxk_reversed([1, 2, 3]), check=_list_check)
+        lambda: nx._nxk_reversed([1, 2, 3]), check=_list_check, nativargs=([1, 2, 3],))
     add("container", "enumerate", lambda: enumerate(["a", "b"]),
-        lambda: nx._nxk_enumerate(["a", "b"]), check=_list_check)
+        lambda: nx._nxk_enumerate(["a", "b"]), check=_list_check, nativargs=(["a", "b"],))
     add("container", "zip", lambda: zip([1, 2], [3, 4]),
-        lambda: nx._nxk_zip([1, 2], [3, 4]), check=_list_check)
+        lambda: nx._nxk_zip([1, 2], [3, 4]), check=_list_check, nativargs=([1, 2], [3, 4],))
 
     # protocol
     add("protocol", "iter", lambda: iter(_XS),
-        lambda: nx._nxk_iter(_XS), check=_list_check)
+        lambda: nx._nxk_iter(_XS), check=_list_check, nativargs=(_XS,))
     add("protocol", "next", lambda: next(iter([1])),
-        lambda: nx._nxk_next(iter([1])))
+        lambda: nx._nxk_next(iter([1])), nativargs=(iter([1]),))
     add("protocol", "repr", lambda: repr(_S),
-        lambda: nx._nxk_repr(_S))
+        lambda: nx._nxk_repr(_S), nativargs=(_S,))
     add("protocol", "bytes", lambda: bytes("hi", "utf-8"),
-        lambda: nx._nxk_bytes("hi", "utf-8"))
+        lambda: nx._nxk_bytes("hi", "utf-8"), nativargs=("hi", "utf-8",))
 
     # service
     add("service", "getattr", lambda: getattr(_S, "upper")(),
         lambda: nx._nxk_getattr(_S, "upper")())
     add("service", "setattr", lambda: setattr(_Fresh(), "x", 1),
-        lambda: nx._nxk_setattr(_Fresh(), "x", 1))
+        lambda: nx._nxk_setattr(_Fresh(), "x", 1), nativargs=(_Fresh(), "x", 1,))
     add("service", "hasattr", lambda: hasattr(_S, "upper"),
-        lambda: nx._nxk_hasattr(_S, "upper"))
+        lambda: nx._nxk_hasattr(_S, "upper"), nativargs=(_S, "upper",))
     add("service", "isinstance", lambda: isinstance(_S, str),
-        lambda: nx._nxk_isinstance(_S, str))
+        lambda: nx._nxk_isinstance(_S, str), nativargs=(_S, str,))
     add("service", "issubclass", lambda: issubclass(bool, int),
-        lambda: nx._nxk_issubclass(bool, int))
+        lambda: nx._nxk_issubclass(bool, int), nativargs=(bool, int,))
     add("service", "callable", lambda: callable(len),
-        lambda: nx._nxk_callable(len))
+        lambda: nx._nxk_callable(len), nativargs=(len,))
     add("service", "id", lambda: id(_S), lambda: nx._nxk_id(_S),
-        check=_isinstance_check)
+        check=_isinstance_check, nativargs=(_S,))
     add("service", "hash", lambda: hash(_S),
-        lambda: nx._nxk_hash(_S))
+        lambda: nx._nxk_hash(_S), nativargs=(_S,))
     add("service", "vars", lambda: sorted(vars(_WithAttr())),
         lambda: sorted(nx._nxk_vars(_WithAttr())))
-    add("service", "dir", lambda: dir([]), lambda: nx._nxk_dir([]))
+    add("service", "dir", lambda: dir([]), lambda: nx._nxk_dir([]), nativargs=([],))
     add("service", "globals", lambda: isinstance(globals(), dict),
         lambda: nx._nxk_globals() is not None and
         isinstance(nx._nxk_globals(), dict))
@@ -336,43 +340,43 @@ def _cases():
     add("service", "compile",
         lambda: compile("40 + 2", "<bench>", "eval"),
         lambda: nx._nxk_compile("40 + 2", "<bench>", "eval"),
-        check=_isinstance_check, slow=True)
+        check=_isinstance_check, slow=True, nativargs=("40 + 2", "<bench>", "eval",))
     add("service", "eval", lambda: eval("40 + 2"),
-        lambda: nx._nxk_eval("40 + 2"))
+        lambda: nx._nxk_eval("40 + 2"), nativargs=("40 + 2",))
     add("service", "exec", _do_exec_plain, _do_exec_shim, slow=True)
     add("service", "memoryview", lambda: memoryview(_B),
-        lambda: nx._nxk_memoryview(_B), check=_bytes_check)
+        lambda: nx._nxk_memoryview(_B), check=_bytes_check, nativargs=(_B,))
 
     # range family (range + async-iteration leftovers living here)
-    add("range", "range", lambda: range(3), lambda: nx._nxk_range(3))
+    add("range", "range", lambda: range(3), lambda: nx._nxk_range(3), nativargs=(3,))
     add("range", "ascii", lambda: ascii("hé"),
-        lambda: nx._nxk_ascii("hé"))
+        lambda: nx._nxk_ascii("hé"), nativargs=("hé",))
     add("range", "format", lambda: format(3.14159, ".2f"),
-        lambda: nx._nxk_format(3.14159, ".2f"))
+        lambda: nx._nxk_format(3.14159, ".2f"), nativargs=(3.14159, ".2f",))
     add("range", "slice", lambda: slice(1, 10, 2),
-        lambda: nx._nxk_slice(1, 10, 2))
+        lambda: nx._nxk_slice(1, 10, 2), nativargs=(1, 10, 2,))
 
     # function family (lazy iterators compared via list())
     add("function", "map", lambda: map(str, _MF),
-        lambda: nx._nxk_map(str, _MF), check=_list_check)
+        lambda: nx._nxk_map(str, _MF), check=_list_check, nativargs=(str, _MF,))
     add("function", "filter", lambda: filter(bool, [0, 1, 2]),
-        lambda: nx._nxk_filter(bool, [0, 1, 2]), check=_list_check)
+        lambda: nx._nxk_filter(bool, [0, 1, 2]), check=_list_check, nativargs=(bool, [0, 1, 2],))
     add("function", "any", lambda: any([0, 1]),
-        lambda: nx._nxk_any([0, 1]))
+        lambda: nx._nxk_any([0, 1]), nativargs=([0, 1],))
     add("function", "all", lambda: all([1, 2]),
-        lambda: nx._nxk_all([1, 2]))
+        lambda: nx._nxk_all([1, 2]), nativargs=([1, 2],))
     add("function", "sum", lambda: sum([1, 2, 3]),
-        lambda: nx._nxk_sum([1, 2, 3]))
+        lambda: nx._nxk_sum([1, 2, 3]), nativargs=([1, 2, 3],))
     add("function", "min", lambda: min([3, 1, 2]),
-        lambda: nx._nxk_min([3, 1, 2]))
+        lambda: nx._nxk_min([3, 1, 2]), nativargs=([3, 1, 2],))
     add("function", "max", lambda: max([3, 1, 2]),
-        lambda: nx._nxk_max([3, 1, 2]))
+        lambda: nx._nxk_max([3, 1, 2]), nativargs=([3, 1, 2],))
     add("function", "pow", lambda: pow(2, 10),
-        lambda: nx._nxk_pow(2, 10))
+        lambda: nx._nxk_pow(2, 10), nativargs=(2, 10,))
     add("function", "divmod", lambda: divmod(7, 3),
-        lambda: nx._nxk_divmod(7, 3))
+        lambda: nx._nxk_divmod(7, 3), nativargs=(7, 3,))
     add("function", "complex", lambda: complex(1, 2),
-        lambda: nx._nxk_complex(1, 2))
+        lambda: nx._nxk_complex(1, 2), nativargs=(1, 2,))
 
     # import family (only the non-interactive op)
     add("import", "__import__", lambda: __import__("math").pi,
@@ -477,6 +481,68 @@ def _cases():
 
 CASES = _cases()
 
+
+def _load_native_module(spec):
+    # type: (str) -> Any
+    """Build or load a native kernel module for the --native arm.
+
+    spec == "build": render a fresh per-build-symbols kernel and cythonize
+    it into a temp dir. A .pyx path: cythonize it. A .so/.pyd path: load
+    it directly. Returns the loaded module or None (with a stderr note).
+    """
+    import importlib.util as _ilu
+    import tempfile as _tf
+    try:
+        from obfuscator.kernel_gen import (
+            cythonize_kernel as _kc,
+            render_pyx as _kr,
+        )
+    except Exception as _e:
+        sys.stderr.write("native arm unavailable (kernel_gen: %s)\n" % (_e,))
+        return None
+    try:
+        if spec == "build":
+            import secrets as _sec
+            _seed = _sec.token_bytes(16)
+            _text, _mod, _omap = _kr(_seed)
+            _d = _tf.mkdtemp(prefix="nxknative_")
+            _pyx = os.path.join(_d, _mod + ".pyx")
+            with open(_pyx, "w", encoding="utf-8") as _f:
+                _f.write(_text)
+            _so, _msg = _kc(_pyx, _d)
+            if _so is None:
+                sys.stderr.write("native arm skipped: %s\n" % (_msg,))
+                return None
+            _spec = _ilu.spec_from_file_location(_mod, _so)
+            _m = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(_m)
+            return _m
+        if spec.endswith(".pyx") and os.path.isfile(spec):
+            _base = os.path.splitext(os.path.basename(spec))[0]
+            _d = _tf.mkdtemp(prefix="nxknative_")
+            _so, _msg = _kc(spec, _d)
+            if _so is None:
+                sys.stderr.write("native arm skipped: %s\n" % (_msg,))
+                return None
+            _spec = _ilu.spec_from_file_location(_base, _so)
+            _m = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(_m)
+            return _m
+        if (spec.endswith(".so") or spec.endswith(".pyd")) and \
+                os.path.isfile(spec):
+            _base = os.path.splitext(os.path.basename(spec))[0]
+            _spec = _ilu.spec_from_file_location(_base, spec)
+            _m = _ilu.module_from_spec(_spec)
+            _spec.loader.exec_module(_m)
+            return _m
+        sys.stderr.write("native arm skipped: unknown spec %r "
+                         "(use 'build', a .pyx path, or a .so path)\n"
+                         % (spec,))
+        return None
+    except Exception as _e:
+        sys.stderr.write("native arm skipped: %s\n" % (_e,))
+        return None
+
 # Timing defaults
 DEFAULT_N = 20000
 DEFAULT_REPEATS = 5
@@ -518,11 +584,41 @@ def _best(fn, n, repeats, quiet=False):
     return best
 
 
-def time_case(case, n, repeats):
-    # type: (Dict[str, Any], int, int) -> Dict[str, Any]
+def time_case(case, n, repeats, native_module=None):
+    # type: (Dict[str, Any], int, int, Any) -> Dict[str, Any]
     nn = max(MIN_N, n // SLOW_DIVISOR) if case["slow"] else n
     plain_s = _best(case["plain"], nn, repeats, case["quiet"])
     shim_s = _best(case["shim"], nn, repeats, case["quiet"])
+    native_s = None
+    native_ok = None
+    if native_module is not None and case.get("nativargs") is not None \
+            or (native_module is not None
+                and case.get("nativkwargs") is not None):
+        try:
+            from obfuscator.kernel_gen import _token as _kg_token
+            _tok = _kg_token(case["op"])
+            _native_fn = getattr(native_module, _tok, None)
+            if _native_fn is not None:
+                _na = tuple(case.get("nativargs") or ())
+                _nk = dict(case.get("nativkwargs") or {})
+
+                def _nthunk():
+                    return _native_fn(*_na, **_nk)
+
+                native_s = _best(_nthunk, nn, repeats, case["quiet"])
+                try:
+                    if case["quiet"]:
+                        with contextlib.redirect_stdout(_io.StringIO()):
+                            _nres = _nthunk()
+                            _pres2 = case["plain"]()
+                    else:
+                        _nres = _nthunk()
+                        _pres2 = case["plain"]()
+                    native_ok = bool(case["check"](_pres2, _nres))
+                except Exception:
+                    native_ok = False
+        except Exception:
+            native_s = None
     if case["quiet"]:
         with contextlib.redirect_stdout(_io.StringIO()):
             pres = case["plain"]()
@@ -532,11 +628,18 @@ def time_case(case, n, repeats):
         sres = case["shim"]()
     ok = bool(case["check"](pres, sres))
     ratio = (shim_s / plain_s) if plain_s > 0 else float("inf")
-    return {"family": case["family"], "op": case["op"], "n": nn,
-            "repeats": repeats,
-            "plain_s": plain_s, "shim_s": shim_s,
-            "plain_us": plain_s / nn * 1e6, "shim_us": shim_s / nn * 1e6,
-            "ratio": ratio, "ok": ok}
+    out = {"family": case["family"], "op": case["op"], "n": nn,
+           "repeats": repeats,
+           "plain_s": plain_s, "shim_s": shim_s,
+           "plain_us": plain_s / nn * 1e6, "shim_us": shim_s / nn * 1e6,
+           "ratio": ratio, "ok": ok}
+    if native_s is not None:
+        out["native_s"] = native_s
+        out["native_us"] = native_s / nn * 1e6
+        out["native_ratio"] = (native_s / plain_s) \
+            if plain_s > 0 else float("inf")
+        out["native_ok"] = native_ok
+    return out
 
 
 def _geomean(xs):
@@ -548,8 +651,8 @@ def _geomean(xs):
 
 
 def run_benchmark(n=DEFAULT_N, repeats=DEFAULT_REPEATS,
-                   families=None):
-    # type: (int, int, Optional[List[str]]) -> Dict[str, Any]
+                   families=None, native_module=None):
+    # type: (int, int, Optional[List[str]], Any) -> Dict[str, Any]
     if families:
         wanted = set(families)
         unknown = wanted - set(lowering.FAMILIES)
@@ -559,7 +662,8 @@ def run_benchmark(n=DEFAULT_N, repeats=DEFAULT_REPEATS,
         todo = [c for c in CASES if c["family"] in wanted]
     else:
         todo = list(CASES)
-    results = [time_case(c, n, repeats) for c in todo]
+    results = [time_case(c, n, repeats, native_module=native_module)
+               for c in todo]
     fams = {}  # type: Dict[str, Dict[str, Any]]
     for r in results:
         fams.setdefault(r["family"], []).append(r)
@@ -595,25 +699,71 @@ def format_markdown(bundle):
     L.append("Ratio = shim_time / plain_time (best-of-%d "
              "time.perf_counter; <1.0 means the shim timed faster, "
              "i.e. noise/faster dispatch on that op)." % meta["repeats"])
+    _has_native = any("native_us" in r for r in results)
+    if _has_native:
+        L.append("native_ratio = native_time / plain_time (same machine, "
+                 "fresh per-build-symbols Cython kernel via --native build).")
     L.append("")
     L.append("## Per-family summary (geometric mean of op ratios)")
     L.append("")
-    L.append("| family | ops | geomean shim/plain | min | max | parity |")
-    L.append("|---|---|---|---|---|---|")
+    if _has_native:
+        L.append("| family | ops | geomean shim/plain | min | max | parity | "
+                 "native ops | geomean native/plain | native parity |")
+        L.append("|---|---|---|---|---|---|---|---|---|")
+    else:
+        L.append("| family | ops | geomean shim/plain | min | max | parity |")
+        L.append("|---|---|---|---|---|---|")
     for fam in sorted(summary):
         s = summary[fam]
-        L.append("| %s | %d | %.3f | %.3f | %.3f | %s |" % (
-            fam, s["ops"], s["geomean"], s["min"], s["max"],
-            "ok" if s["all_ok"] else "MISMATCH"))
+        if _has_native:
+            _nratios = [r["native_ratio"] for r in results
+                        if r["family"] == fam and "native_ratio" in r
+                        and isinstance(r["native_ratio"], float)
+                        and math.isfinite(r["native_ratio"])
+                        and r["native_ratio"] > 0]
+            _nok = [r for r in results if r["family"] == fam
+                    and "native_ok" in r]
+            _ng = _geomean(_nratios) if _nratios else float("nan")
+            _npar = ("ok" if all(r["native_ok"] for r in _nok)
+                     else ("MISMATCH" if _nok else "n/a"))
+            L.append("| %s | %d | %.3f | %.3f | %.3f | %s | %d | %.3f | %s |"
+                     % (fam, s["ops"], s["geomean"], s["min"], s["max"],
+                        "ok" if s["all_ok"] else "MISMATCH",
+                        len(_nratios), _ng, _npar))
+        else:
+            L.append("| %s | %d | %.3f | %.3f | %.3f | %s |" % (
+                fam, s["ops"], s["geomean"], s["min"], s["max"],
+                "ok" if s["all_ok"] else "MISMATCH"))
     L.append("")
     L.append("## Per-op detail (µs per call)")
     L.append("")
-    L.append("| family | op | plain µs | shim µs | ratio | parity |")
-    L.append("|---|---|---|---|---|---|")
+    if _has_native:
+        L.append("| family | op | plain µs | shim µs | ratio | parity | "
+                 "native µs | native ratio | native parity |")
+        L.append("|---|---|---|---|---|---|---|---|---|---|")
+    else:
+        L.append("| family | op | plain µs | shim µs | ratio | parity |")
+        L.append("|---|---|---|---|---|---|")
     for r in results:
-        L.append("| %s | %s | %.4f | %.4f | %.3f | %s |" % (
-            r["family"], r["op"], r["plain_us"], r["shim_us"],
-            r["ratio"], "ok" if r["ok"] else "MISMATCH"))
+        if _has_native:
+            if "native_us" in r:
+                L.append("| %s | %s | %.4f | %.4f | %.3f | %s | %.4f | "
+                         "%.3f | %s |" % (
+                             r["family"], r["op"], r["plain_us"],
+                             r["shim_us"], r["ratio"],
+                             "ok" if r["ok"] else "MISMATCH",
+                             r["native_us"], r["native_ratio"],
+                             "ok" if r.get("native_ok") else "MISMATCH"))
+            else:
+                L.append("| %s | %s | %.4f | %.4f | %.3f | %s | n/a | "
+                         "n/a | n/a |" % (
+                             r["family"], r["op"], r["plain_us"],
+                             r["shim_us"], r["ratio"],
+                             "ok" if r["ok"] else "MISMATCH"))
+        else:
+            L.append("| %s | %s | %.4f | %.4f | %.3f | %s |" % (
+                r["family"], r["op"], r["plain_us"], r["shim_us"],
+                r["ratio"], "ok" if r["ok"] else "MISMATCH"))
     L.append("")
     return "\n".join(L)
 
@@ -633,10 +783,18 @@ def main(argv=None):
                     help="CSV family subset (default: all benchmarked)")
     ap.add_argument("--json", default="",
                     help="optional path to write full JSON results")
+    ap.add_argument("--native", default="",
+                    help="also time the NATIVE Cython kernel: 'build' (fresh "
+                         "per-build-symbols kernel), a .pyx path, or a .so "
+                         "path. Adds native_us/native_ratio/native_ok. "
+                         "Bare builtins auto-covered via recorded args; "
+                         "method-style ops report n/a (shape differs).")
     args = ap.parse_args(argv)
     fams = [f.strip() for f in args.families.split(",") if f.strip()]
+    native_mod = _load_native_module(args.native) if args.native else None
     bundle = run_benchmark(n=args.iterations, repeats=args.repeats,
-                           families=fams or None)
+                           families=fams or None,
+                           native_module=native_mod)
     print(format_markdown(bundle))
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:

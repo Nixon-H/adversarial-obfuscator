@@ -116,6 +116,7 @@ def test_snippet_same_version_ok():
 
 def test_snippet_tamper_mismatch_and_kill(monkeypatch):
     import hashlib
+    from obfuscator.kill_ladder import emit_kill_snippet
     target = os.path.join(os.path.dirname(__file__), "fixtures",
                           "test_payload.py")
     if not os.path.isfile(target):
@@ -126,14 +127,14 @@ def test_snippet_tamper_mismatch_and_kill(monkeypatch):
     src = emit_snapshot_snippet(files, build_tag())
     # Corrupt the expectation (simulate a swapped stdlib on target).
     src = src.replace(good, "0" * 64, 1)
-    code = ("import os as _os\n"
-            "import sys as _sys\n"
-            "def _nx_kill(_reason='', _holders=None):\n"
-            "    _sys.stdout.write('KILLED:' + str(_reason))\n"
-            "    _sys.exit(137)\n"
-            + src +
+    # Use the REAL kill ladder (single failure path), not a hand-rolled
+    # stub: proves the shipped enforcement chain end to end. NOTE: the
+    # ladder uses os._exit (no stdio flush), so GATE output must be
+    # flushed BEFORE the kill — print with flush=True.
+    code = (emit_kill_snippet()
+            + "\n" + src +
             "\n_r = _nx_snapshot_gate()\n"
-            "print('GATE:' + str(_r))\n"
+            "print('GATE:' + str(_r), flush=True)\n"
             "if _r == 'mismatch':\n"
             "    _nx_kill('integrity-snapshot')\n")
     env = dict(os.environ)
@@ -143,7 +144,7 @@ def test_snippet_tamper_mismatch_and_kill(monkeypatch):
                           text=True, timeout=60, env=env)
     assert proc.returncode == 137, (proc.returncode, proc.stdout, proc.stderr)
     assert "GATE:mismatch" in proc.stdout
-    assert "KILLED:integrity-snapshot" in proc.stdout
+    assert proc.stderr == ""  # silent kill (no output on stderr either)
 
 
 def test_snippet_version_mismatch_report_only():

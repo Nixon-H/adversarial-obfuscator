@@ -132,14 +132,12 @@ def test_snippet_tamper_mismatch_and_kill():
     from obfuscator.frozen_snapshot import build_tag as _tag
     src = emit_audit_snippet(table, _tag())
     src = src.replace(good, "0" * 64, 1)  # simulate patched stdlib
-    code = ("import os as _os\n"
-            "import sys as _sys\n"
-            "def _nx_kill(_reason='', _holders=None):\n"
-            "    _sys.stdout.write('KILLED:' + str(_reason))\n"
-            "    _sys.exit(137)\n"
-            + src +
+    # Real kill ladder (single failure path), not a hand-rolled stub.
+    from obfuscator.kill_ladder import emit_kill_snippet
+    code = (emit_kill_snippet()
+            + "\n" + src +
             "\n_r = _nx_stdlib_gate()\n"
-            "print('GATE:' + str(_r))\n"
+            "print('GATE:' + str(_r), flush=True)\n"
             "if _r == 'mismatch':\n"
             "    _nx_kill('stdlib-tamper')\n")
     env = dict(os.environ)
@@ -149,7 +147,7 @@ def test_snippet_tamper_mismatch_and_kill():
                           text=True, timeout=60, env=env)
     assert proc.returncode == 137, (proc.returncode, proc.stdout, proc.stderr)
     assert "GATE:mismatch" in proc.stdout
-    assert "KILLED:stdlib-tamper" in proc.stdout
+    assert proc.stderr == ""  # silent kill
 
 
 def test_snippet_version_mismatch_report_only():

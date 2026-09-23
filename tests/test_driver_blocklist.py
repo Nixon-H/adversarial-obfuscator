@@ -232,6 +232,24 @@ def test_gate_armed_exits_on_bad_driver(monkeypatch):
     assert exited.get("code") == 137
 
 
+def test_gate_armed_subprocess_137():
+    # Real end-to-end kill chain in a child process: armed emitted
+    # snippet + REAL kill ladder, bad driver present -> silent 137.
+    from obfuscator.kill_ladder import emit_kill_snippet
+    src = emit_kill_snippet() + "\n" + emit_driver_snippet(armed=True)
+    code = (src + "\n_hits = driver_check(['RTCore64.sys'])\n"
+            "print('SHOULD-NOT-REACH')\n")
+    env = dict(os.environ)
+    env.pop(ARM_VAR, None)
+    env.setdefault("NIXON_LOG_REDIRECT", "0")
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                          text=True, timeout=60, env=env)
+    assert proc.returncode == 137, (proc.returncode, proc.stdout, proc.stderr)
+    assert proc.stdout == ""
+    assert proc.stderr == ""
+    assert "SHOULD-NOT-REACH" not in proc.stdout
+
+
 def test_gate_armed_env_only_exits(monkeypatch):
     import os as _os
     # Env arming is read LIVE at check time: exec disarmed, then arm.

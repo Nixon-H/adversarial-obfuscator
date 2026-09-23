@@ -36,16 +36,22 @@ jobs:
           echo "Stages: obfuscate → irgen → llvmgen → encrypt → relay → runtime"
       
       - name: Stage 1 - Obfuscate
-        run: python3 obfuscator/core.py obfuscate payload.py -o build/obfuscated.py
-      
+        # NOTE: obfuscator/core.py was a dead 2-line shim (removed); the
+        # canonical entry point is scripts/build.py (shadow-compiler 2.0.0).
+        run: python3 scripts/build.py --payload payload.py --skip-relay --skip-extras
+
       - name: Stage 2 - IR Compile
         run: python3 -m irgen build/obfuscated.py -o build/program.ir
-      
+
       - name: Stage 3 - LLVM Codegen
-        run: python3 -m llvmgen build/program.ir -o build/program.o --bcf --fla --sub
-      
+        # NOTE: llvmgen takes -O/--ollvm-passes (bcf/fla/sub...), not bare
+        # --bcf/--fla/--sub flags.
+        run: python3 -m llvmgen build/program.ir -o build/program.o -O bcf fla sub
+
       - name: Stage 4 - Block Encryption
-        run: python3 -m encrypt build/program.o -o build/encrypted.o --seed "${{ github.event.inputs.seed }}"
+        # NOTE: encrypt is a subcommand CLI (encrypt/pack/unpack/info/
+        # gen-seed); --seed belongs to `gen-seed`, not `encrypt`.
+        run: python3 -m encrypt encrypt build/program.o -o build/encrypted.o
       
       - name: Stage 5 - Link Relay
         run: make relay

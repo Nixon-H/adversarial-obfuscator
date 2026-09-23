@@ -38,6 +38,9 @@ def test_small_benchmark_ratios_finite_and_parity_ok():
     for fam, s in bundle["summary"].items():
         assert math.isfinite(s["geomean"]) and s["geomean"] > 0, fam
         assert s["all_ok"], fam
+    # --native arm contract (no real compile here): time_case with
+    # native_module=None leaves results native-free (no columns).
+    assert not any("native_us" in r for r in bundle["results"])
 
 
 def test_family_subset_and_json_roundtrip(tmp_path):
@@ -77,3 +80,24 @@ def test_all_default_families_with_callable_ops_covered():
             if op not in cased:
                 uncovered.append((fam, op))
     assert not uncovered, uncovered
+
+
+def test_native_arm_loader_contract():
+    # _load_native_module("definitely-not-a-kernel") returns None (never
+    # raises); time_case with a stub native module records native_us +
+    # native parity for ops carrying nativargs.
+    from scripts.benchmark import lowering_perf as lp
+    assert lp._load_native_module("definitely-not-a-kernel") is None
+
+    class _FakeNative(object):
+        pass
+
+    _fake = _FakeNative()
+    _fake._nxk_int = lambda *a, **k: int(*a, **k)
+    bundle = lp.run_benchmark(n=50, repeats=1, families=["scalar"],
+                              native_module=_fake)
+    natives = [r for r in bundle["results"] if "native_us" in r]
+    assert natives, "bare-builtin native arm recorded nothing"
+    for r in natives:
+        assert math.isfinite(r["native_ratio"]) and r["native_ratio"] > 0, r
+        assert r["native_ok"], "native parity mismatch: %s" % r["op"]

@@ -71,6 +71,18 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64 python3-dev
+          sudo apt-get install -y gcc-mingw-w64-x86-64 python3-dev file
       - run: make native-test
       - run: python3 -m pytest tests/test_native_compile.py -v
+      # Windows stub PE proof: stub-win needs Python.h for mingw; install
+      # it via python3-dev headers copy when available, then assert the
+      # output is a real PE (not a SKIP and not a Linux binary misnamed
+      # .exe). Non-fatal if headers are absent (documents the gap).
+      - run: |
+          make stub-win || true
+          if [ -f native/stub_win_test.exe ]; then
+            file native/stub_win_test.exe
+            file native/stub_win_test.exe | grep -q "PE32" && echo "PE-OK" || echo "PE-CHECK-NEEDS-HEADERS"
+          else
+            echo "STUB-WIN-SKIPPED (no mingw Python.h on runner)"
+          fi

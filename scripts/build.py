@@ -283,6 +283,9 @@ Examples:
     parser.add_argument("--version", action="version", version="shadow-compiler 2.0.0")
     parser.add_argument("--payload", required=True, help="Python script to obfuscate")
     parser.add_argument("-o", "--output", help="Output path for obfuscated script")
+    parser.add_argument("--force-output", action="store_true", default=False,
+                        help="Allow -o/--output outside the repo build dir "
+                             "(default: refuse absolute/escaping paths)")
     parser.add_argument("--cross", help="Cross-compile targets: win,linux,macos,linux-arm")
     parser.add_argument("--generate-payload-h", action="store_true", default=True,
                         help="Auto-generate payload.h from obfuscated payload (default: on)")
@@ -901,6 +904,19 @@ Examples:
     obfuscated_name = f"{base}_obfuscated.py"
     obfuscated_output = opts.output or os.path.join(ROOT, f".build_tmp_{obfuscated_name}")
     obfuscated_output = os.path.abspath(obfuscated_output)
+    # Output guard: -o outside the repo build dir overwrites silently
+    # (audit: refuse absolute/escaping paths unless --force-output).
+    if getattr(opts, "output", None):
+        try:
+            _inside = os.path.commonpath(
+                [obfuscated_output, os.path.abspath(BUILD_DIR)])
+            _ok = (_inside == os.path.abspath(BUILD_DIR))
+        except Exception:
+            _ok = False
+        if not _ok and not getattr(opts, "force_output", False):
+            log("ERROR", f"Refusing -o outside build dir: {obfuscated_output} "
+                         "(use --force-output to override)")
+            sys.exit(1)
 
     # Load Advanced Protection config from JSON (phase-2 feature matrix).
     phase2_cfg = load_advanced_protection_config(opts)

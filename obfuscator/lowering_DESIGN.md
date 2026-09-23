@@ -56,6 +56,28 @@ artifact with its own ABI/API/version story. V10's perf numbers
 overhead, documented per family, and families default exactly as V10
 specifies (15 on, 5 opt-in).
 
+## Cipher hierarchy (which XOR/ChaCha20 goes where)
+
+Three cipher helpers exist; they are LAYERED, not duplicated:
+
+- `obfuscator/core/utils.py::fast_xor_bytes` — the WIRED blob cipher.
+  Build-time payload encryption (`pipeline.py` fallback/native blobs)
+  + key-split derivation. Per-build key, transport-grade.
+- `obfuscator/chacha20.py` — RFC 8439 ChaCha20 + HMAC-SHA256 AEAD for
+  STRING literals (`string_crypto.py` sessions, `transforms.py`
+  `StringLiteralObfuscator(mode="chacha20")`, default OFF, opt-in).
+  The SAME core is emitted verbatim as the runtime stub
+  (`STUB_TEMPLATE`), so build-time and artifact share one audited
+  implementation. Use for string confidentiality; not for blobs.
+- `pipeline.py::_xor_decrypt` (loader template) — the artifact-side
+  mirror of `fast_xor_bytes` (decrypt-then-exec own payload only).
+- `cryptography` (AES-CTR, declared in requirements.txt) is tried
+  FIRST at build time (`pipeline.py::_check_aes_ctr`); XOR is the
+  graceful fallback, never the preference.
+
+Rule of thumb: strings → ChaCha20 (AEAD, allowlisted); blobs →
+AES-CTR preferred, fast-XOR fallback; never swap the layers.
+
 ## Operation registry (20 families)
 
 Default ON (15): io, scalar, string, container, service, protocol,
@@ -140,9 +162,43 @@ native 0.19x-1.56x band, as expected for a pure-Python reference
 kernel. Every timed op also passed behavioral parity
 (shim result == plain result) under the timing loop.
 
-Reproduce: `NIXON_LOG_REDIRECT=0 timeout 300 python3
+## Measured NATIVE kernel overhead (same host, --native build)
+
+Same benchmark, third arm added (`--native build` renders a fresh
+per-build-symbols kernel and cythonizes it, then times the COMPILED
+`.so` on the same thunks). Bare builtins only (49/132 ops — method
+style ops take `(recv, *args)` and report n/a; same shapes, different
+thunk plumbing).
+
+Measured (host=nixon, Linux x86_64, CPython 3.13.5, 2026-09-23):
+`NIXON_LOG_REDIRECT=0 python3 scripts/benchmark/lowering_perf.py
+--native build --iterations 3000 --repeats 2` (N=3000 best-of-2;
+smaller N than the shim table above — ratios are N-independent past
+warmup, verified stable across runs).
+
+| family | native ops | geomean native/plain | min | max | parity |
+|---|---|---|---|---|---|
+| container | 9 | 2.48x | 1.43x | 4.30x | ok |
+| function | 10 | 2.76x | 2.13x | 3.81x | ok |
+| protocol | 3 | 3.14x | 2.56x | 4.00x | ok |
+| range | 4 | 2.61x | 1.91x | 3.97x | ok |
+| scalar | 12 | 4.02x | 1.81x | 5.55x | ok |
+| service | 11 | 2.64x | 1.05x | 5.16x | ok |
+
+Overall native: geomean **2.95x**, range 1.05x–5.55x, 49/49 parity ok.
+Honest reading: our Cython kernel is thin passthroughs
+(`def impl(*a, **k): return _bi.op(*a, **k)` — one compiled frame +
+one Python call), NOT a hand-optimized C kernel, so it sits ABOVE the
+shim on microbenchmarks (extra import + dispatch layers) and far above
+the vendor's 0.19x–1.56x native band. The vendor numbers remain
+NOT-reproduced in-repo; what IS proven here is behavioral parity
+(native result == plain result on all 49 timed ops) and per-build
+symbol uniqueness — the obfuscation properties, not speed. Speed is
+the documented tradeoff of lowering depth (see --lowering opt-outs).
+
+Reproduce: `NIXON_LOG_REDIRECT=0 timeout 550 python3
 scripts/benchmark/lowering_perf.py [--iterations N] [--repeats R]
-[--families CSV] [--json PATH]`. Full per-op table prints as
+[--families CSV] [--json PATH] [--native build|.pyx|.so]`. Full per-op table prints as
 markdown to stdout. Smoke lock: tests/test_lowering_perf.py runs the
 same harness at N=200 asserting finite positive ratios + parity
 (no absolute perf assertions — numbers vary by machine).
