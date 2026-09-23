@@ -31,22 +31,29 @@ pub fn rdrand_u64() -> Result<u64, String> {
     Ok(u64::from_le_bytes(buf))
 }
 
-static mut PRNG_STATE: u64 = 0;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// Thread-safe PRNG state (AtomicU64, not `static mut`): the old
+// `static mut PRNG_STATE` was a data race / UB if ever called from >1
+// thread. Same LCG sequence, now atomic (fetch_update CAS loop).
+static PRNG_STATE: AtomicU64 = AtomicU64::new(0);
 
 pub fn rdrand_seed_rng() -> Result<u64, String> {
     let seed = rdrand_u64()?;
-    unsafe {
-        PRNG_STATE = seed;
-    }
+    PRNG_STATE.store(seed, Ordering::SeqCst);
     Ok(seed)
 }
 
-#[allow(static_mut_refs)]
 #[allow(dead_code)]
 fn prng_next() -> u64 {
-    unsafe {
-        PRNG_STATE = PRNG_STATE.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        PRNG_STATE
+    // LCG step, lock-free via CAS retry (single writer in practice,
+    // correct under contention regardless).
+    loop {
+        let cur = PRNG_STATE.load(Ordering::Relaxed);
+        let nxt = cur.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        if PRNG_STATE.compare_exchange_weak(cur, nxt, Ordering::SeqCst, Ordering::Relaxed).is_ok() {
+            return nxt;
+        }
     }
 }
 

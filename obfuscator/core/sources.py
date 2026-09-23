@@ -2709,6 +2709,13 @@ def {FUNC_HARD}():
     {CLS_HARD}.{METHOD_SECCOMP}()
     return True'''
 NANOMITE_SOURCE = r'''
+# NOTE (kill-ladder allowlist): the _o._exit(0) calls below are the
+# forked TRACER CHILD's fast-exit after its watch loop (child PID only,
+# never the protected parent). Exit 0 = child done, not a tamper kill —
+# routing through _nx_kill (137 + key wipe) would be WRONG here (it
+# would nuke the parent's keys from the child context and report a
+# kill for a healthy exit). Documented variance, see
+# tests/test_kill_ladder.py allowlist.
 def {FUNC_NANOMITE_MAIN}():
     import sys as _s, os as _o, time as _t, ctypes as _c, signal as _sig
     if _o.environ.get('{VAR_NANO_MARKER}'): return True    
@@ -3959,6 +3966,9 @@ class {SHAPESHIFTER_CLS}:
         return {SHAPESHIFTER_CLS}._active_decryptions > 0
 '''
 NANOMITE_GUARD_SOURCE = r'''
+# NOTE (kill-ladder allowlist): like NANOMITE_SOURCE above, the child
+# fast-exit here is the forked tracer child exiting 0 on completion —
+# never the tamper path. Not routed through _nx_kill by design.
 class {NANOMITE_GUARD_CLS}:
     _is_guarded = False
     _child_pid = None

@@ -24,14 +24,14 @@ _MODULE_DEAD_CODE = [
     "{var} = __import__('torch', fromlist=['tensor']).tensor([[[[{val}]]]]).reshape(-1, {a}, {b}).unsqueeze(0).expand({c}, {d}, {e}, {f})",
     "{var} = __import__('numpy', fromlist=['random']).random.RandomState({seed}).randn({rows}, {cols}).reshape(-1, 1)",
     "_, _, _, _, _, _, _, _, _, {var} = range(10)",
-    "{var} = [x for xs in [[[{n}]]] for ys in xs for z in ys for _ in range({count})]",
+    "{var} = [z for xs in [[[{n}]]] for ys in xs for z in ys for _ in range({count})]",
     "{var} = __import__('hashlib').sha256(__import__('hashlib').md5(__import__('hashlib').sha1(b'seed').digest()).digest()).hexdigest()",
     "{var} = __import__('hashlib').sha256(b'test').hexdigest()",
 ]
 
 _FUNC_BODY_DEAD_CODE = [
     "{var} = __import__('numpy', fromlist=['random']).random.RandomState({seed}).randn({rows}, {cols}).reshape(-1, 1)",
-    "{var} = [x for xs in [[[{n}]]] for ys in xs for z in ys for _ in range({count})]",
+    "{var} = [z for xs in [[[{n}]]] for ys in xs for z in ys for _ in range({count})]",
     "_, _, _, _, _, _, _, _, _, {var} = range(10)",
     "{var} = __import__('hashlib').sha256(__import__('hashlib').md5(__import__('hashlib').sha1(b'seed').digest()).digest()).hexdigest()",
     "{var} = __import__('hashlib').sha256(b'test').hexdigest()",
@@ -198,7 +198,20 @@ def _inject_func_dead_code(
                 code = _format_and_verify(tmpl, kwargs)
                 try:
                     stmt = _template_to_stmt(code)
-                    node.body.insert(0, stmt)
+                    # Same guard as the module path: dead code must NEVER
+                    # crash the artifact (a poisoned decoder runs at
+                    # import time). Wrap in try/except like module injection.
+                    wrapper = ast.Try(
+                        body=[stmt],
+                        handlers=[ast.ExceptHandler(
+                            type=ast.Name(id='Exception', ctx=ast.Load()),
+                            name=None,
+                            body=[ast.Pass()]
+                        )],
+                        orelse=[],
+                        finalbody=[]
+                    )
+                    node.body.insert(0, wrapper)
                 except Exception:
                     pass
 

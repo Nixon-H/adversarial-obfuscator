@@ -33,7 +33,8 @@ def test_reason_codes_cover_gates():
     for r in ("vm-detect", "driver-blocked", "audit-plant", "audit-timing",
               "trial-expired",
               "trial-tampered", "trial-rollback", "watermark-tampered",
-              "watermark-missing", "integrity-snapshot", "stdlib-tamper"):
+              "watermark-missing", "integrity-snapshot", "stdlib-tamper",
+              "hwid-mismatch"):
         assert r in REASON_CODES, r
 
 
@@ -118,6 +119,15 @@ def _no_direct_exit(path, extra_allowed=()):
     # So check string LITERALS that reach the emitted snippet: any line
     # containing _exit that is NOT inside the kill-ladder import block and
     # NOT a docstring/comment line is a violation.
+    # DOCUMENTED ALLOWLIST (not gates — separate primitives by design):
+    # - macros.py CRASH(): explicit user-invoked stop (exit 1, no wipe).
+    # - sources.py NANOMITE_*: forked tracer CHILD fast-exit(0) on
+    #   completion (child PID only; routing through _nx_kill would wipe
+    #   the parent's keys and misreport a healthy exit as a kill).
+    _allow = set(extra_allowed) | {
+        "CRASH", "NANOMITE", "tracer child", "tracer-child",
+        "child fast-exit", "child done", "allowlist",
+    }
     violations = []
     in_docstring = False
     for ln in src.splitlines():
@@ -130,6 +140,8 @@ def _no_direct_exit(path, extra_allowed=()):
         if in_docstring or s.startswith("#"):
             continue
         if "_nx_kill" in ln or "kill_ladder" in ln or "kill ladder" in ln.lower():
+            continue
+        if any(a in ln for a in _allow):
             continue
         # Emitted-snippet string lines look like: + "    _os._exit(1)\n"
         if "_exit(" in ln and ('"' in ln or "'" in ln):
@@ -178,3 +190,19 @@ def test_pipeline_integrity_gates_use_ladder():
     assert '_nx_kill(\\"stdlib-tamper\\")' in src
     _no_direct_exit(_repo("obfuscator/frozen_snapshot.py"))
     _no_direct_exit(_repo("obfuscator/stdlib_audit.py"))
+
+
+def test_documented_allowlist_only():
+    # CRASH (explicit user stop, exit 1) and the NANOMITE tracer-child
+    # fast-exits (child PID, exit 0) are the ONLY sanctioned direct-exit
+    # primitives. This test fails if anyone adds a new one without
+    # documenting it here.
+    import re
+    macro_src = open(_repo("obfuscator/macros.py")).read()
+    assert "_os._exit(1)" in macro_src  # CRASH() body
+    assert macro_src.count("_os._exit(1)") == 1, "new direct exit in macros?"
+    nano_src = open(_repo("obfuscator/core/sources.py")).read()
+    nano_exits = re.findall(r"_o\._exit\(0\)|_exit\(0\)", nano_src)
+    assert 1 <= len(nano_exits) <= 4, ("nanomite child exits changed:",
+                                       len(nano_exits))
+    assert "kill-ladder allowlist" in nano_src

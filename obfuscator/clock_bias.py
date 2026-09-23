@@ -44,6 +44,19 @@ CLOCK_BIAS_TAIL_FACTOR = 10
 # Tail fraction above which the bias is systematic (>0.5% of samples).
 CLOCK_BIAS_TAIL_FRAC_THRESHOLD = 0.005
 
+# Serialized threshold copies embedded in loader_snippet_fragment()
+# string literals. Python ints/floats repr deterministically; the test
+# test_thresholds_serialized_into_snippet fails the build if the
+# literals drift from these constants. (The emitter uses plain string
+# literals — %r formatting inside the tuple-continuation breaks tuple
+# syntax, so the lock is test-side, not emit-side.)
+_SERIALIZED_THRESHOLDS = {"samples": 2000, "ratio": 50.0, "factor": 10,
+                          "frac": 0.005}
+assert _SERIALIZED_THRESHOLDS["samples"] == CLOCK_BIAS_SAMPLES
+assert _SERIALIZED_THRESHOLDS["ratio"] == CLOCK_BIAS_P99_RATIO_THRESHOLD
+assert _SERIALIZED_THRESHOLDS["factor"] == CLOCK_BIAS_TAIL_FACTOR
+assert _SERIALIZED_THRESHOLDS["frac"] == CLOCK_BIAS_TAIL_FRAC_THRESHOLD
+
 
 def clock_bias_stats(deltas):
     """Compute (median_ns, p99_ns, tail_frac, samples) for a delta vector.

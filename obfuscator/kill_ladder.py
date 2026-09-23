@@ -55,6 +55,7 @@ REASON_CODES = frozenset([
     "watermark-missing",
     "integrity-snapshot",
     "stdlib-tamper",
+    "hwid-mismatch",
 ])
 
 #: Key-material global names deleted on the kill path (immutable

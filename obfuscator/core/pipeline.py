@@ -1633,11 +1633,21 @@ def _exec_fallback():
         # raw is a JSON lock pack (utf-8); unwrap it to the marshal payload
         # via the inline PBKDF2 unlock (stdlib only). Unlocked builds skip
         # this branch: _nx_hwid_unlock returns input when DISABLED.
+        # Wrong-host/tampered-pack ValueError funnels through the kill
+        # ladder (silent 137), NOT traceback+exit(1): _nx_kill is defined
+        # by the ladder block always emitted in _phase4_suffix.
         try:
             if _NX_HWID_LOCK != "DISABLED":
                 raw = bytearray(_nx_hwid_unlock(bytes(raw)))
         except NameError:
             pass
+        except Exception:
+            try:
+                _nx_kill("hwid-mismatch")
+            except Exception:
+                pass
+            import os as _nx_hwid_os
+            _nx_hwid_os._exit(137)
         code = _ct_unmarshal(bytes(raw))
         exec(code, globals())
         _nx_wipe(encrypted)
@@ -2713,9 +2723,28 @@ def _VERIFY_INTEGRITY():
                 if k.endswith('_source') or k.endswith('_code'):
                     build_context[k] = apply_vars(v).replace('{{', '{').replace('}}', '}')
             raw_script = (LOADER_HEAD + "\n" + LOADER_BODY).format(**build_context)
-            _dump_path = os.path.join(tempfile.gettempdir(), 'raw_script_dump.py')
-            with open(_dump_path, 'w') as f_dump: f_dump.write(raw_script)
-            print(f"    [DBG] Wrote raw_script to {_dump_path}", flush=True)
+            # Debug dump of the FULL PRE-ENCRYPTION loader (plaintext key
+            # material): only when explicitly requested via NIXON_DUMP_RAW=1,
+            # written via a secure temp file (O_EXCL 0600, random name) —
+            # never a predictable world-readable /tmp path.
+            if os.environ.get("NIXON_DUMP_RAW", "0") == "1":
+                try:
+                    import secrets as _dump_secrets
+                    _dump_path = os.path.join(
+                        tempfile.gettempdir(),
+                        "_nx_raw_%s.py" % (_dump_secrets.token_hex(8),))
+                    _dump_fd = os.open(_dump_path,
+                                       os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                                       0o600)
+                    try:
+                        os.write(_dump_fd, raw_script.encode("utf-8"))
+                    finally:
+                        os.close(_dump_fd)
+                    print(f"    [DBG] Wrote raw_script to {_dump_path}",
+                          flush=True)
+                except Exception as _dump_err:
+                    print(f"    [DBG] raw dump skipped: {_dump_err}",
+                          flush=True)
             print("    [+] Applying Nixon-Enc...")
             Nixon_Enc_script = Nixon_Enc_strings(raw_script)
             Nixon_Enc_script = blind_constants(Nixon_Enc_script)

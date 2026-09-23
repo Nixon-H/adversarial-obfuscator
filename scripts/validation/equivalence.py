@@ -131,11 +131,12 @@ class EquivalenceChecker:
         inputs: list[z3.BitVecRef],
     ) -> CheckResult:
         if orig_output is None or obf_output is None:
-            # No observable output (bare assignments, no return): fall back
-            # to formula-level equivalence. Both formulas come from the same
-            # translator, so identical canonical form means the programs
-            # constrain variables identically -> equivalent. Otherwise ask
-            # whether a joint assignment EXISTS (SAT = they can agree).
+            # No observable output (bare assignments, no return): joint-SAT
+            # ("they CAN agree on some input") does NOT prove universal
+            # equivalence — x=a+b vs x=a-b agree at b=0 but differ
+            # elsewhere. The only sound positive verdict here is
+            # syntactically identical canonical forms. Anything else is
+            # equivalent=False, never True-from-mere-SAT.
             shared = [v for v in inputs]
             if not shared:
                 solver = z3.Solver()
@@ -151,10 +152,15 @@ class EquivalenceChecker:
                     s2 = z3.Solver(); s2.set("timeout", self.timeout_ms)
                     s2.add(obfuscated_formula)
                     if s1.check() == z3.sat and s2.check() == z3.sat:
-                        return CheckResult(equivalent=True, solver_time_ms=elapsed)
+                        # Mutually exclusive but individually satisfiable:
+                        # provably DIFFERENT programs.
+                        return CheckResult(equivalent=False,
+                                           solver_time_ms=elapsed)
                     return CheckResult(equivalent=False, solver_time_ms=elapsed)
                 elif result == z3.sat:
-                    return CheckResult(equivalent=True, solver_time_ms=elapsed)
+                    # Can agree on some input — says NOTHING about all
+                    # inputs. NOT equivalence.
+                    return CheckResult(equivalent=False, solver_time_ms=elapsed)
                 return CheckResult(equivalent=False, solver_time_ms=elapsed)
             solver = z3.Solver()
             solver.set("timeout", self.timeout_ms)
@@ -162,12 +168,9 @@ class EquivalenceChecker:
             solver.add(obfuscated_formula)
             if str(original_formula) == str(obfuscated_formula):
                 return CheckResult(equivalent=True, solver_time_ms=0)
-            start = __import__("time").time()
-            result = solver.check()
-            elapsed = (__import__("time").time() - start) * 1000
-            if result == z3.sat:
-                return CheckResult(equivalent=True, solver_time_ms=elapsed)
-            return CheckResult(equivalent=False, solver_time_ms=elapsed)
+            # Different canonical forms + no observable output to compare:
+            # cannot prove equivalence. Joint-SAT is agreement, not proof.
+            return CheckResult(equivalent=False, solver_time_ms=0)
 
         solver = z3.Solver()
         solver.set("timeout", self.timeout_ms)

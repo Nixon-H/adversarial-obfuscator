@@ -84,10 +84,20 @@ TIMING_SAMPLES = 50
 
 #: Absolute floor for the timing verdict (ns). Avoids false positives
 #: on heavily loaded hosts where the install baseline itself is slow.
+#: SERIALIZED into the emitted snippet (see _SERIALIZED_THRESHOLDS below);
+#: change the constant AND re-run test_thresholds_serialized.
 TIMING_FLOOR_NS = 500000
 
 #: Multiplicative factor over the install baseline that flags timing.
+#: Serialized alongside TIMING_FLOOR_NS (same lock).
 TIMING_FACTOR = 10
+
+# Serialized threshold copies embedded in emit_snippet() string literals.
+# Python ints repr deterministically; the test below fails the build if
+# the literals drift from the constants.
+_SERIALIZED_THRESHOLDS = {"floor": 500000, "factor": 10}
+assert _SERIALIZED_THRESHOLDS["floor"] == TIMING_FLOOR_NS
+assert _SERIALIZED_THRESHOLDS["factor"] == TIMING_FACTOR
 
 _OPT_OUT_TRUE = ("1", "true", "True", "TRUE", "yes", "Yes", "YES")
 

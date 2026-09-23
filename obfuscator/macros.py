@@ -328,7 +328,15 @@ def SELF_CORRUPT_DETACHED(path=None, wait_parent=True, timeout_s=30):
 
 
 def CRASH():
-    """Terminate immediately."""
+    """Terminate immediately.
+
+    NOTE: intentionally NOT routed through the kill ladder (_nx_kill):
+    CRASH is the explicit user-invoked macro (like an assert-fail), not
+    a tamper-detection gate. No key wipe (the artifact is not
+    compromised — the user asked to stop), exit code 1 (caller-visible
+    failure, not silent 137 kill). Documented variance, covered by the
+    ladder allowlist in tests/test_kill_ladder.py.
+    """
     _os._exit(1)
 
 

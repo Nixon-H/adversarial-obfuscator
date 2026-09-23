@@ -50,6 +50,17 @@ def test_constants_mirror_rust():
     assert CLOCK_BIAS_TAIL_FRAC_THRESHOLD == 0.005
 
 
+def test_thresholds_serialized_into_snippet():
+    # Emitted _nx_has_clock_bias carries literal threshold copies;
+    # this test fails if they drift from the module constants.
+    from obfuscator import clock_bias as _cb
+    src = _cb.loader_snippet_fragment()
+    assert "_samples=%r" % CLOCK_BIAS_SAMPLES in src
+    assert "%r" % CLOCK_BIAS_P99_RATIO_THRESHOLD in src
+    assert "%r" % CLOCK_BIAS_TAIL_FACTOR in src
+    assert "%r" % CLOCK_BIAS_TAIL_FRAC_THRESHOLD in src
+
+
 def test_clean_no_flag():
     flagged, stats = clock_bias_verdict(_clean())
     assert flagged is False

@@ -236,3 +236,9 @@ class PathORAM:
             "num_leaves": self.num_leaves,
             "tree_height": self.tree_height,
         }
+
+
+# Backwards-compatible alias: generated payloads (data_protector) and older
+# tests import PythonORAM; the implementation is PathORAM. Single class,
+# two names — no behavior difference.
+PythonORAM = PathORAM

@@ -98,6 +98,39 @@ def phase_synthesis(args) -> ProtectionPlan:
         log("SYNTHESIS", "Applying synthesis plan to pipeline configuration...")
         cli_args = plan_to_cli_args(plan)
         log("SYNTHESIS", f"Generated CLI flags: {' '.join(cli_args)}")
+        # APPLY (not just record): merge the plan's protections + flags
+        # into the live argparse namespace so DOWNSTREAM phases (Stage 1
+        # obfuscation honors cfg_flatten/mba/etc. via phase01's no-* loop;
+        # boolean flags enable their features) actually change. Idempotent:
+        # only sets attributes that are currently falsy/empty, never
+        # downgrades an explicit user flag. The sidecar JSON is still
+        # written for auditability.
+        try:
+            from scripts.synthesis.engine import ProtectionPlan as _PP
+            _applied = []
+            for _p in list(getattr(plan, "protections", []) or []):
+                _dest = str(_p).replace("-", "_")
+                try:
+                    if not getattr(args, _dest, False):
+                        setattr(args, _dest, True)
+                        _applied.append("--" + str(_p).replace("_", "-"))
+                except Exception:
+                    continue
+            for _flag, _val in dict(getattr(plan, "flags", {}) or {}).items():
+                _dest = str(_flag).replace("-", "_")
+                try:
+                    _cur = getattr(args, _dest, None)
+                    if _cur in (None, False, "", 0, 0.0):
+                        setattr(args, _dest, _val)
+                        _applied.append("--%s=%r" % (_flag, _val))
+                except Exception:
+                    continue
+            if _applied:
+                log("SYNTHESIS", f"Applied to live config: {' '.join(_applied)}")
+            else:
+                log("SYNTHESIS", "Live config already satisfied plan (no changes)")
+        except Exception as _apply_err:
+            log("SYNTHESIS", f"Live apply failed (non-fatal, sidecar kept): {_apply_err}")
         synthesis_apply_path = os.path.join(BUILD_DIR, "synthesis_plan_flags.json")
         atomic_write(synthesis_apply_path, json.dumps({
             "cli_args": cli_args,

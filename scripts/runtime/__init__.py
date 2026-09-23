@@ -16,4 +16,9 @@ Security Relevance:
 Empty init — no security properties. Exists to enable importing from
 the submodules. The submodules themselves provide challenge-response
 authentication and ORAM-based access pattern hiding.
+
+NOTE: data_protector codegen imports PythonORAM from
+scripts.runtime.oram_sim (where PythonORAM = PathORAM alias). This
+package does NOT re-export it (namespace package); import from the
+submodule directly.
 """

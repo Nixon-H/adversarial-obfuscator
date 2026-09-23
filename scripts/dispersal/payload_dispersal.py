@@ -47,6 +47,15 @@ class ShamirSharing:
             raise ValueError("Threshold cannot exceed number of shares")
         if threshold < 2:
             raise ValueError("Threshold must be at least 2")
+        # GF(251) field: byte values >= PRIME do NOT roundtrip (251->0,
+        # 255->4, ...). Fail LOUD, never corrupt silently — callers with
+        # arbitrary binary must hex-encode first (see
+        # obfuscator/split_bootstrap._to_splittable for the pattern).
+        for _b in bytes(secret):
+            if _b >= ShamirSharing.PRIME:
+                raise ValueError(
+                    "split_secret: byte value %d >= field prime %d; "
+                    "hex-encode binary secrets first" % (_b, ShamirSharing.PRIME))
         secret_ints = list(secret)
         share_bytes: List[bytearray] = [
             bytearray(len(secret_ints)) for _ in range(num_shares)

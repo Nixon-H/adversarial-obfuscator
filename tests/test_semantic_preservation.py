@@ -83,3 +83,34 @@ class TestSemanticPreservationProver:
         after = "def f(x):\n    if x > 0:\n        return 0\n    return x\n"
         result = self.prover.prove_equivalence(before, after, "logic_change")
         assert result.equivalent is False
+
+
+class TestBareSnippetSoundness:
+    """SAT-as-equivalence hole (fixed): bare assignments must NEVER be
+    proven equivalent by mere joint-SAT. x=a+b vs x=a-b agree at b=0
+    but differ elsewhere — verdict must be False."""
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        from scripts.proofs.semantic_preservation import (
+            SemanticPreservationProver,
+        )
+        self.prover = SemanticPreservationProver(timeout_ms=10000)
+
+    def test_bare_different_ops_not_equivalent(self):
+        r = self.prover.prove_equivalence("x = a + b", "x = a - b")
+        assert r.equivalent is False
+
+    def test_bare_identical_is_equivalent(self):
+        r = self.prover.prove_equivalence("x = a + b", "x = a + b")
+        assert r.equivalent is True
+
+    def test_function_commuted_addition_equivalent(self):
+        r = self.prover.prove_equivalence(
+            "def f(a, b): return a + b", "def f(a, b): return b + a")
+        assert r.equivalent is True
+
+    def test_function_different_ops_not_equivalent(self):
+        r = self.prover.prove_equivalence(
+            "def f(a, b): return a + b", "def f(a, b): return a - b")
+        assert r.equivalent is False

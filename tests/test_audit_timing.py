@@ -21,6 +21,7 @@ from obfuscator.audit_hook import (
     CANARY_EVENT,
     OPT_OUT_VAR,
     TIMING_VAR,
+    TIMING_FACTOR,
     TIMING_FLOOR_NS,
     TIMING_SAMPLES,
     emit_snippet,
@@ -223,3 +224,16 @@ def test_plant_path_still_kills_137():
 def test_timing_floor_constant_sane():
     assert TIMING_SAMPLES == 50
     assert TIMING_FLOOR_NS == 500000
+
+
+def test_thresholds_serialized():
+    # The emitted snippet carries literal copies of the thresholds
+    # (string-literal concatenation can't %r at emit time without
+    # breaking tuple syntax — see _SERIALIZED_THRESHOLDS). This test
+    # fails if the literals drift from the constants.
+    from obfuscator import audit_hook as _ah
+    assert _ah._SERIALIZED_THRESHOLDS["floor"] == TIMING_FLOOR_NS
+    assert _ah._SERIALIZED_THRESHOLDS["factor"] == TIMING_FACTOR
+    src = _ah.emit_snippet()
+    assert "_thresh = %d" % TIMING_FLOOR_NS in src
+    assert "int(_base) * %d" % TIMING_FACTOR in src
