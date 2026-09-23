@@ -81,6 +81,25 @@ def phase_obfuscate(payload, output, opts):
             source = f.read()
         mba_opt = getattr(opts, '_mba_validator', None)
         extra_opts = {}
+        # Six base --no-* disable flags (additive forwarding; absent keys
+        # stay ON via pipeline defaults — explicit False now wins).
+        for _flag, _opt_key in (
+            ("cfg_flatten", "cfg_flatten"),
+            ("opaque_predicates", "opaque_predicates"),
+            ("bogus_exceptions", "bogus_exceptions"),
+            ("mba_subs", "mba_subs"),
+            ("fragment_strings", "fragment_strings"),
+            ("unicode_ids", "unicode_ids"),
+        ):
+            if getattr(opts, _flag, True) is False:
+                extra_opts[_opt_key] = False
+        # --opt-level ladder (pipeline resolves unset flags; explicit wins).
+        try:
+            _ol = getattr(opts, "opt_level", None)
+        except Exception:
+            _ol = None
+        if _ol is not None:
+            extra_opts["opt_level"] = _ol
         if getattr(opts, 'attention_poison', 0) > 0:
             extra_opts['attention_poison'] = True
             extra_opts['attention_poison_fan_out'] = opts.attention_poison

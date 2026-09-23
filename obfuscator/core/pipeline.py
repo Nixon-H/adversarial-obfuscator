@@ -1101,6 +1101,19 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
     try:
         from obfuscator.vm_score import emit_loader_snippet as _emit_vm
         _phase4_suffix += _emit_vm(_vm_thr) + "\n"
+        # The VM snippet defines vm_check()/vm_score_percent() (KOD-gated
+        # kill inside vm_check). Invoke once at loader import so a VM host
+        # is caught at startup, not only when something calls vm_check().
+        # KOD default-OFF (report-only) keeps this safe: disarmed, the
+        # call computes the verdict and returns without exiting.
+        _phase4_suffix += (
+            "try:\n"
+            "    vm_check()\n"
+            "except SystemExit:\n"
+            "    raise\n"
+            "except Exception:\n"
+            "    pass\n"
+        )
     except Exception:
         pass
     # V10 kernel-driver gate (SAFE read-only defensive gate: enumeration +

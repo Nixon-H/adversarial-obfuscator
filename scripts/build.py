@@ -261,7 +261,6 @@ def main():
     os.environ.setdefault("NIXON_LOG_REDIRECT", "0")
     if not validate_dependencies():
         sys.exit(1)
-
     parser = argparse.ArgumentParser(
         description="Nixon Build Pipeline — Shadow Compiler Multi-Stage Architecture",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -844,6 +843,19 @@ Examples:
         log("OPT", f"Semantic lowering families: {opts.lowering}")
     if getattr(opts, "diagnostic", False):
         log("OPT", "DIAGNOSTIC BUILD (not for release)")
+        try:
+            from scripts.diagnostic import (
+                DiagClock as _DiagClock,
+                banner as _diag_banner,
+                key_freshness as _diag_key_freshness,
+                mark_diagnostic as _mark_diagnostic,
+                summarize_transforms as _diag_summarize,
+            )
+            opts._diag_clock = _DiagClock()
+            opts._diag_clock.mark("obfuscate")
+            log("DIAG", _diag_banner().splitlines()[0])
+        except Exception as _diag_err:
+            log("DIAG", f"diagnostic init failed (non-fatal): {_diag_err}")
     if getattr(opts, "audit_hook_plant_off", False):
         log("OPT", "Audit-hook plant detector disabled (--no-audit-hook-plant)")
     if getattr(opts, "driver_check", False):
@@ -2139,6 +2151,56 @@ Examples:
     # =========================================================================
 
     phase_package(opts.payload, obfuscated_output, obfuscated_name, opts)
+
+    # Diagnostic finalization (V10: per-stage timings + transform counts +
+    # key freshness + visible NOT-FOR-RELEASE marker). Best-effort: never
+    # fails the build. Marks the packaged artifact when resolvable.
+    if getattr(opts, "diagnostic", False):
+        try:
+            from scripts.diagnostic import (
+                banner as _diag_banner2,
+                key_freshness as _diag_key_freshness2,
+                mark_diagnostic as _mark_diagnostic2,
+                summarize_transforms as _diag_summarize2,
+            )
+            _dc = getattr(opts, "_diag_clock", None)
+            if _dc is not None:
+                try:
+                    _dc.mark("package")
+                    _dc.mark("done")
+                    for _st, _dt in sorted(_dc.report().items()):
+                        log("DIAG", f"stage { _st }: {_dt:.3f}s")
+                except Exception:
+                    pass
+            try:
+                _ts = _diag_summarize2(
+                    int(getattr(opts, "opt_level", 4) or 4),
+                    name_gate=bool(getattr(opts, "name_gate", False)),
+                    lowering=str(getattr(opts, "lowering", "") or ""))
+                log("DIAG", f"transforms: {_ts.get('enabled_count')} flags on "
+                            f"(opt-level {_ts.get('opt_level')})")
+            except Exception:
+                pass
+            _marked = False
+            for _cand in (os.path.join(BUILD_DIR, obfuscated_name),
+                          obfuscated_output):
+                try:
+                    if _cand and os.path.isfile(_cand):
+                        _mark_diagnostic2(_cand)
+                        _marked = True
+                        break
+                except Exception:
+                    continue
+            try:
+                _kf = _diag_key_freshness2(
+                    str(getattr(opts, "_diag_blob_key", "") or ""))
+                log("DIAG", f"key freshness: {_kf}")
+            except Exception:
+                pass
+            log("DIAG", _diag_banner2().splitlines()[0]
+                + (" (artifact marked)" if _marked else " (marker skipped)"))
+        except Exception as _diag_err2:
+            log("DIAG", f"diagnostic finalize failed (non-fatal): {_diag_err2}")
 
     # =========================================================================
     # Batch-2: REAL --pytoc native-extension path (best-effort, never fails)
