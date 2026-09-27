@@ -403,7 +403,7 @@ Examples:
     # Structure Randomization flags (Item 88)
     parser.add_argument("--struct-randomization", action="store_true", help="Enable structure randomization (stack/heap/reg)")
     parser.add_argument("--randomization-level", type=int, default=3, choices=[1, 2, 3], help="Randomization level 1-3 (default: 3)")
-    parser.add_argument("--randomization-seed", type=int, default=None, help="Deterministic seed for structure randomization")
+    parser.add_argument("--randomization-seed", type=int, default=None, help="Deterministic seed for structure randomization (also read from SEED/NIXON_SEED env when flag is absent)")
 
     # Adversarial loop flags
     parser.add_argument("--adversarial-loop", action="store_true", help="Enable self-improving obfuscation via deobfuscation agent")
@@ -813,6 +813,18 @@ Examples:
                         help="stable build id (reproducible builds; default: random per build)")
 
     opts = parser.parse_args()
+
+    # SEED/NIXON_SEED env fallback for --randomization-seed (reproducible
+    # builds; documented in docs/DEVELOPER.md). Explicit flag always wins.
+    if getattr(opts, "randomization_seed", None) is None:
+        for _seed_var in ("NIXON_SEED", "SEED"):
+            try:
+                _seed_raw = os.environ.get(_seed_var, "")
+                if str(_seed_raw).strip() != "":
+                    opts.randomization_seed = int(str(_seed_raw).strip())
+                    break
+            except Exception:
+                continue
 
     # Phase-2 delivery: report resolved opt-level via log() (no behavior change).
     try:
@@ -1576,6 +1588,15 @@ Examples:
 
     # =========================================================================
     # Stage 4b: ROP Compile (alternative to LLVM codegen for crown jewels)
+    # -------------------------------------------------------------------------
+    # TWO ROP compilers coexist (documented, both tested — NOT duplicates):
+    # - phase_rop_compile() above uses irgen.rop_compiler.RopFunctionCompiler
+    #   (needs a reference ELF binary for real gadgets; sys.exit(1) when the
+    #   config lacks reference_binary — binary-gated path).
+    # - The block below uses scripts.rop.rop_compiler (GadgetFinder +
+    #   RopCompiler + PayloadDisperser): synthetic gadget DB, works on any
+    #   payload's first FunctionDef, emits build/rop_runtime.c. This is the
+    #   default --rop path.
     # =========================================================================
     rop_cfg = {}
     if os.path.exists(DEFAULT_CONFIG):

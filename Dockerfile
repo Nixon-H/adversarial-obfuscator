@@ -1,6 +1,7 @@
-# NOTE: ubuntu:24.04 is an LTS tag (moves with point releases). For
-# release builds pin a digest (docker inspect --format='{{.RepoDigests}}').
-FROM ubuntu:24.04 AS builder
+# NOTE: base image pinned by digest for release reproducibility
+# (resolved 2026-09-23; refresh with: docker pull ubuntu:24.04 &&
+# docker inspect --format='{{index .RepoDigests 0}}' ubuntu:24.04).
+FROM ubuntu@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
