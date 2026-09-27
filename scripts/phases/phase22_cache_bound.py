@@ -37,7 +37,6 @@ def phase_cache_bound():
         dict with test results written to BUILD_DIR
     """
     log("CACHE_BOUND", "Running cache-bound execution (Item 124)")
-    log("CACHE_BOUND", "Running cache-bound execution (Item 124)")
     results = {"phase": "cache_bound", "status": "ok", "tests": []}
     tests = [
         "cache_bound::tests::test_cache_priming_changes_state",

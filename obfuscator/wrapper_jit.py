@@ -1,5 +1,12 @@
 """Per-wrapper JIT compile+eval emit convention (batch 4).
 
+RESERVED-UNWIRED: this module is convention + mapping only and is NOT
+wired into any pipeline stage (no callers in obfuscator/core or
+scripts/build.py — only tests). Do NOT wire it blindly: the consumer is
+the future Rust-side per-wrapper specialization path
+(``runtime/src/jit.rs::specialize_template_with_class``), and wiring
+requires matching the loader's ``runtime_values`` contract first.
+
 The Rust side already compiles *per wrapper*: see
 ``runtime/src/jit.rs::specialize_template_with_class(class_id)`` — each
 distinct ``class_id`` gets its own machine-code variant (``class_id`` is

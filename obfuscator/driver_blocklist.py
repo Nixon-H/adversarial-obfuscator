@@ -48,7 +48,12 @@ import platform
 #: Runtime opt-in env var. Any of these values arms the gate.
 ARM_VAR = "NIXON_DRIVER_CHECK"
 
+# Canonical armed tokens (lowercase-compared): matches the native gate
+# (IsDriverGateArmed lowercases before comparing against {1,true,yes}).
+# The mixed-case tuple below is kept for back-compat display; the actual
+# comparison is case-insensitive, so "tRuE"/"yEs" arm on both sides.
 _ARMED_TRUE = ("1", "true", "True", "TRUE", "yes", "Yes", "YES")
+_ARMED_TRUE_LOWER = ("1", "true", "yes")
 
 #: Background re-check interval (seconds) for the continuous mode.
 RECHECK_INTERVAL_S = 60
@@ -240,7 +245,12 @@ def _enum_windows_drivers():
 
 def is_armed(env=None):
     # type: (object) -> bool
-    """Return True when the gate is armed via env (``NIXON_DRIVER_CHECK``)."""
+    """Return True when the gate is armed via env (``NIXON_DRIVER_CHECK``).
+
+    Case-insensitive (mirrors the native gate's lowercase compare):
+    "1"/"true"/"yes" in any case arm. Broadening (vs. the old exact
+    tuple) is the fail-closed direction — more spellings kill on hit.
+    """
     try:
         if env is None:
             env = os.environ
@@ -248,7 +258,7 @@ def is_armed(env=None):
     except Exception:
         return False
     try:
-        return str(val) in _ARMED_TRUE
+        return str(val).strip().lower() in _ARMED_TRUE_LOWER
     except Exception:
         return False
 
@@ -333,7 +343,8 @@ def emit_driver_snippet(armed=False, interval_s=60):
         + "    except Exception:\n"
         + "        pass\n"
         + "    try:\n"
-        + "        return str(_os.environ.get(_NX_DRIVER_VAR, '')) in _NX_DRIVER_ARMED_VALUES\n"
+        + "        _v = str(_os.environ.get(_NX_DRIVER_VAR, '')).strip().lower()\n"
+        + "        return _v in ('1', 'true', 'yes')\n"
         + "    except Exception:\n"
         + "        return False\n"
         + "\n"

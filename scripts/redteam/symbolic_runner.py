@@ -46,6 +46,15 @@ def run_symbolic_attack(binary_path, output_dir):
     """
     Run Z3-based symbolic analysis against a binary.
 
+    SYNTHETIC SELF-TEST (not a real attack): the constraint system below
+    is a fixed toy (two 64-bit variables, three hardcoded path OR-terms)
+    that never extracts path constraints from the target binary — the
+    file is only read to confirm it exists. A "completed" result measures
+    that Z3 works, NOT that the binary resists symbolic execution. The
+    result dict carries ``synthetic_self_test: True`` so aggregators
+    never mistake it for measured resistance. Do not gate releases on
+    the symbolic sub-score alone.
+
     Sets up a simple constraint system and checks satisfiability for
     multiple path assumptions. Counts solved constraints and discovered
     paths. Writes results to output_dir/symbolic_results.json.
@@ -61,6 +70,8 @@ def run_symbolic_attack(binary_path, output_dir):
         "status": "failed",
         "error": None,
         "solutions": [],
+        # Provenance tag: synthetic toy constraints, not binary-derived.
+        "synthetic_self_test": True,
     }
 
     try:

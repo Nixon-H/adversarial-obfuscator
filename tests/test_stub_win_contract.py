@@ -43,9 +43,11 @@ def _src():
 def test_poison_function_exists_and_kills_silent():
     src = _src()
     assert "PoisonKeysOnTamper" in src
-    # zeros + random fill, then the silent-kill primitive (ExitProcess 137).
+    # zeros + xorshift fill (srand/rand-free by design; see PoisonNextByte
+    # note in stub), then the silent-kill primitive (ExitProcess 137).
     assert "SecureZeroMemory" in src
-    assert "rand()" in src
+    assert "PoisonNextByte" in src
+    assert "rand()" not in src, "post-tamper fill must not use CRT rand()"
     assert "nixon_silent_kill()" in src
 
 
@@ -152,7 +154,7 @@ def test_blocklist_stems_are_subset_of_python_blocklist():
     )
     assert m, "embedded stem table missing"
     stems = re.findall(r'"([a-z0-9_]+)"', m.group(1))
-    assert 10 <= len(stems) <= 15, "spec: 10-15 worst stems, got %d" % len(stems)
+    assert 10 <= len(stems) <= 22, "spec: 10-22 stems (full BLOCKED_DRIVERS parity), got %d" % len(stems)
     lowered = py.lower()
     for stem in stems:
         assert '"%s"' % stem in lowered, \
@@ -163,9 +165,17 @@ def test_blocklist_stems_are_subset_of_python_blocklist():
 
 
 def test_makefile_links_psapi_for_stub_win():
+    # psapi is consumed purely via dynamic LoadLibraryA/GetProcAddress
+    # inside CheckBYOVDDrivers() — no import-table entry, no link-time
+    # dep. The stub-win link lines must NOT carry -lpsapi; the armed
+    # -DNIXON_DRIVER_CHECK variant has its own stub-win-driver target.
     with open(MAKEFILE, encoding="utf-8") as f:
         mk = f.read()
-    assert "-lpsapi" in mk, "stub-win link must declare -lpsapi (psapi.lib)"
+    code_lines = [ln for ln in mk.splitlines() if not ln.lstrip().startswith("#")]
+    code = "\n".join(code_lines)
+    assert "-lpsapi" not in code, "stub-win must resolve psapi dynamically (no -lpsapi)"
+    assert "stub-win-driver" in mk, "armed -DNIXON_DRIVER_CHECK make target missing"
+    assert "-DNIXON_DRIVER_CHECK" in mk
 
 
 def test_existing_stub_build_unaffected_textually():
@@ -175,3 +185,44 @@ def test_existing_stub_build_unaffected_textually():
                 "CollectAdvancedFingerprint", "DeriveKeyFromFingerprint_Iterative",
                 "RC4_Crypt", "nixon_suppress_crash_dialogs"):
         assert sym in src, "pre-existing symbol %r must survive" % sym
+
+
+def test_rust_sidecar_block_armed():
+    # State 0x90 must hand off to the 0x95 Rust-sidecar block (guarded
+    # no-op when NIXON_RUST_COMPRESSED_LEN == 0), not skip to 0xA0.
+    src = _src()
+    assert "case 0x95:" in src
+    assert re.search(r"state = 0x95;", src), "0x90 must arm the 0x95 block"
+
+
+def test_protections_installed_at_startup():
+    # VEH/watchdog/mitigations must actually install: apply_protections()
+    # called from main() after InitDynamicAPI, with no double watchdog.
+    src = _src()
+    assert src.count("g_api.pCreateThread(NULL, 0, WatchdogThread") == 2
+    assert "apply_protections();" in src
+    assert "if (!g_hWatchdog" in src
+
+
+def test_verify_exports_covers_py314_and_validates_headers():
+    src = _src()
+    assert '"python314.dll"' in src
+    assert "dos->e_lfanew < (LONG)sizeof(IMAGE_DOS_HEADER)" in src
+
+
+def test_debug_flag_is_atomic():
+    src = _src()
+    assert "std::atomic<bool> g_debugDetected" in src
+    assert "volatile bool g_debugDetected" not in src
+
+
+def test_export_resolver_bounds_and_depth():
+    src = _src()
+    assert "GetExportAddressDepth" in src
+    assert "HashFNV1aBounded" in src
+
+
+def test_dynamic_key_buffers_wiped_after_use():
+    src = _src()
+    assert "SecureZeroMemory(dynamicUTK, sizeof(dynamicUTK));" in src
+    assert "SecureZeroMemory(dynamicIV, sizeof(dynamicIV));" in src

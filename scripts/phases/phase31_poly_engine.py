@@ -39,7 +39,6 @@ def phase_poly_engine(payload_path: str, opts) -> dict:
         dict with environment profile and decrypt code
     """
     log("POLY_ENGINE", "Running poly-engine phase (Item 58)...")
-    log("POLY_ENGINE", "Running poly-engine phase (Item 58)...")
     try:
         from scripts.poly.poly_engine import PolyEngine
         pe = PolyEngine(seed=secrets.randbits(32))

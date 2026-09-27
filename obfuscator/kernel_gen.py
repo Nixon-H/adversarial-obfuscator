@@ -43,7 +43,7 @@ import tempfile
 
 # Ops the native kernel implements (must stay in sync with lowering_shim).
 # Dotted ops (str.join) become method-style helpers (sep, it).
-# 140 callable ops + the "fuse" dispatch = 141 total entries.
+# 139 callable ops + the "fuse" dispatch = 140 total entries.
 NATIVE_OPS: tuple[str, ...] = (
     # io
     "print", "input", "open",
@@ -55,7 +55,10 @@ NATIVE_OPS: tuple[str, ...] = (
     "float.hex", "float.as_integer_ratio",
     "complex.conjugate",
     # string (method-style)
-    "str.join", "str.split", "str.format", "str.encode", "str.decode",
+    # NOTE: no "str.decode" — Python 3 removed str.decode; only
+    # bytes.decode exists (kept in the bytes family). A str.decode entry
+    # would misroute bytes values held in str-named variables.
+    "str.join", "str.split", "str.format", "str.encode",
     "str.upper", "str.lower",
     "str.strip", "str.lstrip", "str.rstrip", "str.replace",
     "str.find", "str.rfind", "str.index", "str.count",
@@ -147,8 +150,7 @@ def _impl_body(op: str, impl: str, fast: bool = False) -> str:
         recv, meth = op.split(".", 1)
         if op == "str.join":
             return f"def {impl}(sep, it):\n    return sep.join(it)\n"
-        if op in ("str.maketrans", "dict.fromkeys", "bytes.fromhex",
-                  "int.from_bytes"):
+        if op in ("str.maketrans", "dict.fromkeys", "bytes.fromhex"):
             return (
                 f"def {impl}(*a, **k):\n"
                 f"    import builtins as _bi\n"

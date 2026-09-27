@@ -1,6 +1,11 @@
 """
 self_audit/auditor.py — Self-audit orchestration across ten categories (F180)
 
+# TWIN AUDITORS (different scopes, do not merge): scripts/independent_audit/
+# auditor.py (external cross-check of pipeline artifacts, F197/F200) and
+# scripts/claim_auditor/auditor.py (per-claim evidence scoring, F172 —
+# consumed BY this self-audit).
+
 Purpose:
     Implements the SelfAuditor class that runs audits across source, tests,
     reachability, proofs, benchmarks, claims/evidence, metrics, debt,

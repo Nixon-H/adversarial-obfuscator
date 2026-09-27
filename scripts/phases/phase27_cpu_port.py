@@ -38,7 +38,6 @@ def phase_cpu_port(seed=None):
         dict with test result written to BUILD_DIR
     """
     log("CPU_PORT", "Running CPU execution port entanglement")
-    log("CPU_PORT", "Running CPU execution port entanglement")
     env = os.environ.copy()
     if seed is not None:
         env["NIXON_PORT_ENTANGLE_SEED"] = str(seed)

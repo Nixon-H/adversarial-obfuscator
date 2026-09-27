@@ -37,7 +37,6 @@ def phase_encrypt_binary(input_o, output_enc):
         output_enc: path for the encrypted output
     """
     log("ENCRYPT", f"{input_o} → {output_enc}")
-    log("ENCRYPT", f"{input_o} → {output_enc}")
     script = os.path.join(ROOT, "encrypt", "encrypt.py")
     if not os.path.exists(script):
         log("SKIP", f"encrypt/encrypt.py not found, skipping")

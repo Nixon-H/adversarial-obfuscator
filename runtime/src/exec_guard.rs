@@ -140,7 +140,11 @@ mod tests {
     use std::fs;
 
     fn read_proc_maps() -> Vec<(usize, usize, String)> {
-        let maps = fs::read_to_string("/proc/self/maps").unwrap();
+        // Test helper only, but written panic-free on purpose: with
+        // panic=abort an unwrap here would abort the whole test binary
+        // (DoS on the suite). Unreadable maps => empty vec (callers then
+        // fail their own assertions explicitly); malformed lines skipped.
+        let maps = fs::read_to_string("/proc/self/maps").unwrap_or_default();
         let mut regions = Vec::new();
         for line in maps.lines() {
             let cols: Vec<&str> = line.splitn(5, ' ').collect();
@@ -151,8 +155,12 @@ mod tests {
             if addrs.len() != 2 {
                 continue;
             }
-            let start = usize::from_str_radix(addrs[0], 16).unwrap();
-            let end = usize::from_str_radix(addrs[1], 16).unwrap();
+            let (Some(start), Some(end)) = (
+                usize::from_str_radix(addrs[0], 16).ok(),
+                usize::from_str_radix(addrs[1], 16).ok(),
+            ) else {
+                continue;
+            };
             let perms = cols[1].to_string();
             regions.push((start, end, perms));
         }

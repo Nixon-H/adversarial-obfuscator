@@ -66,19 +66,23 @@ Between the three literal groups the emitter injects ≥ 8 filler comment
 lines each, so the fragments are non-adjacent in the emitted stub.
 :func:`fragments_spread` asserts/measures that spread.
 
-Post-reconstruction wipe: after ``_nx_sb_activate()`` derives the key it
-zeroes what it can and ``del``-etes the fragment holder names
-(``_NX_SB_HEAD``/``_NX_SB_TRAIL``/``_NX_SB_THIRD``) from its namespace.
+Post-reconstruction wipe (del-only + best-effort): after
+``_nx_sb_activate()`` derives the key it ``del``-etes the fragment holder
+names (``_NX_SB_HEAD``/``_NX_SB_TRAIL``/``_NX_SB_THIRD``) from its namespace
+and best-effort zeroes the mutable raw-key copy (``_sb_wipe``) via
+``ctypes.memset`` where available.
 Honesty note: the emitted fragment literals are Python ``str`` (immutable,
 interned) — they cannot be zeroed in place the way ``bytearray`` buffers
-can. The wipe therefore (a) zeroes the mutable intermediates (the raw
-combined key copy and a scratch ``bytearray`` per holder) via
-``ctypes.memset`` where available, and (b) deletes the holder NAMES from
-``globals()`` so a post-activation ``"_NX_SB_HEAD" in ns`` reads ``False``
-and the values are unreachable without a gc/referent walk. Module-level
-``str`` copies (co_consts, interning) remain — that residual is inherent
-to emitting key material as Python source and is documented here, not
-hidden.
+can, and scratch ``bytearray(...)`` copies of holder values would only wipe
+the copy, not the holder (so holders are del-only, never copy-memset).
+The wipe therefore (a) memsets the real ``_sb_wipe`` buffer (best-effort;
+no-op when ``ctypes`` is unavailable), and (b) deletes the holder NAMES
+from ``globals()`` so a post-activation ``"_NX_SB_HEAD" in ns`` reads
+``False`` and the values are unreachable without a gc/referent walk.
+Module-level ``str`` copies (co_consts, interning) and the immutable
+``bytes`` intermediates (``_raw``, ``_key``) remain — that residual is
+inherent to emitting key material as Python source and is documented here,
+not hidden.
 
 Build-time API: :func:`split_bootstrap_key`, :func:`emit_bootstrap_snippet`,
 :func:`fragments_spread`, :func:`snip_markers`.
@@ -101,6 +105,7 @@ DEFAULT_K = 2
 # tests and the pipeline wiring can reference the same contract.
 HEAD_VAR = "_NX_SB_HEAD"
 TRAIL_VAR = "_NX_SB_TRAIL"
+THIRD_VAR = "_NX_SB_THIRD"
 SALT_VAR = "_NX_SB_SALT"
 CACHE_VAR = "_NX_SB_KEY"
 COLLECT_FN = "_nx_sb_collect"
@@ -260,12 +265,12 @@ def emit_bootstrap_snippet(fragments, k: int,
         lines.append(_FILLER.rstrip("\n"))
     lines.append(SALT_MARKER)
     lines.append("%s = %s" % (SALT_VAR, _lit(build_id)))
-    lines.append("_NX_SB_THIRD = %s" % (_lit(frags[2]),))
+    lines.append("%s = %s" % (THIRD_VAR, _lit(frags[2]),))
     lines.append("")
     lines.append("# _collect: locations only.")
     lines.append("def %s():" % COLLECT_FN)
     lines.append('    """Gather k fragments from separate stub locations."""')
-    lines.append("    return [%s, %s, _NX_SB_THIRD]" % (HEAD_VAR, TRAIL_VAR))
+    lines.append("    return [%s, %s, %s]" % (HEAD_VAR, TRAIL_VAR, THIRD_VAR))
     lines.append("")
     # _combine: math only. Self-contained Lagrange-over-GF(251) + hex
     # decode mirroring scripts/dispersal/payload_dispersal.py::ShamirSharing
@@ -319,47 +324,51 @@ def emit_bootstrap_snippet(fragments, k: int,
     lines.append("    %s = _key" % CACHE_VAR)
     lines.append("    try:")
     lines.append("        import ctypes as _sb_ct")
-    lines.append("        _sb_targets = []")
-    lines.append("        try:")
-    lines.append("            _sb_targets.append(_sb_wipe)")
-    lines.append("        except Exception:")
-    lines.append("            pass")
-    lines.append("        for _name in (%s, %s, '_NX_SB_THIRD'):"
-                  % (repr(HEAD_VAR), repr(TRAIL_VAR)))
-    lines.append("            try:")
-    lines.append("                _buf = bytearray(globals().get(_name, b'') or b'')")
-    lines.append("                if len(_buf):")
-    lines.append("                    _sb_ct.memset(_sb_ct.addressof(_sb_ct.c_char.from_buffer(_buf)), 0, len(_buf))")
-    lines.append("            except Exception:")
-    lines.append("                pass")
-    lines.append("            try:")
-    lines.append("                del globals()[_name]")
-    lines.append("            except Exception:")
-    lines.append("                pass")
+    lines.append("        if len(_sb_wipe):")
+    lines.append("            _sb_ct.memset(_sb_ct.addressof(_sb_ct.c_char.from_buffer(_sb_wipe)), 0, len(_sb_wipe))")
     lines.append("    except Exception:")
     lines.append("        pass")
+    lines.append("    for _name in (%s, %s, %s):"
+                 % (repr(HEAD_VAR), repr(TRAIL_VAR), repr(THIRD_VAR)))
+    lines.append("        try:")
+    lines.append("            del globals()[_name]")
+    lines.append("        except Exception:")
+    lines.append("            pass")
     lines.append("    return _key")
     lines.append("")
-    return "\n".join(lines)
+    src = "\n".join(lines)
+    # Build-time self-check: the emitted stub must compile (fail here,
+    # not in the artifact).
+    compile(src, "<split_bootstrap>", "exec")
+    return src
 
 
 def fragments_spread(snippet: str) -> dict:
     """Measure fragment non-adjacency in an emitted snippet.
 
-    Returns ``{"head_line": int, "trail_line": int, "gap": int}`` (0-based
-    line numbers of the two share literals and the line gap between them).
+    Returns ``{"head_line", "trail_line", "third_line", "salt_line",
+    "gap", "gap_head_trail", "gap_trail_third"}`` (0-based line numbers
+    of the three share literals + SALT marker, and the line gaps between
+    them). ``gap`` is kept as the legacy HEAD→TRAIL alias.
     """
     lines = snippet.split("\n")
-    head = trail = None
+    head = trail = third = salt = None
     for i, ln in enumerate(lines):
         if ln.startswith(HEAD_VAR + " ="):
             head = i
         elif ln.startswith(TRAIL_VAR + " ="):
             trail = i
-    if head is None or trail is None:
+        elif ln.startswith(THIRD_VAR + " ="):
+            third = i
+        elif SALT_MARKER in ln:
+            salt = i
+    if head is None or trail is None or third is None:
         raise ValueError("snippet missing fragment literals")
-    return {"head_line": head, "trail_line": trail,
-            "gap": abs(trail - head)}
+    gap_ht = abs(trail - head)
+    gap_tt = abs(third - trail)
+    return {"head_line": head, "trail_line": trail, "third_line": third,
+            "salt_line": salt, "gap": gap_ht,
+            "gap_head_trail": gap_ht, "gap_trail_third": gap_tt}
 
 
 def snip_markers() -> dict:
@@ -372,7 +381,7 @@ def snip_markers() -> dict:
     """
     return {"head": HEAD_MARKER, "trail": TRAIL_MARKER, "salt": SALT_MARKER,
             "head_var": HEAD_VAR, "trail_var": TRAIL_VAR,
-            "third_var": "_NX_SB_THIRD",
+            "third_var": THIRD_VAR,
             "salt_var": SALT_VAR, "cache_var": CACHE_VAR,
             "collect": COLLECT_FN, "combine": COMBINE_FN,
             "activate": ACTIVATE_FN,

@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <vector>
 #include <cstdlib>
+#include <atomic>
 #include <winternl.h>
 #include <intrin.h>
 #include <Python.h>
@@ -49,6 +50,18 @@ constexpr DWORD HashFNV1a(const char* str) {
     while ((c = *str++)) hash = ((hash << 5) + hash) + c;
     return hash;
 }
+// Length-bounded variant for RVAs validated only by start address: the
+// NUL terminator may lie past the image end, so never scan further than
+// the bytes remaining in the mapping.
+static DWORD HashFNV1aBounded(const char* str, size_t maxLen) {
+    DWORD hash = 5381;
+    for (size_t n = 0; n < maxLen; n++) {
+        int c = str[n];
+        if (!c) break;
+        hash = ((hash << 5) + hash) + c;
+    }
+    return hash;
+}
 PVOID GetModuleBase(DWORD moduleHash) {
 #ifdef _WIN64
     PPEB pPeb = (PPEB)__readgsqword(0x60);
@@ -72,30 +85,53 @@ PVOID GetModuleBase(DWORD moduleHash) {
     }
     return nullptr;
 }
+static PVOID GetExportAddressDepth(PVOID pModBase, DWORD procHash, int depth);
 PVOID GetExportAddress(PVOID pModBase, DWORD procHash) {
+    return GetExportAddressDepth(pModBase, procHash, 8);
+}
+// Forwarder-resolution depth is capped (8): a hostile export table with a
+// forwarder cycle (A -> B -> A) must not recurse unboundedly into a stack
+// overflow. All RVAs are validated against SizeOfImage before dereference;
+// any out-of-range value fails closed (nullptr), never reads OOB.
+static PVOID GetExportAddressDepth(PVOID pModBase, DWORD procHash, int depth) {
+    if (!pModBase || depth <= 0) return nullptr;
     PIMAGE_DOS_HEADER pDos = (PIMAGE_DOS_HEADER)pModBase;
+    if (pDos->e_magic != IMAGE_DOS_SIGNATURE) return nullptr;
+    if (pDos->e_lfanew < (LONG)sizeof(IMAGE_DOS_HEADER) || pDos->e_lfanew > 0x100000) return nullptr;
     PIMAGE_NT_HEADERS pNt = (PIMAGE_NT_HEADERS)((PUCHAR)pModBase + pDos->e_lfanew);
+    if (pNt->Signature != IMAGE_NT_SIGNATURE) return nullptr;
+    DWORD imageSize = pNt->OptionalHeader.SizeOfImage;
+    if (imageSize == 0 || imageSize > 0x40000000) return nullptr;
     DWORD expDirRVA = pNt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
     DWORD expDirSize = pNt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
+    if (expDirRVA == 0 || expDirRVA >= imageSize) return nullptr;
+    if (expDirSize > imageSize - expDirRVA) return nullptr;
     PIMAGE_EXPORT_DIRECTORY pExp = (PIMAGE_EXPORT_DIRECTORY)((PUCHAR)pModBase + expDirRVA);
+    if (pExp->AddressOfNames >= imageSize || pExp->AddressOfFunctions >= imageSize ||
+        pExp->AddressOfNameOrdinals >= imageSize) return nullptr;
+    if (pExp->NumberOfNames > 0x10000 || pExp->NumberOfFunctions > 0x10000) return nullptr;
     PDWORD pNames = (PDWORD)((PUCHAR)pModBase + pExp->AddressOfNames);
     PDWORD pAddrs = (PDWORD)((PUCHAR)pModBase + pExp->AddressOfFunctions);
     PWORD  pOrds  = (PWORD)((PUCHAR)pModBase + pExp->AddressOfNameOrdinals);
     for (DWORD i = 0; i < pExp->NumberOfNames; i++) {
+        if (pNames[i] >= imageSize) continue;
         char* fn = (char*)((PUCHAR)pModBase + pNames[i]);
-        if (HashFNV1a(fn) == procHash) {
+        if (HashFNV1aBounded(fn, imageSize - pNames[i]) == procHash) {
+            if (pOrds[i] >= pExp->NumberOfFunctions) return nullptr;
             DWORD funcRVA = pAddrs[pOrds[i]];
+            if (funcRVA >= imageSize) return nullptr;
             if (funcRVA >= expDirRVA && funcRVA < expDirRVA + expDirSize) {
                 char* fwd = (char*)((PUCHAR)pModBase + funcRVA);
+                DWORD fwdMax = imageSize - funcRVA;
                 char modName[128]; int k = 0;
-                while (fwd[k] && fwd[k] != '.' && k < 127) { modName[k] = fwd[k]; k++; }
+                while ((DWORD)k < fwdMax && fwd[k] && fwd[k] != '.' && k < 127) { modName[k] = fwd[k]; k++; }
                 modName[k] = '\0';
                 if (k + 4 < 128) { modName[k]='.'; modName[k+1]='d'; modName[k+2]='l'; modName[k+3]='l'; modName[k+4]='\0'; }
                 for (int j = 0; modName[j]; j++)
                     if (modName[j] >= 'A' && modName[j] <= 'Z') modName[j] += 32;
                 PVOID fwdMod = GetModuleBase(HashFNV1a(modName));
-                if (fwdMod && fwd[k] == '.') {
-                    return GetExportAddress(fwdMod, HashFNV1a(fwd + k + 1));
+                if (fwdMod && (DWORD)k < fwdMax && fwd[k] == '.') {
+                    return GetExportAddressDepth(fwdMod, HashFNV1aBounded(fwd + k + 1, fwdMax - (DWORD)k - 1), depth - 1);
                 }
                 return nullptr; 
             }
@@ -419,8 +455,21 @@ void DeriveKeyFromFingerprint_Iterative(const HardwareFingerprint& fp, unsigned 
     volatile unsigned char* iWipe = initialSeed;
     for (size_t i = 0; i < sizeof(initialSeed); i++) iWipe[i] = 0;
 }
-volatile bool g_debugDetected = false;
+std::atomic<bool> g_debugDetected{false};
 static HANDLE g_hWatchdog = NULL;
+// Post-tamper fill PRNG: plain xorshift32 (NOT a CSPRNG — the zeros pass
+// already destroyed the key; the random pass only defeats residual-charge
+// / cold-boot reads). Deliberately srand/rand-free: no CRT seed state,
+// no data race on the shared generator. Seeded once at startup from the
+// tick count in apply_protections().
+static uint32_t g_poisonXor = 0x9E3779B9u;
+static unsigned char PoisonNextByte() {
+    uint32_t x = g_poisonXor;
+    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+    if (!x) x = 0x9E3779B9u;
+    g_poisonXor = x;
+    return (unsigned char)(x & 0xFF);
+}
 // IAT verification ground truth: (slot address -> resolved address at load).
 // Populated during reflective import resolution; VerifyIAT() re-reads each
 // slot and flags post-load IAT hooking. Fixed-size table: excess slots are
@@ -449,7 +498,7 @@ static size_t g_iatTracked = 0;
 // watchdog (which has no access to main()'s stack locals) can still poison
 // the live keys on tamper. Default: empty (poison covers the globals +
 // obf buffers it can reach; registered keys are wiped when present).
-#define NIXON_POISON_KEYS_MAX 4
+#define NIXON_POISON_KEYS_MAX 8
 static volatile unsigned char* g_poisonKeys[NIXON_POISON_KEYS_MAX] = {0};
 static size_t g_poisonKeyLens[NIXON_POISON_KEYS_MAX] = {0};
 static size_t g_poisonKeyCount = 0;
@@ -462,6 +511,14 @@ static void RegisterPoisonKey(volatile unsigned char* key, size_t len) {
     }
 }
 static bool VerifyIAT() {
+    // KNOWN LIMITATION (documented, not fixed): slot reads are not
+    // synchronized with the loader thread that populates g_iatSlots /
+    // g_iatTruth during reflective import resolution. A torn read could
+    // theoretically flag a mismatch mid-population — in practice the
+    // watchdog only re-verifies every ~5th cycle, long after resolution
+    // completes, and a mismatch lands in the poison-then-kill path
+    // (fail-closed direction). A lock here would risk loader-lock
+    // interplay; the race window is acceptable.
     for (size_t i = 0; i < g_iatTracked; ++i) {
         uintptr_t* slot = (uintptr_t*)g_iatSlots[i];
         if (!slot) continue;
@@ -476,12 +533,21 @@ static bool VerifyIAT() {
 // What is poisoned:
 //   1. Registered live keys (main()'s machineKey/rc4HardwareKey via
 //      RegisterPoisonKey — the actual decrypt-path key buffers).
-//   2. All OBF() decrypted-string buffers (RegisterObfBuf registry).
-//   3. The IAT ground-truth table itself (g_iatTruth) so a racing thread
+//   2. Registered payload/enclave buffers (main()'s payloadData after
+//      decode and enclave.data after Allocate — both stable until their
+//      explicit end-of-block wipes; see states 0x70/0x80).
+//   3. All OBF() decrypted-string buffers (RegisterObfBuf registry).
+//   4. The IAT ground-truth table itself (g_iatTruth) so a racing thread
 //      cannot re-derive the original pointers.
-// Random fill uses rand() (not CSPRNG — post-tamper best-effort; the zeros
-// pass already destroyed the key, the random pass defeats residual-charge /
-// cold-boot reads). SecureZeroMemory (== RtlSecureZeroMemory) guarantees the
+// Block-scope temporaries (enclaveVec/tmpBuf/execBuf/dynamicUTK/
+// dynamicIV) are NOT registered: they rely on explicit end-of-block
+// wipes at each use site. g_pEnclaveBase is deliberately untouched
+// here — the page may be NOACCESS-locked during the marshal window
+// and execBuf is SecureWipe'd at block end regardless.
+// Random fill uses PoisonNextByte() (xorshift32, not CSPRNG —
+// post-tamper best-effort; the zeros pass already destroyed the key,
+// the random pass defeats residual-charge / cold-boot reads).
+// SecureZeroMemory (== RtlSecureZeroMemory) guarantees the
 // compiler cannot elide the wipe.
 static void PoisonKeysOnTamper() {
     for (size_t k = 0; k < g_poisonKeyCount; ++k) {
@@ -490,7 +556,7 @@ static void PoisonKeysOnTamper() {
         if (!p || !n) continue;
         SecureZeroMemory((PVOID)p, n);
         for (size_t i = 0; i < n; ++i)
-            p[i] = (unsigned char)(rand() & 0xFF);
+            p[i] = PoisonNextByte();
         SecureZeroMemory((PVOID)p, n);
     }
     g_poisonKeyCount = 0;
@@ -520,9 +586,13 @@ static bool VerifyExports() {
         (fnGetProcAddress)GetExportAddress(pKernel32, HashFNV1a("GetProcAddress"));
     if (!pGMH || !pGPA) return true;  // fail-open: cannot check yet
     // Candidate host python DLL names (versioned install layouts).
+    // Keep in sync with obfuscator/py_matrix.py SUPPORTED (3.10-3.14+):
+    // add each newly-supported minor here. python3.dll is the stable-ABI
+    // fallback; unknown future names fail OPEN (return true below) rather
+    // than killing a legitimate host — missing-DLL is not tamper.
     static const char* kPyDlls[] = {
         "python311.dll", "python312.dll", "python310.dll", "python39.dll",
-        "python3.dll", "python313.dll",
+        "python3.dll", "python313.dll", "python314.dll",
     };
     HMODULE hPy = NULL;
     for (size_t d = 0; d < sizeof(kPyDlls) / sizeof(kPyDlls[0]); ++d) {
@@ -531,12 +601,25 @@ static bool VerifyExports() {
     }
     if (!hPy) return true;  // reflectively-loaded DLL has no OS module entry
                              // (GetModuleHandle can't see it) — nothing to check.
+    // FAIL-OPEN RATIONALE (do NOT "fix" these into fail-closed): every
+    // early `return true` below fires when the loader isn't ready yet or
+    // the module isn't a normally-loaded image — states where a bounds
+    // check is meaningless, not evidence of tamper. Failing closed here
+    // would turn a cold-start race into a boot failure that kills
+    // legitimate payloads. Positive tamper evidence (an export resolving
+    // outside module bounds) still poisons keys + silent-kills below.
     PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)hPy;
     if (dos->e_magic != IMAGE_DOS_SIGNATURE) return true;
+    // Bounds-check e_lfanew before dereferencing NT headers: a corrupt or
+    // hostile value must not send us out of the mapping.
+    if (dos->e_lfanew < (LONG)sizeof(IMAGE_DOS_HEADER) || dos->e_lfanew > 0x100000) return true;
     PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)((PUCHAR)hPy + dos->e_lfanew);
     if (nt->Signature != IMAGE_NT_SIGNATURE) return true;
     uintptr_t modBase = (uintptr_t)hPy;
     uintptr_t modEnd = modBase + nt->OptionalHeader.SizeOfImage;
+    // Sanity-cap SizeOfImage: a corrupt/huge value would make every
+    // export trivially "in bounds" (vacuous pass). Fail open instead.
+    if (nt->OptionalHeader.SizeOfImage == 0 || nt->OptionalHeader.SizeOfImage > 0x40000000) return true;
     static const char* kExports[] = {
         "PyEval_EvalCode",
         "Py_Initialize",
@@ -565,7 +648,7 @@ static bool VerifyExports() {
 //   - Read-only source: EnumDeviceDrivers + GetDeviceDriverBaseNameA
 //     (psapi; resolved dynamically via LoadLibraryA/GetProcAddress so the
 //     stub gains no new import-table entry and needs no new link dep —
-//     Makefile stub-win still links -lpsapi as the declared dependency).
+//     no -lpsapi on the stub-win link lines for exactly this reason).
 //   - Case-insensitive STEM matching: basename + strip one trailing ".sys"
 //     + lowercase, compared against the embedded blocklist below, which is
 //     a subset of BLOCKED_DRIVERS in obfuscator/driver_blocklist.py (worst
@@ -586,9 +669,12 @@ static bool g_driverCheckArmed = true;
 static bool g_driverCheckArmed = false;
 #endif
 // Worst-stem subset of BLOCKED_DRIVERS (obfuscator/driver_blocklist.py).
-// Lowercase, no ".sys" suffix. 15 stems: RTCore (MSI Afterburner),
-// WinRing0 (CPU-Z/HWMon), GDRV (Gigabyte), AsIO/AsUpIO (ASUS),
-// DBUtilDrv2 (Dell CVE-2021-21551), KProcessHacker (Process Hacker),
+// Lowercase, no ".sys" suffix. Full 22-stem parity with BLOCKED_DRIVERS:
+// RTCore (MSI Afterburner), WinRing0 (CPU-Z/HWMon), GDRV (Gigabyte),
+// AsIO/AsUpIO (ASUS), DBUtilDrv2 (Dell CVE-2021-21551), bwcw10x64
+// (Lenovo diagnostics), KProcessHacker{,2} (Process Hacker),
+// ntidrv (CDBurnerXP/NTI), amsdk (virtual-disk helper), eneio64 /
+// enetechio64 (MSI Dragon Center), lha (monitor-control driver),
 // BioNTdrv (Paragon), dbcohc (Huawei), rzpnk (Razer), truesight.
 static const char* kNixonBlockedDriverStems[] = {
     "rtcore64", "rtcore32",
@@ -596,7 +682,12 @@ static const char* kNixonBlockedDriverStems[] = {
     "gdrv", "gdrv2",
     "asio", "asupio",
     "dbutildrv2", "dbutil_2_3",
-    "kprocesshacker",
+    "bwcw10x64",
+    "kprocesshacker", "kprocesshacker2",
+    "ntidrv",
+    "amsdk",
+    "eneio64", "enetechio64",
+    "lha",
     "biontdrv",
     "dbcohc",
     "rzpnk",
@@ -698,10 +789,15 @@ bool CheckPEB() {
     return (p->BeingDebugged == 1 || ntg == 0x70);
 }
 bool CheckHardwareBP() {
-    CONTEXT ctx = {0};
-    ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
-    if (GetThreadContext(GetCurrentThread(), &ctx))
-        return (ctx.Dr0 || ctx.Dr1 || ctx.Dr2 || ctx.Dr3);
+    // No self-GetThreadContext: it cannot report the CURRENT thread's
+    // debug registers without a suspend (the pseudo-handle call fails,
+    // so the old body always returned false), and a suspend-enumerate
+    // of other threads is unsafe here — this runs inside TlsCallback
+    // under the loader lock, where thread suspension risks deadlock.
+    // Hardware-breakpoint defense is enforced by NixonVEHHandler
+    // (EXCEPTION_SINGLE_STEP DR0-DR3/DR7 clear), installed at startup
+    // via apply_protections(). Returning false keeps the polling-ladder
+    // shape without a fake positive source.
     return false;
 }
 bool CheckDebugPort() {
@@ -808,9 +904,14 @@ void apply_protections(void) {
     PVOID pKernel32 = GetModuleBase(0x6DDB9555);
     fnAddVectoredExceptionHandler pAddVeh = (fnAddVectoredExceptionHandler)GetExportAddress(pKernel32, HashFNV1a("AddVectoredExceptionHandler"));
     if (pAddVeh) pAddVeh(1, NixonVEHHandler);
-    if (g_api.pCreateThread) {
+    // Guarded: main()'s 0x30 state also spawns the watchdog as a
+    // fallback, so never create a second thread here.
+    if (!g_hWatchdog && g_api.pCreateThread) {
         g_hWatchdog = g_api.pCreateThread(NULL, 0, WatchdogThread, NULL, 0, NULL);
     }
+    // Seed the post-tamper fill PRNG once (tick count is non-secret;
+    // unpredictability is not required — see PoisonNextByte() note).
+    if (g_api.pGetTickCount) g_poisonXor ^= g_api.pGetTickCount();
     PVOID pNtdll = GetModuleBase(0x1EDAB0ED);
     if (pNtdll) {
         typedef NTSTATUS(NTAPI* fnNtSetInformationProcess)(HANDLE, ULONG, PVOID, ULONG);
@@ -1513,12 +1614,10 @@ extern "C" void Nixon_AVX512_FHE_Add(uint32_t* c1, uint32_t* c2, uint32_t modulu
 }
 
 LONG WINAPI CustomUnhandledExceptionFilter(EXCEPTION_POINTERS* ) {
-    typedef void(WINAPI* fnExitProcess)(UINT);
-    PVOID pK32 = GetModuleBase(0x6DDB9555);
-    if (pK32) {
-        fnExitProcess ep = (fnExitProcess)GetExportAddress(pK32, HashFNV1a("ExitProcess"));
-        if (ep) ep(0);
-    }
+    // Ladder-preserving: exit 137 (silent-kill), NEVER 0 — a 0 exit
+    // would masquerade a crash as a clean run and break kill-ladder
+    // accounting (cf. nixon_silent_kill / crash_suppress.h).
+    nixon_silent_kill();  // ExitProcess(137); no return
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
@@ -1542,6 +1641,11 @@ int main(int argc, char* argv[]) {
         switch (state) {
             case 0x10: {
                 if (!InitDynamicAPI()) return 1;
+                // Install VEH + watchdog + anti-debug process mitigations
+                // at startup (mirrors stub_linux.cpp main()). Watchdog
+                // creation is guarded inside apply_protections(), so the
+                // 0x30 fallback below never double-spawns.
+                apply_protections();
                 state = 0x20;
                 break;
             }
@@ -1567,7 +1671,9 @@ int main(int argc, char* argv[]) {
                 break;
             }
             case 0x30: {
-                if (g_api.pCreateThread) g_hWatchdog = g_api.pCreateThread(NULL, 0, WatchdogThread, NULL, 0, NULL);
+                // Fallback only: apply_protections() (state 0x10) already
+                // spawned the watchdog; the guard keeps exactly one.
+                if (!g_hWatchdog && g_api.pCreateThread) g_hWatchdog = g_api.pCreateThread(NULL, 0, WatchdogThread, NULL, 0, NULL);
                 state = 0x40;
                 break;
             }
@@ -1588,9 +1694,13 @@ int main(int argc, char* argv[]) {
                 RegisterPoisonKey((volatile unsigned char*)rc4HardwareKey, 32);
                 volatile unsigned char* fpWipe = (volatile unsigned char*)&hwfp;
                 for (size_t i = 0; i < sizeof(hwfp); i++) fpWipe[i] = 0;
-                volatile uint32_t hwMix = hwfp.volumeSerial;
-                hwMix ^= hwfp.volumeSerial; 
-                state = 0x60 + hwMix;
+                // NOTE: dispatch is intentionally linear (state = 0x60).
+                // A fingerprint-dependent branch here would risk jumping
+                // to an unhandled state (default => 0xFF exit, payload
+                // never runs); the fingerprint already gates decrypt
+                // output, so no inspectable signal is lost by keeping
+                // the transition constant.
+                state = 0x60;
                 break;
             }
             case 0x60: {
@@ -1603,12 +1713,17 @@ int main(int argc, char* argv[]) {
                     state = 0xFF; 
                     break;
                 }
+                // Stable from here (no further realloc): register the
+                // decoded-payload window for the tamper-poison path.
+                RegisterPoisonKey((volatile unsigned char*)payloadData.data(), payloadData.size());
                 state = 0x80;
                 break;
             }
             case 0x80: {
                 enclave = SecureEnclave::Allocate(payloadData.size());
                 if (enclave.data) memcpy(enclave.data, payloadData.data(), payloadData.size());
+                // VirtualAlloc-backed: pointer stable until SecureWipe.
+                RegisterPoisonKey(enclave.data, enclave.size);
                 volatile unsigned char* pdWipe = payloadData.data();
                 for (size_t i = 0; i < payloadData.size(); i++) pdWipe[i] = 0;
                 state = 0x90;
@@ -1623,12 +1738,17 @@ int main(int argc, char* argv[]) {
                     DeriveRC4Key(machineKey, 32, NIXON_KEY_SALT, 16, dynamicIV, 16);
                     for (int i = 0; i < 16; i++) dynamicIV[i] ^= (unsigned char)i;
                     WhiteboxCipher::DecryptCTR(enclaveVec.data(), enclaveVec.size(), dynamicUTK, dynamicIV);
+                    SecureZeroMemory(dynamicUTK, sizeof(dynamicUTK));
+                    SecureZeroMemory(dynamicIV, sizeof(dynamicIV));
                     RC4_Crypt(enclaveVec, rc4HardwareKey, 32, dbgPresent);
                     memcpy(enclave.data, enclaveVec.data(), enclaveVec.size());
                     volatile unsigned char* evWipe = enclaveVec.data();
                     for (size_t i = 0; i < enclaveVec.size(); i++) evWipe[i] = 0;
                 }
-                state = 0xA0;
+                // Arm the Rust-sidecar block (0x95): guarded no-op that
+                // passes straight through to 0xA0 when no sidecar is
+                // embedded (NIXON_RUST_COMPRESSED_LEN == 0).
+                state = 0x95;
                 break;
             }
             case 0x95: {
@@ -1794,6 +1914,14 @@ int main(int argc, char* argv[]) {
                 volatile unsigned char* rkHWipe = rc4HardwareKey;
                 for (int i = 0; i < 32; i++) { mkWipe[i] = 0; rkHWipe[i] = 0; }
                 if (g_hWatchdog) {
+                    // KNOWN LIMITATION (documented, not fixed):
+                    // TerminateThread does not run thread cleanup — used
+                    // here only on the exit path (our own watchdog, stuck
+                    // in a 2 s timer wait; the process tears down via
+                    // ExitProcess immediately after), never during live
+                    // execution. A graceful WaitForSingleObject shutdown
+                    // would require a stop event + watchdog cooperation;
+                    // deferred to keep the exit path infallible.
                     if (g_api.pTerminateThread) g_api.pTerminateThread(g_hWatchdog, 0);
                     if (g_api.pCloseHandle) g_api.pCloseHandle(g_hWatchdog);
                 }

@@ -171,8 +171,10 @@ mod tests {
     fn test_rdrand_instruction_works() {
         let result = rdrand_u64();
         assert!(result.is_ok());
-        let val = result.unwrap();
-        assert!(val > 0);
+        // NOTE: no `val > 0` assertion — RDRAND can legitimately return 0
+        // (probability 2^-64 per draw, higher on some VMs); asserting
+        // nonzero would flake the suite. is_ok() is the real property.
+        let _val = result.unwrap();
     }
 
     #[test]

@@ -24,7 +24,7 @@ import json
 import os
 import time
 
-from ..common import log as pipeline_log
+from ..common import log as pipeline_log, BUILD_DIR
 
 
 def phase_redteam(args, binary_path, source_path):
@@ -42,7 +42,15 @@ def phase_redteam(args, binary_path, source_path):
     pipeline_log("REDTEAM", "Starting autonomous red team pipeline...")
     pipeline_log("REDTEAM", "Starting autonomous red team pipeline...")
 
-    output_dir = getattr(args, "red_team_output", "build/redteam")
+    # Anchor relative output dirs at BUILD_DIR so CWD-independent invocation works.
+    from ..common import ROOT as _ROOT
+    _raw_out = getattr(args, "red_team_output", None) or os.path.join(BUILD_DIR, "redteam")
+    if os.path.isabs(_raw_out):
+        output_dir = _raw_out
+    elif _raw_out == os.path.join("build", "redteam"):
+        output_dir = os.path.join(BUILD_DIR, "redteam")
+    else:
+        output_dir = os.path.join(_ROOT, _raw_out)
     os.makedirs(output_dir, exist_ok=True)
 
     try:
@@ -72,7 +80,12 @@ def phase_redteam(args, binary_path, source_path):
             json.dump(summary, f, indent=2, default=str)
 
         pipeline_log("REDTEAM", f"Red team summary → {summary_path}")
-        pipeline_log("REDTEAM", f"Security score: {report.combined_security_score:.1f}/100")
+        # combined_security_score is None when no attack completed
+        # (fail-closed: unknown, not 50.0) — never format blindly.
+        if report.combined_security_score is None:
+            pipeline_log("REDTEAM", "Security score: n/a (no attacks completed)")
+        else:
+            pipeline_log("REDTEAM", f"Security score: {report.combined_security_score:.1f}/100")
         pipeline_log("REDTEAM", f"Weakest link: {report.weakest_link}")
         pipeline_log("REDTEAM", f"Recommendations: {len(report.recommendations)}")
 

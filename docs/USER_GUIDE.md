@@ -193,7 +193,7 @@ Each var verified by grep against the tree (sources + tests):
 |---|---|---|---|
 | `NIXON_LOG_REDIRECT` | `1` redirects stdout/stderr to `build.log`; `0` keeps console | `1` (but `scripts/build.py` calls `setdefault("0")`, so a plain build prints to console) | `obfuscator/core/utils.py`, `scripts/build.py` |
 | `NIXON_KOD` | Anything but `"0"` arms kill-on-detect for the VM verdict (`os._exit`) and mirrors into the audit-hook timing gate | report-only | `obfuscator/vm_score.py`, `obfuscator/audit_hook.py`; `tests/test_vm_score.py`, `tests/test_vm_subset.py` |
-| `NIXON_DRIVER_CHECK` | Arms the BYOVD driver gate at runtime (fail-closed `os._exit(1)` on blocklist hit + 60 s daemon re-check); disarmed = enumerate only | disarmed | `obfuscator/driver_blocklist.py`, `obfuscator/core/pipeline.py`; `tests/test_driver_blocklist.py` |
+| `NIXON_DRIVER_CHECK` | Arms the BYOVD driver gate at runtime (fail-closed `_nx_kill("driver-blocked")`, exit 137, + 60 s daemon re-check); disarmed = enumerate only | disarmed | `obfuscator/driver_blocklist.py`, `obfuscator/core/pipeline.py`; `tests/test_driver_blocklist.py` |
 | `NIXON_AUDIT_TIMING` | Arms timing-kill in the audit hook (any non-0 value arms) | disarmed | `obfuscator/audit_hook.py`; `tests/test_audit_timing.py` |
 | `NIXON_SNAPSHOT_OFF` | Truthy (`1/true/True/TRUE`, see `frozen_snapshot.py`) disables the frozen-stdlib snapshot gate at runtime | gate ON | `obfuscator/frozen_snapshot.py`, `obfuscator/core/pipeline.py`; `tests/test_frozen_snapshot.py` |
 | `NIXON_STDLIB_AUDIT_OFF` | Same truthy set; disables the stdlib function-audit gate at runtime | gate ON | `obfuscator/stdlib_audit.py`, `obfuscator/core/pipeline.py`; `tests/test_stdlib_audit.py` |

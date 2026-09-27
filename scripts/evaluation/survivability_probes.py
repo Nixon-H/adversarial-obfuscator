@@ -25,7 +25,9 @@ def probe_watermark(artifact) -> float:
             with open(artifact, 'rb') as f:
                 data = f.read()
         except (IOError, OSError):
-            return 0.5
+            # Fail-closed: an unreadable artifact is not an intact
+            # watermark (was a neutral 0.5).
+            return 0.0
 
         if data[:4] == b'\x7fELF':
             matches = len(re.findall(rb'[Nn][Ii][Xx][Oo][Nn]_[Ww][Mm]', data))
@@ -90,7 +92,9 @@ def probe_vm_opcodes(artifact) -> float:
 
     found_opcodes = set(re.findall(r'OP_([A-Z0-9_]+)', text))
     if not found_opcodes:
-        return 0.5
+        # Fail-closed: no measurable opcodes is not evidence of
+        # deviation (was a neutral 0.5).
+        return 0.0
 
     full_names = {'OP_' + name for name in found_opcodes}
     custom = full_names - _CANONICAL_OPCODES
@@ -112,7 +116,8 @@ def probe_cfg(artifact) -> float:
     recon_blocks = _reconstruct_cfg(normalized)
 
     if not orig_blocks:
-        return 0.5
+        # Fail-closed: nothing measurable proves nothing (was 0.5).
+        return 0.0
 
     if not recon_blocks:
         return 1.0
@@ -135,7 +140,9 @@ def probe_fragments(artifact) -> float:
     total_expected = _count_expected_fragments(artifact)
 
     if total_expected == 0:
-        return 1.0
+        # Fail-closed: with nothing expected there is nothing hidden —
+        # a vacuous 1.0 ("perfectly hidden") certified empty inputs.
+        return 0.0
 
     detection_rate = min(1.0, detected / total_expected)
     return 1.0 - detection_rate

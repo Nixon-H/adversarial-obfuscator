@@ -6,8 +6,8 @@ class _EntropyBranchInjector(ast.NodeTransformer):
     def __init__(self, config: dict):
         self.config = config
         self._counter = 0
-        self._entropy_var = "_entropy_buf"
-        self._idx_var = "_entropy_idx"
+        self._entropy_var = "_nx_entropy_buf"
+        self._idx_var = "_nx_entropy_idx"
 
     def _make_entropy_branch(self, body: list[ast.stmt]) -> list[ast.stmt]:
         idx = self._counter
@@ -76,11 +76,39 @@ def inject_entropy_branches(source: str, config: dict) -> str:
     except SyntaxError:
         return source
 
-    import_os = ast.Import(names=[ast.alias(name="os", asname=None)])
-    tree.body.insert(0, import_os)
+    funcs = [n for n in ast.walk(tree)
+             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    if not funcs:
+        # Nothing to instrument: do not touch the foreign module at all
+        # (no import, no globals).
+        return source
 
-    tree.body.insert(1, ast.Assign(
-        targets=[ast.Name(id="_entropy_buf", ctx=ast.Store())],
+    # Avoid clobbering names the target module already binds: never
+    # inject globals (a foreign setattr equivalent) when unsupported.
+    bound = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    bound |= {n.name for n in ast.walk(tree)
+              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    if "_nx_entropy_buf" in bound or "_nx_entropy_idx" in bound:
+        return source
+
+    # Guarded import: only add `import os` when no bare `import os`
+    # already binds the name in the target module — and never when the
+    # target binds its own `os` (importing would clobber it).
+    has_bare_os = any(
+        isinstance(n, ast.Import)
+        and any(a.name == "os" and a.asname is None for a in n.names)
+        for n in ast.walk(tree)
+    )
+    if "os" in bound and not has_bare_os:
+        return source
+    at = 0
+    if not has_bare_os:
+        import_os = ast.Import(names=[ast.alias(name="os", asname=None)])
+        tree.body.insert(0, import_os)
+        at = 1
+
+    tree.body.insert(at, ast.Assign(
+        targets=[ast.Name(id="_nx_entropy_buf", ctx=ast.Store())],
         value=ast.Call(
             func=ast.Attribute(
                 value=ast.Name(id="os", ctx=ast.Load()),
@@ -92,8 +120,8 @@ def inject_entropy_branches(source: str, config: dict) -> str:
         ),
     ))
 
-    tree.body.insert(2, ast.Assign(
-        targets=[ast.Name(id="_entropy_idx", ctx=ast.Store())],
+    tree.body.insert(at + 1, ast.Assign(
+        targets=[ast.Name(id="_nx_entropy_idx", ctx=ast.Store())],
         value=ast.Constant(value=0),
     ))
 

@@ -101,9 +101,15 @@ FEATURES: dict[str, _FeatureInfo] = {
 _BYPASS_VAR = "NIXON_VERIFY_SKIP_VERSION_CHECK"
 _CI_GATE_VARS = ("NIXON_CI", "NIXON_ALLOW_SKIP")
 
+#: Explicit allowlist of truthy env values (fail-closed). A deny-list
+#: ("FALSE", "NO", "0", ...) is unsafe here: any unlisted spelling such
+#: as "FALSE" (uppercase) or "OFF" would read as truthy and arm the
+#: version-check bypass. Only these spellings enable it.
+_TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
+
 
 def _is_truthy(value: str | None) -> bool:
-    return value not in (None, "", "0", "false", "False", "no", "No")
+    return isinstance(value, str) and value.strip().lower() in _TRUTHY_VALUES
 
 
 def supports(feature: str) -> bool:
@@ -168,8 +174,10 @@ def emit_version_gate(required: tuple) -> str:
         "import sys as _sys\n"
         f"_req = ({req_major!r}, {req_minor!r})\n"
         f"_bypass = _os.environ.get({_BYPASS_VAR!r})\n"
-        "_bypass_on = _bypass not in (None, '', '0', 'false', 'False', 'no', 'No')\n"
-        f"_ci_on = any(_os.environ.get(_v) not in (None, '', '0', 'false', 'False', 'no', 'No') for _v in ({gate_vars},))\n"
+        "def _nx_truthy(_v):\n"
+        "    return isinstance(_v, str) and _v.strip().lower() in ('1', 'true', 'yes', 'on')\n"
+        "_bypass_on = _nx_truthy(_bypass)\n"
+        f"_ci_on = any(_nx_truthy(_os.environ.get(_v)) for _v in ({gate_vars},))\n"
         "if tuple(_sys.version_info[:2]) != _req and not (_bypass_on and _ci_on):\n"
         "    _sys.stderr.write(\n"
         "        f'version mismatch: required {_req[0]}.{_req[1]} '\n"

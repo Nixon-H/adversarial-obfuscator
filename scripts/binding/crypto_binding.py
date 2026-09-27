@@ -13,6 +13,9 @@ raw Fragment objects into BoundFragment objects that carry
 encrypted payloads tied to a specific binding identity (hardware,
 VM, temporal epoch). The binding ensures that a fragment can only
 be decrypted and executed in the intended context.
+(Sibling: temporal_key.py — epoch-ratcheting sub-keys consumed by
+this binder's rolling/history-bound modes. Different layer — key
+schedule vs. fragment transform; do not merge.)
 
 Security Relevance:
 This is the primary cryptography layer for fragment-level
@@ -364,9 +367,17 @@ def encrypt_fragment(plaintext: bytes, key: bytes, iv: bytes,
 
 def decrypt_fragment(ciphertext: bytes, key: bytes, iv: bytes, tag: bytes,
                       fragment_id: int, next_fragment_id: int) -> Optional[bytes]:
-    """Decrypt a fragment payload, returning None on failure."""
+    """Decrypt a fragment payload, returning None on failure.
+
+    Fail-closed: AESGCM.encrypt appends the 16-byte tag to the ciphertext
+    (see encrypt_fragment), so a stored ``tag`` that is not the
+    ciphertext suffix means the (ciphertext, tag) pair is inconsistent —
+    reject before attempting decryption.
+    """
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     try:
+        if not ciphertext.endswith(tag):
+            return None
         aesgcm = AESGCM(key)
         aad = struct.pack(">ii", fragment_id, next_fragment_id)
         return aesgcm.decrypt(iv, ciphertext, aad)
@@ -375,7 +386,16 @@ def decrypt_fragment(ciphertext: bytes, key: bytes, iv: bytes, tag: bytes,
 
 
 def compute_output_hash(data: bytes) -> bytes:
-    """Compute the output hash of a decrypted fragment for chain chaining."""
+    """Compute the chaining hash of a fragment's CIPHERTEXT for chain linking.
+
+    NOTE (honest semantics): despite the historical "decrypted fragment"
+    wording, both call sites — bind_fragments() and verify_chain() — hash
+    the ciphertext (``ct`` / ``bf.payload_ciphertext``). Chaining over the
+    ciphertext is the correct binding: it commits to the exact bytes an
+    attacker would have to reproduce, and decryption is verified
+    separately per fragment via decrypt_fragment(). Changing this to hash
+    plaintext would break chain compatibility with all bound artifacts.
+    """
     return hashlib.sha256(data).digest()
 
 

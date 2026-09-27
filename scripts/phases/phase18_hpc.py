@@ -42,7 +42,6 @@ def phase_hpc(ir_output=None, obfuscated_output=None):
         dict with phase results written to BUILD_DIR
     """
     log("HPC", "Running hardware performance counter integration (Item 120)")
-    log("HPC", "Running hardware performance counter integration (Item 120)")
     results = {"phase": "hpc", "status": "ok", "tests": []}
     tests = [
         "hpc::tests::test_read_tsc_returns_value",

@@ -153,16 +153,32 @@ class ProofCarryingObfuscator:
         )
 
     def verify_certificate(self, cert: ProofCertificate) -> bool:
+        """Independently re-verify a certificate by re-running the solver.
+
+        The stored ``solver_result`` string is UNTRUSTED (anyone holding
+        the JSON can flip "sat" to "unsat"). The verdict is re-derived by
+        parsing the stored SMT-LIB formulas and re-checking them with a
+        fresh solver: unsat => equivalent, anything else => not.
+        Fail-closed: missing formulas, parse errors, solver errors, and
+        ``unknown`` all return False.
+        """
         if not cert.proof_json:
             return False
         try:
-            proof_data = cert.proof_json
-            solver_result = proof_data.get("solver_result", "")
-            if solver_result == "unsat":
-                return True
-            if solver_result == "sat":
+            formulas = cert.proof_json.get("formulas") or []
+            if not formulas:
                 return False
-            return cert.equivalent
+            solver = z3.Solver()
+            solver.set("timeout", self.timeout_ms)
+            for smt2 in formulas:
+                if not isinstance(smt2, str) or not smt2.strip():
+                    return False
+                for assertion in z3.parse_smt2_string(smt2):
+                    solver.add(assertion)
+            recheck = solver.check()
+            if recheck == z3.unsat:
+                return True
+            return False
         except Exception:
             return False
 

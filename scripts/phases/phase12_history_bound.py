@@ -41,7 +41,6 @@ def phase_execution_history_binding(config=None):
         config: dict optionally containing payload_path
     """
     log("HISTORY_BOUND", "Applying execution-history-bound decryption")
-    log("HISTORY_BOUND", "Applying execution-history-bound decryption")
     if config is None:
         config = {}
     try:

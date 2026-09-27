@@ -174,6 +174,9 @@ pub fn init_runtime(config: &RuntimeConfig) {
         }
     }
     if config.enable_exec_guard {
+        // Intentional abort-on-failure: without the guard pages the
+        // process cannot meet its W^X invariant, so starting anyway
+        // would silently run unprotected. expect() => panic => abort.
         let _guard = exec_guard::ExecGuard::new(config.scratch_buffer_size)
             .expect("ExecGuard::new failed in init_runtime");
     }
@@ -236,6 +239,11 @@ pub fn init_runtime(config: &RuntimeConfig) {
     }
     if config.enable_memguard {
         let size = config.scratch_buffer_size;
+        // Intentional abort-on-failure: a zero-sized/over-aligned layout
+        // is a caller bug, and continuing with a differently-sized locked
+        // buffer would silently violate the memguard contract. expect()
+        // => panic => abort. (The mlock failure just below is different:
+        // resource-dependent, so it degrades gracefully instead.)
         let layout = std::alloc::Layout::from_size_align(size, 1)
             .expect("Invalid layout for memguard buffer");
         let ptr = unsafe { std::alloc::alloc_zeroed(layout) };

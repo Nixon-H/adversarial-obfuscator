@@ -37,7 +37,6 @@ def phase_hpc_detect():
         dict with test results written to BUILD_DIR
     """
     log("HPC_DETECT", "Running emulator detection via HPC (Item 122)")
-    log("HPC_DETECT", "Running emulator detection via HPC (Item 122)")
     results = {"phase": "hpc_detect", "status": "ok", "tests": []}
     tests = [
         "hpc_detect::tests::test_detect_emulator_runs",

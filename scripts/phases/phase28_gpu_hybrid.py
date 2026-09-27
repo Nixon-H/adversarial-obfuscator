@@ -39,7 +39,6 @@ def phase_gpu_hybrid():
         dict with status and trace information
     """
     log("GPU_HYBRID", "Running CPU/GPU hybrid protection")
-    log("GPU_HYBRID", "Running CPU/GPU hybrid protection")
     try:
         from scripts.gpu.gpu_execution import GPUExecutor, is_gpu_available
         from scripts.gpu.hybrid_protection import HybridProtector, cpu_obfuscation_pass, gpu_parallel_transform

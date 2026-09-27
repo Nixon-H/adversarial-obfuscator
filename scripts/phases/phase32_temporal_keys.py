@@ -37,21 +37,20 @@ def phase_temporal_keys(opts) -> dict:
         dict with master_key, bucket_seconds, current_bucket, key_hex
     """
     log("TEMPORAL_KEYS", "Running temporal key evolution phase (Item 59)...")
-    log("TEMPORAL_KEYS", "Running temporal key evolution phase (Item 59)...")
     try:
-        from scripts.binding.temporal_key import TemporalKeyEvolver
+        from scripts.binding.temporal_key import TemporalKeyChain
         master_key = secrets.token_bytes(32)
         window_seconds = getattr(opts, "temporal_window", 60.0)
-        evolver = TemporalKeyEvolver(
-            master_key=master_key,
-            bucket_seconds=window_seconds,
+        chain = TemporalKeyChain(
+            genesis_secret=master_key,
+            window_seconds=window_seconds,
         )
-        current_key = evolver.derive_key()
+        current_key = chain.derive_key_for_window()
         tk_config = {
             "master_key": master_key.hex(),
             "bucket_seconds": window_seconds,
-            "current_bucket": evolver._get_bucket(),
-            "key_hex": current_key.hex(),
+            "current_bucket": current_key.index,
+            "key_hex": current_key.key.hex(),
             "enabled": True,
         }
         tk_config_path = os.path.join(BUILD_DIR, "temporal_key_config.json")

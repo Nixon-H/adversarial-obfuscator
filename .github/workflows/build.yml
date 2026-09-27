@@ -37,7 +37,11 @@ jobs:
           cargo +nightly fuzz run fuzz_target_1 -- -max_total_time=60 2>&1 | tail -5 || true
         working-directory: relay/fuzz
       - name: Upload fuzz crashers
-        if: failure()
+        # always(): the smoke step above ends 0 by design
+        # (continue-on-error + `|| true`), so `if: failure()` would never
+        # fire and crashers would never upload. always() + if-no-files-found
+        # keeps the step green when there is nothing to upload.
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-crashers

@@ -37,15 +37,14 @@ def phase_compile_relay():
     The resulting binary is placed in BUILD_DIR.
 
     Raises:
-        SystemExit: if the binary is not produced.
+        RuntimeError: if the binary is not produced.
     """
     log("RELAY", "Compiling orbital-relay (Rust)...")
-    log("RELAY", "Compiling orbital-relay (Rust)...")
-    result = run(["make", "relay"])
+    result = run(["make", "relay"], timeout=1800)
     binary = os.path.join(BUILD_DIR, "orbital-relay")
     if not os.path.exists(binary):
         log("ERROR", "Rust build failed — binary not found")
-        sys.exit(1)
+        raise RuntimeError("Rust build failed — binary not found")
     size = os.path.getsize(binary)
     log("RELAY", f"Done: {binary} ({size/1024:.1f}KB, stripped)")
 
@@ -56,6 +55,10 @@ def phase_cross_compile(targets_str):
 
     Args:
         targets_str: comma-separated target aliases (win, linux, macos, etc.)
+
+    Returns:
+        list of (target, ok, message) per-target results. Does not abort
+        the loop on a single failure; the caller decides the exit status.
     """
     targets = [t.strip() for t in targets_str.split(",") if t.strip()]
     target_map = {
@@ -67,25 +70,33 @@ def phase_cross_compile(targets_str):
         "macos-arm": "aarch64-apple-darwin",
     }
 
+    results = []
     for t in targets:
         triple = target_map.get(t, t)
         log("CROSS", f"Building for {triple}...")
         try:
-            result = run(["cargo", "build", "--release", "--target", triple], cwd=RELAY_DIR)
+            result = run(["cargo", "build", "--release", "--target", triple], cwd=RELAY_DIR, timeout=1800)
             src = os.path.join(RELAY_DIR, "target", triple, "release", "orbital-relay")
             if os.path.exists(src):
                 ext = ".exe" if "windows" in triple else ""
                 dst = os.path.join(BUILD_DIR, f"orbital-relay-{t}{ext}")
                 shutil.copy2(src, dst)
                 log("CROSS", f"  → {dst} ({os.path.getsize(dst)/1024:.1f}KB)")
+                results.append((t, True, dst))
             else:
                 log("WARN", f"  Binary not found at {src}")
+                results.append((t, False, f"binary not found at {src}"))
         except subprocess.CalledProcessError as e:
-            log("ERROR", f"  Cross-compile for {triple} failed: {e.stderr[-200:]}")
-            sys.exit(1)
+            err = getattr(e, "stderr", "") or ""
+            log("ERROR", f"  Cross-compile for {triple} failed: {err[-200:]}")
+            results.append((t, False, f"build failed: {err[-200:]}"))
         except FileNotFoundError:
             log("ERROR", f"  Cross-compile toolchain for {triple} not installed")
-            sys.exit(1)
+            results.append((t, False, "toolchain not installed"))
+    failed = [t for t, ok, _ in results if not ok]
+    if failed:
+        log("ERROR", f"Cross-compile failures: {', '.join(failed)}")
+    return results
 
 
 def phase_ir_compile(input_py, output_ir):

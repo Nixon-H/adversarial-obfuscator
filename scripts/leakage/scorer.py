@@ -128,21 +128,24 @@ def _compute_per_function_scores(original_ir: Any, obfuscated_ir: Any) -> dict[s
                 fn_scores["block_count_diff"] = abs(len(of.blocks) - len(nf.blocks))
                 fn_scores["block_match"] = 100.0 - fn_scores["block_count_diff"] / max(len(of.blocks), 1) * 100.0
             else:
+                # Fail-closed: missing structure is not evidence of a
+                # match. Default 0.0 (was 100.0) so absent IR attributes
+                # cannot inflate similarity.
                 fn_scores["block_count_diff"] = 0.0
-                fn_scores["block_match"] = 100.0
-                logger.warning("Function '%s' missing 'blocks' attribute — defaulting block scores", fname)
+                fn_scores["block_match"] = 0.0
+                logger.warning("Function '%s' missing 'blocks' attribute — defaulting block_match to 0.0 (fail-closed)", fname)
 
             if hasattr(of, "return_type") and hasattr(nf, "return_type") and hasattr(of.return_type, "kind") and hasattr(nf.return_type, "kind"):
                 fn_scores["return_type_match"] = 100.0 if of.return_type.kind == nf.return_type.kind else 0.0
             else:
-                fn_scores["return_type_match"] = 100.0
-                logger.warning("Function '%s' missing return_type or return_type.kind — defaulting return_type_match to 100", fname)
+                fn_scores["return_type_match"] = 0.0
+                logger.warning("Function '%s' missing return_type or return_type.kind — defaulting return_type_match to 0.0 (fail-closed)", fname)
 
             if hasattr(of, "params") and hasattr(nf, "params"):
                 fn_scores["param_count_match"] = 100.0 if len(of.params) == len(nf.params) else 0.0
             else:
-                fn_scores["param_count_match"] = 100.0
-                logger.warning("Function '%s' missing 'params' attribute — defaulting param_count_match to 100", fname)
+                fn_scores["param_count_match"] = 0.0
+                logger.warning("Function '%s' missing 'params' attribute — defaulting param_count_match to 0.0 (fail-closed)", fname)
 
         elif fname in orig_funcs:
             of = orig_funcs[fname]

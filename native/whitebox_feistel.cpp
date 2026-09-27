@@ -81,7 +81,12 @@ void wb_derive_tables(const uint8_t key16[16], uint64_t salt, WbTables& t) {
     for (int i = 0; i < 16; ++i) seed[i] = key16[i];
     for (int i = 0; i < 8; ++i) seed[16+i] = (uint8_t)(salt >> (8*i));
     uint8_t stream[32];
-    static uint8_t pool[WB_ROUNDS_MAX * 2 * 256 + WB_ROUNDS_MAX * WB_BLOCK];
+    // Function-local scratch: seed/stream/saltmix/rhash all carry key
+    // material and are wiped before return (see end of function). The
+    // expansion pool is thread_local (not plain static): concurrent
+    // table derivations must not share scratch. Single-threaded callers
+    // (native/core.cpp) are unaffected.
+    thread_local static uint8_t pool[WB_ROUNDS_MAX * 2 * 256 + WB_ROUNDS_MAX * WB_BLOCK];
     size_t got = 0, ctr = 0;
     while (got < sizeof(pool)) {
         uint8_t in[28];
@@ -115,6 +120,18 @@ void wb_derive_tables(const uint8_t key16[16], uint64_t salt, WbTables& t) {
     }
     volatile uint8_t* vp = pool;
     for (size_t i = 0; i < sizeof(pool); ++i) vp[i] = 0;
+    // Wipe all key-derived scratch: seed (raw key + salt), the SHA-256
+    // stream, the salt mix, and the round-count hash. Only the derived
+    // lookup tables in `t` persist (white-box property: no key bytes
+    // at rest). Volatile writes so the compiler cannot elide the wipes.
+    volatile uint8_t* vs = seed;
+    for (size_t i = 0; i < sizeof(seed); ++i) vs[i] = 0;
+    volatile uint8_t* vt = stream;
+    for (size_t i = 0; i < sizeof(stream); ++i) vt[i] = 0;
+    volatile uint8_t* vm = saltmix;
+    for (size_t i = 0; i < sizeof(saltmix); ++i) vm[i] = 0;
+    volatile uint8_t* vr = rhash;
+    for (size_t i = 0; i < sizeof(rhash); ++i) vr[i] = 0;
 }
 void wb_feistel_block(const WbTables& t, uint8_t blk[WB_BLOCK], bool invert) {
     uint8_t L[8], R[8];

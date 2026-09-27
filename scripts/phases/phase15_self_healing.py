@@ -34,7 +34,6 @@ def phase_self_healing(config_path=None):
         config_path: optional path (unused)
     """
     log("SELF_HEALING", "Configuring self-healing runtime")
-    log("SELF_HEALING", "Configuring self-healing runtime")
     config = {
         "enabled": True,
         "num_redundant_copies": 3,

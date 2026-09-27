@@ -66,14 +66,14 @@ class TestRedTeamBenchmarks:
         )
 
         def run():
-            score = _compute_security_score(report)
+            score, attacks_run = _compute_security_score(report)
             weak = _find_weakest_link(report)
             recs = _generate_recommendations(report)
             return score, weak, recs
 
         result = benchmark(run)
         assert len(result) == 3
-        assert 0 <= result[0] <= 100
+        assert result[0] is not None and 0 <= result[0] <= 100
 
     def test_unified_orchestration_time(self, test_binary, test_source, output_dir, benchmark):
         from scripts.redteam.unified_attack import RedTeamConfig, RedTeamReport, run_redteam_attack

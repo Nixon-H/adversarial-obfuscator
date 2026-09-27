@@ -18,7 +18,7 @@ class ObfuscationTransformer:
         _orig_choice = secrets.choice
         _rng = random.Random(self.seed)
         secrets.randbelow = lambda n: _rng.randint(0, n - 1)
-        secrets.token_bytes = lambda n=None: bytes([_rng.randint(0, 255) for _ in range(n or 16)])
+        secrets.token_bytes = lambda n=None: bytes([_rng.randint(0, 255) for _ in range(n if n is not None else 16)])
         secrets.choice = lambda s: s[_rng.randint(0, len(s) - 1)]
         return _orig_randbelow, _orig_token_bytes, _orig_choice
 
@@ -204,7 +204,39 @@ def blind_constants(code):
         if val < 2 or val > 5000: return match.group(0)
         mask = random.randint(1, 0xFFFF)
         return f"{prefix}({val ^ mask} ^ {mask})"
-    return re.sub(r'(\w+\s*=\s*)(\d+)(?!\w)', replace, code)
+    _pat = re.compile(r'(\w+\s*=\s*)(\d+)(?!\w)')
+    # Tokenize-aware: never rewrite numbers inside string literals or
+    # comments (docstrings / embedded text like "x = 5" used to match
+    # and corrupt string contents). Falls back to the legacy regex on
+    # tokenize failure.
+    try:
+        _lines = code.splitlines(keepends=True)
+        _offs = [0]
+        for _ln in _lines:
+            _offs.append(_offs[-1] + len(_ln))
+        def _abs(_pos):
+            return _offs[_pos[0] - 1] + _pos[1]
+        _skip = []
+        for _tok in tokenize.generate_tokens(io.StringIO(code).readline):
+            if _tok.type in (tokenize.STRING, tokenize.COMMENT):
+                _skip.append((_abs(_tok.start), _abs(_tok.end)))
+        def _in_skip(_s, _e):
+            for _a, _b in _skip:
+                if _s >= _a and _e <= _b:
+                    return True
+            return False
+        _out = []
+        _last = 0
+        for _m in _pat.finditer(code):
+            if _in_skip(_m.start(), _m.end()):
+                continue
+            _out.append(code[_last:_m.start()])
+            _out.append(replace(_m))
+            _last = _m.end()
+        _out.append(code[_last:])
+        return ''.join(_out)
+    except Exception:
+        return _pat.sub(replace, code)
 def get_Nixon_Enc_table():
     result = {'tables': {}, 'router': {}, 'keys': {}}
     for tbl_name, strings in STRING_TABLES.items():
@@ -332,7 +364,7 @@ setup(
         shutil.rmtree(cython_dir, ignore_errors=True)
 def _safe_compile_worker(src, dest, swizzle_key, enc_map, morph_seed):
     try:
-        morpher = OpcodeMorpher(seed=None, enc_map=enc_map)
+        morpher = OpcodeMorpher(seed=morph_seed, enc_map=enc_map)
         cfile = dest + "c"
         py_compile.compile(src, cfile=cfile, optimize=2)
         with open(cfile, "rb") as f:
@@ -368,16 +400,7 @@ def process_file_safe(args):
                 raw_source = mutated_source.encode('utf-8')
             except Exception: pass
             header = b"# NIXON_HEADER \n" 
-            if HAS_NUMPY:
-                arr = np.frombuffer(raw_source, dtype=np.uint8).copy()
-                k = np.frombuffer(bytes(swizzle_key), dtype=np.uint8)
-                k_tiled = np.resize(k, len(arr))
-                swizzled_body = (arr ^ k_tiled).tobytes()
-            else:
-                b = bytearray(raw_source)
-                kl = len(swizzle_key)
-                for i in range(len(b)): b[i] ^= bytes(swizzle_key)[i % kl]
-                swizzled_body = bytes(b)
+            swizzled_body = swizzle_bytecode(raw_source, bytes(swizzle_key))
             with open(dest, "wb") as f: f.write(header + swizzled_body)
             return ('success', src)
         except Exception as e: return ('error', src, str(e))
@@ -426,7 +449,7 @@ def Nixon_Enc_AES_CTR(data, key, nonce):
             derived = hashlib.sha256(key + nonce).digest()
             aes_key = derived[:32]
             iv = hashlib.sha256(nonce + key).digest()[:16]
-            cipher = AES.new(aes_key, AES.MODE_CTR, nonce=b'', initial_value=iv)
+            cipher = AES.new(aes_key, AES.MODE_CTR, nonce=b'', initial_value=int.from_bytes(iv, 'big'))
             return cipher.encrypt(bytes(data))
         except ImportError:
             pass
@@ -453,7 +476,11 @@ def rot13_encode(data):
     if isinstance(data, str): data = data.encode()
     return bytes([(b + 13) % 256 for b in data])
 def find_native_blobs(source_path):
-    blob_dir=".native_blobs"
+    try:
+        _base = os.path.dirname(os.path.abspath(source_path)) if source_path else os.getcwd()
+    except Exception:
+        _base = os.getcwd()
+    blob_dir = os.path.join(_base, ".native_blobs")
     if not os.path.exists(blob_dir): return {'windows':'','linux':'','android':'','darwin':''}
     blobs = {'windows':'','linux':'','android':'','darwin':''}
     for f in os.listdir(blob_dir):
@@ -468,7 +495,7 @@ def find_native_blobs(source_path):
     return blobs
 def get_native_blob_for_build(source_path, force_compile=False):
     fat = find_native_blobs(source_path)
-    if fat:
+    if fat and any(fat.values()):
         print("    [+] Using Fat Binary approach (multi-platform)")
         return fat
     if force_compile:
@@ -1017,7 +1044,6 @@ def prepare_obfuscated_source(source_path, ast_opts=None):
     except Exception:
         pass
     print("    [+] Pre-obfuscating source for native build...")
-    \
     protected_code, _ = apply_ast_mutation(source_code, options=ast_opts)
     return protected_code
 def build_local_cython(source_content, target_python=None):
@@ -1729,7 +1755,7 @@ def _load_native():
     # consistent; _NX_CI_OK reads os.environ live at call time.
     def _nx_ci_bypass_ok():
         try:
-            _e = _nixon_オペレーション운영.environ
+            _e = os.environ
             if not _e.get('NIXON_VERIFY_SKIP_VERSION_CHECK'):
                 return False
             return bool(_e.get('NIXON_CI') or _e.get('NIXON_ALLOW_SKIP'))
@@ -1738,13 +1764,13 @@ def _load_native():
     if not blob_key or "PLACEHOLDER" in str(NATIVE_BLOBS):
         if _nx_ci_bypass_ok():
             _exec_fallback()
-            return _nixon_システム시스템.modules[__name__]
+            return sys.modules[__name__]
         return None
     blobs = NATIVE_BLOBS
     if blob_key not in blobs or not blobs[blob_key]:
         if _nx_ci_bypass_ok():
             _exec_fallback()
-            return _nixon_システム시스템.modules[__name__]
+            return sys.modules[__name__]
         return None
     try:
         encrypted_blob = base64.b85decode(blobs[blob_key])
@@ -1762,17 +1788,17 @@ def _load_native():
             else:
                 if _nx_ci_bypass_ok():
                     _exec_fallback()
-                    return _nixon_システム시스템.modules[__name__]
+                    return sys.modules[__name__]
                 return None
         except Exception as load_err:
              if _nx_ci_bypass_ok():
                  _exec_fallback()
-                 return _nixon_システム시스템.modules[__name__]
+                 return sys.modules[__name__]
              return None
     except Exception as main_err:
         if _nx_ci_bypass_ok():
             _exec_fallback()
-            return _nixon_システム시스템.modules[__name__]
+            return sys.modules[__name__]
         return None
     finally:
         if fpath is not None:
@@ -1998,7 +2024,10 @@ def build_project(args):
                 t.update(status="WARN", value="Skipped/Failed (Using bytecode)")
                 UI._console.write("\n") 
         with UI.Task("Hybrid Loader", "Compiling Universal Fallback...") as t:
-            fallback_opts = ast_options.copy() if 'ast_options' in locals() else {
+            # NOTE: 'ast_options' is assigned later in this function, so it
+            # is never in locals() here — the literal below is the live
+            # branch (the .copy() alternative was dead).
+            fallback_opts = {
                 'cfg_flatten': True, 'opaque_predicates': True, 'fragment_strings': True, 'exception_flow': True,
                 'mba_subs': True, 'obf_calls': True, 'stego': getattr(args, 'stego', False),
                 'vm_nest': 1, 'bogus_exceptions': True, 'split_vars': True,
@@ -2110,8 +2139,15 @@ def build_project(args):
             )
             args._real_native_blobs = real_blobs_dict
             args._real_fallback_blob = real_fallback_str
-            fd, loader_path = tempfile.mkstemp(suffix=".py", prefix="hybrid_loader_", dir=".")
+            # Secure temp (no predictable CWD artifact): system temp dir,
+            # random name, 0600; removed at the end of build_project.
+            fd, loader_path = tempfile.mkstemp(suffix=".py", prefix="hybrid_loader_")
             os.close(fd)
+            try:
+                os.chmod(loader_path, 0o600)
+            except Exception:
+                pass
+            args._tmp_hybrid_loader = loader_path
             with open(loader_path, 'w', encoding='utf-8') as f:
                 f.write(hybrid_loader_src)
             t.success(value="Universal Fallback Generated")
@@ -2134,7 +2170,7 @@ def build_project(args):
     exp_ts = 0
     if args.expire:
         try: exp_ts = datetime.strptime(args.expire, "%Y-%m-%d").timestamp()
-        except Exception: return
+        except Exception: UI.fatal(f"Bad --expire date {args.expire!r}: expected YYYY-MM-DD")
     if getattr(args, 'auto_deploy', False):
         deploy_rpc = getattr(args, 'deploy_rpc', 'http://localhost:8545')
         explorer_url = getattr(args, 'explorer', None)
@@ -2157,6 +2193,10 @@ def build_project(args):
             args._cf_hmac_key = secrets.token_hex(32)
             with open(key_file, "w") as f:
                 f.write(args._cf_hmac_key)
+            try:
+                os.chmod(key_file, 0o600)
+            except Exception:
+                pass
             UI.dot_item("Master Key", "Generated new HMAC Key", "SAVED")
         deployed_url = deployer.deploy_master(hmac_key=args._cf_hmac_key)
         if deployed_url:
@@ -2354,16 +2394,7 @@ def _VERIFY_INTEGRITY():
                     raw_source = mutated_source.encode('utf-8')
                 except Exception: pass
                 header = b"# NIXON_HEADER \n" 
-                if HAS_NUMPY:
-                    arr = np.frombuffer(raw_source, dtype=np.uint8).copy()
-                    k = np.frombuffer(bytes(swizzle_key), dtype=np.uint8)
-                    k_tiled = np.resize(k, len(arr))
-                    swizzled_body = (arr ^ k_tiled).tobytes()
-                else:
-                    b = bytearray(raw_source)
-                    kl = len(swizzle_key)
-                    for i in range(len(b)): b[i] ^= bytes(swizzle_key)[i % kl]
-                    swizzled_body = bytes(b)
+                swizzled_body = swizzle_bytecode(raw_source, bytes(swizzle_key))
                 with open(dest, "wb") as f: f.write(header + swizzled_body)
             buf = io.BytesIO()
             inner_key = secrets.token_bytes(32)
@@ -2612,9 +2643,9 @@ def _VERIFY_INTEGRITY():
                 'VAR_VM_CLS': VARS["VM_CLS"],
                 'VAR_FUNC_SEC_MEM': VARS["FUNC_SEC_MEM"],
                 'VAR_FUNC_ADV_HK': VARS["FUNC_ADV_HK"],
-                'VAR_FUNC_ADV_HK': VARS["FUNC_ADV_HK"],
                 'HMAC_SECRET_HEX': hmac_secret,
                 'INNER_KEY_HEX': inner_key_hex,
+                'NATIVE_BLOB_KEY_HEX': key.hex(),
                 'DECOY_FUNC': VARS['DECOY_FUNC'],
                 'remove_entropy_code': remove_entropy_source(VARS["ENTROPY_MARKER"]),
                 'VAR_ONE_SHOT': var_oneshot,
@@ -2709,7 +2740,6 @@ def _VERIFY_INTEGRITY():
                 'VAR_SECURE_ENCLAVE_CLS': VARS["SECURE_ENCLAVE_CLS"],
                 'VAR_INTEGRITY_MON_CLS': VARS["INTEGRITY_MON_CLS"],
                 'VAR_ANTI_EMULATOR_CLS': VARS["ANTI_EMULATOR_CLS"],
-                'VAR_ANTI_EMULATOR_CLS': VARS["ANTI_EMULATOR_CLS"],
                 'code_signing_source': CODE_SIGNING_SOURCE,
                 'tor_client_source': TOR_CLIENT_SOURCE,
                 'nn_obfuscation_source': NN_OBFUSCATION_SOURCE,
@@ -2741,13 +2771,14 @@ def _VERIFY_INTEGRITY():
                 'VAR_ORAM_CLS': VARS["ORAM_CLS"],
                 'VAR_SYNTH_CLS': VARS["SYNTH_CLS"],
                 'VAR_FAULT_CLS': VARS["FAULT_CLS"],
-                'fhe_source': FHE_SOURCE,
-                'oram_source': ORAM_SOURCE,
-                'semantic_synth_source': SEMANTIC_SYNTH_SOURCE,
-                'triple_redundancy_source': TRIPLE_REDUNDANCY_SOURCE,
                 'runtime_check_code': ast_options.get('runtime_check_code', 'pass')
             }
-            VARS["INNER_KEY_HEX"] = key.hex()
+            # NOTE: do NOT write the outer payload key into
+            # VARS["INNER_KEY_HEX"] here — build_context already holds
+            # the inner __main__.nixon zip key under that name, and the
+            # native-blob XOR key travels separately as
+            # NATIVE_BLOB_KEY_HEX. Overwriting would make native-exec
+            # decrypt with the wrong key.
             build_context.update(VARS)
             for k, v in build_context.items():
                 if k.endswith('_source') or k.endswith('_code'):
@@ -2801,9 +2832,13 @@ def _VERIFY_INTEGRITY():
                 except Exception as fix_err:
                     print(f"    [!] Auto-fix failed: {fix_err}")
             enc_blob, enc_key_a, enc_key_b = get_Nixon_Enc_table()
-            final_script = Nixon_Enc_script.replace('"__NX_STR_TABLE_SENTINEL__"', repr(enc_blob), 1)
-            final_script = final_script.replace('"__NX_STR_KEY_A__"', repr(enc_key_a), 1)
-            final_script = final_script.replace('"__NX_STR_KEY_B__"', repr(enc_key_b), 1)
+            final_script = Nixon_Enc_script
+            # Quote-robust: an AST round-trip (auto-fix above) normalizes
+            # quotes to single, so replace both variants.
+            for _q in ('"', "'"):
+                final_script = final_script.replace(_q + "__NX_STR_TABLE_SENTINEL__" + _q, repr(enc_blob), 1)
+                final_script = final_script.replace(_q + "__NX_STR_KEY_A__" + _q, repr(enc_key_a), 1)
+                final_script = final_script.replace(_q + "__NX_STR_KEY_B__" + _q, repr(enc_key_b), 1)
             normalized_script = final_script.replace('\r\n', '\n')
             anchor_sig = b"__SIG_ANCHOR__"; anchor_hmac = b"__HMAC_ANCHOR__"
             script_bytes = normalized_script.encode('utf-8')
@@ -2827,8 +2862,18 @@ def _VERIFY_INTEGRITY():
                     hashes = parents
                 return hashes[0]
             final_hash = build_merkle_sim(m_chunks)
-            final_bytes = script_bytes.replace(dummy_checksum.encode('utf-8'), final_hash.encode('utf-8'), 1)
-            final_bytes = final_bytes.replace(dummy_checksum.encode('utf-8'), hmac_val.encode('utf-8'), 1)
+            # Anchored checksum fill: replace the `= "000...0"` slot
+            # assignments (CHECKSUM line first, HMAC line second) rather
+            # than the first bare 64-zero run anywhere, which could sit
+            # inside payload data. Falls back to the legacy replace when
+            # the anchored pattern is absent.
+            _ck_pat = re.compile(rb'=\s*["\']0{64}["\']')
+            final_bytes, _n1 = _ck_pat.subn(b'= "' + final_hash.encode('utf-8') + b'"', script_bytes, count=1)
+            if _n1 == 0:
+                final_bytes = script_bytes.replace(dummy_checksum.encode('utf-8'), final_hash.encode('utf-8'), 1)
+            final_bytes, _n2 = _ck_pat.subn(b'= "' + hmac_val.encode('utf-8') + b'"', final_bytes, count=1)
+            if _n2 == 0:
+                final_bytes = final_bytes.replace(dummy_checksum.encode('utf-8'), hmac_val.encode('utf-8'), 1)
             with open(out_name, 'wb') as f: 
                 f.write(final_bytes)
             if ast_options.get('stego'):
@@ -2846,6 +2891,12 @@ def _VERIFY_INTEGRITY():
     print(f"[*] SUCCESS: Dual Output Generated")
     build_info = {'features': {'hw_locked': hw_enable, 'expiration': args.expire if args.expire else "None", 'network_auth': bool(args.net_url), 'vm_inception': True, 'native_vm': bool(native_blob), 'memory_encryption': True, 'integrity_hmac': True}, 'metrics': {'build_time_sec': round(time.time() - start_time, 4), 'Nixon_Enc_strings': get_legacy_count()}}
     generate_report(base_out_name, build_info, generated_outputs)
+    try:
+        _tmp_loader = getattr(args, '_tmp_hybrid_loader', None)
+        if _tmp_loader and os.path.exists(_tmp_loader):
+            os.unlink(_tmp_loader)
+    except Exception:
+        pass
     return generated_files_map
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
@@ -2911,6 +2962,20 @@ if __name__ == "__main__":
             build.add_argument('--platform', choices=['auto', 'github', 'gitlab'], default='auto', help='Select build farm platform')
             build.add_argument('--layers', type=int, help='Recursive packaging layers')
             build.add_argument('--zips', type=int, help='Number of ZIP layers')
+            build.add_argument('--hwid', default='', help='HWID string for macro expansion / HWID-locked fallback')
+            build.add_argument('--trial', default='', help="Trial period spec, e.g. '7d' (parsed via obfuscator.macros.parse_trial)")
+            build.add_argument('--vm-threshold', dest='vm_threshold', type=float, default=50.0, help='VM-score verdict threshold (default: 50.0)')
+            build.add_argument('--kod', action='store_true', help='Arm loader kill-on-detect note')
+            build.add_argument('--hostguard', action='store_true', help='Prepend hostguard snippet to loader')
+            build.add_argument('--hwid-lock', dest='hwid_lock', action='store_true', help='HWID-lock the bytecode fallback blob (requires --hwid)')
+            build.add_argument('--driver-check', dest='driver_check', action='store_true', help='Bake the kernel-driver gate into the loader')
+            build.add_argument('--split-bootstrap', dest='split_bootstrap', action='store_true', help='Shamir (n=3,k=2) threshold key + fragmented decoder')
+            build.add_argument('--no-snapshot', dest='snapshot_off', action='store_true', help='Omit the frozen-stdlib snapshot gate')
+            build.add_argument('--no-stdlib-audit', dest='stdlib_audit_off', action='store_true', help='Omit the stdlib function-audit gate')
+            build.add_argument('--name-gate', dest='name_gate', action='store_true', help='Rewrite privileged call sites through per-build token map')
+            build.add_argument('--lowering', default='', help='Semantic-lowering families CSV (default: disabled)')
+            build.add_argument('--rename-internal', dest='rename_internal', action='store_true', help='Rename proven-internal public methods/attributes')
+            build.add_argument('--no-audit-hook-plant', dest='audit_hook_plant_off', action='store_true', help='Omit the audit-hook plant detector')
             build.add_argument('--python', default=f"{sys.version_info.major}.{sys.version_info.minor}", help='Python version for GitHub Actions (Defaults to local)')
             auth_desc = "Registers a Target Machine Hardware ID (HWID) to the Cloudflare licensing system.\nUses the Cloudflare API Key configured in the setup wizard."
             auth = subparsers.add_parser('auth', help='Authorize a hardware ID (Cloudflare)', description=auth_desc, formatter_class=custom_fmt, add_help=False)

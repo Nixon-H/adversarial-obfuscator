@@ -103,13 +103,33 @@ class CertificateChain:
         certs = [Certificate.from_json(json.dumps(c)) for c in d["certificates"]]
         return cls(certificates=certs, chain_validated=d.get("chain_validated", False))
 
-    def validate_chain(self) -> bool:
+    def validate_chain(self, verify_proofs: bool = False) -> bool:
+        """Check hash linkage, optionally gating on proof attestation.
+
+        Default (verify_proofs=False) preserves long-standing semantics:
+        hash-linkage only. With verify_proofs=True, every certificate
+        must ALSO carry validated=True and an equivalence_proof dict
+        whose "equivalent"/"satisfiable" verdict is affirmative —
+        otherwise the chain fails even when hashes link. NOTE: this is
+        attestation-gating, NOT SMT re-execution; full re-verification
+        means re-running the prover (e.g. ProofCarryingObfuscator.
+        verify_certificate, which re-checks stored formulas).
+        """
         for i in range(1, len(self.certificates)):
             prev = self.certificates[i - 1]
             curr = self.certificates[i]
             if prev.output_hash != curr.input_hash:
                 self.chain_validated = False
                 return False
+        if verify_proofs:
+            for cert in self.certificates:
+                if not cert.validated:
+                    self.chain_validated = False
+                    return False
+                proof = cert.equivalence_proof or {}
+                if not (proof.get("equivalent") is True or proof.get("satisfiable") is True):
+                    self.chain_validated = False
+                    return False
         self.chain_validated = True
         return True
 
@@ -120,6 +140,12 @@ def emit_certificate(
     output_text: str,
     equivalence_proof: dict,
     duration_ms: float,
+    # WARNING: default True is SELF-ATTESTATION, not verification — kept
+    # because existing callers (tests, certificates __main__ demos) rely
+    # on it. Production paths must pass validated=<real SMT verdict>
+    # explicitly (cf. CertificateCollector.record, which derives it from
+    # smt_result). Use CertificateChain.validate_chain(verify_proofs=True)
+    # to gate a chain on these flags.
     validated: bool = True,
 ) -> Certificate:
     import hashlib

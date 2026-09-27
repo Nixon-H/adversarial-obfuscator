@@ -40,7 +40,6 @@ def phase_package(payload, obfuscated_output, obfuscated_name, opts):
         opts: argparse.Namespace (checks include_original)
     """
     log("PACKAGE", "Packaging build artifacts...")
-    log("PACKAGE", "Packaging build artifacts...")
     os.makedirs(BUILD_DIR, exist_ok=True)
 
     if os.path.exists(obfuscated_output):
@@ -67,8 +66,8 @@ def phase_package(payload, obfuscated_output, obfuscated_name, opts):
                         log("PACKAGE", f"  Signing failed (non-fatal): {_se}")
                 else:
                     log("PACKAGE", f"  Sign key env {_sign_env!r} empty/unset (skipping signing)")
-        except Exception:
-            pass
+        except Exception as _sign_outer:
+            log("PACKAGE", f"  Signing sidecar skipped (non-fatal): {_sign_outer}")
 
     if opts.include_original:
         dst = os.path.join(BUILD_DIR, f"original_{os.path.basename(payload)}")

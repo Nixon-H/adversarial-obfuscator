@@ -38,7 +38,6 @@ def phase_cfg_mutation(ir_module_path, num_variants=4):
         num_variants: number of orderings to generate per function
     """
     log("CFG_MUTATION", f"Generating {num_variants} CFG orderings per function")
-    log("CFG_MUTATION", f"Generating {num_variants} CFG orderings per function")
     try:
         from llvmgen.lower import NixonIRParser
         parser = NixonIRParser()

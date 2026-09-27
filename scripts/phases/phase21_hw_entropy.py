@@ -37,7 +37,6 @@ def phase_hw_entropy():
         dict with test results written to BUILD_DIR
     """
     log("HW_ENTROPY", "Running hardware entropy loop (Item 123)")
-    log("HW_ENTROPY", "Running hardware entropy loop (Item 123)")
     results = {"phase": "hw_entropy", "status": "ok", "tests": []}
     tests = [
         "hw_entropy::tests::test_collects_rdtsc_jitter",

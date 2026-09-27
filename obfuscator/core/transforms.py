@@ -2,11 +2,32 @@ import sys,os,zipfile,base64,io,tokenize,py_compile,shutil,tempfile,random,hashl
 from .utils import get_random_var_name
 
 class TypeHintStripper(ast.NodeTransformer):
+    def _clear_args(self, args):
+        try:
+            for arg in list(getattr(args, 'posonlyargs', []) or []) + list(args.args or []) + list(getattr(args, 'kwonlyargs', []) or []):
+                arg.annotation = None
+            if getattr(args, 'vararg', None) is not None:
+                args.vararg.annotation = None
+            if getattr(args, 'kwarg', None) is not None:
+                args.kwarg.annotation = None
+        except Exception:
+            pass
+        return args
     def visit_FunctionDef(self, node):
         node.returns = None
-        if node.args.args:
-            for arg in node.args.args:
-                arg.annotation = None
+        try:
+            self._clear_args(node.args)
+        except Exception:
+            pass
+        self.generic_visit(node)
+        return node
+    def visit_AsyncFunctionDef(self, node):
+        return self.visit_FunctionDef(node)
+    def visit_Lambda(self, node):
+        try:
+            self._clear_args(node.args)
+        except Exception:
+            pass
         self.generic_visit(node)
         return node
     def visit_AnnAssign(self, node):
@@ -65,6 +86,10 @@ class ScopeAnalyzer(ast.NodeVisitor):
         }
         self.generic_visit(node)
         self.current_function = old_function
+    def visit_AsyncFunctionDef(self, node):
+        return self.visit_FunctionDef(node)
+    def visit_Lambda(self, node):
+        self.generic_visit(node)
     def get_unsafe_functions(self):
         unsafe = []
         for func_name, scope in self.function_scopes.items():
@@ -166,6 +191,10 @@ class SymbolRenamer(ast.NodeTransformer):
             '_nx_snapshot_gate', '_nx_stdlib_gate',
             '_NX_SNAPSHOT_GATE', '_NX_SNAPSHOT_TAG', '_NX_SNAPSHOT_FILES',
             '_NX_STDLIB_GATE', '_NX_STDLIB_TAG', '_NX_STDLIB_FUNCS',
+            # VM loader helpers (public runtime API in vm_score.py):
+            # vm_check / vm_score_percent must survive renames or the
+            # armed VM gate breaks at runtime.
+            'vm_check', 'vm_score_percent',
             '__all__',
             'NATIVE_BLOBS', 'FALLBACK_BLOB', 'BLOB_KEY',
         }
@@ -378,6 +407,9 @@ class StringLiteralObfuscator(ast.NodeTransformer):
         if isinstance(node.value, str) and len(node.value) >= 2 and len(node.value) <= 200000:
             if node.value.startswith("_NX_PART_"): return node
             if "PLACEHOLDER" in node.value: return node
+            if "SENTINEL" in node.value: return node
+            if "__NX_STR_KEY_" in node.value: return node
+            if "__NX_STR_TABLE_" in node.value: return node
             original = node.value
             if getattr(self, "mode", "xor") == "chacha20" and self._session is not None:
                 # ChaCha20 path: allowlisted strings stay plaintext (additive).
@@ -1110,7 +1142,7 @@ class BogusExceptionHandler(ast.NodeTransformer):
     def visit_FunctionDef(self, node):
         self.generic_visit(node)
         for child in ast.walk(node):
-            if isinstance(child, (ast.Nonlocal, ast.Global, ast.AsyncFunctionDef, ast.AsyncWith, ast.AsyncFor, ast.FunctionDef)):
+            if child is not node and isinstance(child, (ast.Nonlocal, ast.Global, ast.AsyncFunctionDef, ast.AsyncWith, ast.AsyncFor, ast.FunctionDef)):
                 return node
         if isinstance(node, ast.AsyncFunctionDef):
             return node
@@ -1363,6 +1395,10 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
             '_nx_snapshot_gate', '_nx_stdlib_gate',
             '_NX_SNAPSHOT_GATE', '_NX_SNAPSHOT_TAG', '_NX_SNAPSHOT_FILES',
             '_NX_STDLIB_GATE', '_NX_STDLIB_TAG', '_NX_STDLIB_FUNCS',
+            # VM loader helpers (public runtime API in vm_score.py):
+            # vm_check / vm_score_percent must survive unicode encoding
+            # or the armed VM gate breaks at runtime.
+            'vm_check', 'vm_score_percent',
             '__all__',
         }
         self._use_safe_mode = True
@@ -1433,9 +1469,32 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
         self.encoded_map[name] = new_name
         return new_name
     def visit_Name(self, node):
+        # V10 kwargs fix: parameter names are call-site contracts
+        # (f(1, c=2), dict(a=1), **kwargs). The definition's arg nodes
+        # are never renamed (see visit_arg), so uses of those params
+        # must not be renamed either or def/body go out of sync.
+        try:
+            _params = getattr(self, '_local_params', None)
+        except Exception:
+            _params = None
+        if _params is not None and node.id in _params:
+            return node
         node.id = self._encode_name(node.id)
         self.generic_visit(node)
         return node
+    def _collect_params(self, node):
+        names = set()
+        try:
+            _a = node.args
+            for a in list(getattr(_a, 'posonlyargs', []) or []) + list(_a.args or []) + list(getattr(_a, 'kwonlyargs', []) or []):
+                names.add(a.arg)
+            if getattr(_a, 'vararg', None) is not None:
+                names.add(_a.vararg.arg)
+            if getattr(_a, 'kwarg', None) is not None:
+                names.add(_a.kwarg.arg)
+        except Exception:
+            pass
+        return names
     def visit_FunctionDef(self, node):
         # V10 internal-rename: default = safe (class-body methods
         # preserved); only proven-internal names (allow set) encode.
@@ -1448,7 +1507,14 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
             self.generic_visit(node)
             return node
         node.name = self._encode_name(node.name)
-        self.generic_visit(node)
+        _prev_params = getattr(self, '_local_params', None)
+        _accum = set(_prev_params) if _prev_params else set()
+        _accum.update(self._collect_params(node))
+        self._local_params = _accum
+        try:
+            self.generic_visit(node)
+        finally:
+            self._local_params = _prev_params
         return node
     def visit_ClassDef(self, node):
         node.name = self._encode_name(node.name)
@@ -1460,7 +1526,22 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
             self._class_depth = _prev
         return node
     def visit_arg(self, node):
-        node.arg = self._encode_name(node.arg)
+        # V10 kwargs fix: parameter names are call-site contracts.
+        # Renaming the definition without rewriting every keyword call
+        # site (f(1, c=2), dict(a=1)) breaks binding, and keyword.arg
+        # strings are never visited — so params are NEVER renamed
+        # (mirrors SymbolRenamer.visit_arg; visit_Name skips param
+        # uses via _local_params to keep def/body in sync).
+        return node
+    def visit_Lambda(self, node):
+        _prev_params = getattr(self, '_local_params', None)
+        _accum = set(_prev_params) if _prev_params else set()
+        _accum.update(self._collect_params(node))
+        self._local_params = _accum
+        try:
+            self.generic_visit(node)
+        finally:
+            self._local_params = _prev_params
         return node
     def visit_AsyncFunctionDef(self, node):
         # Same policy as FunctionDef (async methods preserve by default,
@@ -1730,7 +1811,7 @@ class FunctionTransformer(ast.NodeTransformer):
     def visit_FunctionDef(self, node):
         self.generic_visit(node)
         for child in ast.walk(node):
-            if isinstance(child, (ast.Nonlocal, ast.Global, ast.AsyncFunctionDef, ast.AsyncWith, ast.AsyncFor, ast.FunctionDef)):
+            if child is not node and isinstance(child, (ast.Nonlocal, ast.Global, ast.AsyncFunctionDef, ast.AsyncWith, ast.AsyncFor, ast.FunctionDef)):
                 return node
         if isinstance(node, ast.AsyncFunctionDef):
             return node
@@ -1748,6 +1829,24 @@ class FunctionTransformer(ast.NodeTransformer):
         var_capture = VariableCapture(node)
         split_point = random.randint(2, len(node.body) - 2)
         extracted = node.body[split_point:]
+        # Outlining hazard guard: moving a tail containing break /
+        # continue / yield / await / del / scope declarations into a
+        # fresh def breaks control-flow or name binding (break/continue
+        # escape their loop, yields turn the fragment into a generator,
+        # `del x` loses the outer binding). Skip such tails — outline
+        # safe tails only. (A trailing/conditional `return` is safe:
+        # the outlined call is the new last statement and is itself
+        # wrapped in `return`, so fall-off-end None is preserved.)
+        _hazard = False
+        for _block in extracted:
+            for _s in ast.walk(_block):
+                if isinstance(_s, (ast.Break, ast.Continue, ast.Yield, ast.YieldFrom, ast.Await, ast.Delete, ast.Global, ast.Nonlocal)):
+                    _hazard = True
+                    break
+            if _hazard:
+                break
+        if _hazard:
+            return node
         temp_module = ast.Module(body=extracted, type_ignores=[])
         external_vars = var_capture.get_external_vars(temp_module)
         outlined_name = f'_nx_out_{self.outlined_counter}'
@@ -1823,7 +1922,7 @@ class ReflectionObfuscator(ast.NodeTransformer):
 class ControlFlowFlattener(ast.NodeTransformer):
     def visit_FunctionDef(self, node):
         for child in ast.walk(node):
-            if isinstance(child, (ast.Nonlocal, ast.Global, ast.AsyncFunctionDef, ast.AsyncWith, ast.AsyncFor, ast.FunctionDef)):
+            if child is not node and isinstance(child, (ast.Nonlocal, ast.Global, ast.AsyncFunctionDef, ast.AsyncWith, ast.AsyncFor, ast.FunctionDef)):
                 return node
         if isinstance(node, ast.AsyncFunctionDef): return node
         if len(node.body) < 3: return node

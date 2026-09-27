@@ -50,6 +50,14 @@ class AttentionPoisonInjector(ast.NodeTransformer):
         if len(node.body) <= 1:
             return node
 
+        # A non-tail Return (or more than one top-level Return) means later
+        # code is unreachable or early-exit semantics matter; hoisting only
+        # the last Return would silently change behavior. Skip such bodies.
+        last = len(node.body) - 1
+        for i, s in enumerate(node.body):
+            if isinstance(s, ast.Return) and i != last:
+                return node
+
         real_stmts: list[ast.stmt] = []
         return_stmt = None
         for s in node.body:

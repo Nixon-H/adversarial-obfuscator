@@ -274,7 +274,9 @@ class DistributedDiversityPool:
 
     def verify_semantic_equivalence(self) -> bool:
         if len(self._variants) < 2:
-            return True
+            # Fail-closed: fewer than 2 variants means there is nothing
+            # to compare — a vacuous True would certify an unchecked pool.
+            return False
 
         codes = [v.code for v in self._variants.values()]
         base_ops = self._extract_ops(codes[0])

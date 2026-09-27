@@ -1,3 +1,10 @@
+"""
+Distributed attestation orchestration (cross-host challenges).
+
+TWIN: runtime/src/sw_attestation.rs (in-artifact challenge/response core)
+— that module answers challenges inside one artifact; this module
+coordinates them between hosts. Do not merge.
+"""
 import hashlib
 import os
 import random

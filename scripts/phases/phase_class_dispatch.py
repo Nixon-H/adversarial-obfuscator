@@ -39,7 +39,6 @@ def phase_class_dispatch(num_classes=4):
         list of (label, hash) tuples
     """
     log("CLASS_DISPATCH", f"Generating {num_classes} class dispatch variants")
-    log("CLASS_DISPATCH", f"Generating {num_classes} class dispatch variants")
     classes = []
     for i in range(num_classes):
         label = f"class_{i}"

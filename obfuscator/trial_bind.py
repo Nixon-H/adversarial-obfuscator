@@ -489,6 +489,8 @@ def emit_trial_snippet(deadline_epoch, token_hex, build_key_hex,
     bytes.fromhex(token)
     if not token or len(token) != 64:
         raise ValueError("token_hex must be a 64-char sha256 hex digest")
+    if not str(func_name).isidentifier():
+        raise ValueError("func_name must be a valid identifier")
     src = (
         "def %s(hwid_hint=\"\"):\n" % (func_name,)
         + "    import hashlib as _tb_hashlib\n"

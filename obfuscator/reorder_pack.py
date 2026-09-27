@@ -29,15 +29,26 @@ class _SeededRng:
         """Return a uniform-ish int in range(n) using rejection sampling."""
         if n <= 0:
             raise ValueError("randbelow requires n > 0")
-        # Rejection sampling for unbiased results.
-        limit = 256 - (256 % n)
+        if n <= 256:
+            # Single-byte fast path (unchanged historical output).
+            limit = 256 - (256 % n)
+            while True:
+                if not self._buf:
+                    self._refill()
+                b = self._buf[0]
+                self._buf = self._buf[1:]
+                if b < limit:
+                    return b % n
+        # Two-byte path for n > 256 (the single-byte loop can never
+        # terminate there: limit would be 0).
+        limit = 65536 - (65536 % n)
         while True:
-            if not self._buf:
+            while len(self._buf) < 2:
                 self._refill()
-            b = self._buf[0]
-            self._buf = self._buf[1:]
-            if b < limit:
-                return b % n
+            v = (self._buf[0] << 8) | self._buf[1]
+            self._buf = self._buf[2:]
+            if v < limit:
+                return v % n
 
     def shuffle(self, xs: list) -> None:
         """In-place Fisher-Yates shuffle using this PRNG."""

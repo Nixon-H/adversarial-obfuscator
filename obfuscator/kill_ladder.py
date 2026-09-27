@@ -19,11 +19,17 @@ Semantics (both implementations, kept in sync):
     ``native/crash_suppress.h`` ``nixon_silent_kill`` / fatal handler).
     ``os._exit`` is used, never ``sys.exit`` — ``os._exit`` skips
     cleanup handlers (atexit/finally/flush) that could dump state;
-(d) single choke point: every migrated gate (vm_score, driver_blocklist,
-    audit_hook, trial/watermark enforcement) calls ``_nx_kill``; nothing
-    else exits directly. No warn tier in the ladder itself (Monitor
-    tiers stay in ``runtime/src/hydra.rs``; the ladder is the Enforce
-    end — first strike exits);
+(d) single choke point for TAMPER gates: every migrated tamper gate
+    (vm_score, driver_blocklist, audit_hook, trial/watermark
+    enforcement) calls ``_nx_kill``; nothing else on the tamper path
+    exits directly. Known non-tamper-path exceptions (documented
+    variance, not ladder violations): the ``CRASH`` user macro
+    (``os._exit(1)`` — explicit caller-visible failure, see
+    ``obfuscator/macros.py``), the timing-traps ``hard_exit`` degrader
+    (``sys.exit(1)``), and the ``py_matrix`` version-gate snippet
+    (``sys.exit(1)`` on version mismatch). No warn tier in the ladder
+    itself (Monitor tiers stay in ``runtime/src/hydra.rs``; the ladder
+    is the Enforce end — first strike exits);
 (e) silent kill (crash_suppress philosophy): no stdout/stderr output by
     default. ``NIXON_LADDER_DEBUG=1`` prints the reason to stderr for
     diagnostics.
@@ -246,8 +252,6 @@ def emit_kill_snippet():
         "    except Exception:\n"
         "        pass\n"
         "    _nx_os._exit(137)\n"
-        "    import sys as _nx_sys\n"
-        "    _nx_sys.exit(137)\n"
     )
     compile(src, "<nx_kill_ladder>", "exec")
     return src

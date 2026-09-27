@@ -352,6 +352,16 @@ class SealedSection:
         """
         if self.closed:
             return
+        # Release the exported view FIRST: mmap.close() with a live
+        # exported view raises BufferError (previously swallowed, leaking
+        # the mapping). Guarded — release() on an already-released view
+        # raises ValueError.
+        try:
+            rel = getattr(self._view, "release", None)
+            if callable(rel):
+                rel()
+        except Exception:
+            pass
         writable = not self.readonly
         if self.readonly:
             try:

@@ -46,7 +46,9 @@ class ReasoningLoopInjector:
     def _build_chain(self, entry_name: str, depth: int) -> list[str]:
         names = [entry_name]
         for _ in range(depth - 1):
-            names.append(f"_nx_trap_{secrets.token_hex(4)}")
+            # Seeded RNG (self._rng), not secrets.token_hex: reproducible
+            # per-seed builds instead of unseeded global randomness.
+            names.append(f"_nx_trap_{self._rng.getrandbits(32):08x}")
         names.append(entry_name)
         return names
 

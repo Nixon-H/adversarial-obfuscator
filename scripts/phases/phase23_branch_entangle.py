@@ -35,7 +35,6 @@ def phase_branch_entangle():
         dict with test result written to BUILD_DIR
     """
     log("BRANCH_ENTANGLE", "Running branch predictor entanglement")
-    log("BRANCH_ENTANGLE", "Running branch predictor entanglement")
     result = subprocess.run(
         ["cargo", "test", "--", "branch_entangle::tests", "--nocapture"],
         cwd=RUNTIME_DIR, capture_output=True, text=True, timeout=60,

@@ -1,15 +1,17 @@
-"""Op-count truth lock (verified-141 audit).
+"""Op-count truth lock (verified-140 audit; was 141 before str.decode was
+removed — Python 3 has no str.decode, only bytes.decode).
 
-The "141 lowered operations" claim is now TRUE and enforced here:
+The "140 lowered operations" claim is now TRUE and enforced here:
 
-- 20 families, 149 registry entries (148 unique names)
-- 140 callable ops + 8 AST node-kind markers (BinOp, Compare, BoolOp,
+- 20 families, 148 registry entries (147 unique names)
+- 139 callable ops + 8 AST node-kind markers (BinOp, Compare, BoolOp,
   Not, Subscript, JoinedStr, FormattedValue, AugAssign — Phase-2 only,
   no runtime function yet)
-- 141 native kernel ops (NATIVE_OPS): the 140 callable ops + fuse dispatch
+- 140 native kernel ops (NATIVE_OPS): the 139 callable ops + fuse dispatch
 - Every kernel op routes at least one real call site through the kernel
-  (behavioral parity locked by tests/test_lowering_parity_141.py); the
-  original 52 op names/shapes are untouched.
+  (behavioral parity locked by tests/test_lowering_parity_141.py — file
+  name kept for stable references; content asserts 140); the
+  original 51 op names/shapes are untouched.
 
 Python 3.10 compatible: stdlib only, no match statements.
 """
@@ -27,13 +29,15 @@ NODE_KINDS = frozenset({
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# The original 52 kernel entries (order-independent): additive growth
-# must never rename, drop, or reshape these.
+# The original 51 kernel entries (order-independent): additive growth
+# must never rename, drop, or reshape these. ("str.decode" was removed
+# outright per audit: Python 3 has no str.decode — only bytes.decode —
+# so it was never a real op, just a misroute hazard.)
 ORIGINAL_OPS = frozenset({
     "print", "input", "open",
     "int", "float", "str", "bool", "chr", "ord", "hex", "oct", "bin",
     "abs", "round", "len",
-    "str.join", "str.split", "str.format", "str.encode", "str.decode",
+    "str.join", "str.split", "str.format", "str.encode",
     "str.upper", "str.lower",
     "list", "tuple", "dict", "set", "frozenset", "sorted", "reversed",
     "enumerate", "zip",
@@ -48,16 +52,16 @@ ORIGINAL_OPS = frozenset({
 def test_registry_counts():
     assert len(lowering.FAMILIES) == 20
     total = sum(len(info["ops"]) for info in lowering.FAMILIES.values())
-    assert total == 149
+    assert total == 148
     unique = {op for info in lowering.FAMILIES.values() for op in info["ops"]}
-    assert len(unique) == 148
+    assert len(unique) == 147
     assert (unique & NODE_KINDS) == NODE_KINDS  # all 8 node-kind markers
-    assert len(unique - NODE_KINDS) == 140  # callable ops
+    assert len(unique - NODE_KINDS) == 139  # callable ops
 
 
 def test_native_kernel_counts():
-    assert len(NATIVE_OPS) == 141
-    assert len(set(NATIVE_OPS)) == 141  # no duplicate entries
+    assert len(NATIVE_OPS) == 140
+    assert len(set(NATIVE_OPS)) == 140  # no duplicate entries
     callable_ops = (
         {op for info in lowering.FAMILIES.values() for op in info["ops"]}
         - NODE_KINDS
@@ -65,7 +69,7 @@ def test_native_kernel_counts():
     assert set(NATIVE_OPS) - {"fuse"} == callable_ops
 
 
-def test_original_52_untouched():
+def test_original_51_untouched():
     assert ORIGINAL_OPS <= set(NATIVE_OPS)
     for op in ORIGINAL_OPS - {"fuse"}:
         fam_hit = [n for n, i in lowering.FAMILIES.items()
@@ -78,15 +82,15 @@ def test_shim_kernel_parity():
     shim_names = {n for n in dir(shim) if n.startswith("_nxk_")}
     native_tokens = {"_nxk_" + op.replace(".", "_") for op in NATIVE_OPS}
     assert shim_names == native_tokens
-    assert len(shim_names) == 141
+    assert len(shim_names) == 140
 
 
-def test_design_doc_states_verified_141():
+def test_design_doc_states_verified_140():
     path = os.path.join(REPO_ROOT, "obfuscator", "lowering_DESIGN.md")
     with open(path, encoding="utf-8") as f:
         text = f.read()
-    assert "verified-141" in text.lower() or "verified 141" in text.lower()
-    assert "141" in text
+    assert "verified-140" in text.lower() or "verified 140" in text.lower()
+    assert "140" in text
     # No stale debunk framing may survive.
     for line in text.splitlines():
         low = line.lower()

@@ -541,8 +541,10 @@ class EvidenceCompletenessScorer:
 
         total_scores = sum(c.score for c in self.claims)
         if not self.claims:
-            logger.warning("No claims found — returning hardcoded overall_score=100.0. This may inflate completeness metrics.")
-        overall_score = total_scores / len(self.claims) if self.claims else 100.0
+            logger.warning("No claims found — returning overall_score=0.0 (fail-closed: no evidence, no confidence).")
+        # Fail-closed: an empty claim set previously scored a perfect
+        # 100.0, certifying "complete evidence" for nothing audited.
+        overall_score = total_scores / len(self.claims) if self.claims else 0.0
 
         all_missing = {}
         for c in self.claims:

@@ -1,4 +1,9 @@
-"""Behavioral parity for all 141 lowered ops (verified-141 audit).
+"""Behavioral parity for all 140 lowered ops (verified-140 audit; was 141
+before str.decode was removed — Python 3 has no str.decode, only
+bytes.decode).
+
+Every non-fusion op in ``NATIVE_OPS`` is exercised TWICE from the SAME
+call spelling:
 
 Every non-fusion op in ``NATIVE_OPS`` is exercised TWICE from the SAME
 call spelling:
@@ -109,7 +114,6 @@ CASES = [
     ("str.split", "s = 'a,b'\n", "str.split(s, ',')"),
     ("str.format", "s = '{a}-{b}'\n", "str.format(s, a=1, b=2)"),
     ("str.encode", "s = 'hi'\n", "str.encode(s)"),
-    ("str.decode", "s = 'hi'\n", "str.encode(s).decode()"),
     ("str.upper", "s = 'hi'\n", "str.upper(s)"),
     ("str.lower", "s = 'HI'\n", "str.lower(s)"),
     ("str.strip", "s = '  hi  '\n", "str.strip(s)"),
@@ -329,8 +333,8 @@ def test_every_kernel_op_has_parity_case():
     assert set(CASE_OPS) == ops, sorted(ops ^ set(CASE_OPS))
 
 
-def test_kernel_op_total_is_141():
-    assert len(NATIVE_OPS) == 141
+def test_kernel_op_total_is_140():
+    assert len(NATIVE_OPS) == 140
 
 
 def test_receiver_prepend_routes_same_helper():
@@ -367,3 +371,21 @@ def test_unknown_receivers_never_rewritten():
         out, n = lowering.lower_source(expr, "all")
         assert n == 0, (expr, out)
         assert "_nxk_" not in out
+
+
+def test_str_decode_removed_bytes_decode_kept():
+    # Python 3 has no str.decode: the registry/shim must not contain it,
+    # while bytes.decode keeps working through the kernel.
+    assert "str.decode" not in lowering._active_ops(frozenset({"string"}))
+    assert not hasattr(shim, "_nxk_str_decode")
+    assert hasattr(shim, "_nxk_bytes_decode")
+    # bytes held in a str-named variable must NOT route anywhere
+    # (previously misrouted to the nonexistent str.decode helper).
+    out, n = lowering.lower_source("s = b'hi'\nout = s.decode()\n", "all")
+    assert "_nxk_str_decode" not in out
+    ns = {}
+    exec(compile(out, "<t>", "exec"), ns)
+    assert ns["out"] == "hi"
+    # canonical bytes spelling still routes through the kernel helper
+    out2, n2 = lowering.lower_source("b = b'hi'\nout = b.decode()\n", "all")
+    assert n2 >= 1 and "_nxk_bytes_decode" in out2

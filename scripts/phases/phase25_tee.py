@@ -38,7 +38,6 @@ def phase_tee(tee_type="software"):
         dict with test result written to BUILD_DIR
     """
     log("TEE", f"Running TEE partition tests (type={tee_type})")
-    log("TEE", f"Running TEE partition tests (type={tee_type})")
     env = os.environ.copy()
     env["NIXON_TEE_TYPE"] = tee_type
     result = subprocess.run(

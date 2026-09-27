@@ -6,6 +6,10 @@ Analyzes Python source code via AST to classify each function into a
 protection category: simple_helper, crypto, license_check,
 key_derivation, or sensitive_algo.
 
+TWIN: scripts/classify_features.py (feature-level claim validation) —
+that script classifies the 129 RESEARCH features; this module classifies
+CODE to drive pass selection (see strategy_selector.py). Do not merge.
+
 Architectural Role:
 First stage of the function-classification pipeline. The output feeds
 StrategySelector, which maps each category to a set of obfuscation

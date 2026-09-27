@@ -38,7 +38,9 @@ jobs:
       - name: Stage 1 - Obfuscate
         # NOTE: obfuscator/core.py was a dead 2-line shim (removed); the
         # canonical entry point is scripts/build.py (shadow-compiler 2.0.0).
-        run: python3 scripts/build.py --payload payload.py --skip-relay --skip-extras
+        # Payload is the checked-in examples/hello.py fixture (there is no
+        # repo-root payload.py; a missing payload would fail the stage).
+        run: python3 scripts/build.py --payload examples/hello.py --skip-relay --skip-extras
 
       - name: Stage 2 - IR Compile
         run: python3 -m irgen build/obfuscated.py -o build/program.ir

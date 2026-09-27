@@ -74,6 +74,12 @@ class FragmentProof:
     counterexample: Optional[dict] = None
     timestamp: str = ""
     proof_hash: str = ""
+    # Isolation-path verdict (set ONLY by prove_fragment_isolation):
+    # True means "constraints satisfiable (a model exists)", which is a
+    # DIFFERENT polarity from chain proofs (unsat => equivalent). New
+    # consumers of isolation results must read this field, not
+    # `equivalent` (kept for back-compat with chain-proof aggregators).
+    satisfiable: Optional[bool] = None
 
     def __post_init__(self):
         if not self.timestamp:
@@ -90,6 +96,7 @@ class FragmentProof:
             "output_hash": self.proof_hash,
             "equivalence_proof": {
                 "equivalent": self.equivalent,
+                "satisfiable": self.satisfiable,
                 "solver_time_ms": self.solver_time_ms,
                 "counterexample": self.counterexample,
             },
@@ -316,6 +323,9 @@ class FragmentSafetyProver:
                 fragment_ids=[fragment.id],
                 equivalent=True,
                 solver_time_ms=elapsed,
+                # Polarity note: True here means SATISFIABLE (a model
+                # exists), NOT chain-equivalence. See `satisfiable`.
+                satisfiable=True,
             )
         elif result == z3.unsat:
             proof = FragmentProof(
@@ -324,6 +334,7 @@ class FragmentSafetyProver:
                 equivalent=False,
                 solver_time_ms=elapsed,
                 counterexample={"error": "fragment constraints unsatisfiable"},
+                satisfiable=False,
             )
         else:
             proof = FragmentProof(
@@ -332,6 +343,7 @@ class FragmentSafetyProver:
                 equivalent=False,
                 solver_time_ms=elapsed,
                 counterexample={"error": "solver unknown"},
+                satisfiable=False,
             )
 
         self.proofs.append(proof)

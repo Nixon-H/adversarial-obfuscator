@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """Phase 5: Claim Validation — Classify all 129 protection/research features."""
+# TWIN: scripts/classification/ (function_classifier.py AST-level function
+# triage + strategy_selector.py pass selection) — that package classifies
+# CODE to pick protections; this script classifies FEATURES to validate
+# claims. Different input, different output; do not merge.
 import argparse
 import json
 import os

@@ -45,7 +45,6 @@ def phase_classify(payload, config):
         dict mapping function names to classification labels, or None
     """
     log("CLASSIFY", f"Running classification pass on {payload}")
-    log("CLASSIFY", f"Running classification pass on {payload}")
     script = os.path.join(ROOT, "obfuscator", "classification.py")
     if not os.path.exists(script):
         log("SKIP", "classification.py not found, skipping")

@@ -60,7 +60,7 @@ Notes:
 | Feature | What it does | Evidence |
 |---|---|---|
 | AST obfuscation ladder `--opt-level 0-5` (default 4, 14/17 flags on) | cfg-flatten, opaque predicates, MBA, string fragmentation, unicode ids, junk/decoys/minify/dataflow/provenance | `tests/test_opt_levels.py`, `tests/test_obfuscator.py` |
-| Semantic lowering, 20 families / 141 kernel ops | rewrites covered call sites to `_nxk_*` kernel calls; op-count truth-locked | `tests/test_lowering.py`, `tests/test_opcount_truth.py`, `tests/test_lowering_parity_141.py` |
+| Semantic lowering, 20 families / 140 kernel ops | rewrites covered call sites to `_nxk_*` kernel calls; op-count truth-locked | `tests/test_lowering.py`, `tests/test_opcount_truth.py`, `tests/test_lowering_parity_141.py` |
 | Anti-VM loader snippet, 12 Linux-checkable signals incl `clock_bias` | weighted verdict vs `--vm-threshold` (default 50.0); report-only unless KOD armed | `tests/test_vm_subset.py`, `tests/test_vm_score.py`, `tests/test_clock_bias.py` |
 | Frozen-stdlib snapshot gate (default ON) | refuse-to-run on stdlib tamper; runtime off via `NIXON_SNAPSHOT_OFF` | `tests/test_frozen_snapshot.py` |
 | Stdlib function-audit gate (default ON) | audit of stdlib functions; runtime off via `NIXON_STDLIB_AUDIT_OFF` | `tests/test_stdlib_audit.py` |

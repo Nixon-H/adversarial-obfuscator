@@ -13,7 +13,14 @@ class ToolSimulator:
     """
 
     def simulate(self, metrics: dict, tool: str) -> dict:
-        profile = TOOL_PROFILES.get(tool, TOOL_PROFILES['readelf'])
+        # Fail-closed on unknown tools: silently scoring an unprofiled
+        # tool as readelf (the old .get fallback) fabricates evidence.
+        if tool not in TOOL_PROFILES:
+            raise ValueError(
+                "ToolSimulator.simulate: unknown tool %r (known: %s)"
+                % (tool, sorted(TOOL_PROFILES))
+            )
+        profile = TOOL_PROFILES[tool]
 
         cfg_blocks = metrics.get('protected_blocks', 0)
         if isinstance(cfg_blocks, dict):
@@ -39,6 +46,10 @@ class ToolSimulator:
             'bb_accuracy': bb_acc,
             'function_recovery': fn_rec,
             'decompilation': decomp,
+            # Provenance tag: heuristic simulation from public
+            # benchmarks, NOT a measured tool run. Aggregators must
+            # surface this (cf. multi_tool tools_simulated).
+            'simulated': True,
         }
 
     @staticmethod

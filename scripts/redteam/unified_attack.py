@@ -83,7 +83,12 @@ class RedTeamReport:
     bninja_result: Optional[dict] = None
     llm_result: Optional[dict] = None
     symbolic_result: Optional[dict] = None
-    combined_security_score: float = 0.0
+    # None = no attack completed (fail-closed: unknown, NOT "average").
+    # A numeric 50.0 here previously masqueraded "no data" as a middling
+    # security posture and could gate a release as PASS. Consumers must
+    # treat None as "no evidence" (see attacks_run).
+    combined_security_score: Optional[float] = None
+    attacks_run: int = 0
     weakest_link: str = ""
     recommendations: list = field(default_factory=list)
     attack_times_ms: dict = field(default_factory=dict)
@@ -184,7 +189,7 @@ def run_redteam_attack(args):
             pipeline_log("REDTEAM", "  Symbolic: skipped (not available)")
 
     report.attack_times_ms = attack_times
-    report.combined_security_score = _compute_security_score(report)
+    report.combined_security_score, report.attacks_run = _compute_security_score(report)
     report.weakest_link = _find_weakest_link(report)
     report.recommendations = _generate_recommendations(report)
 
@@ -194,7 +199,10 @@ def run_redteam_attack(args):
         json.dump(report_dict, f, indent=2, default=str)
 
     pipeline_log("REDTEAM", f"Attack report written to {out_path}")
-    pipeline_log("REDTEAM", f"Combined security score: {report.combined_security_score:.1f}/100")
+    if report.combined_security_score is None:
+        pipeline_log("REDTEAM", "Combined security score: n/a (no attacks completed)")
+    else:
+        pipeline_log("REDTEAM", f"Combined security score: {report.combined_security_score:.1f}/100")
     pipeline_log("REDTEAM", f"Weakest link: {report.weakest_link}")
 
     return report
@@ -206,7 +214,9 @@ def _compute_security_score(report):
 
     Each attack is scored 0-100 (higher = more secure). The overall
     score is the average of individual scores. Attacks that didn't
-    run are excluded. Falls back to 50 if no attacks ran.
+    run are excluded. Returns (score_or_None, attacks_run): when no
+    attack completed there is no evidence, so the score is None
+    (fail-closed) instead of a fabricated 50.0.
     """
     scores = []
 
@@ -243,8 +253,8 @@ def _compute_security_score(report):
             scores.append(s)
 
     if scores:
-        return sum(scores) / len(scores)
-    return 50.0
+        return sum(scores) / len(scores), len(scores)
+    return None, 0
 
 
 def _find_weakest_link(report):

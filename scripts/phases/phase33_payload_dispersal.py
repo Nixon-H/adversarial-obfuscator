@@ -40,7 +40,6 @@ def phase_payload_dispersal(payload_path: str, opts) -> dict:
         dict with num_shares, threshold, share_indices, mmap_addresses
     """
     log("PAYLOAD_DISPERSAL", "Running payload dispersal phase (Item 69)...")
-    log("PAYLOAD_DISPERSAL", "Running payload dispersal phase (Item 69)...")
     try:
         from scripts.dispersal.payload_dispersal import PayloadDispersal
         with open(payload_path, "rb") as f:

@@ -36,7 +36,6 @@ def phase_struct_randomization(seed=None, level=3):
         level: randomization intensity (1-10)
     """
     log("STRUCT_RANDOM", f"Configuring structure randomization (level {level})")
-    log("STRUCT_RANDOM", f"Configuring structure randomization (level {level})")
     import hashlib
     import struct
 

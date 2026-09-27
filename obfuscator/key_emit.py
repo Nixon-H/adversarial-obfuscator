@@ -100,11 +100,13 @@ def emit_key_loader(share0_b64: str, share1_b64: str, build_id: str,
     if not isinstance(build_id, str) or not build_id:
         raise ValueError("build_id must be a non-empty string")
     # b64 alphabet has no quotes/backslashes: safe inside "..." literals.
+    # Newlines/CRs are rejected too: b64decode() silently ignores them,
+    # but they would break the emitted "..." literal (source injection).
     for chunk in (share0_b64, share1_b64):
         base64.b64decode(chunk)  # fail fast on malformed shares
-        if '"' in chunk or "\\" in chunk:
+        if '"' in chunk or "\\" in chunk or "\n" in chunk or "\r" in chunk:
             raise ValueError("share contains unsafe characters")
-    if '"' in build_id or "\\" in build_id:
+    if '"' in build_id or "\\" in build_id or "\n" in build_id or "\r" in build_id:
         raise ValueError("build_id contains unsafe characters")
     return (
         "_NX_BUILD_ID = \"%s\"\n" % (build_id,)

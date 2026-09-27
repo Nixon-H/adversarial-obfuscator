@@ -6,6 +6,10 @@ _console = sys.stdout
 if os.environ.get('NIXON_LOG_REDIRECT', '1') == '1':
     try:
         _log_fd = open("build.log", "w", encoding='utf-8')
+        try:
+            os.chmod("build.log", 0o600)
+        except Exception:
+            pass
         _console_fd = os.dup(1)
         os.dup2(_log_fd.fileno(), 1)
         os.dup2(_log_fd.fileno(), 2)
@@ -389,7 +393,15 @@ def _next_h_impl(current, step):
     return int.from_bytes(hashlib.sha256(str(current).encode() + str(step).encode()).digest()[:8], 'little')
 globals()[FUNC_NEXT_H] = _next_h_impl
 next_h = _next_h_impl
-NEXT_H_SOURCE = None
+# Loader-embedded definition of the FUNC_NEXT_H chaining hash. The
+# loader template calls {FUNC_NEXT_H}(h, step) ~15 times but never
+# defined it (this slot was None, emitting a literal "None" line).
+# Brace-free so apply_vars/.format pass it through untouched.
+NEXT_H_SOURCE = (
+    "def " + FUNC_NEXT_H + "(current, step):\n"
+    "    import hashlib as _nx_hh\n"
+    "    return int.from_bytes(_nx_hh.sha256(str(current).encode() + str(step).encode()).digest()[:8], 'little')\n"
+)
 class ConfigManager:
     CONFIG_FILE=os.path.join(os.path.expanduser("~"),".nixon_builder_config.json")
     def __init__(self):self.config=self._load()
@@ -480,7 +492,7 @@ class GitHubBuildFarm:
     def _get_username(self):
         try:
             import requests
-            r=requests.get(f"{self.base_url}/user",headers=self.headers,proxies=self.proxies,verify=False)
+            r=requests.get(f"{self.base_url}/user",headers=self.headers,proxies=self.proxies,verify=True)
             r.raise_for_status()
             return r.json()['login']
         except Exception as e:
@@ -490,7 +502,7 @@ class GitHubBuildFarm:
         print(f"\n [*] [Cloud] Ensuring private repo exists: {self.repo_name}...")
         import requests
         data={"name":self.repo_name,"private":True,"auto_init":True}
-        r=requests.post(f"{self.base_url}/user/repos",headers=self.headers,json=data,proxies=self.proxies,verify=False)
+        r=requests.post(f"{self.base_url}/user/repos",headers=self.headers,json=data,proxies=self.proxies,verify=True)
         if r.status_code==201 or r.status_code==422:                           
             return True
         print(f" [!] Repo creation failed: {r.text}")
@@ -500,7 +512,13 @@ class GitHubBuildFarm:
         with open(local_path,"rb")as f:content=base64.b64encode(f.read()).decode()
         url=f"{self.base_url}/repos/{self.username}/{self.repo_name}/contents/{remote_name}"
         data={"message":f"Upload {remote_name}","content":content}
-        requests.put(url,headers=self.headers,json=data,proxies=self.proxies,verify=False)
+        r=requests.put(url,headers=self.headers,json=data,proxies=self.proxies,verify=True)
+        try:
+            r.raise_for_status()
+        except Exception:
+            print(f" [!] Upload failed: {r.status_code} {r.text}")
+            return False
+        return True
     def create_workflow(self, payload_filename):
         script_content = f"""
 from setuptools import setup, Extension
@@ -571,13 +589,13 @@ jobs:
         with UI.Task("Build Config", "Updating Workflow...") as t:
             for attempt in range(3):
                 try:
-                    get_r = requests.get(url, headers=self.headers, proxies=self.proxies, verify=False, timeout=30)
+                    get_r = requests.get(url, headers=self.headers, proxies=self.proxies, verify=True, timeout=30)
                     sha = None
                     if get_r.status_code == 200:
                          sha = get_r.json().get("sha")
                     data = {"message": "Update workflow", "content": base64.b64encode(workflow_yaml.encode()).decode()}
                     if sha: data["sha"] = sha      
-                    put_r = requests.put(url, headers=self.headers, json=data, proxies=self.proxies, verify=False, timeout=60)
+                    put_r = requests.put(url, headers=self.headers, json=data, proxies=self.proxies, verify=True, timeout=60)
                     if put_r.status_code in [200, 201]:
                         t.success("Workflow Updated")
                         return
@@ -592,18 +610,18 @@ jobs:
         import requests
         prev_run_id = None
         try:
-            r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs",headers=self.headers,proxies=self.proxies,verify=False,timeout=20)
+            r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs",headers=self.headers,proxies=self.proxies,verify=True,timeout=20)
             runs=r.json()
             if runs.get('total_count',0)>0:
                 prev_run_id=runs['workflow_runs'][0]['id']
         except Exception: pass
         url=f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/workflows/build.yml/dispatches"
-        requests.post(url,headers=self.headers,json={"ref":"main"},proxies=self.proxies,verify=False)
+        requests.post(url,headers=self.headers,json={"ref":"main"},proxies=self.proxies,verify=True)
         print(" [*] Waiting for runners (this takes 3-5 mins)...")
         run_id=None
         for _ in range(30):
             time.sleep(10)
-            r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs",headers=self.headers,proxies=self.proxies,verify=False)
+            r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs",headers=self.headers,proxies=self.proxies,verify=True)
             runs=r.json()
             if runs.get('total_count',0)>0:
                 current_id=runs['workflow_runs'][0]['id']
@@ -625,7 +643,7 @@ jobs:
         job_end_times = {}
         while True:
             try:
-                r = requests.get(jobs_url, headers=self.headers, proxies=self.proxies, verify=False)
+                r = requests.get(jobs_url, headers=self.headers, proxies=self.proxies, verify=True)
                 jobs_data = r.json()
                 jobs = jobs_data.get("jobs", [])
                 states = {"Wind": "Q", "Linux": "Q", "macOS": "Q", "Android": "Q"}
@@ -640,10 +658,10 @@ jobs:
                     conclusion = job['conclusion']
                     def parse_ts(t):
                         if not t: return 0.0
-                    try:
-                        t = t.replace('Z', '+00:00')
-                        return datetime.datetime.fromisoformat(t).timestamp()
-                    except Exception: return 0.0
+                        try:
+                            t = t.replace('Z', '+00:00')
+                            return datetime.datetime.fromisoformat(t).timestamp()
+                        except Exception: return 0.0
                     s_time = parse_ts(job.get('started_at'))
                     c_time = parse_ts(job.get('completed_at'))
                     job_start_times[short_code] = s_time
@@ -656,7 +674,7 @@ jobs:
                         states[short_code] = "IP"
                     else:
                         states[short_code] = "Q"
-                r_wf = requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}", headers=self.headers, proxies=self.proxies, verify=False)
+                r_wf = requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}", headers=self.headers, proxies=self.proxies, verify=True)
                 wf_data = r_wf.json()
                 wf_status = wf_data.get('status')
                 wf_conclusion = wf_data.get('conclusion')
@@ -698,12 +716,12 @@ jobs:
         print(f" [*] [Cloud] Downloading binaries to {output_dir}...")
         import requests
         os.makedirs(output_dir,exist_ok=True)
-        r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}/artifacts",headers=self.headers,proxies=self.proxies,verify=False)
+        r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}/artifacts",headers=self.headers,proxies=self.proxies,verify=True)
         artifacts=r.json().get('artifacts',[])
         for art in artifacts:
             name=art['name']
             down_url=art['archive_download_url']
-            zip_resp=requests.get(down_url,headers=self.headers,stream=True,proxies=self.proxies,verify=False)
+            zip_resp=requests.get(down_url,headers=self.headers,stream=True,proxies=self.proxies,verify=True)
             zip_path=os.path.join(output_dir,f"{name}.zip")
             with open(zip_path,"wb")as f:f.write(zip_resp.content)
             with zipfile.ZipFile(zip_path,'r')as z:z.extractall(output_dir)
@@ -718,7 +736,7 @@ jobs:
     def nuke(self):
         import requests
         url = f"{self.base_url}/repos/{self.username}/{self.repo_name}"
-        requests.delete(url, headers=self.headers, proxies=self.proxies, verify=False)
+        requests.delete(url, headers=self.headers, proxies=self.proxies, verify=True)
         UI.dot_item("Cleanup", "Repository Nuked", "SCORCHED")
 class GitHubNuitkaFarm:
     def __init__(self, token, is_public=False, use_tor=False, tor_proxy=None):
@@ -733,7 +751,7 @@ class GitHubNuitkaFarm:
     def _get_username(self):
         try:
             import requests
-            r = requests.get(f"{self.base_url}/user", headers=self.headers, proxies=self.proxies, verify=False)
+            r = requests.get(f"{self.base_url}/user", headers=self.headers, proxies=self.proxies, verify=True)
             return r.json()['login']
         except Exception: return "unknown"
     def create_disposable_repo(self):
@@ -741,7 +759,7 @@ class GitHubNuitkaFarm:
             import requests
             with UI.Task("Repo Access", f"Repo {self.repo_name}") as t:
                 data = {"name": self.repo_name, "private": not self.is_public, "auto_init": True}
-                r = requests.post(f"{self.base_url}/user/repos", headers=self.headers, json=data, proxies=self.proxies, verify=False)
+                r = requests.post(f"{self.base_url}/user/repos", headers=self.headers, json=data, proxies=self.proxies, verify=True)
                 if r.status_code in [201, 422]:
                     t.success(f"{self.repo_name} Verified")
                     return True
@@ -764,13 +782,13 @@ class GitHubNuitkaFarm:
                     try:
                         sha = None
                         try:
-                            get_r = requests.get(url, headers=self.headers, proxies=self.proxies, verify=False, timeout=30)
+                            get_r = requests.get(url, headers=self.headers, proxies=self.proxies, verify=True, timeout=30)
                             if get_r.status_code == 200:
                                 sha = get_r.json().get("sha")
                         except Exception: pass
                         data = {"message": f"Upload {remote_name}", "content": content}
                         if sha: data["sha"] = sha
-                        r = requests.put(url, headers=self.headers, json=data, proxies=self.proxies, verify=False, timeout=300)
+                        r = requests.put(url, headers=self.headers, json=data, proxies=self.proxies, verify=True, timeout=300)
                         if r.status_code in [200, 201]:
                             t.success()
                             return True
@@ -789,17 +807,17 @@ class GitHubNuitkaFarm:
     def delete_file(self, filename):
         import requests
         url = f"{self.base_url}/repos/{self.username}/{self.repo_name}/contents/{filename}"
-        get_r = requests.get(url, headers=self.headers, proxies=self.proxies, verify=False)
+        get_r = requests.get(url, headers=self.headers, proxies=self.proxies, verify=True)
         if get_r.status_code == 200:
             sha = get_r.json().get("sha")
             data = {"message": "Cleanup payload", "sha": sha}
-            requests.delete(url, headers=self.headers, json=data, proxies=self.proxies, verify=False)
+            requests.delete(url, headers=self.headers, json=data, proxies=self.proxies, verify=True)
             UI.item("Cleanup", f"Wiped {filename}", "SECURE")
     def nuke(self):
         import requests
         url = f"{self.base_url}/repos/{self.username}/{self.repo_name}"
         try:
-            r = requests.delete(url, headers=self.headers, proxies=self.proxies, verify=False)
+            r = requests.delete(url, headers=self.headers, proxies=self.proxies, verify=True)
             if r.status_code == 204:
                 UI.dot_item("Cleanup", f"Repo Deleted", "SCORCHED")
             elif r.status_code == 403:
@@ -821,7 +839,6 @@ class GitHubNuitkaFarm:
         safe_filename = payload_filename.replace('"', '').replace("'", "").replace(";", "").replace("|", "")
         install_cmd = pip_command if pip_command else "pip install nuitka zstandard ordered-set requests websockets"
         base_nuitka_flags = "--enable-plugin=upx --include-package=runpy --include-package=importlib --include-package=ctypes --include-package=encodings --include-package=asyncio --include-module=uuid,json,ssl,socket,base64,lzma,struct,hashlib,hmac,secrets,datetime,threading,multiprocessing,subprocess,platform,argparse,urllib.request,shutil,tempfile,random,warnings,contextlib,weakref,signal,bisect,email,http,requests,websockets,websockets.exceptions,websockets.legacy,websockets.legacy.client"
-        full_nuitka_flags = f"{base_nuitka_flags} {extra_nuitka_flags}"
         full_nuitka_flags = f"{base_nuitka_flags} {extra_nuitka_flags}"
         matrix_entries = """          - os: windows-latest
             suffix: .exe
@@ -1016,11 +1033,11 @@ jobs:
         import requests
         with UI.Task("Build Config", "Updating Workflow...") as t:
             url = f"{self.base_url}/repos/{self.username}/{self.repo_name}/contents/.github/workflows/nuitka.yml"
-            get_r = requests.get(url, headers=self.headers, proxies=self.proxies, verify=False)
+            get_r = requests.get(url, headers=self.headers, proxies=self.proxies, verify=True)
             sha = get_r.json().get("sha") if get_r.status_code == 200 else None
             data = {"message": "Update Nuitka workflow", "content": base64.b64encode(workflow_yaml.encode()).decode()}
             if sha: data["sha"] = sha
-            r = requests.put(url, headers=self.headers, json=data, proxies=self.proxies, verify=False)
+            r = requests.put(url, headers=self.headers, json=data, proxies=self.proxies, verify=True)
             if r.status_code in [200, 201]:
                 t.success("Workflow Updated")
             else:
@@ -1035,7 +1052,7 @@ jobs:
         if not run_id:
             prev_run_id = None
             try:
-                r = requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs", headers=self.headers, proxies=self.proxies, verify=False, timeout=20)
+                r = requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs", headers=self.headers, proxies=self.proxies, verify=True, timeout=20)
                 runs = r.json()
                 if runs.get('total_count', 0) > 0:
                     prev_run_id = runs['workflow_runs'][0]['id']
@@ -1043,7 +1060,7 @@ jobs:
             url = f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/workflows/nuitka.yml/dispatches"
             try:
                 with UI.Task("Build Trigger", "Dispatching..") as t:
-                    requests.post(url, headers=self.headers, json={"ref": "main"}, proxies=self.proxies, verify=False, timeout=20)
+                    requests.post(url, headers=self.headers, json={"ref": "main"}, proxies=self.proxies, verify=True, timeout=20)
                     t.success()
             except Exception as e:
                 if 't' in locals(): t.fail(str(e))
@@ -1053,7 +1070,7 @@ jobs:
                 time.sleep(5)
                 for _ in range(30):
                     try:
-                        r = requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs", headers=self.headers, proxies=self.proxies, verify=False, timeout=20)
+                        r = requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs", headers=self.headers, proxies=self.proxies, verify=True, timeout=20)
                         runs = r.json()
                         if runs.get('total_count', 0) > 0:
                             current_id = runs['workflow_runs'][0]['id']
@@ -1076,7 +1093,6 @@ jobs:
             'success': '✓', 'startup_failure': '⚠', 'pending': 'Q'
         }
         last_status_line = ""
-        last_status_line = ""
         final_times = {} 
         job_start_times = {} 
         job_statuses = {}
@@ -1086,15 +1102,12 @@ jobs:
         while True:
             try:
                 if loops % 10 == 0:
-                    r = requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}", headers=self.headers, proxies=self.proxies, verify=False, timeout=30)
+                    r = requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}", headers=self.headers, proxies=self.proxies, verify=True, timeout=30)
                     if r.status_code == 200:
                         run_data = r.json()
                         run_status = run_data.get('status')
                         run_conclusion = run_data.get('conclusion')
-                    jobs_r = requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}/jobs", headers=self.headers, proxies=self.proxies, verify=False, timeout=30)
-                    if jobs_r.status_code == 200:
-                        job_statuses = {}
-                        jobs_data = jobs_r.json()
+                    jobs_r = requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}/jobs", headers=self.headers, proxies=self.proxies, verify=True, timeout=30)
                     if jobs_r.status_code == 200:
                         job_statuses = {}
                         jobs_data = jobs_r.json()
@@ -1184,7 +1197,7 @@ jobs:
              start_time = time.time()
              headers = self.headers.copy()
              headers['Range'] = 'bytes=0-2097152' 
-             r = requests.get(test_url, headers=headers, stream=True, proxies=self.proxies, verify=False, timeout=10)
+             r = requests.get(test_url, headers=headers, stream=True, proxies=self.proxies, verify=True, timeout=10)
              if r.status_code not in [200, 206]: return 4
              size = 0
              for chunk in r.iter_content(chunk_size=1024*1024):
@@ -1201,7 +1214,7 @@ jobs:
         import requests
         from concurrent.futures import ThreadPoolExecutor, as_completed
         try:
-            head = requests.head(url, headers=self.headers, proxies=self.proxies, verify=False, allow_redirects=True)
+            head = requests.head(url, headers=self.headers, proxies=self.proxies, verify=True, allow_redirects=True)
             total_bytes = int(head.headers.get('content-length', 0))
             accept_ranges = head.headers.get('accept-ranges', 'none')
         except Exception:
@@ -1209,7 +1222,7 @@ jobs:
             accept_ranges = 'none'
 
         if total_bytes < 10 * 1024 * 1024 or accept_ranges != 'bytes':
-            with requests.get(url, headers=self.headers, stream=True, proxies=self.proxies, verify=False, timeout=300) as r:
+            with requests.get(url, headers=self.headers, stream=True, proxies=self.proxies, verify=True, timeout=300) as r:
                 r.raise_for_status()
                 with open(dest_path, 'wb') as f:
                     downloaded = 0
@@ -1236,7 +1249,7 @@ jobs:
             headers = self.headers.copy()
             headers['Range'] = f"bytes={start}-{end}"
             part_path = f"{dest_path}.part{index}"
-            with requests.get(url, headers=headers, stream=True, proxies=self.proxies, verify=False, timeout=300) as r:
+            with requests.get(url, headers=headers, stream=True, proxies=self.proxies, verify=True, timeout=300) as r:
                 r.raise_for_status()
                 with open(part_path, "wb") as f:
                     for chunk in r.iter_content(chunk_size=1024 * 1024):
@@ -1268,7 +1281,7 @@ jobs:
         import time
         time.sleep(3)
         try:
-            r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}/artifacts",headers=self.headers,proxies=self.proxies,verify=False)
+            r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}/artifacts",headers=self.headers,proxies=self.proxies,verify=True)
             all_artifacts=r.json().get('artifacts',[])
         except Exception:
             UI.dot_item("Artifacts", "Access Failed", "FAIL")
@@ -1396,10 +1409,14 @@ def strip_binary(path):
     fname = os.path.basename(path).lower()
     host_os = sys.platform
     target_os = None
+    # Policy (explicit): Android/ARM artifacts are NEVER stripped —
+    # host binutils would corrupt cross-arch binaries. This early
+    # return also makes any "android" alternative below unreachable
+    # by design (kept out deliberately, not a dead branch).
     if "android" in fname or "arm" in fname:
         print(f"    [!] Skipping strip for {fname} (Cross-arch safety)")
         return False
-    if "linux" in fname or "android" in fname:
+    if "linux" in fname:
         target_os = "linux"
     elif "macos" in fname or "darwin" in fname:
         target_os = "darwin"

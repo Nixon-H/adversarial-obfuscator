@@ -182,7 +182,6 @@ def _make_xor_decode_ast(
     var_name: str,
 ) -> list[ast.AST]:
     """Generate AST for runtime string reconstruction via XOR."""
-    import_strs: list[ast.AST] = []
     body: list[ast.AST] = []
 
     fragments_var = f"_{var_name}_frags"
@@ -213,71 +212,44 @@ def _make_xor_decode_ast(
         )
     )
 
-    recover_call = ast.Call(
-        func=ast.Attribute(
+    # Single-XOR decode via the module-level helper (the old inline
+    # expression double-XORed frag^key^key, yielding the still-encrypted
+    # bytes, and bytes^bytes is not valid Python anyway). Decode once
+    # after joining so multibyte UTF-8 split across fragments survives.
+    body.append(
+        ast.Assign(
+            targets=[ast.Name(id=var_name, ctx=ast.Store())],
             value=ast.Call(
-                func=ast.Name(id="bytes", ctx=ast.Load()),
-                args=[],
+                func=ast.Name(id="_nx_xor_decode_str", ctx=ast.Load()),
+                args=[
+                    ast.Name(id=fragments_var, ctx=ast.Load()),
+                    ast.Name(id=keys_var, ctx=ast.Load()),
+                ],
                 keywords=[],
             ),
-            attr="join",
-            ctx=ast.Load(),
-        ),
-        args=[
-            ast.ListComp(
-                elt=ast.Call(
-                    func=ast.Attribute(
-                        value=ast.BinOp(
-                            left=ast.BinOp(
-                                left=ast.Subscript(
-                                    value=ast.Name(id=fragments_var, ctx=ast.Load()),
-                                    slice=ast.Name(id="_i", ctx=ast.Load()),
-                                    ctx=ast.Load(),
-                                ),
-                                op=ast.BitXor(),
-                                right=ast.Subscript(
-                                    value=ast.Name(id=keys_var, ctx=ast.Load()),
-                                    slice=ast.Name(id="_i", ctx=ast.Load()),
-                                    ctx=ast.Load(),
-                                ),
-                            ),
-                            op=ast.BitXor(),
-                            right=ast.Subscript(
-                                value=ast.Name(id=keys_var, ctx=ast.Load()),
-                                slice=ast.Name(id="_i", ctx=ast.Load()),
-                                ctx=ast.Load(),
-                            ),
-                        ),
-                        attr="decode",
-                        ctx=ast.Load(),
-                    ),
-                    args=[],
-                    keywords=[],
-                ),
-                generators=[
-                    ast.comprehension(
-                        target=ast.Name(id="_i", ctx=ast.Store()),
-                        iter=ast.Call(
-                            func=ast.Name(id="range", ctx=ast.Load()),
-                            args=[
-                                ast.Call(
-                                    func=ast.Name(id="len", ctx=ast.Load()),
-                                    args=[ast.Name(id=fragments_var, ctx=ast.Load())],
-                                    keywords=[],
-                                )
-                            ],
-                            keywords=[],
-                        ),
-                        ifs=[],
-                        is_async=0,
-                    )
-                ],
-            )
-        ],
-        keywords=[],
+        )
     )
 
     return body
+
+
+_NX_XOR_DECODE_HELPER_SRC = (
+    "def _nx_xor_decode_str(frags, keys):\n"
+    "    _out = bytearray()\n"
+    "    for _f, _k in zip(frags, keys):\n"
+    "        _out += bytes(_a ^ _b for _a, _b in zip(_f, _k))\n"
+    "    return bytes(_out).decode('utf-8')\n"
+)
+
+
+def _ensure_xor_decode_helper(tree: ast.Module) -> ast.Module:
+    """Prepend the ``_nx_xor_decode_str`` helper if not already defined."""
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "_nx_xor_decode_str":
+            return tree
+    helper = ast.parse(_NX_XOR_DECODE_HELPER_SRC)
+    tree.body = helper.body + tree.body
+    return tree
 
 
 def encode_sensitive_strings(
@@ -343,6 +315,10 @@ def encode_sensitive_strings(
 
     transformer = StringEncoder()
     result = transformer.visit(ast_tree)
+    if replacements:
+        # Decode statements reference the runtime helper; ensure it is
+        # defined at module top (before its first use).
+        result = _ensure_xor_decode_helper(result)
     ast.fix_missing_locations(result)
     return result
 
@@ -477,6 +453,7 @@ def wrap_library_calls(
 
     used: set[str] = set()
     wrappers: list[ast.FunctionDef] = []
+    adapter_names: dict[str, str] = {}
 
     for _, original_name in call_sites:
         if original_name in used:
@@ -486,21 +463,22 @@ def wrap_library_calls(
         adapter_name = _generate_adapter_name(
             original_name[:4], rand
         )
+        adapter_names[original_name.lower()] = adapter_name
 
-        num_params = 2
-        params = [
-            ast.arg(arg=f"a{i}", annotation=None)
-            for i in range(num_params)
-        ]
-
-        call_args = [ast.Name(id=f"a{i}", ctx=ast.Load()) for i in range(num_params)]
-
+        # *args/**kwargs passthrough: preserves arity for any signature
+        # (the old fixed 2-param wrapper broke calls with != 2 args).
         wrapper_body = [
             ast.Return(
                 value=ast.Call(
                     func=ast.Name(id=original_name, ctx=ast.Load()),
-                    args=call_args,
-                    keywords=[],
+                    args=[ast.Starred(
+                        value=ast.Name(id="_nx_a", ctx=ast.Load()),
+                        ctx=ast.Load(),
+                    )],
+                    keywords=[ast.keyword(
+                        arg=None,
+                        value=ast.Name(id="_nx_k", ctx=ast.Load()),
+                    )],
                 )
             )
         ]
@@ -509,9 +487,11 @@ def wrap_library_calls(
             name=adapter_name,
             args=ast.arguments(
                 posonlyargs=[],
-                args=params,
+                args=[],
+                vararg=ast.arg(arg="_nx_a", annotation=None),
                 kwonlyargs=[],
                 kw_defaults=[],
+                kwarg=ast.arg(arg="_nx_k", annotation=None),
                 defaults=[],
             ),
             body=wrapper_body,
@@ -529,14 +509,11 @@ def wrap_library_calls(
                 lower = node.func.id.lower()
                 if lower in self.wrap_map:
                     node.func.id = self.wrap_map[lower]
-            return node
+            return self.generic_visit(node)
 
-    wrap_map = {}
-    for orig_name in used:
-        lower = orig_name.lower()
-        wrap_map[lower] = _generate_adapter_name(
-            orig_name[:4], rand
-        )
+    # Single generation: rewrite to the actually-emitted adapter names
+    # (a second random generation here previously produced undefined names).
+    wrap_map = dict(adapter_names)
 
     transformer = CallWrapper(wrap_map)
     result = transformer.visit(ast_tree)

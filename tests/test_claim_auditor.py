@@ -130,8 +130,10 @@ def test_check_evidence_no_false_positive():
 
 
 def test_compute_claim_score_perfect():
+    # Fail-closed: auditing nothing yields zero confidence, never a
+    # vacuous "perfect" score.
     score = compute_claim_score([], {})
-    assert score == 100.0, "Empty matches should give perfect score"
+    assert score == 0.0, "Empty matches must give zero (fail-closed)"
 
 
 def test_compute_claim_score_penalty():

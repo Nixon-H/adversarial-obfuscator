@@ -187,18 +187,23 @@ pub fn unlock_payload(
 mod tests {
     use super::*;
 
+    // Test-only helpers over hardcoded hex literals: expect() (not
+    // bare unwrap) so a typo'd fixture vector names itself in the panic
+    // instead of surfacing as a bare ParseInt/TryFrom error.
     fn hex_to_32(s: &str) -> [u8; 32] {
+        assert!(s.len() == 64, "hex_to_32 fixture must be 64 hex chars");
         let v: Vec<u8> = (0..s.len())
             .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("hex fixture nibble"))
             .collect();
-        v.try_into().unwrap()
+        v.try_into().expect("hex fixture must decode to 32 bytes")
     }
 
     fn hex_to_vec(s: &str) -> Vec<u8> {
+        assert!(s.len() % 2 == 0, "hex_to_vec fixture must have even length");
         (0..s.len())
             .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("hex fixture nibble"))
             .collect()
     }
 

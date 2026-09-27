@@ -177,12 +177,15 @@ class SpeculationObfuscator(ast.NodeTransformer):
             comparators=[ast.Constant(value=arr_size)],
         )
 
+        # Type-correct speculative probe: arr[idx] (a real bounds-check-
+        # bypass gadget shape). The old list-minus-int BinOp always raised
+        # TypeError whenever the (always-true) guard let it execute.
         speculative_access = ast.Assign(
             targets=[ast.Name(id=idx_name, ctx=ast.Store())],
-            value=ast.BinOp(
-                left=ast.Name(id=arr_name, ctx=ast.Load()),
-                op=ast.Sub(),
-                right=ast.Name(id=idx_name, ctx=ast.Load()),
+            value=ast.Subscript(
+                value=ast.Name(id=arr_name, ctx=ast.Load()),
+                slice=ast.Name(id=idx_name, ctx=ast.Load()),
+                ctx=ast.Load(),
             ),
         )
 

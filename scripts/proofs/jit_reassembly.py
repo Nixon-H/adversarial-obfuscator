@@ -494,12 +494,17 @@ class JITReassemblyProver:
 
             if not all_defs:
                 elapsed = (time.time() - start) * 1000
+                # Fail-closed: no variable definitions means there is
+                # nothing to compare — a vacuous True would certify empty
+                # IR as "equivalent". Report non-equivalence with the
+                # reason instead.
                 proof = JITProof(
                     pass_name="jit_reassembly",
                     fragment_ir_hash=combined_frag_hash,
                     jit_code_hash=orig_hash,
-                    equivalent=True,
+                    equivalent=False,
                     solver_time_ms=elapsed,
+                    counterexample={"error": "no variable definitions to compare (empty IR?)"},
                 )
                 self.proofs.append(proof)
                 return proof
@@ -514,12 +519,16 @@ class JITReassemblyProver:
 
             if not var_diffs:
                 elapsed = (time.time() - start) * 1000
+                # Fail-closed: no comparable output pairs (e.g. disjoint
+                # variable namespaces) — certifying True would bless an
+                # unchecked reassembly. Report non-equivalence instead.
                 proof = JITProof(
                     pass_name="jit_reassembly",
                     fragment_ir_hash=combined_frag_hash,
                     jit_code_hash=orig_hash,
-                    equivalent=True,
+                    equivalent=False,
                     solver_time_ms=elapsed,
+                    counterexample={"error": "no comparable variable pairs between fragments and original"},
                 )
                 self.proofs.append(proof)
                 return proof

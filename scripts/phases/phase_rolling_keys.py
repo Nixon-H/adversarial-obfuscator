@@ -36,7 +36,6 @@ def phase_rolling_keys(payload_path=None):
         payload_path: optional path to payload for fragment binding
     """
     log("ROLLING_KEYS", "Configuring rolling key schedules")
-    log("ROLLING_KEYS", "Configuring rolling key schedules")
     chain_secret = os.urandom(32)
     binder = CryptoFragmentBinder(chain_secret=chain_secret, rolling_key_mode=True)
     if payload_path and os.path.exists(payload_path):

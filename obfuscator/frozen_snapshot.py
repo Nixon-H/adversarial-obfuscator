@@ -169,28 +169,6 @@ def build_snapshot_context(modules=None):
     return {"tag": build_tag(), "files": files, "skipped": skipped}
 
 
-def check_snapshot(files, runtime_tag=None):
-    # type: (dict, str) -> str
-    """Pure build/runtime verdict helper (testable without a loader).
-
-    ``files``: ``{name: {"path": ..., "sha256": ...}}`` as recorded at
-    build time. Returns ``"ok"`` / ``"mismatch"`` / ``"version-mismatch"``.
-
-    Version binding: when ``runtime_tag`` (default: current interpreter)
-    differs from ``files.get("__tag__")``... actually the tag travels
-    separately — callers pass ``expected_tag`` via the ``__tag__`` key
-    convention is NOT used; instead compare explicitly: this helper
-    takes ``expected_tag`` from ``files.pop``-free sidecar? Simplified:
-    the tag check lives in the emitted snippet; here ``runtime_tag``
-    compared against ``build_tag()`` of THIS process only when the
-    caller embeds the expected tag as ``files["__tag__"]``... To keep
-    the helper honest and simple: signature is
-    ``check_snapshot(files, expected_tag=None, runtime_tag=None)`` —
-    see below. (Kept minimal: version gate + re-hash + compare.)
-    """
-    return _check_snapshot_impl(files, None, runtime_tag)
-
-
 def _check_snapshot_impl(files, expected_tag=None, runtime_tag=None):
     # type: (object, object, object) -> str
     try:

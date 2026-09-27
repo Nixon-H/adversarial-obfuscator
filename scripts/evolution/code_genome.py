@@ -68,6 +68,10 @@ class CodeGenomeEvolver:
     def fitness_diversity(
         self, genome: CodeGenome, others: List[CodeGenome],
     ) -> float:
+        # Neutral 0.5 (documented, not a placeholder): with no population
+        # to compare against, diversity is undefined — 0.5 neither rewards
+        # nor punishes the genome, so selection pressure comes from the
+        # semantic/performance terms instead.
         if not others:
             return 0.5
         src = genome.to_source()
@@ -90,6 +94,10 @@ class CodeGenomeEvolver:
                 return 1.0
             elif result == z3.unsat:
                 return 0.1
+            # Solver UNKNOWN (e.g. timeout): neutral 0.5 — unknown is not
+            # evidence of breakage (unlike unsat => 0.1) nor of safety
+            # (unlike sat => 1.0). Hard failures (translate exceptions)
+            # below stay fail-closed at 0.0.
             return 0.5
         except Exception:
             return 0.0
@@ -255,6 +263,14 @@ class CodeGenomeEvolver:
 
 
 class IrCodeGenomeEvolver:
+    """IR-level twin of CodeGenomeEvolver (NOT dead code).
+
+    CodeGenomeEvolver evolves Python-AST genomes (via evolve()); this
+    class evolves IrGenome instruction streams (via evolve_ir_genome(),
+    wired in scripts/phases/phase16_code_genome.py). The two share the
+    RNG/mutate/select skeleton but operate on different representations
+    — keep them separate; merging would entangle AST and IR fitness.
+    """
     def __init__(self, seed: int = 42):
         self.rng_state = seed
 
@@ -275,6 +291,9 @@ class IrCodeGenomeEvolver:
         )
 
     def fitness_ir_diversity(self, genome: IrGenome, others: List[IrGenome]) -> float:
+        # Same neutral-0.5 rationale as fitness_diversity (no population
+        # or empty encodings => undefined diversity, neither rewarded
+        # nor punished).
         if not others:
             return 0.5
         encoded = genome.encode()

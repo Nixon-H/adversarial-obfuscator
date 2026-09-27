@@ -40,7 +40,6 @@ def phase_generate_payload_h(obfuscated_py_path, opts):
         opts: argparse.Namespace with options like --crypto-binding
     """
     log("PAYLOAD_H", "Generating payload.h from obfuscated payload...")
-    log("PAYLOAD_H", "Generating payload.h from obfuscated payload...")
     cmd = [sys.executable, os.path.join(ROOT, "scripts", "generate_payload_h.py"),
            "--obfuscated-py", obfuscated_py_path,
            "--output", os.path.join(ROOT, "native", "payload.h")]
@@ -79,6 +78,10 @@ def phase_embed_crypto_binding(payload_h_path: str):
 
     with open(crypto_binding_path, "rb") as f:
         bound_data = f.read()
+
+    if len(bound_data) < 4:
+        log("ERROR", f"Bound fragments file too short ({len(bound_data)} bytes), skipping embed")
+        return
 
     chain_secret = b""
     if os.path.exists(chain_secret_path):

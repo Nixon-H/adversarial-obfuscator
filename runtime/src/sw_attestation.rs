@@ -1,3 +1,7 @@
+//! Software attestation core (in-artifact challenge/response).
+//! TWIN: scripts/distributed/dist_attestation.py (cross-host attestation
+//! orchestration) — that module coordinates challenges BETWEEN hosts; this
+//! module answers them INSIDE one artifact. Do not merge.
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 

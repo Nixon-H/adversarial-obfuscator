@@ -35,7 +35,6 @@ def phase_multicore_entangle():
         dict with test result written to BUILD_DIR
     """
     log("MULTICORE_ENTANGLE", "Running multi-core timing entanglement")
-    log("MULTICORE_ENTANGLE", "Running multi-core timing entanglement")
     result = subprocess.run(
         ["cargo", "test", "--", "multicore_entangle::tests", "--nocapture"],
         cwd=RUNTIME_DIR, capture_output=True, text=True, timeout=60,

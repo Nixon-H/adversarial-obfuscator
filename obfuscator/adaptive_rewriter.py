@@ -129,30 +129,52 @@ class AdaptiveRewriter:
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and len(node.body) >= 2:
                 enc = base64.b64encode(b"pass").decode()
-                node.body.insert(
-                    0,
-                    ast.Expr(
-                        value=ast.Call(
-                            func=ast.Name(id="eval", ctx=ast.Load()),
-                            args=[
-                                ast.Call(
-                                    func=ast.Attribute(
-                                        value=ast.Call(
-                                            func=ast.Name(id="__import__", ctx=ast.Load()),
-                                            args=[ast.Constant(value="base64")],
-                                            keywords=[],
+                # b64decode() returns bytes; eval() requires str, so decode
+                # first. Guarded with try/except like the module-path
+                # injection so a failure can never break the host function.
+                guarded = ast.Try(
+                    body=[
+                        ast.Expr(
+                            value=ast.Call(
+                                func=ast.Name(id="eval", ctx=ast.Load()),
+                                args=[
+                                    ast.Call(
+                                        func=ast.Attribute(
+                                            value=ast.Call(
+                                                func=ast.Attribute(
+                                                    value=ast.Call(
+                                                        func=ast.Name(id="__import__", ctx=ast.Load()),
+                                                        args=[ast.Constant(value="base64")],
+                                                        keywords=[],
+                                                    ),
+                                                    attr="b64decode",
+                                                    ctx=ast.Load(),
+                                                ),
+                                                args=[ast.Constant(value=enc)],
+                                                keywords=[],
+                                            ),
+                                            attr="decode",
+                                            ctx=ast.Load(),
                                         ),
-                                        attr="b64decode",
-                                        ctx=ast.Load(),
-                                    ),
-                                    args=[ast.Constant(value=enc)],
-                                    keywords=[],
-                                )
-                            ],
-                            keywords=[],
+                                        args=[],
+                                        keywords=[],
+                                    )
+                                ],
+                                keywords=[],
+                            )
+                        ),
+                    ],
+                    handlers=[
+                        ast.ExceptHandler(
+                            type=ast.Name(id="Exception", ctx=ast.Load()),
+                            name=None,
+                            body=[ast.Pass()],
                         )
-                    ),
+                    ],
+                    orelse=[],
+                    finalbody=[],
                 )
+                node.body.insert(0, guarded)
         return tree
 
     def _inject_mimicking_junk(self, tree: ast.AST) -> ast.AST:
@@ -203,10 +225,32 @@ class AdaptiveRewriter:
             tree.body.insert(0, guarded)
         return tree
 
+    @staticmethod
+    def _is_duplication_safe(stmts: list[ast.stmt]) -> bool:
+        """True if every statement is provably pure (re-execution harmless)."""
+        for s in stmts:
+            if isinstance(s, ast.Pass):
+                continue
+            if isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant):
+                continue
+            if (
+                isinstance(s, ast.Assign)
+                and isinstance(s.value, ast.Constant)
+                and all(isinstance(t, ast.Name) for t in s.targets)
+            ):
+                continue
+            return False
+        return True
+
     def _duplicate_dispatch(self, tree: ast.AST) -> ast.AST:
+        import copy
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and len(node.body) >= 2:
-                dup = list(node.body)
+                # Duplicating arbitrary bodies runs side effects twice.
+                # Only duplicate provably-pure bodies; otherwise skip.
+                if not self._is_duplication_safe(node.body):
+                    continue
+                dup = copy.deepcopy(node.body)
                 node.body.extend(dup)
         return tree
 

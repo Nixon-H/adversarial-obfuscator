@@ -37,7 +37,6 @@ def phase_hpc_key():
         dict with test results written to BUILD_DIR
     """
     log("HPC_KEY", "Running HPC-based key derivation (Item 121)")
-    log("HPC_KEY", "Running HPC-based key derivation (Item 121)")
     results = {"phase": "hpc_key", "status": "ok", "tests": []}
     tests = [
         "hpc_key::tests::test_mix_key_deterministic_same_params",

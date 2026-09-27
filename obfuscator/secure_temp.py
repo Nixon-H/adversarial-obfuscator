@@ -6,7 +6,6 @@ multi-pass secure unlink, and a runtime loader snippet counterpart.
 
 from __future__ import annotations
 
-import atexit  # noqa: F401  (re-exported conceptually; used in snippet)
 import os
 import secrets
 import shutil
@@ -227,6 +226,8 @@ def _nx_secure_write(data, suffix="", prefix="_nx_"):
             _nx_fd = _nx_os.open(_nx_path, _nx_flags, 0o600)
         except FileExistsError:
             continue
+        except OSError:
+            continue
         try:
             try:
                 _nx_os.fchmod(_nx_fd, 0o600)
@@ -242,6 +243,10 @@ def _nx_secure_write(data, suffix="", prefix="_nx_"):
             _nx_os.fsync(_nx_fd)
         finally:
             _nx_os.close(_nx_fd)
+        try:
+            _nx_os.chmod(_nx_path, 0o600)
+        except OSError:
+            pass
         _nx_TRACKED.append(_nx_path)
         return _nx_path
     raise OSError("secure write failed: no unique name")
@@ -268,4 +273,6 @@ try:
 finally:
     pass
 '''
+    # Build-time self-check: the emitted loader must compile.
+    compile(snippet, "<nx_secure_temp_loader>", "exec")
     return snippet

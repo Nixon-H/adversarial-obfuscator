@@ -32,7 +32,7 @@ from .phase03_compile import phase_compile_relay, phase_cross_compile, phase_ir_
 from .phase04_encrypt import phase_encrypt_binary, phase_entropy_flatten
 
 # ---- Stage 5: Payload Header & Runtime Manifest ----
-from .phase05_payload_h import phase_generate_payload_h, phase_runtime_manifest
+from .phase05_payload_h import phase_generate_payload_h, phase_embed_crypto_binding, phase_runtime_manifest
 
 # ---- Stage 6: Packaging ----
 from .phase06_package import phase_package, phase_optional_extras

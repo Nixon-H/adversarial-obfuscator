@@ -37,7 +37,7 @@ FAMILIES: dict[str, dict] = {
                        "float.as_integer_ratio", "complex.conjugate"),
                "default_on": True, "note": "numeric conversions + basics"},
     "string": {"ops": ("str.join", "str.split", "str.format", "str.encode",
-                       "str.decode", "str.upper", "str.lower",
+                       "str.upper", "str.lower",
                        "str.strip", "str.lstrip", "str.rstrip",
                        "str.replace", "str.find", "str.rfind", "str.index",
                        "str.count", "str.startswith", "str.endswith",

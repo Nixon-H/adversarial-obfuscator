@@ -109,7 +109,10 @@ class MultiToolEvaluator:
         weight_sum = 0.0
         for tool, tool_scores in scores.items():
             w = weights.get(tool, 0.25)
-            avg = sum(tool_scores.values()) / max(len(tool_scores), 1)
+            # Skip non-numeric provenance tags (e.g. 'simulated': True):
+            # averaging them in would corrupt the composite.
+            nums = [v for v in tool_scores.values() if isinstance(v, (int, float)) and not isinstance(v, bool)]
+            avg = sum(nums) / max(len(nums), 1)
             total += avg * w
             weight_sum += w
         return total / max(weight_sum, 1.0)
@@ -277,7 +280,9 @@ class MultiToolResistance:
         weight_sum = 0.0
         for tool, tool_scores in scores.items():
             w = self.WEIGHTS.get(tool, 0.10)
-            avg = sum(tool_scores.values()) / max(len(tool_scores), 1)
+            # Skip non-numeric provenance tags (e.g. 'simulated': True).
+            nums = [v for v in tool_scores.values() if isinstance(v, (int, float)) and not isinstance(v, bool)]
+            avg = sum(nums) / max(len(nums), 1)
             total += avg * w
             weight_sum += w
         if weight_sum == 0:

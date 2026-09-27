@@ -397,6 +397,15 @@ def apply_ast_mutation(source_code, options=None):
                 print("    [!] Warning: %s" % (_all_warn(_all_names, True),))
             except Exception:
                 print("    [!] Warning: dynamic __all__ detected; left untouched")
+        if options.get('builtin_alias'):
+            # Additive opt-in (default OFF): alias builtin loads to
+            # babel names. Runs before the renamers; aliases start
+            # with '_' so both renamers leave them alone.
+            _aliaser = BuiltinAliaser()
+            tree = _aliaser.visit(tree)
+            _alias_preamble = _aliaser.get_preamble()
+        else:
+            _alias_preamble = ""
         if options.get('symbol_rename'):
             renamer = SymbolRenamer()
             renamer.reserved.update({'NATIVE_BLOBS', 'FALLBACK_BLOB', 'BLOB_KEY'})
@@ -445,6 +454,10 @@ def apply_ast_mutation(source_code, options=None):
                 '_NX_SNAPSHOT_GATE', '_NX_SNAPSHOT_TAG', '_NX_SNAPSHOT_FILES',
                 '_NX_STDLIB_GATE', '_NX_STDLIB_TAG', '_NX_STDLIB_FUNCS',
             })
+            # VM loader helpers (public runtime API in vm_score.py):
+            # vm_check / vm_score_percent must survive whole-artifact
+            # renames or the armed VM gate breaks at runtime.
+            renamer.reserved.update({'vm_check', 'vm_score_percent'})
             # V10 internal-rename (opt-in, default OFF): prove internal-only
             # methods first, then allow the renamer to rename exactly those
             # (defs + attribute uses rewrite consistently; __all__ exports
@@ -514,6 +527,8 @@ def apply_ast_mutation(source_code, options=None):
                 '_NX_SNAPSHOT_GATE', '_NX_SNAPSHOT_TAG', '_NX_SNAPSHOT_FILES',
                 '_NX_STDLIB_GATE', '_NX_STDLIB_TAG', '_NX_STDLIB_FUNCS',
             })
+            # VM loader helpers: same names for the encoder path.
+            encoder.reserved.update({'vm_check', 'vm_score_percent'})
             encoder.reserved.update(_nonlocal_vars)
             # V10 internal-rename (opt-in, default OFF): same proof set as
             # the renamer so unicode encoding renames exactly the proven
@@ -602,6 +617,7 @@ def apply_ast_mutation(source_code, options=None):
             tree.body.insert(insert_idx, node)
         ast.fix_missing_locations(tree)
         code_output = ast.unparse(tree)
+        if _alias_preamble: code_output = _alias_preamble + '\n' + code_output
         if preamble: code_output = preamble + '\n' + code_output
         if options.get('stego'): code_output = stego_encode(code_output)
         return code_output, secure_map
@@ -626,9 +642,9 @@ class OpcodeMorpher:
                 for i in range(255, 0, -1):
                     j = secrets.randbelow(i + 1)
                     self.enc_map[i], self.enc_map[j] = self.enc_map[j], self.enc_map[i]
-            for i in range(255, 0, -1):
-                j = secrets.randbelow(i + 1)
-                self.enc_map[i], self.enc_map[j] = self.enc_map[j], self.enc_map[i]
+                for i in range(255, 0, -1):
+                    j = secrets.randbelow(i + 1)
+                    self.enc_map[i], self.enc_map[j] = self.enc_map[j], self.enc_map[i]
             self.dec_map = {self.enc_map[i]: i for i in range(256)}
     def morph(self, code_obj, depth=0):
         if sys.version_info >= (3, 11):
@@ -734,6 +750,11 @@ def create_exec_layer(input_code_string, encoding_type):
 def recursive_package(initial_source, final_output, layers=100, zip_count=0, bind_paths_list=None, num_layers=None, num_zips=None):
     if num_layers is not None: layers = num_layers
     if num_zips is not None: zip_count = num_zips
+    try:
+        layers = int(layers)
+    except Exception:
+        layers = 1
+    if layers < 1: layers = 1
     print(f"[*] Starting recursive packaging ({layers} layers) for {initial_source}...")
     bind_data = []
     if bind_paths_list:
@@ -744,6 +765,11 @@ def recursive_package(initial_source, final_output, layers=100, zip_count=0, bin
                     print(f"  [+] Bind loaded: {bp}")
                 except Exception as e: print(f"  [!] Skip bind {bp}: {e}")
     if len(bind_data) > 0 and zip_count < 1: zip_count = 1
+    if len(bind_data) > 0 and layers <= 2:
+        # Binds ride interior zip slots (range(2, layers)); with
+        # layers<=2 no slot exists and binds would be silently
+        # dropped. Bump to 3 so slot 2 carries them.
+        layers = 3
     zip_layer_indices = set()
     if zip_count > 0 and layers > 2:
         available_slots = list(range(2, layers))
@@ -784,8 +810,6 @@ def recursive_package(initial_source, final_output, layers=100, zip_count=0, bin
             current_code = create_intermediate_zip_layer(current_code, enc_choice, payloads)
             mode_str = f"Disk-Mode (Binds: {len(payloads) if payloads else 0})"
         else: current_code = create_exec_layer(current_code, enc_choice)
-        if i == layers:
-            pass
         last_encoding = enc_choice
         size_kb = len(current_code.encode('utf-8')) / 1024
         if i % 10 == 0: gc.collect()
@@ -5560,8 +5584,6 @@ if not {VAR_IS_DEBUG}:
 _STR_SESSION_KEY = {STR_SESSION_KEY}
 BUILD_TIMESTAMP = {build_timestamp}
 
-_HMAC_KEY_ = "{hmac_key_hex}"
-
 _BUILD_ID = "{build_id}"
 MORPH_MAP_A = {morph_map_a}
 MORPH_MAP_B = {morph_map_b}
@@ -5571,7 +5593,6 @@ pass
 _NX_ATTR_MAP.update({ATTR_MAP})
 {FUNC_LOG}("[DEBUG] Decryptor loaded...")
 FORCE_NATIVE_MODE = {force_native}
-_BUILD_ID = "{build_id}"
 {VAR_CHECKSUM} = "{dummy_checksum}"; _SIG_ANCHOR_ = "__SIG_ANCHOR__"
 {VAR_HMAC_SIG} = "{dummy_hmac}"; _HMAC_ANCHOR_ = "__HMAC_ANCHOR__"
 _HMAC_KEY_ = b"{HMAC_SECRET_HEX}".decode()
@@ -5678,7 +5699,7 @@ try:
 except Exception:
     {VAR_TEMPORAL_DEGRADE_CLS}.{METHOD_TD_INJECT_ANOMALY}(5)
 
-BLOB_KEY = bytes.fromhex("{INNER_KEY_HEX}")'''
+BLOB_KEY = bytes.fromhex("{NATIVE_BLOB_KEY_HEX}")'''
 INTEGRITY_CHECK_SOURCE = r'''
 def _check_interpreter_integrity():
     try:

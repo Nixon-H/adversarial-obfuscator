@@ -61,7 +61,6 @@ def phase_state_isa(history_len: int = 8, seed: int = 0):
         dict with ISA config
     """
     log("STATE_ISA", f"Generating state-dependent ISA config (history len: {history_len})")
-    log("STATE_ISA", f"Generating state-dependent ISA config (history len: {history_len})")
     schedule = generate_state_rotation_schedule(seed)
     config = {
         "history_len": history_len,

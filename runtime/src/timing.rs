@@ -325,10 +325,11 @@ mod tests {
 
     #[test]
     fn test_folded_timing_check_rejects_garbage() {
-        // A zero reference cannot match a real folded measurement.
-        // (With overwhelming probability; the fold space is 2^48.)
+        // A zero reference cannot match a real folded measurement: the
+        // fold space is 2^48, so P(false accept) = 2^-48 per call. This
+        // is a real statistical assertion, not a vacuous smoke call.
         let reference = 0u64;
-        let _ = folded_timing_check(reference);
+        assert!(!folded_timing_check(reference));
     }
 
     // ---- clock-interrupt-bias detector (deterministic, synthetic) ----

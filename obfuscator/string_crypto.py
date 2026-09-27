@@ -110,17 +110,21 @@ def is_allowlisted(value, allowlist=None):
 
 def normalize_mode(mode):
     # type: (object) -> str
-    """Map the ``string_crypto`` option to a known mode (default ChaCha20)."""
+    """Map the ``string_crypto`` option to a known mode.
+
+    Raises ValueError on unknown modes (fail loud at build time rather
+    than silently sealing with a different cipher than requested).
+    """
     if mode in (None, "", "default", CHACHA_MODE):
         return CHACHA_MODE
     if mode == LEGACY_MODE:
         return LEGACY_MODE
     text = str(mode).strip().lower()
-    if text in ("chacha", "chacha20", "xchacha", "aead"):
+    if text in ("chacha", "chacha20", "aead"):
         return CHACHA_MODE
     if text in ("xor", "legacy"):
         return LEGACY_MODE
-    return CHACHA_MODE
+    raise ValueError("unknown string_crypto mode: %r" % (mode,))
 
 
 def _check_key(key):

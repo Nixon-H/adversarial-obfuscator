@@ -10,6 +10,7 @@ Controlled by config/default.json → shadow_compiler → advanced_protection.en
 from __future__ import annotations
 import argparse
 import ast
+import copy
 import hashlib
 import json
 import os
@@ -59,6 +60,36 @@ def affine_decode(x_enc: int, A: int, b: int) -> int:
     return ((x_enc - b) * _modinv(A & 0xFFFFFFFFFFFFFFFF, U64_MOD)) & 0xFFFFFFFFFFFFFFFF
 
 
+# Runtime helper emitted alongside affine-encoded modules. The transform emits
+# ``_affine_enc.encode`` / ``_affine_enc.decode`` calls, so transformed modules
+# must define this helper (previously it was referenced but never defined).
+_AFFINE_HELPER_SRC = (
+    "class _affine_enc:\n"
+    "    _MASK = 0xFFFFFFFFFFFFFFFF\n"
+    "    _MOD = 0x10000000000000000\n"
+    "    @staticmethod\n"
+    "    def encode(x, A, b):\n"
+    "        return (A * x + b) & 0xFFFFFFFFFFFFFFFF\n"
+    "    @staticmethod\n"
+    "    def decode(x_enc, A, b):\n"
+    "        return ((x_enc - b) * pow(A & 0xFFFFFFFFFFFFFFFF, -1, 0x10000000000000000)) & 0xFFFFFFFFFFFFFFFF\n"
+)
+
+
+def _ensure_affine_helper(tree: ast.Module) -> ast.Module:
+    """Prepend the ``_affine_enc`` helper if the module does not define it."""
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == "_affine_enc":
+            return tree
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == "_affine_enc":
+                    return tree
+    helper = ast.parse(_AFFINE_HELPER_SRC)
+    tree.body = helper.body + tree.body
+    return tree
+
+
 # ─── 1. Affine Encoded Variables ─────────────────────────────────────────────
 
 def encode_variables_affine(
@@ -80,6 +111,9 @@ def encode_variables_affine(
         def visit_Assign(self, node: ast.Assign) -> ast.Assign:
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id in params:
+                    # Decode any encoded-variable uses inside RHS first, then
+                    # store the encoded value (handles `y = x + 1`, `x = x + 1`).
+                    node = self.generic_visit(node)
                     A, b = params[target.id]
                     enc_name = f"{target.id}_enc"
                     rhs = node.value
@@ -96,7 +130,7 @@ def encode_variables_affine(
                     node.targets = [new_target]
                     node.value = new_rhs
                     return node
-            return node
+            return self.generic_visit(node)
 
         def visit_Name(self, node: ast.Name) -> ast.Name:
             if isinstance(node.ctx, ast.Load) and node.id in params:
@@ -119,6 +153,7 @@ def encode_variables_affine(
             return node
 
     tree = AffineTransformer().visit(ast_tree)
+    tree = _ensure_affine_helper(tree)
     ast.fix_missing_locations(tree)
     return tree
 
@@ -137,9 +172,28 @@ def split_value(
     if num_parts < 2:
         return ast_tree
 
+    bits_per = 64 // num_parts
+    if bits_per == 0:
+        # Cannot cover 64 bits with this many parts; leave tree unchanged.
+        return ast_tree
+
+    # Part i covers bits [64-(i+1)*bits_per, 64-i*bits_per); the last part
+    # takes all remaining low bits unshifted (covers any 64 % num_parts
+    # remainder). Masks are truncated to the part width so reconstruction
+    # (xor mask back, shift, OR) is exact.
+    shifts: list[int] = []
+    widths: list[int] = []
+    for i in range(num_parts):
+        if i < num_parts - 1:
+            widths.append(bits_per)
+            shifts.append(64 - bits_per * (i + 1))
+        else:
+            shifts.append(0)
+            widths.append(64 - bits_per * (num_parts - 1))
+
     masks = []
     for i in range(num_parts):
-        m = _derive_u64(seed, f"part_{i}")
+        m = _derive_u64(seed, f"part_{i}") & ((1 << widths[i]) - 1)
         masks.append(m)
 
     part_names = [f"{variable}_part_{i}" for i in range(num_parts)]
@@ -152,49 +206,31 @@ def split_value(
 
                     parts_assign: list[ast.stmt] = []
                     for i, (pn, mask) in enumerate(zip(part_names, masks)):
-                        if i == 0:
-                            shift = 64 - (64 // num_parts) * (i + 1)
-                            extract = ast.BinOp(
+                        shift = shifts[i]
+                        field_mask = (1 << widths[i]) - 1
+                        rhs_copy = copy.deepcopy(rhs)
+                        if shift:
+                            field = ast.BinOp(
                                 left=ast.BinOp(
-                                    left=rhs,
-                                    op=ast.RShift() if shift >= 0 else ast.LShift(),
-                                    right=ast.Constant(value=abs(shift)),
-                                ),
-                                op=ast.BitXor(),
-                                right=ast.Constant(value=mask),
-                            )
-                        elif i == num_parts - 1:
-                            total_bits = 64
-                            bits_per = total_bits // num_parts
-                            shift = total_bits - bits_per
-                            extract = ast.BinOp(
-                                left=ast.BinOp(
-                                    left=rhs,
+                                    left=rhs_copy,
                                     op=ast.RShift(),
                                     right=ast.Constant(value=shift),
                                 ),
-                                op=ast.BitXor(),
-                                right=ast.Constant(value=mask),
+                                op=ast.BitAnd(),
+                                right=ast.Constant(value=field_mask),
                             )
                         else:
-                            bits_per = 64 // num_parts
-                            shift = 64 - bits_per * (i + 1)
-                            total_bits = 64
-                            shift = total_bits - bits_per * (i + 1)
-                            mask_val = (1 << bits_per) - 1
-                            extract = ast.BinOp(
-                                left=ast.BinOp(
-                                    left=ast.BinOp(
-                                        left=rhs,
-                                        op=ast.RShift(),
-                                        right=ast.Constant(value=shift),
-                                    ),
-                                    op=ast.BitAnd(),
-                                    right=ast.Constant(value=mask_val),
-                                ),
-                                op=ast.BitXor(),
-                                right=ast.Constant(value=mask),
+                            # Last part: low bits, unshifted.
+                            field = ast.BinOp(
+                                left=rhs_copy,
+                                op=ast.BitAnd(),
+                                right=ast.Constant(value=field_mask),
                             )
+                        extract = ast.BinOp(
+                            left=field,
+                            op=ast.BitXor(),
+                            right=ast.Constant(value=mask),
+                        )
 
                         assign = ast.Assign(
                             targets=[ast.Name(id=pn, ctx=ast.Store())],
@@ -206,7 +242,7 @@ def split_value(
                         body=parts_assign,
                         orelse=[],
                     )
-            return node
+            return self.generic_visit(node)
 
         def visit_Name(self, node: ast.Name) -> ast.Name:
             if isinstance(node.ctx, ast.Load) and node.id == variable:
@@ -219,25 +255,51 @@ def split_value(
     return tree
 
 
+def _split_layout(num_parts: int) -> tuple[list[int], list[int]]:
+    """Return (shifts, widths) for a num_parts split (see split_value)."""
+    bits_per = 64 // num_parts
+    shifts: list[int] = []
+    widths: list[int] = []
+    for i in range(num_parts):
+        if i < num_parts - 1:
+            widths.append(bits_per)
+            shifts.append(64 - bits_per * (i + 1))
+        else:
+            shifts.append(0)
+            widths.append(64 - bits_per * (num_parts - 1))
+    return shifts, widths
+
+
 def _build_reconstruction(part_names: list[str], masks: list[int]) -> ast.AST:
     num_parts = len(part_names)
+    if num_parts < 1:
+        return ast.Constant(value=0)
+    shifts, widths = _split_layout(num_parts)
     result: Optional[ast.AST] = None
 
     for i, (pn, mask) in enumerate(zip(part_names, masks)):
-        part_node = ast.BinOp(
-            left=ast.Name(id=pn, ctx=ast.Load()),
-            op=ast.BitXor(),
-            right=ast.Constant(value=mask),
+        field_mask = (1 << widths[i]) - 1
+        part_node: ast.AST = ast.BinOp(
+            left=ast.BinOp(
+                left=ast.BinOp(
+                    left=ast.Name(id=pn, ctx=ast.Load()),
+                    op=ast.BitXor(),
+                    right=ast.Constant(value=mask),
+                ),
+                op=ast.BitAnd(),
+                right=ast.Constant(value=field_mask),
+            ),
+            op=ast.LShift(),
+            right=ast.Constant(value=shifts[i]),
+        ) if shifts[i] else ast.BinOp(
+            left=ast.BinOp(
+                left=ast.Name(id=pn, ctx=ast.Load()),
+                op=ast.BitXor(),
+                right=ast.Constant(value=mask),
+            ),
+            op=ast.BitAnd(),
+            right=ast.Constant(value=field_mask),
         )
-
-        if i < num_parts - 1:
-            bits_per = 64 // num_parts
-            shift = 64 - bits_per * (i + 1)
-            part_node = ast.BinOp(
-                left=part_node,
-                op=ast.LShift(),
-                right=ast.Constant(value=shift),
-            )
 
         if result is None:
             result = part_node
@@ -248,7 +310,11 @@ def _build_reconstruction(part_names: list[str], masks: list[int]) -> ast.AST:
                 right=part_node,
             )
 
-    return result or ast.Constant(value=0)
+    return ast.BinOp(
+        left=result,
+        op=ast.BitAnd(),
+        right=ast.Constant(value=0xFFFFFFFFFFFFFFFF),
+    )
 
 
 # ─── 3. MBA State Encoding ──────────────────────────────────────────────────
@@ -481,18 +547,17 @@ def _mba_pipeline(tree: ast.Module, variables: list[str], seed: bytes) -> ast.Mo
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id in variables:
                     rhs = node.value
-                    ctx_str = f"mba_{target.id}"
-                    mba_expr = mba_encode_value(
-                        int(_extract_constant(rhs) or 0),
-                        seed,
-                        ctx_str,
-                    )
+                    const = _extract_constant(rhs)
+                    if const is None:
+                        # Non-constant RHS: MBA-encoding it as a constant
+                        # would miscompile (MBA(0)+0). Leave unchanged.
+                        return self.generic_visit(node)
+                    # NOTE: mba_encode_value() does not evaluate to the
+                    # original constant, so substituting it would still
+                    # miscompile. Wrap the original RHS in MBA identities
+                    # (semantics-preserving) instead.
+                    node.value = _mba_chain_wrap(copy.deepcopy(rhs), depth=2)
                     self._var_index += 1
-                    node.value = ast.BinOp(
-                        left=mba_expr,
-                        op=ast.Add(),
-                        right=ast.Constant(value=0),
-                    )
                     return node
             return node
 

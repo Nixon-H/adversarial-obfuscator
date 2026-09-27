@@ -34,7 +34,6 @@ def phase_sgx():
         dict with test result written to BUILD_DIR
     """
     log("SGX", "Running SGX enclave tests (requires Intel SGX SDK)")
-    log("SGX", "Running SGX enclave tests (requires Intel SGX SDK)")
     try:
         result = subprocess.run(
             ["cargo", "test", "--features", "sgx", "--", "tee_sgx::tests", "--nocapture"],

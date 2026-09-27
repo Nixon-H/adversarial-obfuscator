@@ -144,7 +144,10 @@ def test_normalize_mode():
     assert normalize_mode("chacha20") == "chacha20"
     assert normalize_mode("xor") == "xor"
     assert normalize_mode("legacy") == "xor"
-    assert normalize_mode("bogus-future-mode") == "chacha20"
+    with pytest.raises(ValueError):
+        normalize_mode("bogus-future-mode")
+    with pytest.raises(ValueError):
+        normalize_mode("xchacha")
 
 
 def test_make_session_roundtrip():

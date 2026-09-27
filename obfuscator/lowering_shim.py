@@ -113,8 +113,8 @@ def _nxk_str_encode(s, *a, **k):
     return s.encode(*a, **k)
 
 
-def _nxk_str_decode(s, *a, **k):
-    return s.decode(*a, **k)
+# NOTE: no _nxk_str_decode — Python 3 removed str.decode; bytes input
+# routes to _nxk_bytes_decode instead.
 
 
 def _nxk_str_upper(s):

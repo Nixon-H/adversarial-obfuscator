@@ -106,7 +106,7 @@ def log(phase, msg):
     print(f"[{ts}] [{phase:>12}] {msg}")
 
 
-def run(cmd, cwd=None, check=True):
+def run(cmd, cwd=None, check=True, timeout=900):
     """
     run
 
@@ -119,6 +119,9 @@ def run(cmd, cwd=None, check=True):
     - cmd (list[str] | str): command to execute
     - cwd (str | None): working directory (defaults to ROOT)
     - check (bool): if True, raise CalledProcessError on non-zero exit
+    - timeout (float | None): seconds before the child is killed
+      (default 900; None disables). Callers with tighter budgets pass
+      their own value through.
 
     Outputs:
     - subprocess.CompletedProcess: result with stdout, stderr, returncode
@@ -129,7 +132,7 @@ def run(cmd, cwd=None, check=True):
     arguments as this function does not perform input sanitisation.
     """
     log("CMD", " ".join(cmd) if isinstance(cmd, list) else cmd)
-    result = subprocess.run(cmd, cwd=cwd or ROOT, check=False, capture_output=True, text=True)
+    result = subprocess.run(cmd, cwd=cwd or ROOT, check=False, capture_output=True, text=True, timeout=timeout)
     if check and result.returncode != 0:
         if result.stdout:
             log("CMD", f"stdout:\n{result.stdout[:2000]}")

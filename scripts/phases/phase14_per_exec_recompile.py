@@ -35,7 +35,6 @@ def phase_per_exec_recompile(config_path=None):
         config_path: optional path (unused, config always goes to BUILD_DIR)
     """
     log("PER_EXEC_RECOMPILE", "Configuring per-execution recompilation")
-    log("PER_EXEC_RECOMPILE", "Configuring per-execution recompilation")
     config = {
         "enabled": True,
         "classifier": "fnv1a",

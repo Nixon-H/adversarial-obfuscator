@@ -43,7 +43,6 @@ def phase_adversarial_loop(ir_path, opts):
         opts: argparse.Namespace with deobfuscation_threshold, evolution_iterations
     """
     log("ADVERSARIAL", "Running adversarial self-improvement loop...")
-    log("ADVERSARIAL", "Running adversarial self-improvement loop...")
 
     try:
         from scripts.deobfuscation_agent import DeobfuscationAgent

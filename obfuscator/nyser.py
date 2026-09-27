@@ -25,8 +25,9 @@ Security properties vs marshal:
     nothing (complements the ctypes-only marshal loader).
   - Template comes from a lambda defined INSIDE the loader (not from the
     payload), so payload bytes alone never describe a full code object.
-  - Loader verifies SHA-256 of the node stream before reconstruct
-    (tamper-evident; caller decides fail-closed vs fallback).
+  - Loader verifies SHA-256 of the node stream BEFORE reconstructing
+    (tamper-evident; caller decides fail-closed vs fallback), and caps
+    the buffered body size before any parsing.
 
 Version gating: CPython code-object fields drift per minor version
 (co_linetable, co_exceptiontable, co_branches...). Dumps record the
@@ -47,6 +48,9 @@ import types
 MAGIC = b"NYS1"
 FORMAT_VERSION = 1
 SUPPORTED_MINORS = ((3, 10), (3, 11), (3, 12), (3, 13), (3, 14))
+# Upper bound on the node-stream body buffered before verification.
+# Enforced in loads() prior to any parsing (DoS cap on corrupt inputs).
+_MAX_BODY_BYTES = 64 * 1024 * 1024
 
 _TAG_CODE = 0x01
 _TAG_BYTES = 0x02
@@ -84,13 +88,16 @@ def _decode_uvarint(buf: bytes, pos: int) -> tuple[int, int]:
         if not (b & 0x80):
             return n, pos
         shift += 7
-        if shift > 70:
+        # Bound a single varint (~2k bits max) so corrupt streams cannot
+        # force unbounded bigint growth; the 64MB body cap bounds the rest.
+        if shift > 2048:
             raise ValueError("uvarint overflow")
 
 
 def _encode_zigzag(n: int) -> bytes:
-    # portable zigzag for arbitrary-size ints
-    return _encode_uvarint((n << 1) ^ (n >> 63) if n >= 0 else ((-n) << 1) - 1)
+    # zigzag for arbitrary-size ints: non-negative maps to n<<1
+    # ((n<<1)^(n>>63) is only valid for 64-bit n and corrupts n>=2**63)
+    return _encode_uvarint(n << 1 if n >= 0 else ((-n) << 1) - 1)
 
 
 class _Writer:
@@ -104,8 +111,8 @@ class _Writer:
         self.buf += _encode_uvarint(v)
 
     def zigzag(self, v: int) -> None:
-        # portable zigzag for arbitrary-size ints
-        self.buf += _encode_uvarint((v << 1) ^ (v >> 63) if v >= 0 else ((-v) << 1) - 1)
+        # zigzag for arbitrary-size ints (see _encode_zigzag)
+        self.buf += _encode_uvarint((v << 1) if v >= 0 else ((-v) << 1) - 1)
 
     def blob(self, b: bytes) -> None:
         self.varint(len(b))
@@ -325,14 +332,21 @@ def loads(data: bytes) -> types.CodeType:
         )
     digest = r.blob()
     body_start = r.pos
-    node = _loads_const(r)
-    if not isinstance(node, types.CodeType):
-        raise ValueError("NYSER1 top-level node is not a code object")
-    if r.pos != len(r.buf):
-        raise ValueError("NYSER1 trailing bytes")
-    actual = hashlib.sha256(r.buf[body_start:]).digest()
+    body = bytes(r.buf[body_start:])
+    # Verify-before-reconstruct: hash the node stream BEFORE parsing it,
+    # and cap the buffered body so a corrupt length prefix cannot force
+    # unbounded allocation inside _loads_const.
+    if len(body) > _MAX_BODY_BYTES:
+        raise ValueError("NYSER1 body exceeds max-size cap")
+    actual = hashlib.sha256(body).digest()
     if actual != digest:
         raise ValueError("NYSER1 integrity failure (SHA-256 mismatch)")
+    br = _Reader(body)
+    node = _loads_const(br)
+    if not isinstance(node, types.CodeType):
+        raise ValueError("NYSER1 top-level node is not a code object")
+    if br.pos != len(br.buf):
+        raise ValueError("NYSER1 trailing bytes")
     return node
 
 

@@ -1,13 +1,13 @@
 # Semantic lowering — operation registry design (V10 headline adopt)
 
 Status: DESIGN + registry + first families (pure-Python AST form) +
-verified-141 native kernel (Cython `.pyx` helpers, per-build renamed
+verified-140 native kernel (Cython `.pyx` helpers, per-build renamed
 symbols) on the `--pytoc` path — see Phase 5 below.
 
-## What V10 does (vendor claim, now VERIFIED at 141 in this repo)
+## What V10 does (vendor claim, now VERIFIED at 140 in this repo)
 
 Call sites for Python builtins replaced with native implementations in
-the protection kernel: 20 families / 141 ops (VERIFIED — enforced by
+the protection kernel: 20 families / 140 ops (VERIFIED — enforced by
 tests/test_opcount_truth.py + tests/test_lowering_parity_141.py),
 registry-driven, default-ON
 families (I/O, scalar, string, container, service, protocol, function,
@@ -17,18 +17,19 @@ Per-build kernel symbols; fusion collapses lowered chains; 0.19x–1.56x
 of CPython 3.12 measured.
 
 Audited truth (2026-09, enforced by tests/test_opcount_truth.py): the
-verified-141 count holds. 20 families hold 149
-registry entries (148 unique names): 140 callable ops + 8 AST node-kind
+verified-140 count holds (was 141 before str.decode was removed —
+Python 3 has no str.decode, only bytes.decode). 20 families hold 148
+registry entries (147 unique names): 139 callable ops + 8 AST node-kind
 markers (BinOp, Compare, BoolOp, Not, Subscript, JoinedStr,
 FormattedValue, AugAssign — Phase-2 only, no runtime function yet).
-The native kernel implements verified-141 ops (``NATIVE_OPS`` in
-obfuscator/kernel_gen.py): those 140 callable ops + the ``fuse``
+The native kernel implements verified-140 ops (``NATIVE_OPS`` in
+obfuscator/kernel_gen.py): those 139 callable ops + the ``fuse``
 dispatch, with identical call shapes in ``obfuscator/lowering_shim.py``.
-Every one of the verified-141 ops routes at least one real call site
+Every one of the verified-140 ops routes at least one real call site
 through the kernel — proven by behavioral parity tests
 (tests/test_lowering_parity_141.py: each lowered call == the same plain
-call). The original 52 op names/shapes are untouched; growth is purely
-additive.
+call; file name kept for stable references). The original 51 op
+names/shapes are untouched; growth is purely additive.
 
 ## Our architecture (additive, staged)
 

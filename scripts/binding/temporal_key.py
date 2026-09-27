@@ -30,6 +30,10 @@ Threat model: Long-term key compromise, cross-epoch decryption,
 key extraction from memory dumps.
 
 What happens on invalid epoch: derive_key() returns None.
+
+Sibling: crypto_binding.py — fragment-payload encryption transform that
+CONSUMES these epoch keys (rolling/history-bound modes). Key schedule
+here, fragment transform there; do not merge.
 """
 
 import hashlib

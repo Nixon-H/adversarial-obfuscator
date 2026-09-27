@@ -30,9 +30,11 @@ Maintenance Notes:
 - The _scan_build_for_modules() fallback is a rough heuristic
   (estimates block count from file size). It should only be used
   when no real coverage map is available.
-- The knowledge_graph_data() function at the bottom returns empty
-  defaults; it is overridden by the real knowledge graph when
-  passed to generate_all().
+- The knowledge_graph_data() function at the bottom returns defaults
+  wired to the canonical ATTACK_VECTORS registry
+  (scripts/knowledge_graph/builder.py) with honest unknown-status
+  fields; pass a richer build-specific graph to generate_all() when
+  available.
 """
 
 from __future__ import annotations
@@ -310,9 +312,33 @@ class ArtifactBuilder:
 
 
 def knowledge_graph_data() -> dict:
+    """Default threat/attack data for the artifact threat-model table.
+
+    Wired (trivially) to the canonical ATTACK_VECTORS registry in
+    scripts/knowledge_graph/builder.py — no longer an empty stub. Each
+    attack vector becomes a threat entry with honest unknown-status
+    fields (severity/status are NOT fabricated: "unknown"/"unassessed").
+    Callers that have a richer, build-specific graph should still pass
+    it to generate_all() instead of relying on these defaults.
+    """
+    try:
+        from scripts.knowledge_graph.builder import ATTACK_VECTORS
+    except Exception:
+        ATTACK_VECTORS = []
+    threats = [
+        {
+            "name": a.get("name", a.get("id", "unknown")),
+            "severity": "unknown",
+            "mitigation": "",
+            "status": "unassessed",
+            "targets": list(a.get("targets", [])),
+        }
+        for a in ATTACK_VECTORS
+    ]
+    targets = sorted({t for a in ATTACK_VECTORS for t in a.get("targets", [])})
     return {
-        "threats": [],
-        "attack_vectors": [],
-        "targets": [],
+        "threats": threats,
+        "attack_vectors": [a.get("id", "") for a in ATTACK_VECTORS],
+        "targets": targets,
         "mitigations": [],
     }

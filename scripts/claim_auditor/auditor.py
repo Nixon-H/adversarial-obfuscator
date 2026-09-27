@@ -1,6 +1,10 @@
 """
 claim_auditor/auditor.py — Evidence cross-referencing and scoring for claims (F172)
 
+# TWIN AUDITORS (different scopes, do not merge): scripts/self_audit/
+# auditor.py (ten-category release gate, F180 — consumes THESE scores) and
+# scripts/independent_audit/auditor.py (external artifact cross-check).
+
 Purpose:
     After claims are detected, cross-references each against the filesystem
     for supporting evidence (tests, benchmarks, implementations, proofs,
@@ -73,9 +77,12 @@ def compute_claim_score(matches: List[ClaimMatch],
     Weighted by severity: critical=1.0, high=0.8, medium=0.5, low=0.3.
     Each evidence type contributes up to its weight (test 0.25, impl 0.30, etc.).
     A penalty of up to 60 points is applied for the number of matches.
+
+    Fail-closed: no matches audited => 0.0 (no evidence, no confidence),
+    never a vacuous 100.0 "perfect" score.
     """
     if not matches:
-        return 100.0
+        return 0.0
     total_weight = 0.0
     weighted_score = 0.0
     severity_weights = {"critical": 1.0, "high": 0.8, "medium": 0.5, "low": 0.3}
@@ -96,7 +103,7 @@ def compute_claim_score(matches: List[ClaimMatch],
             evidence_score += 0.10
         claim_score = 100.0 - (100.0 * (1.0 - evidence_score) * w)
         weighted_score += claim_score * w
-    base = weighted_score / total_weight if total_weight > 0 else 100.0
+    base = weighted_score / total_weight if total_weight > 0 else 0.0
     penalty = min(len(matches) * 3.0, 60.0)
     return max(0.0, base - penalty)
 

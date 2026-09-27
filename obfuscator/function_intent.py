@@ -53,12 +53,19 @@ class FunctionIntentObfuscator(ast.NodeTransformer):
     def __init__(self, seed: int | None = None):
         self._rng = _random.Random(seed) if seed is not None else _random.Random()
         self._name_map: dict[str, str] = {}
+        self._call_sites: dict[str, list[ast.Call]] = {}
 
     def obfuscate_intent(self, tree: ast.AST) -> ast.AST:
         self._name_map.clear()
         funcs = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
         for func in funcs:
             self._name_map[func.name] = self._pick_misleading_name(func.name)
+        # Index direct Name call sites per function (original names) so the
+        # parameter swap can prove single-caller safety + rewrite the site.
+        self._call_sites = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                self._call_sites.setdefault(node.func.id, []).append(node)
         self.visit(tree)
         ast.fix_missing_locations(tree)
         return tree
@@ -72,19 +79,21 @@ class FunctionIntentObfuscator(ast.NodeTransformer):
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
         self.generic_visit(node)
+        orig_name = node.name
         new_name = self._name_map.get(node.name, node.name)
         node.name = new_name
 
-        node = self._swap_parameters(node)
+        node = self._swap_parameters(node, orig_name)
         node = self._wrap_body(node)
         node = self._add_fake_docstring(node)
         return node
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AsyncFunctionDef:
         self.generic_visit(node)
+        orig_name = node.name
         new_name = self._name_map.get(node.name, node.name)
         node.name = new_name
-        node = self._swap_parameters(node)
+        node = self._swap_parameters(node, orig_name)
         node = self._wrap_body(node)
         node = self._add_fake_docstring(node)
         return node
@@ -94,34 +103,49 @@ class FunctionIntentObfuscator(ast.NodeTransformer):
             node.id = self._name_map[node.id]
         return node
 
-    def _swap_parameters(self, func: ast.FunctionDef | ast.AsyncFunctionDef) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    @staticmethod
+    def _is_private(name: str) -> bool:
+        return name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
+
+    def _swap_parameters(
+        self,
+        func: ast.FunctionDef | ast.AsyncFunctionDef,
+        orig_name: str | None = None,
+    ) -> ast.FunctionDef | ast.AsyncFunctionDef:
+        """Pairwise-swap positional params ONLY for provably single-caller
+        private functions (and rewrite that call site); otherwise a no-op.
+
+        Reordering params without rewriting call sites silently changes
+        positional-argument binding, and renaming params without rewriting
+        the body breaks name resolution — both miscompile, so both require
+        the strict gate below. (Parameter renaming was removed outright:
+        it never rewrote body references.)
+        """
         args = func.args
         all_args = args.posonlyargs + args.args
-        if len(all_args) >= 2:
-            parts = []
-            for i in range(0, len(all_args) - 1, 2):
-                parts.append(all_args[i + 1])
-                parts.append(all_args[i])
-            if len(all_args) % 2 == 1:
-                parts.append(all_args[-1])
-            swap_count = len(parts)
-            if len(args.posonlyargs) > 0:
-                pos_count = len(args.posonlyargs)
-                for i in range(min(pos_count, swap_count)):
-                    if i < len(args.posonlyargs) and i < len(parts):
-                        args.posonlyargs[i] = parts[i]
-                args.args = parts[pos_count:]
-            else:
-                args.args = parts
-
-            for i, arg in enumerate(args.args):
-                suffixes = ["_buf", "_tmp", "_val", "_raw", "_ctx", "_acc", "_ptr", "_idx"]
-                if self._rng.random() < 0.5:
-                    new_arg_name = arg.arg + self._rng.choice(suffixes)
-                    possible = [n.arg for n in args.args + args.kwonlyargs]
-                    if new_arg_name not in possible and (args.vararg is None or args.vararg.arg != new_arg_name) and (args.kwarg is None or args.kwarg.arg != new_arg_name):
-                        arg.arg = new_arg_name
-
+        if len(all_args) < 2:
+            return func
+        key = orig_name if orig_name is not None else func.name
+        if not self._is_private(key):
+            return func
+        sites = self._call_sites.get(key, [])
+        if len(sites) != 1:
+            return func
+        call = sites[0]
+        if call.keywords:
+            return func
+        if args.defaults or args.kwonlyargs or args.vararg or args.kwarg or args.posonlyargs:
+            return func
+        if len(call.args) != len(all_args):
+            return func
+        perm: list[int] = []
+        for i in range(0, len(all_args) - 1, 2):
+            perm.append(i + 1)
+            perm.append(i)
+        if len(all_args) % 2 == 1:
+            perm.append(len(all_args) - 1)
+        args.args = [all_args[p] for p in perm]
+        call.args = [call.args[p] for p in perm]
         return func
 
     def _add_fake_docstring(self, func: ast.FunctionDef | ast.AsyncFunctionDef) -> ast.FunctionDef | ast.AsyncFunctionDef:

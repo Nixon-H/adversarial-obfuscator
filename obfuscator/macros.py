@@ -11,7 +11,9 @@ Runtime macros (left for runtime; implemented by :func:`emit_runtime_helpers`):
 
 import ast
 import io
+import os as _os
 import re
+import sys as _sys
 import tokenize
 
 MACROS = {
@@ -42,9 +44,10 @@ def collect_macros(source: str) -> set[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and node.id in _MACRO_NAMES:
             found.add(node.id)
-        elif isinstance(node, ast.Attribute) and node.attr in _MACRO_NAMES:
-            # e.g. module.GET_HWID — still counts as a reference.
-            found.add(node.attr)
+        # NOTE: dotted forms (module.GET_HWID) are deliberately NOT
+        # collected: apply_macros only expands bare GET_HWID() (its regex
+        # excludes dotted prefixes), so collecting them would promise an
+        # expansion that never happens. Both sides match on bare forms.
     return found
 
 
@@ -151,18 +154,6 @@ def parse_trial(spec: str | None) -> int | None:
     if total <= 0:
         raise ValueError(f"bad trial spec: {spec!r}")
     return total
-
-
-def emit_runtime_helpers() -> str:
-    """Return Python source with runtime macro implementations. Must compile()."""
-    # NOTE: the FIRST draft of this change kept the giant src '''...'''
-    # block as dead reference text.  That was wrong: the block CONTAINS
-    # live def statements, so keeping it would shadow the real module-level
-    # functions and break inspect-based embedding.  The block is REMOVED;
-    # the emitted stub is built from live sources (single source of
-    # truth) by the second half of this function, defined after all
-    # macro functions at the bottom of this module.
-    return _emit_runtime_helpers_from_live()
 
 
 def SELF_DELETE():
@@ -417,8 +408,6 @@ def _stub_self_corrupt_detached():
 # NOTE: emit_runtime_helpers is defined IMMEDIATELY below, AFTER all macro
 # functions, because it embeds their live source via inspect (single source
 # of truth — new macros can never silently go missing from artifacts).
-# The legacy big src '''...''' block above is module-level reference text
-# (kept for auditability), NOT the emitted stub.
 
 
 def emit_runtime_helpers() -> str:

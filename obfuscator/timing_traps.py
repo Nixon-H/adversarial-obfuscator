@@ -105,6 +105,10 @@ def inject_timing_checks(source: str, config: dict) -> str:
 
     import_time = ast.Import(names=[ast.alias(name="time", asname=None)])
     tree.body.insert(0, import_time)
+    if hard_exit:
+        # The trap body calls sys.exit(); import sys as well (without it
+        # the emitted module raises NameError instead of exiting).
+        tree.body.insert(1, ast.Import(names=[ast.alias(name="sys", asname=None)]))
 
     injector = _TimingInjector(threshold=threshold, hard_exit=hard_exit)
     tree = injector.visit(tree)
@@ -140,8 +144,7 @@ def generate_rdtsc_ir_pattern(config: dict) -> str:
         f"  ret void\n"
         f"\n"
         f"{exit_label}:\n"
-        f'  {"call void @exit(i32 1)" if hard_exit else "ret void"}\n'
-        f"  ret void\n"
+        f'  {"call void @exit(i32 1)\n  unreachable" if hard_exit else "ret void"}\n'
         f"}}\n"
     )
     return ir

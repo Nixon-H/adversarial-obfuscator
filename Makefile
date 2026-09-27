@@ -19,7 +19,7 @@ WB_O       := $(BUILD_DIR)/wb.so
 PY_COMPILE := $(BUILD_DIR)/py_compile.so
 RELAY_BIN  := $(BUILD_DIR)/orbital-relay
 
-.PHONY: all core wb py_compile relay relay-win relay-linux-arm relay-all relay-cross relay-cross-prereqs clean strip install-deps lint test irgen llvmgen encrypt all-shadow stub stub-check vm-stub-so vm-stub-win
+.PHONY: all core wb py_compile relay relay-win relay-linux-arm relay-all relay-cross relay-cross-prereqs clean strip install-deps lint test irgen llvmgen encrypt all-shadow stub stub-check stub-win-driver vm-stub-so vm-stub-win
 
 all: core wb py_compile relay
 
@@ -137,7 +137,25 @@ stub-win:
 	@echo "  WIN32CC native/stub_win.cpp"
 	@if command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then \
 		if echo '#include <Python.h>' | x86_64-w64-mingw32-gcc -E -x c - >/dev/null 2>&1; then \
-			x86_64-w64-mingw32-gcc -o native/stub_win_test.exe native/stub_win.cpp -lz -lpsapi; \
+			x86_64-w64-mingw32-gcc -o native/stub_win_test.exe native/stub_win.cpp -lz; \
+		else \
+			echo "  SKIP: Python.h not found for mingw cross-compiler"; \
+		fi \
+	else \
+		echo "  SKIP: x86_64-w64-mingw32-gcc not found"; \
+	fi
+
+# Armed BYOVD-gate variant of stub-win: identical compile plus
+# -DNIXON_DRIVER_CHECK (mirrors --driver-check baking; the native gate
+# comment block in native/stub_win.cpp documents arming semantics).
+# NOTE: no -lpsapi on either stub-win line — psapi is used purely via
+# dynamic LoadLibraryA/GetProcAddress inside CheckBYOVDDrivers(), so the
+# stub gains no new import-table entry and needs no link-time dep.
+stub-win-driver:
+	@echo "  WIN32CC native/stub_win.cpp (NIXON_DRIVER_CHECK)"
+	@if command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then \
+		if echo '#include <Python.h>' | x86_64-w64-mingw32-gcc -E -x c - >/dev/null 2>&1; then \
+			x86_64-w64-mingw32-gcc -DNIXON_DRIVER_CHECK -o native/stub_win_driver_test.exe native/stub_win.cpp -lz; \
 		else \
 			echo "  SKIP: Python.h not found for mingw cross-compiler"; \
 		fi \

@@ -729,9 +729,13 @@ mod tests {
         bin.push(0xC3);
         while bin.len() < 0x1200 { bin.push(0); }
 
-        let e_phoff = u64::from_le_bytes(bin[32..40].try_into().unwrap());
-        let e_phentsize = u16::from_le_bytes(bin[54..56].try_into().unwrap());
-        let e_phnum = u16::from_le_bytes(bin[56..58].try_into().unwrap());
+        // Fixture is built above (>= 0x1200 bytes); assert the shape
+        // explicitly so a future fixture edit fails here with a clear
+        // message instead of a slice panic deeper down.
+        assert!(bin.len() >= 58, "ELF fixture too short for Ehdr reads");
+        let e_phoff = u64::from_le_bytes(bin[32..40].try_into().expect("fixture Ehdr e_phoff range"));
+        let e_phentsize = u16::from_le_bytes(bin[54..56].try_into().expect("fixture Ehdr e_phentsize range"));
+        let e_phnum = u16::from_le_bytes(bin[56..58].try_into().expect("fixture Ehdr e_phnum range"));
         assert_eq!(e_phoff, 64);
         assert_eq!(e_phentsize, 56);
         assert_eq!(e_phnum, 1);

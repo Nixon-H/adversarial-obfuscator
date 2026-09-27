@@ -80,10 +80,16 @@ class HybridProtector:
         return fragment_id, encrypted
 
     def load_gpu_code(self, fragment_id: int) -> bytes:
-        encrypted = self.gpu_code_store.get(fragment_id)
-        if encrypted is None:
-            return b""
-        key = self.gpu_key_store.get(f"frag_{fragment_id}", b"")
+        # Fail-closed: a missing fragment used to return b"" silently,
+        # which callers could mistake for empty (but valid) GPU code.
+        # Raise so a bad fragment id surfaces immediately; the
+        # store→load round-trip path is unaffected.
+        if fragment_id not in self.gpu_code_store:
+            raise KeyError("unknown gpu fragment id: %r" % (fragment_id,))
+        encrypted = self.gpu_code_store[fragment_id]
+        key = self.gpu_key_store.get("frag_%s" % fragment_id)
+        if not key:
+            raise KeyError("missing gpu key for fragment id: %r" % (fragment_id,))
         return self.decrypt_gpu_code(encrypted, key)
 
     def execute_gpu_crypto(self, data: bytes, kernel_type: str = "encrypt") -> bytes:

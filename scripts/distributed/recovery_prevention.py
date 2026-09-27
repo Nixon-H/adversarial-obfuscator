@@ -203,13 +203,17 @@ class ExecutionRecoveryPreventer:
     def is_traffic_indistinguishable(self) -> Tuple[bool, float]:
         with self._lock:
             if not self._traffic_log:
-                return True, 1.0
+                # Fail-closed: no traffic observed proves nothing about
+                # indistinguishability. (False, 0.0), never a vacuous pass.
+                return False, 0.0
 
             noise_msgs = [m for m in self._traffic_log if m.is_noise]
             real_msgs = [m for m in self._traffic_log if not m.is_noise]
 
             if not real_msgs:
-                return True, 1.0
+                # Fail-closed: nothing real to hide is not evidence of
+                # cover (a misconfigured run logs noise only).
+                return False, 0.0
 
             if not noise_msgs:
                 return False, 0.0
@@ -263,7 +267,8 @@ class ExecutionRecoveryPreventer:
     def is_constant_time_traffic(self) -> bool:
         with self._lock:
             if not self._traffic_log:
-                return True
+                # Fail-closed: an empty log is not constant-time traffic.
+                return False
 
             msgs_per_source: Dict[int, List[float]] = {}
             for msg in self._traffic_log:

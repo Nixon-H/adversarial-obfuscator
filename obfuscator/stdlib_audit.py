@@ -249,9 +249,12 @@ def verify_audit(runtime_table, expected_tag, runtime_tag=None):
     """Pure version-bound verdict over the runtime subset.
 
     ``runtime_table``: ``{qname: expected_co_code_sha256}``. Resolves
-    each name FRESH (fresh import each call would defeat caching games;
-    plain attribute walk is enough — a monkeypatch replaces the
-    attribute, which is exactly what the compare detects). Returns
+    each name per call via ``importlib.import_module`` + attribute walk
+    (no stale local binding is kept — but note this is NOT a fresh
+    import: ``sys.modules`` caching still applies, so a module replaced
+    wholesale in ``sys.modules`` before the call resolves to the
+    replacement; plain attribute walk is enough — a monkeypatch replaces
+    the attribute, which is exactly what the compare detects). Returns
     ``"ok"`` / ``"mismatch"`` / ``"version-mismatch"``. Unresolvable or
     code-less targets are SKIPPED (never fail — a same-tag interpreter
     always exposes the same pure-python functions, so a skip means a

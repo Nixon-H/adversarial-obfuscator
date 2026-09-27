@@ -37,19 +37,22 @@ def phase_rop_compile(input_ir, output_rop, config):
         input_ir: path to the .ir module file
         output_rop: path for the ROP manifest JSON
         config: dict with target_functions list and reference_binary path
+
+    Returns:
+        dict {"ok": bool, "reason": str, "compiled": int} — never raises
+        for config-level skips; raises only on unexpected I/O errors.
     """
-    log("ROP", f"{input_ir} -> {output_rop}")
     log("ROP", f"{input_ir} -> {output_rop}")
     if not os.path.exists(input_ir):
         log("ERROR", f"Input IR not found: {input_ir}")
-        return
+        return {"ok": False, "reason": f"input IR not found: {input_ir}", "compiled": 0}
 
     try:
         from irgen.rop_compiler import RopFunctionCompiler, generate_gadget_database
         from llvmgen.lower import NixonIRParser
     except ImportError as e:
         log("SKIP", f"rop_compiler not importable: {e}")
-        return
+        return {"ok": False, "reason": f"rop_compiler not importable: {e}", "compiled": 0}
 
     with open(input_ir, "r") as f:
         ir_text = f.read()
@@ -60,18 +63,18 @@ def phase_rop_compile(input_ir, output_rop, config):
     target_funcs = config.get("target_functions", [])
     if not target_funcs:
         log("ROP", "No target functions specified")
-        return
+        return {"ok": False, "reason": "no target functions specified", "compiled": 0}
 
     ref_binary = config.get("reference_binary")
     if not ref_binary:
         log("ERROR", "No reference_binary in config for ROP compilation")
-        sys.exit(1)
+        return {"ok": False, "reason": "no reference_binary in config", "compiled": 0}
     try:
         gadgets_db = generate_gadget_database(ref_binary)
         log("ROP", f"Loaded {len(gadgets_db)} gadgets from {ref_binary}")
     except (FileNotFoundError, RuntimeError) as e:
         log("ERROR", f"Gadget database generation failed: {e}")
-        sys.exit(1)
+        return {"ok": False, "reason": f"gadget DB failed: {e}", "compiled": 0}
 
     compiler = RopFunctionCompiler(gadgets_db)
     compiled = {}
@@ -112,3 +115,4 @@ def phase_rop_compile(input_ir, output_rop, config):
 
     total = sum(v["size"] for v in compiled.values())
     log("ROP", f"Done: {len(compiled)} functions compiled, {total} bytes total")
+    return {"ok": True, "reason": f"{len(compiled)} functions, {total} bytes", "compiled": len(compiled)}

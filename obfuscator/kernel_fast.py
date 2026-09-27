@@ -95,7 +95,6 @@ _FAST_CIMPORTS = (
     ")\n"
     "from cpython.number cimport PyNumber_Absolute, PyNumber_Float\n"
     "from cpython.sequence cimport PySequence_List, PySequence_Tuple\n"
-    "from cpython.unicode cimport PyUnicode_FromOrdinal, PyUnicode_ReadChar\n"
     "from cpython.long cimport PyLong_FromVoidPtr\n"
 )
 
@@ -167,11 +166,12 @@ _t("hash", [
 _t("callable", [
     'def {impl}(object o=_nxk_fast_missing, /, *a, **k):',
     '    """Fast: 1-arg hot branch calls PyCallable_Check — no CALL at',
-    '    all, just a tp_call slot probe returning a C int (cheapest op',
-    '    here). Other shapes -> real builtin."""',
+    '    all, just a tp_call slot probe (wrapped in bool() so the hot',
+    '    path returns a real bool like the builtin). Other shapes ->',
+    '    real builtin."""',
     '    import builtins as _bi',
     '    if not a and not k and o is not _nxk_fast_missing:',
-    '        return PyCallable_Check(o)',
+    '        return bool(PyCallable_Check(o))',
     '    _args = () if o is _nxk_fast_missing else (o,)',
     '    return _bi.callable(*_args + tuple(a), **k)',
     '',
@@ -197,7 +197,7 @@ _t("bool", [
     '    via the real builtin (same object). Other shapes -> builtin."""',
     '    import builtins as _bi',
     '    if not a and not k and o is not _nxk_fast_missing:',
-    '        return PyObject_IsTrue(o)',
+    '        return bool(PyObject_IsTrue(o))',
     '    _args = () if o is _nxk_fast_missing else (o,)',
     '    return _bi.bool(*_args + tuple(a), **k)',
     '',
@@ -364,7 +364,7 @@ _t("isinstance", [
     '    import builtins as _bi',
     '    if not a and not k:',
     '        if o is not _nxk_fast_missing and c is not _nxk_fast_missing:',
-    '            return PyObject_IsInstance(o, c)',
+    '            return bool(PyObject_IsInstance(o, c))',
     '    _args = ()',
     '    if o is not _nxk_fast_missing:',
     '        _args = (o,)',
@@ -381,7 +381,7 @@ _t("issubclass", [
     '    import builtins as _bi',
     '    if not a and not k:',
     '        if d is not _nxk_fast_missing and c is not _nxk_fast_missing:',
-    '            return PyObject_IsSubclass(d, c)',
+    '            return bool(PyObject_IsSubclass(d, c))',
     '    _args = ()',
     '    if d is not _nxk_fast_missing:',
     '        _args = (d,)',
@@ -401,7 +401,7 @@ _t("hasattr", [
     '    if not a and not k:',
     '        if o is not _nxk_fast_missing and n is not _nxk_fast_missing:',
     '            if isinstance(n, str):',
-    '                return PyObject_HasAttr(o, n)',
+    '                return bool(PyObject_HasAttr(o, n))',
     '            return _bi.hasattr(o, n)',
     '    _args = ()',
     '    if o is not _nxk_fast_missing:',

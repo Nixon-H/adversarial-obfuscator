@@ -39,7 +39,6 @@ def phase_code_genome(base_genome_path=None, generations=50, population_size=30)
         population_size: population per generation
     """
     log("CODE_GENOME", f"Running code genome evolution ({generations} gen, {population_size} pop)")
-    log("CODE_GENOME", f"Running code genome evolution ({generations} gen, {population_size} pop)")
 
     source_text = None
     if base_genome_path and os.path.exists(base_genome_path):

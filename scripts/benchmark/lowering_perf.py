@@ -228,8 +228,8 @@ def _cases():
         lambda: nx._nxk_str_format(_FMT, a=1, b=2))
     add("string", "str.encode", lambda: _S.encode(),
         lambda: nx._nxk_str_encode(_S))
-    add("string", "str.decode", lambda: b"hi".decode(),
-        lambda: nx._nxk_str_decode(b"hi"))
+    add("string", "bytes.decode", lambda: b"hi".decode(),
+        lambda: nx._nxk_bytes_decode(b"hi"))
     add("string", "str.upper", lambda: _S.upper(),
         lambda: nx._nxk_str_upper(_S))
     add("string", "str.lower", lambda: _S.lower(),

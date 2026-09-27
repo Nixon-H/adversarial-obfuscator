@@ -54,14 +54,16 @@ from .algo_templates import _REAL_ALGO_SOURCES
 class ContextCollapseObfuscator(ast.NodeTransformer):
     """Saturates LLM context windows with deeply nested irrelevant structures."""
 
-    def __init__(self, depth: int = _COLLAPSED_DEPTH, dead_vars: int = 50):
+    def __init__(self, depth: int = _COLLAPSED_DEPTH, dead_vars: int = 50,
+                 seed: int | None = None):
         self.depth = depth
         self.dead_vars = dead_vars
+        self._rng = secrets.SystemRandom() if seed is None else random.Random(seed)
         self._guard_vars: list[str] = []
         self._guard_counter = 0
 
     def obfuscate(self, tree: ast.AST) -> ast.AST:
-        self._guard_vars = random.sample(_GUARD_VAR_POOL, min(4, len(_GUARD_VAR_POOL)))
+        self._guard_vars = self._rng.sample(_GUARD_VAR_POOL, min(4, len(_GUARD_VAR_POOL)))
         self.visit(tree)
         ast.fix_missing_locations(tree)
         return tree
@@ -125,13 +127,13 @@ class ContextCollapseObfuscator(ast.NodeTransformer):
         stmts: list[ast.stmt] = []
         prev = None
         for i in range(self.dead_vars):
-            vname = f"_nx_dc_{i}_{random.randint(1000, 9999)}"
+            vname = f"_nx_dc_{i}_{self._rng.randint(1000, 9999)}"
             if prev is None:
-                val = ast.Constant(value=random.randint(0, 2**32))
+                val = ast.Constant(value=self._rng.randint(0, 2**32))
             else:
                 val = ast.BinOp(
                     left=ast.Name(id=prev, ctx=ast.Load()),
-                    op=random.choice(
+                    op=self._rng.choice(
                         [
                             ast.Add(),
                             ast.Sub(),
@@ -140,7 +142,7 @@ class ContextCollapseObfuscator(ast.NodeTransformer):
                             ast.BitOr(),
                         ]
                     ),
-                    right=ast.Constant(value=random.randint(1, 255)),
+                    right=ast.Constant(value=self._rng.randint(1, 255)),
                 )
             stmts.append(
                 ast.Assign(
@@ -156,9 +158,9 @@ class ContextCollapseObfuscator(ast.NodeTransformer):
     def _build_nested_if(self, inner: ast.stmt) -> ast.stmt:
         node: ast.stmt = inner
         for level in range(self.depth):
-            a = random.randint(2, 250)
-            b = random.randint(2, 250)
-            c = a + random.randint(1, 100)
+            a = self._rng.randint(2, 250)
+            b = self._rng.randint(2, 250)
+            c = a + self._rng.randint(1, 100)
             d = c - a
             node = ast.If(
                 test=ast.Compare(
@@ -235,20 +237,22 @@ class ContextCollapseObfuscator(ast.NodeTransformer):
 class HoneyFunctionInjector(ast.NodeTransformer):
     """Injects plausible dead functions with zero data-flow to real code."""
 
-    def __init__(self, count: int = 5, naming_prefix: str | None = None):
+    def __init__(self, count: int = 5, naming_prefix: str | None = None,
+                 seed: int | None = None):
         self.count = count
         self._naming_prefix = naming_prefix or "_nx_honey"
+        self._rng = secrets.SystemRandom() if seed is None else random.Random(seed)
 
     def inject(self, tree: ast.AST) -> ast.AST:
         source_algo_names = list(_REAL_ALGO_SOURCES.keys())
-        chosen = random.sample(source_algo_names, min(self.count, len(source_algo_names)))
+        chosen = self._rng.sample(source_algo_names, min(self.count, len(source_algo_names)))
         for _ in range(self.count - len(chosen)):
-            chosen.append(random.choice(source_algo_names))
+            chosen.append(self._rng.choice(source_algo_names))
 
         new_funcs: list[ast.FunctionDef] = []
         for algo_key in chosen:
             source_template = _REAL_ALGO_SOURCES[algo_key]
-            func_name = f"{self._naming_prefix}_{algo_key}_{secrets.token_hex(4)}"
+            func_name = f"{self._naming_prefix}_{algo_key}_{(f"{self._rng.getrandbits(32):08x}")}"
             source = source_template.replace("{name}", func_name)
             try:
                 parsed = ast.parse(source)

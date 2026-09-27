@@ -1,6 +1,10 @@
 """
 independent_audit/auditor.py
 
+# TWIN AUDITORS (different scopes, do not merge): scripts/self_audit/
+# auditor.py (in-pipeline ten-category gate, F180) and scripts/
+# claim_auditor/auditor.py (per-claim evidence scoring, F172).
+
 Purpose:
 Provides an independent audit mechanism that examines the build pipeline for
 reachability of phase functions, proof logic presence, benchmark validity,

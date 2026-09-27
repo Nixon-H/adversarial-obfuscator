@@ -1,3 +1,7 @@
+//! Runtime event ledger (in-artifact append-only log).
+//! TWIN: scripts/ledger_proof.py (offline integrity proofs over built
+//! artifacts) — that script proves artifacts; this module records runtime
+//! events inside the protected binary. Do not merge.
 use std::fs;
 
 const K: [u32; 64] = [

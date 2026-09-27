@@ -75,6 +75,7 @@ from scripts.phases import (
     phase_encrypt_binary,
     phase_entropy_flatten,
     phase_generate_payload_h,
+    phase_embed_crypto_binding,
     phase_runtime_manifest,
     phase_package,
     phase_optional_extras,
@@ -181,6 +182,85 @@ def _check_exe(name: str, install_hint: str) -> bool:
     print(f"ERROR: Missing dependency: {name}")
     print(f"Install: {install_hint}")
     return False
+
+
+def _warn_dangling(opts, parent, subs):
+    """Log a warning when sub-options are set but their parent flag is off.
+
+    Args:
+        opts: argparse.Namespace with parsed CLI options.
+        parent (str): dest name of the enabling flag (truthiness enables).
+            A parent value of None also counts as off.
+        subs (list[tuple[str, object]]): (dest, default) pairs; a sub-option
+            counts as "set" when its current value != default (with None
+            meaning "flag absent"). Only warns when at least one sub is set
+            while the parent is off. Never fails the build.
+    """
+    try:
+        parent_on = bool(getattr(opts, parent, False))
+    except Exception:
+        return
+    if parent_on:
+        return
+    dangling = []
+    for sub, default in subs:
+        try:
+            val = getattr(opts, sub, default)
+        except Exception:
+            continue
+        if val != default:
+            dangling.append(f"--{sub.replace('_', '-')}")
+    if dangling:
+        log("WARN", f"{', '.join(dangling)} set without --{parent.replace('_', '-')} (ignored)")
+
+
+def _warn_all_dangling(opts):
+    """Single call-site: check every known parent → sub-option group."""
+    groups = [
+        ("watermark", [("verify_watermark", False)]),
+        ("confidence_interval", [("confidence_level", 0.95)]),
+        ("benchmark", [("benchmark_model", None), ("benchmark_report", False)]),
+        ("decoy_apis", [("decoy_api_count", 5)]),
+        ("multi_agent_deception", [("storyline_count", 3)]),
+        ("reasoning_traps", [("trap_depth", 5)]),
+        ("llm_fingerprint", [("fingerprint_model", "gpt")]),
+        ("temporal_keys", [("temporal_window", 60.0)]),
+        ("payload_dispersal", [("dispersal_slices", 3)]),
+        ("tee", [("tee_type", "software")]),
+        ("coverage_map", [("coverage_output", None)]),
+        ("knowledge_graph", [("knowledge_graph_output", None)]),
+        ("fhe_vm", [("fhe_vm_functions", None)]),
+        ("io_research", [("io_research_functions", None)]),
+        ("kernel_assist", [("kernel_assist_features", None)]),
+        ("red_team", [("red_team_output", "build/redteam")]),
+        ("diversity", [("diversity_dir", "build/variants"),
+                       ("diversity_threshold", 0.3),
+                       ("diversity_report", False)]),
+        ("synthesis", [("synthesis_target_security", 70.0),
+                       ("synthesis_max_overhead", 50.0),
+                       ("synthesis_max_size", 3.0),
+                       ("synthesis_output", None),
+                       ("apply_synthesis", False)]),
+        ("adversarial_bench", [("adversarial_bench_count", 20)]),
+        ("dist_attestation", [("dist_attestation_nodes", 5)]),
+        ("dist_watermark", [("dist_watermark_shares", 5)]),
+        ("dist_diversity", [("dist_diversity_variants", 8),
+                            ("dist_diversity_nodes", 4),
+                            ("dist_diversity_rotation", 3600.0)]),
+        ("class_dispatch", [("class_dispatch_count", 4)]),
+        ("ssa_mutation", [("ssa_variants", 4)]),
+        ("cfg_mutation", [("cfg_mutation_variants", 4)]),
+        ("state_isa", [("state_isa_history_len", 8)]),
+        ("code_genome", [("genome_generations", 50),
+                         ("genome_population", 30)]),
+        ("struct_randomization", [("randomization_level", 3)]),
+        ("micro_fragment", [("micro_fragment_size", 64)]),
+        ("multi_binary", [("multi_binary_num", 4)]),
+        ("multi_host", [("multi_host_count", 3)]),
+        ("remote_unlock", [("remote_unlock_ttl", 30.0)]),
+    ]
+    for parent, subs in groups:
+        _warn_dangling(opts, parent, subs)
 
 
 def validate_dependencies() -> bool:
@@ -832,6 +912,7 @@ Examples:
         log("OPT", _opt_describe(opts.opt_level))
     except Exception as _opt_err:
         log("OPT", f"opt-level {getattr(opts, 'opt_level', '?')}: ({_opt_err})")
+    _warn_all_dangling(opts)
     if getattr(opts, "pytoc", False):
         log("OPT", "PyTOC native-extension path requested (best-effort Cython build)")
     if getattr(opts, "pyinstaller_spec", False):
@@ -933,6 +1014,23 @@ Examples:
     # Load Advanced Protection config from JSON (phase-2 feature matrix).
     phase2_cfg = load_advanced_protection_config(opts)
     opts._phase2_cfg = phase2_cfg
+
+    # RESEARCH STATUS (2026-09-27): the following phases emit JSON sidecars
+    # into BUILD_DIR that currently have ZERO downstream consumers (no
+    # pipeline stage or runtime loader reads them back — verified by grep):
+    #   per_exec_recompile → per_exec_recompile_config.json
+    #   self_healing       → self_healing_config.json
+    #   struct_randomization → struct_randomization_config.json
+    #   micro_fragment     → micro_fragment_config.json
+    #   poly_engine        → poly_engine_config.json
+    #   temporal_keys      → temporal_key_config.json
+    #   payload_dispersal  → payload_dispersal_config.json
+    #   rolling_keys       → rolling_keys_config.json
+    #   state_isa          → state_isa_config.json
+    #   class_dispatch     → class_dispatch_config.json
+    # They are kept as research-sidecar outputs (evidence/audit trail).
+    # Do NOT wire them into the artifact path blindly — each needs a
+    # consumer contract (schema + loader + test) first.
 
     # =========================================================================
     # Stage 0.5: Cost-Aware Protection Optimizer
@@ -1116,7 +1214,11 @@ Examples:
     # =========================================================================
 
     if not opts.skip_obfuscate:
-        phase_obfuscate(preprocessed_payload, obfuscated_output, opts)
+        try:
+            phase_obfuscate(preprocessed_payload, obfuscated_output, opts)
+        except RuntimeError as e:
+            log("ERROR", f"Obfuscation failed: {e}")
+            sys.exit(1)
 
         # Record certificate for obfuscation phase with real Z3 equivalence check
         if certificate_collector is not None:
@@ -1228,6 +1330,8 @@ Examples:
         ]):
             poison_input = obfuscated_output
             phase_provenance_poison(poison_input, obfuscated_output, opts)
+        else:
+            log("SKIP", "Provenance poisoning not requested (no --provenance-poison/--poison-* flag)")
     else:
         log("SKIP", "Provenance poisoning skipped (not enabled)")
 
@@ -1347,6 +1451,10 @@ Examples:
     classifications = None
     if opts.classify or phase2_cfg.get("enabled", False):
         classifications = phase_classify(opts.payload, phase2_cfg)
+        if classifications:
+            log("CLASSIFY", f"Summary: {len(classifications)} functions classified")
+        else:
+            log("CLASSIFY", "Summary: no functions classified (empty result)")
     else:
         log("SKIP", "Classification pass skipped")
 
@@ -1354,8 +1462,26 @@ Examples:
     # Stage 2a: Adaptive Classifier Loop
     # =========================================================================
 
+    # NOTE: the provenance/dataflow/adaptive passes below operate on a
+    # BUILD_DIR scratch copy of the payload, NEVER on opts.payload itself
+    # (earlier revisions clobbered the user's source file in place). They
+    # run AFTER phase_obfuscate, so their outputs are diagnostic sidecars
+    # only and are NOT fed back into the artifact pipeline — in particular,
+    # phase_dataflow_obfuscation emits references to _affine_enc without a
+    # definition, so feeding its output downstream would break artifacts.
+    _sidecar_src = os.path.join(BUILD_DIR, "sidecar_payload.py")
+    try:
+        shutil.copy2(opts.payload, _sidecar_src)
+        log("SIDECAR", f"Scratch copy for diagnostic passes: {_sidecar_src}")
+    except OSError as e:
+        log("ERROR", f"Sidecar scratch copy failed: {e}")
+        _sidecar_src = None
+
     if opts.adaptive_classifier_loop:
-        phase_adaptive_classifier_loop(opts.payload, opts)
+        if _sidecar_src is not None:
+            phase_adaptive_classifier_loop(_sidecar_src, opts)
+        else:
+            log("SKIP", "Adaptive classifier loop skipped (no scratch copy)")
     else:
         log("SKIP", "Adaptive classifier loop not enabled (use --adaptive-classifier-loop)")
 
@@ -1367,12 +1493,13 @@ Examples:
         phase2_cfg.get("features", {}).get("provenance_removal", False)
     )
     if provenance_replace:
-        phase_provenance_removal(
-            opts.payload, phase2_cfg,
-            replace_mode=opts.provenance_replace
-        )
-    elif phase2_cfg.get("enabled", False) and phase2_cfg.get("features", {}).get("provenance_removal", False):
-        phase_provenance_removal(opts.payload, phase2_cfg)
+        if _sidecar_src is not None:
+            phase_provenance_removal(
+                _sidecar_src, phase2_cfg,
+                replace_mode=opts.provenance_replace
+            )
+        else:
+            log("SKIP", "Provenance removal skipped (no scratch copy)")
     else:
         log("SKIP", "Provenance removal skipped (not enabled)")
 
@@ -1381,7 +1508,10 @@ Examples:
     # =========================================================================
 
     if phase2_cfg.get("enabled", False) and phase2_cfg.get("features", {}).get("dataflow_obfuscation", False):
-        phase_dataflow_obfuscation(opts.payload, phase2_cfg)
+        if _sidecar_src is not None:
+            phase_dataflow_obfuscation(_sidecar_src, phase2_cfg)
+        else:
+            log("SKIP", "Data-flow obfuscation skipped (no scratch copy)")
     else:
         log("SKIP", "Data-flow obfuscation skipped (not enabled)")
 
@@ -1454,7 +1584,9 @@ Examples:
                 _obf_source = f.read()
             original_ir = compile_py_to_ir(_orig_source)
             obfuscated_ir = compile_py_to_ir(_obf_source)
-            _leakage_result = phase_leakage(opts, original_ir, obfuscated_ir)
+            leakage_report = phase_leakage(opts, original_ir, obfuscated_ir)
+            if leakage_report is not None:
+                log("LEAKAGE", f"Summary: SLI={leakage_report.overall_sli:.2f}/100")
         except Exception as e:
             log("LEAKAGE", f"Error computing semantic leakage: {e}")
     else:
@@ -1518,6 +1650,8 @@ Examples:
     if phase2_cfg.get("enabled", False) and phase2_cfg.get("features", {}).get("watermarking", False):
         if not opts.skip_irgen:
             phase_watermark_embedding(ir_output, phase2_cfg)
+        else:
+            log("SKIP", "Watermark embedding skipped (requires IR; --skip-irgen set)")
     else:
         log("SKIP", "Watermark embedding skipped (not enabled)")
 
@@ -1605,7 +1739,11 @@ Examples:
         rop_cfg = default.get("shadow_compiler", {}).get("llvmgen", {}).get("rop", {})
     if rop_cfg.get("enabled", False) or opts.rop:
         rop_output = os.path.join(BUILD_DIR, "rop_chain.bin")
-        phase_rop_compile(ir_output, rop_output, rop_cfg)
+        _rop_status = phase_rop_compile(ir_output, rop_output, rop_cfg)
+        if isinstance(_rop_status, dict):
+            log("ROP", f"Status: ok={_rop_status.get('ok')} ({_rop_status.get('reason', 'n/a')})")
+        elif _rop_status is not None:
+            log("ROP", f"Status: {_rop_status}")
         # Generate runtime C source using rop_exec.h
         try:
             rop_runtime_path = os.path.join(BUILD_DIR, "rop_runtime.c")
@@ -1857,6 +1995,13 @@ Examples:
 
             log("CRYPTO_BINDING", f"Bound {len(bound)} fragments → {crypto_binding_output}")
             log("CRYPTO_BINDING", f"Chain secret: {chain_secret_path}")
+            # payload.h was generated ~430 lines earlier (Stage 2e), before
+            # these binding files existed, so its embed step silently skipped.
+            # Re-run it now (best-effort) so --crypto-binding actually lands.
+            try:
+                phase_embed_crypto_binding(os.path.join(ROOT, "native", "payload.h"))
+            except Exception as _cb_err:
+                log("CRYPTO_BINDING", f"Late embed skipped (non-fatal): {_cb_err}")
         except Exception as e:
             log("ERROR", f"Crypto binding failed: {e}")
             import traceback
@@ -1948,8 +2093,11 @@ Examples:
     # =========================================================================
 
     if opts.cfg_mutation and not opts.skip_irgen:
-        phase_cfg_mutation(ir_output if not opts.skip_irgen else obfuscated_output,
-                          opts.cfg_mutation_variants)
+        phase_cfg_mutation(ir_output, opts.cfg_mutation_variants)
+    elif opts.cfg_mutation and opts.skip_irgen:
+        log("SKIP", "CFG mutation skipped (requires IR; --skip-irgen set)")
+    else:
+        log("SKIP", "CFG mutation not enabled (use --cfg-mutation)")
 
     if opts.class_dispatch:
         log("CLASS_DISPATCH", f"Class dispatch enabled ({opts.class_dispatch_count} classes)")
@@ -2168,7 +2316,11 @@ Examples:
     # =========================================================================
 
     if not opts.skip_relay:
-        phase_compile_relay()
+        try:
+            phase_compile_relay()
+        except RuntimeError as e:
+            log("ERROR", f"Relay build failed: {e}")
+            sys.exit(1)
     else:
         log("SKIP", "Rust relay build skipped")
 
@@ -2177,7 +2329,16 @@ Examples:
     # =========================================================================
 
     if opts.cross:
-        phase_cross_compile(opts.cross)
+        try:
+            _xc_results = phase_cross_compile(opts.cross)
+        except RuntimeError as e:
+            log("ERROR", f"Cross-compile failed: {e}")
+            sys.exit(1)
+        else:
+            _xc_failed = [t for t, ok, _ in (_xc_results or []) if not ok]
+            if _xc_failed:
+                log("ERROR", f"Cross-compile failed for: {', '.join(_xc_failed)}")
+                sys.exit(1)
 
     # =========================================================================
     # Stage 8: Runtime Manifest
@@ -2448,7 +2609,11 @@ Examples:
                 opts.bogus_exceptions = True
                 opts.cfg_flatten = True
                 opts.honey_functions = max(opts.honey_functions or 0, (iteration + 1) * 5)
-                phase_obfuscate(opts.payload, obfuscated_output, opts)
+                try:
+                    phase_obfuscate(opts.payload, obfuscated_output, opts)
+                except RuntimeError as e:
+                    log("ERROR", f"Obfuscation failed during auto-tune iteration {iteration}: {e}")
+                    break
                 shutil.copy2(obfuscated_output, prot_source)
         else:
             metrics.measure(payload_source, prot_source)
@@ -4088,10 +4253,8 @@ Examples:
         log("SKIP", "Self-critique not enabled (use --self-critique)")
 
     log("DONE", "Pipeline complete")
-    print(f"\n  {'='*50}")
-    print(f"  Build artifacts: {BUILD_DIR}/")
-    print(f"  Run: build/orbital-relay --help")
-    print(f"  {'='*50}\n")
+    log("DONE", f"Build artifacts: {BUILD_DIR}/")
+    log("DONE", "Run: build/orbital-relay --help")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Ledger Integrity Proof Generator for Shadow Compiler."""
+# TWIN: runtime/src/ledger.rs (in-artifact append-only event ledger) — that
+# ledger records runtime events inside the protected binary; this script
+# generates offline integrity proofs over built artifacts. Do not merge.
 
 import os
 import struct

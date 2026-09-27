@@ -135,13 +135,20 @@ def _mac_key(key):
 
 def generate_key():
     # type: () -> bytes
-    """32-byte build key. Uses ``secrets`` so seeded builds stay deterministic."""
+    """32-byte build key from OS entropy (``secrets``: NOT deterministic).
+
+    Seeded/deterministic builds must pin the key explicitly instead of
+    calling this (pass ``key=`` through); tests patch ``secrets`` only to
+    observe call behavior, never for reproducibility."""
     return secrets.token_bytes(KEY_SIZE)
 
 
 def generate_nonce():
     # type: () -> bytes
-    """12-byte per-string nonce. Uses ``secrets`` (seed-patchable)."""
+    """12-byte per-string nonce from OS entropy (``secrets``: NOT deterministic).
+
+    Deterministic builds must pass an explicit ``nonce=`` to
+    :func:`aead_encrypt` instead."""
     return secrets.token_bytes(NONCE_SIZE)
 
 
@@ -221,6 +228,7 @@ STUB_TEMPLATE = """def __NX_DEC__(_s):
         _x[_b] ^= _x[_c]
         _x[_b] = _nx_rl(_x[_b], 7)
     def _nx_bl(_ctr):
+        _ctr = _ctr & _nx_M
         _w = [int.from_bytes(_nx_k[_i:_i + 4], 'little') for _i in (0, 4, 8, 12, 16, 20, 24, 28)]
         _nn = [int.from_bytes(_nx_n[_i:_i + 4], 'little') for _i in (0, 4, 8)]
         _x = [1634760805, 857760878, 2036477234, 1797285236, _w[0], _w[1], _w[2], _w[3], _w[4], _w[5], _w[6], _w[7], _ctr, _nn[0], _nn[1], _nn[2]]
@@ -259,5 +267,11 @@ def build_stub_decoder(decoder_name, key_hex):
     """Fill the runtime stub template for one build (no str.format used)."""
     if not decoder_name.isidentifier():
         raise ValueError("decoder name must be a valid identifier")
+    try:
+        raw = bytes.fromhex(str(key_hex))
+    except ValueError:
+        raise ValueError("key_hex must be hex")
+    if len(raw) != KEY_SIZE:
+        raise ValueError("key_hex must decode to exactly 32 bytes")
     return STUB_TEMPLATE.replace("__NX_DEC__", decoder_name).replace(
         "__NX_KEYHEX__", key_hex)

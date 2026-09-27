@@ -182,7 +182,7 @@ def _compute_scores(tree: ast.AST, source_lines: list[str]) -> dict:
     """
     scores = {}
     for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
 
         crypto = _count_crypto_ops(node)
@@ -259,7 +259,7 @@ def classify_functions(source: str, config: dict | None = None) -> dict[str, str
 
     results = {}
     for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
 
         name = node.name

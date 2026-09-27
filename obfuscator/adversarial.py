@@ -344,8 +344,9 @@ def inject_adversarial_code(source: str, config: dict) -> str:
         mod_patterns = mod_patterns or _MODULE_DEAD_CODE
         func_patterns = func_patterns or _FUNC_BODY_DEAD_CODE
 
-    if func_count > 0 and func_patterns:
+    if mod_count > 0 and mod_patterns:
         _inject_module_dead_code(tree, rng, mod_count, mod_patterns)
+    if func_count > 0 and func_patterns:
         _inject_func_dead_code(tree, rng, func_count, func_patterns, include_training)
 
     if do_prompt and prompt_count > 0:

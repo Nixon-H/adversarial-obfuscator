@@ -25,12 +25,14 @@ enabled for the entire build pipeline.
 import json
 import os
 
-from ..common import log, atomic_write, CONFIG_FILE, DEFAULT_CONFIG
+from ..common import log, atomic_write, BUILD_DIR, CONFIG_FILE, DEFAULT_CONFIG
 
 
 def phase_generate_config(opts):
     """
     Write a minimal config file to disk and return the empty dict.
+
+    Writes into BUILD_DIR (never overwrites the repo-tree config/relay.json).
 
     Args:
         opts: argparse.Namespace (unused here, kept for interface compat)
@@ -40,8 +42,10 @@ def phase_generate_config(opts):
     """
     log("CONFIG", "Generating minimal config")
     cfg = {}
-    atomic_write(CONFIG_FILE, json.dumps(cfg, indent=2))
-    log("CONFIG", f"Written to {CONFIG_FILE}")
+    dest = os.path.join(BUILD_DIR, "orbital-relay.json")
+    os.makedirs(BUILD_DIR, exist_ok=True)
+    atomic_write(dest, json.dumps(cfg, indent=2))
+    log("CONFIG", f"Written to {dest}")
     return cfg
 
 
@@ -59,6 +63,7 @@ def load_advanced_protection_config(opts) -> dict:
         dict with merged "features" sub-dict and optional "extras"
     """
     cfg = {}
+    default = {}
     if os.path.exists(DEFAULT_CONFIG):
         try:
             with open(DEFAULT_CONFIG, "r") as f:

@@ -141,8 +141,9 @@ _DECOY_IMPLS: dict[str, str] = {
 
 
 class SemanticDecoyApiInjector(ast.NodeTransformer):
-    def __init__(self, count: int = 5):
+    def __init__(self, count: int = 5, seed: int | None = None):
         self.count = count
+        self._rng = secrets.SystemRandom() if seed is None else random.Random(seed)
         self._existing_names: set[str] = set()
 
     def inject(self, tree: ast.Module) -> ast.Module:
@@ -152,11 +153,11 @@ class SemanticDecoyApiInjector(ast.NodeTransformer):
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
         }
 
-        chosen = random.sample(
+        chosen = self._rng.sample(
             _DECOY_API_POOL, min(self.count, len(_DECOY_API_POOL))
         )
         for _ in range(self.count - len(chosen)):
-            chosen.append(random.choice(_DECOY_API_POOL))
+            chosen.append(self._rng.choice(_DECOY_API_POOL))
 
         new_funcs: list[ast.FunctionDef] = []
         for api_name in chosen:
@@ -188,11 +189,11 @@ class SemanticDecoyApiInjector(ast.NodeTransformer):
             self._existing_names.add(candidate)
             return candidate
         for i in range(100):
-            candidate = f"_nx_decoy_{base}_{secrets.token_hex(2)}"
+            candidate = f"_nx_decoy_{base}_{(f"{self._rng.getrandbits(16):04x}")}"
             if candidate not in self._existing_names:
                 self._existing_names.add(candidate)
                 return candidate
-        return f"_nx_decoy_{base}_{secrets.token_hex(4)}"
+        return f"_nx_decoy_{base}_{(f"{self._rng.getrandbits(32):08x}")}"
 
     def visit(self, node: ast.AST) -> ast.AST:
         return self.generic_visit(node)
