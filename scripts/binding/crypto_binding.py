@@ -16,6 +16,9 @@ be decrypted and executed in the intended context.
 (Sibling: temporal_key.py — epoch-ratcheting sub-keys consumed by
 this binder's rolling/history-bound modes. Different layer — key
 schedule vs. fragment transform; do not merge.)
+(Sibling: scripts/fragment/fragment_compiler.py — chained
+decrypt→execute→wipe bytecode splitting; that module owns fragment
+granularity, this one owns context binding; do not merge.)
 
 Security Relevance:
 This is the primary cryptography layer for fragment-level

@@ -127,9 +127,11 @@ jobs:
           for /f "delims=" %%P in ('python -c "import sysconfig; print(sysconfig.get_paths()['include'])"') do set PYINC=%%P
           for /f "delims=" %%L in ('python -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))"') do set PYLIBDIR=%%L
           echo Python include: %PYINC%
+          echo Python lib dir: %PYLIBDIR%
           if exist "C:\vcpkg\installed\x64-windows\include\zlib.h" (set ZINC=C:\vcpkg\installed\x64-windows\include) else (set ZINC=%VCPKG_INSTALLATION_ROOT%\installed\x64-windows\include)
           if exist "C:\vcpkg\installed\x64-windows\lib\zlib.lib" (set ZLIB=C:\vcpkg\installed\x64-windows\lib\zlib.lib) else (set ZLIB=%VCPKG_INSTALLATION_ROOT%\installed\x64-windows\lib\zlib.lib)
           echo zlib include: %ZINC%
+          if not exist "%ZINC%\zlib.h" (echo ERROR: zlib.h not found under %ZINC% - the vcpkg step above is best-effort, install zlib:x64-windows first & exit 1)
           cl.exe /nologo /EHsc /O2 /I "%PYINC%" /I "%ZINC%" /I native /c native\stub_win.cpp /Fo:stub_win.obj
-          link.exe /nologo stub_win.obj "%ZLIB%" /OUT:stub_win_test.exe
+          link.exe /nologo stub_win.obj "%ZLIB%" "%PYLIBDIR%\python311.lib" /OUT:stub_win_test.exe
           if exist stub_win_test.exe (echo STUB-WIN-MSVC-OK) else (echo STUB-WIN-MSVC-FAILED & exit 1)

@@ -5,6 +5,11 @@ Advanced Protection: Classification Pass
 Analyzes Python source code and classifies each function into one of three
 categories: standard (90-95%), crown_jewel (5-10%), or jit_target (<1%).
 
+TWIN: scripts/classification/ (function_classifier.py 5-category AST triage
++ strategy_selector.py pass map) — that package drives per-pass selection;
+this module is the pipeline classification pass (3 routing categories).
+Different taxonomy, different consumer; do not merge.
+
 This pass controls which code path each function takes through the pipeline:
   - Standard   → Shadow IR → LLVM → native binary
   - Crown Jewel → VM bytecode compilation, full VM protection

@@ -3,6 +3,10 @@
 Detects execution environment characteristics (OS, Python version, installed
 modules, CPU features) and generates environment-specific code variants that
 adapt to the detected platform.
+
+TWIN: scripts/poly/poly_engine.py (PolyEngine) — that module emits
+polymorphic decryptors bound to the environment; this module fingerprints
+the platform to pick code variants. Different output; do not merge.
 """
 
 import hashlib

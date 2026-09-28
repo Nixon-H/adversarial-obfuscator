@@ -7,6 +7,10 @@ Fragment C → decrypt → execute → wipe
 Each fragment key is derived from the *previous fragment's output*, creating
 cryptographic fragment binding: recovering one fragment is insufficient
 because you cannot decrypt the next without the previous fragment's output.
+
+TWIN: scripts/fragment/micro_fragment.py (per-line fragments, index-derived
+keys, no chaining) and scripts/binding/crypto_binding.py (context-bound
+Fragment→BoundFragment transform) — different granularity/binding; do not merge.
 """
 
 from __future__ import annotations

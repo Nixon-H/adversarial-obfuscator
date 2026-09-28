@@ -3,6 +3,10 @@
 Probes the execution environment and generates polymorphic decryption code
 that only works in the correct environment. If environment check fails,
 the decryption produces garbage.
+
+TWIN: scripts/environment/poly_engine.py (EnvironmentalPolyEngine) — that
+module fingerprints the platform to pick code variants; this module emits
+polymorphic decryptors. Different output; do not merge.
 """
 
 import base64

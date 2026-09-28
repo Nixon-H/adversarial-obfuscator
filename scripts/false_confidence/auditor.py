@@ -1,6 +1,11 @@
 """
 false_confidence/auditor.py — Focused auditing functions for false confidence (F173)
 
+TWIN: scripts/claim_auditor/auditor.py (per-claim evidence scoring, F172) —
+that module scores whether a claim has supporting evidence; this module
+detects vacuous-pattern shapes (assert-nothing, 100-on-empty) in source,
+tests, and benchmarks. Different signal; do not merge.
+
 Purpose:
     Provides targeted audit functions (audit_source, audit_tests,
     audit_benchmarks, audit_all) that run a subset of false-confidence
