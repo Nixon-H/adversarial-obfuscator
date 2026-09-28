@@ -32,7 +32,8 @@ EXEC (execution model) · INT (integrity, not obfuscation) · NOOP.
 | enhanced_junk | EnhancedJunkInserter + ASTMutator junk | LEX | dead statements | noise filtering |
 | attention_poison/decoy/adaptive | various | LEX | decoy content | LLM/reasoning attacks |
 | stego/minify/residue | various | LEX | formatting/packaging | — |
-| **vm** | **NONE — no consumer** | **NOOP** | *nothing; pass name silently ignored* | — |
+| **vm** (legacy pass name) | **NONE — no consumer (verified)** | **NOOP** | *nothing; pass name silently ignored* | — |
+| vm_dispatch a/b (`obfuscator/vm_dispatch.py`, opt-in) | VMDispatchTransformer | EXEC | function → stack-VM bytecode + dispatcher (switch vs threaded) | boundary/CFG recovery |
 
 Verified 2026-09-28: no transformer, phase, or pipeline branch reads a
 `vm` option (`grep` over obfuscator/ + scripts/). Every G2 hetero

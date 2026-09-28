@@ -615,6 +615,27 @@ def apply_ast_mutation(source_code, options=None):
                 break        
         for node in reversed(detached_nodes):
             tree.body.insert(insert_idx, node)
+        # G2-H2 representation diversification (opt-in, default OFF):
+        # structurally rewrites literals/expressions. Runs last so no
+        # later pass needs to understand its output shapes.
+        if options.get('rep_diversify'):
+            try:
+                from obfuscator.rep_diversify import RepDiversifier as _RepDiv
+                _seed = options.get('rep_seed', None)
+                tree = _RepDiv(seed=_seed).visit(tree)
+            except Exception:
+                pass
+        # G2-H3/H4 execution-model diversification (opt-in, default OFF):
+        # selective function-level virtualization, VM-A (switch) or
+        # VM-B (threaded) dispatcher. Runs last; ineligible functions
+        # pass through untouched.
+        if options.get('vm_dispatch') in ('a', 'b'):
+            try:
+                from obfuscator.vm_dispatch import VMDispatchTransformer as _VMDisp
+                tree = _VMDisp(seed=options.get('vm_seed', None),
+                               family=options.get('vm_dispatch')).visit(tree)
+            except Exception:
+                pass
         ast.fix_missing_locations(tree)
         code_output = ast.unparse(tree)
         if _alias_preamble: code_output = _alias_preamble + '\n' + code_output
