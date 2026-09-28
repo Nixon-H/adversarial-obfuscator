@@ -368,6 +368,34 @@ def _load_version_fingerprints():
         return {}
 
 
+def version_fingerprints_mtime():
+    # type: () -> object
+    """mtime (epoch float) of driver_versions.json, or None when unreadable."""
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+        return os.path.getmtime(os.path.join(here, _VERSION_FP_FILENAME))
+    except Exception:
+        return None
+
+
+def version_fingerprints_stale(max_age_s=90 * 86400):
+    # type: (object) -> bool
+    """True when fingerprints are older than ``max_age_s`` (or unreadable).
+
+    Evaluable staleness flag for the hand-curated version fingerprints:
+    callers can warn (never gate) on True. Unreadable/missing counts as
+    stale (fail-closed direction: flag it, don't silently trust).
+    """
+    try:
+        mtime = version_fingerprints_mtime()
+        if mtime is None:
+            return True
+        import time as _t
+        return (_t.time() - float(mtime)) > float(max_age_s)
+    except Exception:
+        return True
+
+
 def _parse_version(text):
     # type: (object) -> object
     """Parse 'a.b.c.d' into a 4-tuple of ints. None when unparseable."""

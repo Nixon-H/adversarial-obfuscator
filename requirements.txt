@@ -1,6 +1,7 @@
 # =============================================================================
 # NIXON PROJECT — Python Dependencies
-# Pin to latest stable versions as of 2026-06.
+# Pin to audited stable versions as of 2026-09.
+# Security updates must pass pip-audit before merge.
 # =============================================================================
 
 # ─── Core ────────────────────────────────────────────────────────────────────

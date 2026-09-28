@@ -2425,7 +2425,13 @@ def _VERIFY_INTEGRITY():
             for i in range(7): sim_h = next_h(sim_h, i)
             prov_salt = hashlib.sha256(str(sim_h).encode()).digest()
             encryption_key = bytes([a ^ b ^ c for a, b, c in zip(key, time_salt, prov_salt)])
-            core_blob = lzma.compress(encrypt_payload(padded_raw, encryption_key, nonce))
+            # Loader-compatibility: the artifact-side decryptors (CIPHER_SOURCE
+            # XOR-stream, hybrid _xor_decrypt) have no AES-CTR inverse, and the
+            # loader must stay stdlib-only (cryptography is build-time-only).
+            # Force the XOR-stream construction here so build output is always
+            # loader-readable; AES-CTR stays available via encrypt_payload for
+            # non-artifact uses (binding envelopes, dispersal).
+            core_blob = lzma.compress(encrypt_payload(padded_raw, encryption_key, nonce, use_aes_ctr=False))
             mid_buf = io.BytesIO()
             with zipfile.ZipFile(mid_buf, 'w', zipfile.ZIP_DEFLATED) as z: z.writestr("payload", Nixon_Enc_onion(core_blob, recipe_in))
             outer_encoded = Nixon_Enc_onion(mid_buf.getvalue(), recipe_out)

@@ -716,15 +716,27 @@ jobs:
         print(f" [*] [Cloud] Downloading binaries to {output_dir}...")
         import requests
         os.makedirs(output_dir,exist_ok=True)
-        r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}/artifacts",headers=self.headers,proxies=self.proxies,verify=True)
+        # Integrity model (documented): artifacts come over authenticated
+        # TLS (verify=True) from the repo's own Actions runs — the channel
+        # is the integrity mechanism (GitHub's API provides no artifact
+        # content hash to pin against). Below adds timeouts, HTTP-status
+        # enforcement, and ZipSlip confinement on top of that channel.
+        r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}/artifacts",headers=self.headers,proxies=self.proxies,verify=True,timeout=30)
+        r.raise_for_status()
         artifacts=r.json().get('artifacts',[])
         for art in artifacts:
             name=art['name']
             down_url=art['archive_download_url']
-            zip_resp=requests.get(down_url,headers=self.headers,stream=True,proxies=self.proxies,verify=True)
+            zip_resp=requests.get(down_url,headers=self.headers,stream=True,proxies=self.proxies,verify=True,timeout=120)
+            zip_resp.raise_for_status()
             zip_path=os.path.join(output_dir,f"{name}.zip")
             with open(zip_path,"wb")as f:f.write(zip_resp.content)
-            with zipfile.ZipFile(zip_path,'r')as z:z.extractall(output_dir)
+            with zipfile.ZipFile(zip_path,'r')as z:
+                for _m in z.namelist():
+                    _dest=os.path.realpath(os.path.join(output_dir,_m))
+                    if _dest != os.path.realpath(output_dir) and not _dest.startswith(os.path.realpath(output_dir)+os.sep):
+                        raise ValueError(f"refusing zip member escaping output dir: {_m!r}")
+                z.extractall(output_dir)
             os.remove(zip_path)
             clean_name=name.replace("blob-","")
             if "android.so" in clean_name: clean_name = "android.so" 
