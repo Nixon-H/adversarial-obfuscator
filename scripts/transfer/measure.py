@@ -28,6 +28,54 @@ from scripts.transfer import protocol
 
 CAP_RATIO = 10.0
 
+# Cross-build attack taxonomy (what transfers, not just how much).
+# Each covered type maps to a measured endpoint; uncovered types are
+# reported as null WITH reason (never silently dropped, never zeroed).
+TRANSFER_TYPES = (
+    ("function", "S_cfg_boundary",
+     "covered: arity-boundary mapping transfer"),
+    ("semantic", "S_cfg",
+     "covered: vector-confirmed recovery transfer (PRIMARY)"),
+    ("constant", "S_const",
+     "covered: literal-recovery transfer"),
+    ("name", "S_deobf",
+     "covered: by-name recovery transfer (identifier-resistance failure)"),
+    ("cfg", None,
+     "uncovered: no CFG-edge recovery arm; needs edge-level measurement"),
+    ("dataflow", None,
+     "uncovered: no dataflow-recovery arm"),
+    ("vm", None,
+     "uncovered: no VM/dispatcher-recovery arm"),
+)
+
+
+def taxonomy_transfer(recoveries, ground_truth, vectors):
+    """Per-type T vectors. Returns {type: {...}}.
+
+    Covered types reuse the frozen transfer definition
+    (transfer_matrix) on their endpoint. Uncovered types return
+    {"status": "uncovered", "reason": ...} with entries=[] and
+    T=None — an explicit gap, not a zero.
+    """
+    out = {}
+    for tname, endpoint, note in TRANSFER_TYPES:
+        if endpoint is None:
+            out[tname] = {"status": "uncovered", "reason": note,
+                          "entries": [], "T": None}
+            continue
+        entries = transfer_matrix(recoveries, ground_truth, vectors,
+                                  endpoint=endpoint)
+        h_t = [e["T"] for e in entries
+               if e["dev"].startswith(protocol.ARM_HETERO)
+               and e["target"].startswith(protocol.ARM_HETERO)]
+        s_t = [e["T"] for e in entries
+               if e["dev"].startswith(protocol.ARM_SEED_ONLY)
+               and e["target"].startswith(protocol.ARM_SEED_ONLY)]
+        out[tname] = {"status": "covered", "reason": note,
+                      "entries": entries, "T_hetero": h_t, "T_seed": s_t,
+                      "falsification": falsification_verdict(h_t, s_t)}
+    return out
+
 
 def score_recovery(recovery, ground_truth, vectors):
     """Compute all endpoints from one apply() recovery dict."""

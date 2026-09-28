@@ -116,6 +116,8 @@ def run_experiment(prog_entry, out_root, n_hetero=3, n_seed=3,
                 "T_hetero_ci": list(measure_mod.bootstrap_ci(h_t, seed=seed)),
                 "T_seed_ci": list(measure_mod.bootstrap_ci(s_t, seed=seed + 1)),
                 "falsification": verdict,
+                "taxonomy": measure_mod.taxonomy_transfer(
+                    recoveries, gt, vectors),
                 "skipped": sum(1 for r in recoveries.values()
                                if r.get("status") == "skipped"),
                 "failed": sum(1 for r in recoveries.values()
@@ -158,6 +160,16 @@ def render_markdown(report):
         L.append("verdict: %s (U=%.2f p=%.4f med_h=%.3f med_s=%.3f)" % (
             f["verdict"], f["U"], f["p"], f["median_hetero"], f["median_seed"]))
         L.append("skipped=%d failed=%d" % (data["skipped"], data["failed"]))
+        L.append("")
+        L.append("### attack taxonomy (per-type transfer)")
+        for tname, tdata in data.get("taxonomy", {}).items():
+            if tdata.get("status") == "uncovered":
+                L.append("- %s: UNCOVERED (%s)" % (tname, tdata.get("reason")))
+                continue
+            fh = tdata.get("falsification", {})
+            L.append("- %s: med_h=%.3f med_s=%.3f p=%.4f → %s" % (
+                tname, fh.get("median_hetero"), fh.get("median_seed"),
+                fh.get("p"), fh.get("verdict")))
         L.append("")
         L.append("| dev \\ target | " + " | ".join(
             sorted({e["target"] for e in data["entries"]})) + " |")

@@ -1648,6 +1648,42 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
             node.name = self._encode_name(node.name)
         self.generic_visit(node)
         return node
+    def visit_MatchAs(self, node):
+        # Pattern-captured names are bindings: uses are renamed via
+        # visit_Name, so the binding must encode identically (or skip
+        # when colliding with params, whose uses are never renamed).
+        if node.name:
+            try:
+                _params = getattr(self, '_local_params', None)
+            except Exception:
+                _params = None
+            if _params is not None and node.name in _params:
+                return node
+            node.name = self._encode_name(node.name)
+        self.generic_visit(node)
+        return node
+    def visit_MatchStar(self, node):
+        if node.name:
+            try:
+                _params = getattr(self, '_local_params', None)
+            except Exception:
+                _params = None
+            if _params is not None and node.name in _params:
+                return node
+            node.name = self._encode_name(node.name)
+        self.generic_visit(node)
+        return node
+    def visit_MatchMapping(self, node):
+        if node.rest:
+            try:
+                _params = getattr(self, '_local_params', None)
+            except Exception:
+                _params = None
+            if _params is not None and node.rest in _params:
+                return node
+            node.rest = self._encode_name(node.rest)
+        self.generic_visit(node)
+        return node
 class DependencyScanner:
     PACKAGE_MAP = {
         "PIL": "Pillow", "cv2": "opencv-python", "sklearn": "scikit-learn",

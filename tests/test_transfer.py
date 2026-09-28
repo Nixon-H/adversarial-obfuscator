@@ -201,3 +201,50 @@ def test_report_marks_and_times():
     md = R.render_markdown(rep)
     assert "y.py" in md and "boom" in md and "X" in md
     assert "hetero:0" not in md  # only provided entries render
+
+
+def _tax_recovery(boundary_ok=True, passed=("f", "g"), by_name=False):
+    pf = {}
+    for name in ("f", "g"):
+        pf[name] = {"candidate": ("f" if by_name else "a_" + name) if boundary_ok else None,
+                    "passed": 1 if name in passed else 0, "total": 1}
+    return {"status": "ok", "per_func": pf, "constants_found": ["x"],
+            "attack_time_s": 0.1}
+
+
+def test_taxonomy_types_diverge():
+    # Boundary recovers everywhere but semantics only on self-builds:
+    # per-type T must differ (vector, not a single number).
+    from scripts.transfer import measure as M
+    gt = {"functions": [{"name": "f"}, {"name": "g"}], "constants": ["x"]}
+    rec = {
+        ("hetero:0", "hetero:0"): _tax_recovery(True, ("f", "g")),
+        ("hetero:1", "hetero:0"): _tax_recovery(True, ("f",)),
+        ("hetero:1", "hetero:1"): _tax_recovery(True, ("f", "g")),
+        ("seed_only:0", "seed_only:0"): _tax_recovery(True, ("f", "g")),
+        ("seed_only:1", "seed_only:0"): _tax_recovery(True, ("f", "g")),
+        ("seed_only:1", "seed_only:1"): _tax_recovery(True, ("f", "g")),
+    }
+    tax = M.taxonomy_transfer(rec, gt, None)
+    assert set(tax) == {"function", "semantic", "constant", "name",
+                        "cfg", "dataflow", "vm"}
+    assert tax["function"]["status"] == "covered"
+    assert tax["semantic"]["status"] == "covered"
+    fh = [e["T"] for e in tax["function"]["entries"]]
+    sh = [e["T"] for e in tax["semantic"]["entries"]]
+    assert all(v == 1.0 for v in fh)  # boundaries transfer everywhere
+    assert 0.5 in sh  # semantic transfer partially fails cross-build
+    assert tax["cfg"]["status"] == "uncovered"
+    assert tax["cfg"]["T"] is None
+    assert tax["dataflow"]["entries"] == []
+    assert "reason" in tax["vm"]
+
+
+def test_taxonomy_uncovered_never_zero():
+    from scripts.transfer import measure as M
+    gt = {"functions": [{"name": "f"}], "constants": []}
+    tax = M.taxonomy_transfer({}, gt, None)
+    for tname in ("cfg", "dataflow", "vm"):
+        assert tax[tname]["status"] == "uncovered"
+        assert tax[tname]["T"] is None  # explicit gap, not a zero
+    assert tax["semantic"]["entries"] == []
