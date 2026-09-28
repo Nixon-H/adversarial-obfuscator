@@ -67,6 +67,15 @@ def generate_variant(source: str, variant_id: int, config: dict) -> str:
     from obfuscator.core.pipeline import ObfuscationTransformer
 
     combined_seed = ast_seed ^ mba_seed ^ cfg_seed
+    # Experiment arms (transfer H0-H5) inject extra options here
+    # (rep/vm families, isolation flags). Absent by default: zero
+    # behavior change for all existing callers.
+    for _k, _v in dict(config.get("extra_options", {}) or {}).items():
+        options[_k] = _v
+    # Seed the new families deterministically per variant unless the
+    # experiment pins them explicitly.
+    options.setdefault("rep_seed", combined_seed)
+    options.setdefault("vm_seed", combined_seed ^ 0x9E3779B9)
     transformer = ObfuscationTransformer(seed=combined_seed)
 
     rng = random.Random(combined_seed)

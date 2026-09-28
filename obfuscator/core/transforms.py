@@ -2057,6 +2057,14 @@ class ControlFlowFlattener(ast.NodeTransformer):
         num_blocks = len(blocks)
         indices = list(range(num_blocks))
         random.shuffle(indices)
+        # Entry block (original_idx 0, holding the function's first
+        # statement) MUST execute first: rotate the shuffled order so it
+        # leads. Otherwise dispatch starts mid-function and reads
+        # unbound locals (was: init state pointed at a random block).
+        # Rotation preserves all pairwise chain links; the new tail
+        # still terminates via is_last -> loop=False.
+        k = indices.index(0)
+        indices = indices[k:] + indices[:k]
         lut_size = max(num_blocks * 4, 64)
         dispatch_lut = [random.randint(0, num_blocks - 1) for _ in range(lut_size)]
         for i in range(len(indices) - 1):
