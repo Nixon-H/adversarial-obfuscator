@@ -343,7 +343,7 @@ def apply_ast_mutation(source_code, options=None):
         stripper = TypeHintStripper()
         tree = stripper.visit(tree)
         secure_map = {}
-        mutator = ASTMutator()
+        mutator = ASTMutator(junk_enabled=options.get('enhanced_junk', True))
         tree = mutator.visit(tree)
         if options.get('cfg_flatten'):
             flattener = ControlFlowFlattener()

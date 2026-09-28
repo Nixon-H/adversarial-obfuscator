@@ -283,7 +283,10 @@ class SymbolRenamer(ast.NodeTransformer):
         _accum = set(_prev_params) if _prev_params else set()
         _accum.update(_param_names)
         self._local_params = _accum
+        _prev_fdepth = getattr(self, '_func_depth', 0)
+        self._func_depth = _prev_fdepth + 1
         self.generic_visit(node)
+        self._func_depth = _prev_fdepth
         self._local_params = _prev_params
         self.current_function = old_function
         return node
@@ -304,6 +307,16 @@ class SymbolRenamer(ast.NodeTransformer):
         _params = getattr(self, '_local_params', None)
         if _params is not None and node.id in _params:
             return node
+        # Class-body attribute stores (e.g. `kind = "box"` directly in a
+        # class body) are read back via attribute access (`self.kind`),
+        # which NEVER renames — so the Store must not rename either, or
+        # def/use desync into AttributeError. Applies only to direct
+        # class-body statements (inside a class, outside any function;
+        # method locals still rename). Bare loads in methods that would
+        # only resolve via class attrs raise NameError identically
+        # before/after (no behavior change).
+        if isinstance(node.ctx, (ast.Store, ast.Del)) and getattr(self, '_class_depth', 0) > 0 and getattr(self, '_func_depth', 0) == 0:
+            return node
         if isinstance(node.ctx, (ast.Load, ast.Store, ast.Del)) and not node.id.startswith("__") and not node.id.startswith("_") and node.id not in self.reserved:
             node.id = self.get_new_name(node.id)
         return node
@@ -322,6 +335,62 @@ class SymbolRenamer(ast.NodeTransformer):
         # runtime — renaming them breaks binding exactly like renaming
         # visit_arg definitions. NEVER rename keyword.arg (None = **kwargs
         # splash, nothing to rename).
+        return node
+    def visit_ExceptHandler(self, node):
+        # Binding/use consistency: `except E as name` binds `name`, and
+        # uses inside the handler are renamed via visit_Name — so the
+        # binding MUST rename identically or the handler breaks. Params
+        # are never renamed (call-site contracts), so a handler name
+        # colliding with a param keeps its spelling (uses are skipped
+        # as params too, staying consistent).
+        if node.name:
+            _params = getattr(self, '_local_params', None) or set()
+            if node.name not in self.reserved and node.name not in _params:
+                node.name = self.get_new_name(node.name)
+        self.generic_visit(node)
+        return node
+    def visit_MatchAs(self, node):
+        # Same binding/use contract as ExceptHandler: pattern-captured
+        # names (case [x], case {"k": y}, case [*rest]) must rename
+        # identically to their uses, or skip when colliding with params.
+        if node.name:
+            _params = getattr(self, '_local_params', None) or set()
+            if node.name not in self.reserved and node.name not in _params:
+                node.name = self.get_new_name(node.name)
+        self.generic_visit(node)
+        return node
+    def visit_MatchStar(self, node):
+        if node.name:
+            _params = getattr(self, '_local_params', None) or set()
+            if node.name not in self.reserved and node.name not in _params:
+                node.name = self.get_new_name(node.name)
+        self.generic_visit(node)
+        return node
+    def visit_MatchMapping(self, node):
+        if node.rest:
+            _params = getattr(self, '_local_params', None) or set()
+            if node.rest not in self.reserved and node.rest not in _params:
+                node.rest = self.get_new_name(node.rest)
+        self.generic_visit(node)
+        return node
+    def visit_Lambda(self, node):
+        # Lambda parameters are bindings: uses in the body must agree.
+        # visit_arg never renames defs, so record lambda params as
+        # no-rename (mirrors the FunctionDef _local_params contract).
+        _prev_params = getattr(self, '_local_params', None)
+        _accum = set(_prev_params) if _prev_params else set()
+        for a in list(node.args.posonlyargs) + list(node.args.args) + list(node.args.kwonlyargs):
+            _accum.add(a.arg)
+        if node.args.vararg is not None:
+            _accum.add(node.args.vararg.arg)
+        if node.args.kwarg is not None:
+            _accum.add(node.args.kwarg.arg)
+        self._local_params = _accum
+        _fd = getattr(self, '_func_depth', 0)
+        self._func_depth = _fd + 1
+        self.generic_visit(node)
+        self._local_params = _prev_params
+        self._func_depth = _fd
         return node
     def visit_Nonlocal(self, node):
         if self.current_function in self.protected_functions:
@@ -601,16 +670,24 @@ class VariableCapture(ast.NodeVisitor):
         accessible = (self.defined_in_function | self.params | self.nonlocal_vars | self.global_vars)
         return external & accessible
 class ASTMutator(ast.NodeTransformer):
-    def __init__(self):
+    def __init__(self, junk_enabled=True):
         self.funcs = []
         self.junk_counter = 0
+        # Junk/sandbox interleaving is governed by the caller's
+        # enhanced_junk flag (O0 disables it; the O0-identity contract
+        # requires byte-stable output when all transforms are off).
+        # Default True preserves legacy always-on behavior.
+        self.junk_enabled = junk_enabled
     def visit_Module(self, node):
-        self.funcs = [n for n in node.body if isinstance(n, ast.FunctionDef)]
-        non_funcs = [n for n in node.body if not isinstance(n, ast.FunctionDef)]
-        random.shuffle(self.funcs)
+        # Semantic-preservation rule: original statements keep their
+        # relative order. Moving FunctionDefs after executable statements
+        # breaks definition-before-use (module-level calls/constants);
+        # shuffling defs breaks decorator/default-arg forward references.
+        # Only pure junk may be INTERLEAVED; sandbox checks (may exit)
+        # are appended after user statements, before __main__ guards.
         main_blocks = []
-        other_stmts = []
-        for n in non_funcs:
+        others = []
+        for n in node.body:
             is_main = False
             if isinstance(n, ast.If):
                 try:
@@ -622,17 +699,18 @@ class ASTMutator(ast.NodeTransformer):
             if is_main:
                 main_blocks.append(n)
             else:
-                other_stmts.append(n)
+                others.append(n)
         new_body = []
-        for stmt in other_stmts:
+        for stmt in others:
             new_body.append(stmt)
+            if not self.junk_enabled:
+                continue
             r = random.random()
             if r < 0.2:
                 new_body.append(self._generate_dead_code())
             elif r > 0.8:
                 new_body.extend(self._generate_sandbox_check())
-        final_body = new_body + self.funcs + main_blocks
-        node.body = final_body
+        node.body = new_body + main_blocks
         return node
     def _generate_dead_code(self):
         self.junk_counter += 1
