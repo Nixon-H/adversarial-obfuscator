@@ -176,6 +176,8 @@ Default-ON vs default-OFF matrix:
   - `--pytoc` / `--pyinstaller-spec` are best-effort and never fail the build.
   - Vendor-native perf claims (0.19x–1.56x) are not reproduced in-repo;
     measured Phase-1 shim overhead is 1.46x–3.84x per family.
+- Full attacker-by-attacker breakdown: `THREAT_MODEL.md`.
+- Policy, supported versions (3.10–3.14), and enforceable invariants: `SECURITY.md`.
 
 ## Repo layout
 

@@ -1,0 +1,22 @@
+# Gitleaks config for the Nixon project.
+# Extends the default rule set; the [allowlist] below covers two CONFIRMED
+# false positives (verified 2026-09-28 with `gitleaks detect --no-git`):
+#   - tests/test_chacha20_strings.py: RFC 8439 Section 2.4.2 test vector
+#     (RFC_KEYSTREAM = "10f1e7..."), flagged as generic-api-key.
+#   - build/: gitignored generated build artifacts (e.g.
+#     build/temporal_key_config.json ephemeral keys). Kept in the allowlist
+#     so local `--no-git` scans stay green too; the CI action scans git
+#     content where build/ never appears.
+# Everything else uses default rules with zero tolerance.
+
+title = "Nixon gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "confirmed false positives: RFC test vectors + generated build output"
+paths = [
+  '''tests/test_chacha20_strings\.py''',
+  '''build/.*''',
+]

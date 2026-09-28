@@ -27,6 +27,16 @@ stdlib-only, ``match``-free Python 3.10-compatible source defining
 embeds that fragment by construction and wires the ``clock_bias`` signal
 (weight :data:`CLOCK_BIAS_WEIGHT`, in the ``timing=10`` family) into the
 runtime ``vm_check`` / ``vm_score_percent`` findings, default ON.
+
+Live-hardware status: DIAGNOSTIC / NON-GATING, permanently. The live
+:func:`clock_bias_check` samples a real host counter, so its verdict is
+inherently host-noisy: scheduler preemption, CI load spikes, power
+management, and hypervisor steal time all widen the delta tail on
+otherwise clean metal. A live verdict therefore never gates execution
+and never contributes more than its Monitor-tier confidence weight; it
+is a diagnostic hint corroborated (or outvoted) by the rest of the
+signal ensemble. Deterministic verdicts come only from explicit delta
+vectors via :func:`clock_bias_verdict` (unit-testable, no I/O).
 """
 
 import time

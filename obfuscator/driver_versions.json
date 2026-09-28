@@ -1,0 +1,24 @@
+{
+  "_meta": {
+    "purpose": "Hand-curated known-vulnerable version fingerprints for stems in BLOCKED_DRIVERS (obfuscator/driver_blocklist.py). Used ONLY to raise confidence (stem-only 0.6 -> vulnerable-version 0.95). A stem hit ALWAYS still reports at >= 0.6 even when no version data exists or the version looks fixed: version parsing is best-effort and must never fail-open.",
+    "staleness_warning": "Hand-written from public BYOVD knowledge (LOLDrivers project, vendor advisories cited in driver_blocklist.py). Version boundaries are APPROXIMATE and WILL go stale as vendors ship fixes. Refresh against the LOLDrivers project and the relevant vendor advisory before trusting any version gate. Better 10 curated entries than 100 guessed: entries without solid data carry fixed_in=null and are stem-only by design.",
+    "refresh": "LOLDrivers project + vendor advisories (see BLOCKED_DRIVERS comments in obfuscator/driver_blocklist.py); Dell DSA-2021-088 for DBUtilDrv2; Paragon advisory for BioNTdrv CVE-2025-0286..0290.",
+    "schema": {
+      "affected": "exact known-vulnerable file-version strings (match -> vulnerable)",
+      "affected_below": "versions strictly below this are treated as vulnerable (approximate boundary)",
+      "fixed_in": "first fixed version if known, else null (null = no fixed version tracked, stem-only)",
+      "cve": "public CVE id if any, else null",
+      "note": "short provenance note"
+    }
+  },
+  "rtcore64": {"affected": [], "affected_below": null, "fixed_in": null, "cve": null, "note": "MSI Afterburner RTCore64.sys (MSR/physical-memory access). No fixed version published; MSI removed the driver in later releases. Any version is stem-only."},
+  "rtcore32": {"affected": [], "affected_below": null, "fixed_in": null, "cve": null, "note": "32-bit RTCore sibling of rtcore64. Same treatment: no fixed version tracked, stem-only."},
+  "winring0": {"affected": [], "affected_below": null, "fixed_in": null, "cve": null, "note": "OpenLibSys WinRing0 (ships with CPU-Z/HW-monitor tools). No fixed version tracked, stem-only."},
+  "winring0x64": {"affected": [], "affected_below": null, "fixed_in": null, "cve": null, "note": "64-bit WinRing0 sibling. No fixed version tracked, stem-only."},
+  "gdrv": {"affected": [], "affected_below": null, "fixed_in": null, "cve": null, "note": "Gigabyte GDRV.sys (arbitrary physical-memory RW). Fixed utilities exist but exact fixed boundary not tracked here; stem-only."},
+  "asio": {"affected": [], "affected_below": null, "fixed_in": null, "cve": null, "note": "ASUS AsIO.sys (physical-memory access). Fixed via updated utilities; exact boundary not tracked; stem-only."},
+  "dbutildrv2": {"affected": ["2.3.0.0"], "affected_below": "2.4.0.0", "fixed_in": null, "cve": "CVE-2021-21551", "note": "Dell DBUtilDrv2.sys. Vulnerable 2.3.0.0 and earlier per Dell DSA-2021-088; boundary approximate, refresh from advisory."},
+  "dbutil_2_3": {"affected": ["2.3.0.0"], "affected_below": "2.4.0.0", "fixed_in": null, "cve": "CVE-2021-21551", "note": "dbutil_2_3.sys variant filename of the same Dell driver; same CVE and boundary as dbutildrv2."},
+  "biontdrv": {"affected": [], "affected_below": "2.1.0.0", "fixed_in": null, "cve": "CVE-2025-0286", "note": "Paragon BioNTdrv.sys (CVE-2025-0286..0290 family). Pre-fix 2.0.x builds vulnerable; boundary approximate, refresh from Paragon advisory."},
+  "rzpnk": {"affected": [], "affected_below": null, "fixed_in": null, "cve": null, "note": "Razer rzpnk.sys (local-privesc abuse). Fixed in Synapse updates; exact boundary not tracked; stem-only."}
+}

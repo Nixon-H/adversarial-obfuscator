@@ -21,12 +21,24 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from obfuscator.driver_blocklist import (
     ARM_VAR,
     BLOCKED_DRIVERS,
+    CONF_BAD_SIGNATURE,
+    CONF_STEM_ONLY,
+    CONF_SUSPICIOUS_PATH,
+    CONF_VULN_VERSION,
+    KILL_THRESHOLD,
+    LIMITATION_HIDDEN,
     check_current,
+    check_current_evidence,
     check_names,
+    check_names_evidence,
     emit_driver_snippet,
     enum_loaded_drivers,
+    enum_loaded_drivers_with_paths,
+    get_file_version,
     is_armed,
     normalize,
+    should_kill,
+    signature_status,
 )
 
 BUILD_PY = os.path.join(os.path.dirname(__file__), "..", "scripts", "build.py")
@@ -346,3 +358,211 @@ def test_driver_names_survive_rename_passes():
                  "_NX_DRIVER_BLOCKED", "_NX_DRIVER_ARMED_BUILD",
                  "_NX_DRIVER_CHECK_ARMED"):
         assert name in out, name
+
+
+# ---------------------------------------------------------------------------
+# Hardening additions: evidence records, path signal, version fingerprints,
+# confidence tiers. All additive; existing bare-string/snippet behavior above
+# is untouched.
+# ---------------------------------------------------------------------------
+
+def test_check_names_still_bare_strings_contract():
+    # check_names return type is load-bearing (snippet parity): bare stems.
+    assert check_names(["RTCore64.sys"]) == ["rtcore64"]
+    recs = check_names_evidence(["RTCore64.sys"])
+    assert len(recs) == 1
+    assert recs[0]["stem"] == "rtcore64"
+    assert check_names(["ntoskrnl.sys"]) == []
+    assert check_names_evidence(["ntoskrnl.sys"]) == []
+
+
+def test_evidence_shape_keys():
+    recs = check_names_evidence(["RTCore64.sys"])
+    assert len(recs) == 1
+    rec = recs[0]
+    for key in ("stem", "raw", "rule", "confidence"):
+        assert key in rec, key
+    assert rec["stem"] == "rtcore64"
+    assert rec["raw"] == "RTCore64.sys"
+    assert isinstance(rec["confidence"], float)
+    # Explainable verdict: limitation strings always present.
+    assert "limitation" in rec
+    assert "rootkit" in rec["limitation"] or "hidden" in rec["limitation"]
+    assert LIMITATION_HIDDEN in rec["limitation"]
+
+
+def test_evidence_stem_only_confidence_06():
+    recs = check_names_evidence(["WinRing0x64.sys"])
+    assert len(recs) == 1
+    assert recs[0]["confidence"] == CONF_STEM_ONLY == 0.6
+    assert recs[0]["rule"] == "stem_match"
+    # Kill gate preserved: stem-only still meets threshold.
+    assert should_kill(recs) is True
+    assert KILL_THRESHOLD == 0.6
+
+
+def test_evidence_known_dir_path_stays_06():
+    recs = check_names_evidence(
+        ["C:\\Windows\\System32\\drivers\\RTCore64.sys"])
+    assert len(recs) == 1
+    assert recs[0]["confidence"] == 0.6
+    assert "location_suspicious" not in recs[0]["rules"]
+    assert recs[0]["path"] != ""
+
+
+def test_evidence_suspicious_path_confidence_08():
+    recs = check_names_evidence(["C:\\Users\\evil\\Temp\\RTCore64.sys"])
+    assert len(recs) == 1
+    assert recs[0]["confidence"] == CONF_SUSPICIOUS_PATH == 0.8
+    assert recs[0]["rule"] == "location_suspicious"
+    assert "location_suspicious" in recs[0]["rules"]
+    assert should_kill(recs) is True
+
+
+def test_evidence_tuple_and_paths_map_inputs():
+    recs = check_names_evidence([("gdrv.sys", "C:\\Temp\\gdrv.sys")])
+    assert len(recs) == 1 and recs[0]["confidence"] == 0.8
+    recs = check_names_evidence(["gdrv.sys"],
+                                paths={"gdrv": "C:\\Temp\\gdrv.sys"})
+    assert len(recs) == 1 and recs[0]["confidence"] == 0.8
+    recs = check_names_evidence(
+        ["gdrv.sys"], paths={"gdrv": "C:\\Windows\\System32\\drivers\\gdrv.sys"})
+    assert len(recs) == 1 and recs[0]["confidence"] == 0.6
+
+
+def test_evidence_vulnerable_version_confidence_095():
+    # DBUtilDrv2 2.3.0.0 is a known-vulnerable build (CVE-2021-21551).
+    recs = check_names_evidence(["DBUtilDrv2.sys"],
+                                versions={"dbutildrv2": "2.3.0.0"})
+    assert len(recs) == 1
+    assert recs[0]["confidence"] == CONF_VULN_VERSION == 0.95
+    assert recs[0]["rule"] == "vulnerable_version"
+    assert recs[0]["version"] == "2.3.0.0"
+    assert should_kill(recs) is True
+
+
+def test_evidence_version_mismatch_falls_back_to_stem():
+    # Far-future version: not vulnerable per fingerprint, but the stem hit
+    # still reports at 0.6 (version data must never fail-open).
+    recs = check_names_evidence(["DBUtilDrv2.sys"],
+                                versions={"dbutildrv2": "9.9.9.9"})
+    assert len(recs) == 1
+    assert recs[0]["confidence"] == 0.6
+    assert recs[0]["rule"] == "fixed_version_stem_only"
+    assert should_kill(recs) is True
+
+
+def test_evidence_unknown_version_falls_back_to_stem():
+    recs = check_names_evidence(["DBUtilDrv2.sys"])
+    assert len(recs) == 1
+    assert recs[0]["confidence"] == 0.6
+    assert recs[0]["version"] == ""
+    assert should_kill(recs) is True
+    # Garbage version strings never raise, never inflate.
+    recs = check_names_evidence(["DBUtilDrv2.sys"],
+                                versions={"dbutildrv2": "not-a-version!!!"})
+    assert recs[0]["confidence"] == 0.6
+
+
+def test_evidence_signature_invalid_09_via_override():
+    recs = check_names_evidence(["gdrv.sys"],
+                                signatures={"gdrv": False})
+    assert len(recs) == 1
+    assert recs[0]["confidence"] == CONF_BAD_SIGNATURE == 0.9
+    assert recs[0]["rule"] == "signature_invalid"
+    recs = check_names_evidence(["gdrv.sys"], signatures={"gdrv": True})
+    assert recs[0]["confidence"] == 0.6  # valid: no boost
+
+
+def test_signature_helper_skipped_gracefully():
+    # Live validation intentionally unimplemented: always unknown, never raises.
+    assert signature_status("C:\\Windows\\System32\\drivers\\gdrv.sys") is None
+    assert signature_status(None) is None
+    assert signature_status("") is None
+
+
+def test_get_file_version_failsoft_nonwindows():
+    # On this Linux host: always None, never raises.
+    assert get_file_version("/proc/modules") is None
+    assert get_file_version(None) is None
+    assert get_file_version("") is None
+
+
+def test_evidence_renamed_copy_stem_still_hits():
+    # Rename that keeps the stem (new dir, same basename) still hits.
+    recs = check_names_evidence(["C:\\evil-drop\\RTCore64.sys"])
+    assert [r["stem"] for r in recs] == ["rtcore64"]
+    # A copy renamed to a fully different stem is invisible: documented
+    # limitation, must NOT false-positive.
+    assert check_names_evidence(["totally_legit.sys"]) == []
+    assert check_names_evidence(["totally_legit.sys"]) == check_names(
+        ["totally_legit.sys"])
+
+
+def test_evidence_never_raises_bad_input():
+    assert check_names_evidence(None) == []
+    assert check_names_evidence([]) == []
+    assert check_names_evidence([None, "", 123]) == []
+    assert check_names_evidence("not-a-list-but-string") == [] or isinstance(
+        check_names_evidence("not-a-list-but-string"), list)
+    assert check_names_evidence([("gdrv.sys", None, "extra")]) == [] or \
+        isinstance(check_names_evidence([("gdrv.sys", None, "extra")]), list)
+    assert should_kill(None) is False
+    assert should_kill([]) is False
+    assert should_kill([{"confidence": 0.1}]) is False
+    assert should_kill([{"confidence": 0.6}]) is True
+
+
+def test_evidence_sorted_dedup():
+    recs = check_names_evidence(["GDRV.sys", "gdrv",
+                                 "C:\\T\\RTCore64.sys", "ntoskrnl.sys"])
+    assert [r["stem"] for r in recs] == ["gdrv", "rtcore64"]
+
+
+def test_check_current_evidence_pure_helper(monkeypatch):
+    import obfuscator.driver_blocklist as mod
+    monkeypatch.setattr(mod, "enum_loaded_drivers",
+                        lambda *a, **k: ["gdrv.sys"])
+    recs = check_current_evidence(names=None)
+    assert [r["stem"] for r in recs] == ["gdrv"]
+    assert check_current_evidence(names=["ntoskrnl.sys"]) == []
+    recs = check_current_evidence(names=["WinRing0x64.sys"])
+    assert recs[0]["confidence"] == 0.6
+
+
+def test_enum_with_paths_linux_no_paths(tmp_path):
+    f = tmp_path / "modules"
+    f.write_text("tun 77824 0 - Live 0x0\n", encoding="utf-8")
+    pairs = enum_loaded_drivers_with_paths(str(f))
+    assert pairs == [("tun", None)]  # /proc/modules has no path column
+    assert enum_loaded_drivers_with_paths("/nonexistent-nx-modules") == []
+
+
+def test_version_fingerprints_small_curated_subset():
+    import json as _json
+    fp_path = os.path.join(os.path.dirname(__file__), "..", "obfuscator",
+                           "driver_versions.json")
+    data = _json.load(open(fp_path, encoding="utf-8"))
+    assert "_meta" in data  # staleness warning + refresh pointer documented
+    meta = _json.dumps(data["_meta"]).lower()
+    assert "stale" in meta and "lol" in meta
+    stems = [k for k in data if not k.startswith("_")]
+    assert 1 <= len(stems) <= 10, len(stems)
+    for stem in stems:
+        assert stem in BLOCKED_DRIVERS, stem
+
+
+def test_module_no_driver_loading_apis():
+    src = open(os.path.join(os.path.dirname(__file__), "..", "obfuscator",
+                            "driver_blocklist.py")).read()
+    for banned in ("CreateService", "StartService", "NtLoadDriver",
+                   "ZwLoadDriver", "DeviceIoControl", "WriteProcessMemory",
+                   "NtDeviceIoControlFile", "IoCreateDevice"):
+        assert banned not in src, banned
+
+
+def test_module_compiles_py310():
+    src = open(os.path.join(os.path.dirname(__file__), "..", "obfuscator",
+                            "driver_blocklist.py")).read()
+    compile(src, "<nx_driver_blocklist>", "exec")
+    ast.parse(src, feature_version=(3, 10))

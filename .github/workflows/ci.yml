@@ -2,6 +2,11 @@ name: CI
 
 on: [push, pull_request]
 
+# Least privilege: the default GITHUB_TOKEN for this workflow is read-only.
+# Jobs that need more must declare it explicitly per-job.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -34,3 +39,52 @@ jobs:
         run: python3 -m py_compile obfuscator/*.py irgen/*.py llvmgen/*.py scripts/*.py vm/*.py encrypt/*.py tests/*.py
       - name: Build C shared libs
         run: make core
+
+  pip-audit:
+    # Supply chain HARD gate: pip-audit exits nonzero when any advisory
+    # matches requirements.txt, and continue-on-error stays false (the
+    # default) so a vulnerable pin breaks the build until a human bumps the
+    # pin in requirements.txt after reviewing the advisory. Deliberately no
+    # --fix auto-mutation in CI. NOTE (2026-09-28): a local
+    # `pip-audit -r requirements.txt` run already reports advisories on
+    # requests/urllib3/cryptography/pytest pins — expect this job red until
+    # those pins are bumped. That is the gate working as designed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pip-audit
+        run: pip install pip-audit
+      - name: Audit pinned dependencies (hard gate)
+        run: pip-audit -r requirements.txt --desc
+
+  gitleaks:
+    # Secret scanning on every push/PR: default rule set plus the
+    # .gitleaks.toml allowlist (RFC 8439 test vector in
+    # tests/test_chacha20_strings.py and gitignored build/ artifacts — both
+    # verified false positives, allowlist verified green locally 2026-09-28).
+    # Pinned to the v2 major line; watch gitleaks/gitleaks-action releases
+    # for v3 migration.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependency-diff:
+    # Informational only, never gates: surface requirements.txt history for
+    # human review. Always exits 0 (|| true); reviewers check the log.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Show requirements.txt diff (informational)
+        run: |
+          git log --oneline -3 -- requirements.txt
+          git diff HEAD~1 -- requirements.txt || true

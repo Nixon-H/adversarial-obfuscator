@@ -443,3 +443,90 @@ def test_e2e_expired_trial_nonzero_exit(tmp_path):
     # watermark gates.
     assert proc.returncode == 137, proc.stdout[-2000:] + proc.stderr[-2000:]
     assert "SHOULD_NOT_PRINT" not in proc.stdout
+
+
+# -- rollback edge battery (now/tolerance/state injectable seams) ---------
+
+def _trial_ctx(key, fp, t0, trial_s=86400):
+    deadline = compute_deadline(trial_s, now=t0)
+    return deadline, mint_token(key, fp, deadline)
+
+
+def test_rollback_basic_rewind_beyond_tolerance(tmp_path):
+    key, fp, t0 = b"e" * 32, "EDGE-H", 1_700_000_000.0
+    deadline, token = _trial_ctx(key, fp, t0)
+    state = str(tmp_path / "edge_basic.state")
+    assert check_and_update(key, fp, deadline, token, state_path=state,
+                            now=t0) == "ok"
+    # now < last_seen - tolerance -> rollback.
+    assert check_and_update(key, fp, deadline, token, state_path=state,
+                            now=t0 - ROLLBACK_TOLERANCE_S - 1) == "rollback"
+
+
+def test_rollback_exactly_at_tolerance_boundary_ok(tmp_path):
+    # The gate is STRICTLY less-than: now == last_seen - tolerance is
+    # tolerated (NTP wobble exactly at the allowance still passes).
+    key, fp, t0 = b"e" * 32, "EDGE-H", 1_700_000_000.0
+    deadline, token = _trial_ctx(key, fp, t0)
+    state = str(tmp_path / "edge_boundary.state")
+    assert check_and_update(key, fp, deadline, token, state_path=state,
+                            now=t0) == "ok"
+    assert check_and_update(key, fp, deadline, token, state_path=state,
+                            now=t0 - ROLLBACK_TOLERANCE_S) == "ok"
+
+
+def test_last_seen_in_future_then_back_is_rollback(tmp_path):
+    # Clock jumped forward (state sealed at a future stamp, e.g. the box
+    # ran ahead) then came back: now far behind the sealed stamp ->
+    # rollback, even though `now` itself looks sane.
+    key, fp, t0 = b"e" * 32, "EDGE-H", 1_700_000_000.0
+    deadline, token = _trial_ctx(key, fp, t0)
+    state = str(tmp_path / "edge_future.state")
+    with open(state, "w", encoding="utf-8") as fh:
+        fh.write(seal_last_seen(key, t0 + 3600.0))
+    assert check_and_update(key, fp, deadline, token, state_path=state,
+                            now=t0) == "rollback"
+
+
+def test_missing_state_file_is_first_run_ok(tmp_path):
+    # No state file: first run seals at `now` and passes. The file must be
+    # created as a side effect so the NEXT run has a rollback window.
+    key, fp, t0 = b"e" * 32, "EDGE-H", 1_700_000_000.0
+    deadline, token = _trial_ctx(key, fp, t0)
+    state = str(tmp_path / "edge_missing.state")
+    assert not os.path.exists(state)
+    assert check_and_update(key, fp, deadline, token, state_path=state,
+                            now=t0) == "ok"
+    assert os.path.exists(state)
+    assert unseal_last_seen(key, open(state).read().strip()) == t0
+
+
+def test_corrupt_state_variants(tmp_path):
+    # Garbage with no seal structure -> tampered (fail closed, NOT ok).
+    # An EMPTY file is the documented exception: treated as first run
+    # (e.g. crashed mid-write) -> ok, resealed at `now`.
+    key, fp, t0 = b"e" * 32, "EDGE-H", 1_700_000_000.0
+    deadline, token = _trial_ctx(key, fp, t0)
+    garbage = str(tmp_path / "edge_garbage.state")
+    with open(garbage, "w", encoding="utf-8") as fh:
+        fh.write("definitely-not-a-sealed-stamp")
+    assert check_and_update(key, fp, deadline, token, state_path=garbage,
+                            now=t0) == "tampered"
+    empty = str(tmp_path / "edge_empty.state")
+    with open(empty, "w", encoding="utf-8") as fh:
+        fh.write("")
+    assert check_and_update(key, fp, deadline, token, state_path=empty,
+                            now=t0) == "ok"
+
+
+def test_tolerance_zero_edge(tmp_path):
+    # tolerance=0: any backwards step is a rollback; standing still is ok.
+    key, fp, t0 = b"e" * 32, "EDGE-H", 1_700_000_000.0
+    deadline, token = _trial_ctx(key, fp, t0)
+    state = str(tmp_path / "edge_zero.state")
+    assert check_and_update(key, fp, deadline, token, state_path=state,
+                            now=t0, tolerance_s=0) == "ok"
+    assert check_and_update(key, fp, deadline, token, state_path=state,
+                            now=t0, tolerance_s=0) == "ok"
+    assert check_and_update(key, fp, deadline, token, state_path=state,
+                            now=t0 - 1, tolerance_s=0) == "rollback"

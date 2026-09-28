@@ -272,3 +272,149 @@ def test_live_no_false_positive_on_clean_host():
     assert stats1["median_ns"] > 0
     assert stats1["p99_ns"] >= stats1["median_ns"]
     assert 0.0 <= stats1["tail_frac"] <= 1.0
+
+
+# ---- clock edge battery (timer-injectable seams, deterministic) ----
+
+
+def _ticks_from_deltas(deltas, start=1_000_000_000):
+    ticks = [start]
+    for d in deltas:
+        ticks.append(ticks[-1] + d)
+    it = iter(ticks)
+    return lambda: next(it)
+
+
+def test_normal_drift_no_flag():
+    # Monotonic ~100ns deltas: the healthy-metal shape. No flag.
+    flagged, stats = clock_bias_verdict([95 + (i % 11) for i in range(2000)])
+    assert flagged is False
+    assert stats["median_ns"] > 0
+    assert stats["tail_frac"] <= CLOCK_BIAS_TAIL_FRAC_THRESHOLD
+
+
+def test_extreme_but_uniform_drift_no_flag():
+    # Uniformity is the key property: ALL deltas huge but identical means
+    # no tail at all (p99/median == 1), so no flag despite the magnitude.
+    flagged, stats = clock_bias_verdict([10_000_000] * 2000)
+    assert flagged is False
+    assert stats["p99_ns"] == stats["median_ns"]
+    assert stats["tail_frac"] == 0.0
+
+
+def test_backwards_jumps_no_crash():
+    # Negative deltas (clock stepped backwards mid-vector): must not crash
+    # and must yield a sane verdict. Alternating +/- drives the median to
+    # <= 0, which never flags by rule.
+    flagged, stats = clock_bias_verdict([100, -100] * 1000)
+    assert isinstance(flagged, bool)
+    assert flagged is False
+    assert stats["samples"] == 2000
+
+
+def test_single_discontinuity_no_flag():
+    # One step-change mid-vector (100ns half, 10us half): bimodal but not
+    # a *tail* — p99/median ~2x, far below the 50x bar. Documents that a
+    # lone regime shift is not virtualization evidence.
+    vec = [100] * 1000 + [10000] * 1000
+    flagged, stats = clock_bias_verdict(vec)
+    assert flagged is False
+    assert stats["p99_ns"] / stats["median_ns"] < 50.0
+
+
+def test_same_vector_both_timer_paths_agree():
+    # Same delta vector through the pure verdict path AND the injected-timer
+    # sampling path: verdicts and stats must agree exactly.
+    vec = _clean()
+    flagged_v, stats_v = clock_bias_verdict(vec)
+    flagged_c, stats_c = clock_bias_check(
+        samples=len(vec), timer=_ticks_from_deltas(vec))
+    assert flagged_c is flagged_v
+    assert stats_c == stats_v
+
+
+def test_scheduler_delay_single_fat_outlier_no_flag():
+    # One fat outlier among clean samples: proves single-spike immunity
+    # (p99 rank needs >1% outliers at N=2000; tail fraction stays ~0.05%).
+    d = _clean()
+    d[0] = 50_000_000
+    flagged, stats = clock_bias_verdict(d)
+    assert flagged is False
+    assert stats["tail_frac"] < CLOCK_BIAS_TAIL_FRAC_THRESHOLD
+
+
+def test_virtualization_artifact_periodic_fat_tail_flags():
+    # Periodic fat tail (~2% of samples at ~200x median, via timer path):
+    # BOTH conditions hold -> flag. Same shape as _vm_like, exercised
+    # through the injectable timer seam instead of the verdict seam.
+    vec = [20000 if i % 50 == 0 else 95 + (i % 11) for i in range(2000)]
+    flagged, stats = clock_bias_check(
+        samples=len(vec), timer=_ticks_from_deltas(vec))
+    assert flagged is True
+    assert stats["tail_frac"] > CLOCK_BIAS_TAIL_FRAC_THRESHOLD
+    assert stats["p99_ns"] / stats["median_ns"] > 50.0
+
+
+def test_integer_overflow_scale_deltas_no_crash():
+    # Deltas near 2**63 (counter-width edge): uniform, so no flag; Python
+    # bigints must not overflow and the loader mirror must agree.
+    vec = [(2 ** 63 - 1) - (i % 7) for i in range(2000)]
+    flagged, stats = clock_bias_verdict(vec)
+    assert isinstance(flagged, bool)
+    assert flagged is False
+    assert stats["median_ns"] > 0
+    src = loader_snippet_fragment()
+    ns = {"_time": __import__("time")}
+    exec(compile(src, "<t>", "exec"), ns)
+    assert ns["_nx_has_clock_bias"](_deltas=vec) is False
+
+
+def test_zero_timer_constant_never_flags():
+    # Degenerate timer (constant ticks -> all-zero deltas -> median 0):
+    # verdict False, never a crash.
+    flagged, stats = clock_bias_check(samples=64, timer=lambda: 42)
+    assert flagged is False
+    assert stats["median_ns"] == 0
+    assert stats["samples"] == 64
+
+
+def test_none_timer_never_crashes():
+    # Timer returning None: subtraction raises per-sample, caught -> 0
+    # deltas -> degenerate -> False. Loader must survive too.
+    flagged, stats = clock_bias_check(samples=16, timer=lambda: None)
+    assert flagged is False
+    assert stats["median_ns"] == 0
+
+
+def test_empty_vector_never_flags():
+    flagged, stats = clock_bias_verdict([])
+    assert flagged is False
+    assert stats == {"median_ns": 0, "p99_ns": 0, "tail_frac": 0.0,
+                     "samples": 0}
+
+
+def test_malformed_entries_documented():
+    # clock_bias_verdict is strict over explicit vectors: None/str entries
+    # raise TypeError (documented here — callers sanitize first). The
+    # emitted loader mirror is total instead: it returns False on anything
+    # malformed and never raises (loader must not crash the artifact).
+    import pytest
+    for bad in ([100, None, 200], [100, "x", 200], [None] * 8):
+        with pytest.raises(TypeError):
+            clock_bias_verdict(bad)
+    src = loader_snippet_fragment()
+    ns = {"_time": __import__("time")}
+    exec(compile(src, "<t>", "exec"), ns)
+    f = ns["_nx_has_clock_bias"]
+    assert f(_deltas=[100, None, 200]) is False
+    assert f(_deltas="not-a-list") is False
+
+
+def test_replayed_vector_deterministic():
+    # Replaying the identical vector twice yields identical verdict+stats
+    # (both a clean and a flagging vector).
+    for vec in (_clean(), _vm_like()):
+        flagged1, stats1 = clock_bias_verdict(vec)
+        flagged2, stats2 = clock_bias_verdict(list(vec))
+        assert flagged1 is flagged2
+        assert stats1 == stats2

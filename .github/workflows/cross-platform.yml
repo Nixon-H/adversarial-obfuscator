@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: read-only default token.
+permissions:
+  contents: read
+
 jobs:
   test-linux-x86_64:
     runs-on: ubuntu-24.04

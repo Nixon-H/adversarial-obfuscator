@@ -390,3 +390,375 @@ def test_fast_passthrough_op_unaffected(fastmod):
     with contextlib.redirect_stdout(buf):
         fastmod._nxk_print("hello-fast")
     assert buf.getvalue() == "hello-fast\n"
+
+
+# ---------------------------------------------------------------------------
+# hostile-input battery (memory-safety / exception-parity fuzz for the top-5
+# C-facing ops: len/int/abs/bool/str).
+#
+# Every case asserts EXACT parity with the builtin: the same value (same
+# type) or the same exception TYPE + message. A segfault aborts the run
+# (faulthandler prints the C traceback); a silent wrong answer fails the
+# assert. Deterministic (no randomness); the randomized roundtrips live in
+# tests/test_adversarial_security.py.
+#
+# Run with: NIXON_LOG_REDIRECT=0 python3 -X dev -X faulthandler \
+#     -m pytest tests/test_kernel_fast.py -q -p no:cacheprovider
+# ---------------------------------------------------------------------------
+import faulthandler as _hostile_fh
+
+_hostile_fh.enable()
+
+
+def _assert_hostile_parity(fast_fn, plain_fn, args, kwargs=None,
+                           type_only=False):
+    """Exact value-or-error parity; catches BaseException (KI/SystemExit)."""
+    kwargs = dict(kwargs or {})
+    try:
+        want = plain_fn(*args, **kwargs)
+        want_exc = None
+    except BaseException as e:  # noqa: BLE001 - parity needs exact compare
+        want, want_exc = None, e
+    try:
+        got = fast_fn(*args, **kwargs)
+        got_exc = None
+    except BaseException as e:  # noqa: BLE001 - parity needs exact compare
+        got, got_exc = None, e
+    if want_exc is not None or got_exc is not None:
+        assert type(got_exc) is type(want_exc), (args, got_exc, want_exc)
+        if isinstance(want_exc, RecursionError):
+            # CPython's recursion message varies by where the limit trips:
+            # eval-loop gives 'maximum recursion depth exceeded', a C call
+            # boundary (e.g. via PyNumber_Absolute) appends ' while calling
+            # a Python object'. Both are correct; normalize the prefix.
+            assert str(got_exc).startswith(
+                "maximum recursion depth exceeded"), (args, got_exc)
+            assert str(want_exc).startswith(
+                "maximum recursion depth exceeded"), (args, want_exc)
+            return
+        assert str(got_exc) == str(want_exc), (args, got_exc, want_exc)
+        return
+    if type_only:
+        assert type(got) is type(want), (args, type(got), type(want))
+        return
+    assert _same_type_and_value(got, want), (args, repr(got), repr(want))
+
+
+class _RaiseLen(object):
+    def __init__(self, exc):
+        self._exc = exc
+
+    def __len__(self):
+        raise self._exc
+
+
+class _BadLenType(object):
+    def __len__(self):
+        return "not-an-int"
+
+
+class _NegLen(object):
+    def __len__(self):
+        return -5
+
+
+class _HugeLen(object):
+    def __len__(self):
+        return 2 ** 100
+
+
+class _MutatingLen(object):
+    def __init__(self):
+        self.n = 0
+
+    def __len__(self):
+        self.n += 1
+        return self.n
+
+
+class _RecursiveLen(object):
+    def __len__(self):
+        return len(self)
+
+
+class _RaiseAbs(object):
+    def __init__(self, exc):
+        self._exc = exc
+
+    def __abs__(self):
+        raise self._exc
+
+
+class _RecursiveAbs(object):
+    def __abs__(self):
+        return abs(self)
+
+
+class _MarkerAbs(object):
+    def __abs__(self):
+        return "custom-abs-marker"
+
+
+class _RaiseBool(object):
+    def __init__(self, exc):
+        self._exc = exc
+
+    def __bool__(self):
+        raise self._exc
+
+
+class _NonBoolRet(object):
+    def __bool__(self):
+        return 5
+
+
+class _RecursiveBool(object):
+    def __bool__(self):
+        return bool(self)
+
+
+class _RaiseLenForBool(object):
+    def __len__(self):
+        raise OSError("len-boom")
+
+
+class _HugeLenForBool(object):
+    def __len__(self):
+        return 2 ** 100
+
+
+class _RaiseInt(object):
+    def __init__(self, exc):
+        self._exc = exc
+
+    def __int__(self):
+        raise self._exc
+
+
+class _NonIntRet(object):
+    def __int__(self):
+        return "not-an-int"
+
+
+class _RecursiveInt(object):
+    def __int__(self):
+        return int(self)
+
+
+class _RaiseIndex(object):
+    def __index__(self):
+        raise IndexError("index-boom")
+
+
+class _RaiseStr(object):
+    def __init__(self, exc):
+        self._exc = exc
+
+    def __str__(self):
+        raise self._exc
+
+
+class _NonStrRet(object):
+    def __str__(self):
+        return b"bytes-not-str"
+
+
+class _RecursiveStr(object):
+    def __str__(self):
+        return str(self)
+
+
+class _RaiseReprForStr(object):
+    def __repr__(self):
+        raise RuntimeError("repr-boom")
+
+
+def test_hostile_len(fastmod):
+    import builtins as bi
+    fast = getattr(fastmod, _token("len"))
+    deterministic = [
+        ((None,), {}), ((123,), {}), ((object(),), {}),
+        ((), {}), (([1], [2]), {}), (([1],), {"x": 1}),
+        ((bytearray(b"ab"),), {}), ((memoryview(b"abc"),), {}),
+        ((b"ab",), {}), (("ab",), {}), (({"k": 1},), {}),
+        ((range(2 ** 40),), {}),
+        ((_RaiseLen(ValueError("boom")),), {}),
+        ((_RaiseLen(RuntimeError("boom")),), {}),
+        ((_RaiseLen(TypeError("boom")),), {}),
+        ((_RaiseLen(KeyboardInterrupt()),), {}),
+        ((_RaiseLen(SystemExit(3)),), {}),
+        ((_BadLenType(),), {}), ((_NegLen(),), {}),
+        ((_HugeLen(),), {}), ((_RecursiveLen(),), {}),
+    ]
+    for a, k in deterministic:
+        _assert_hostile_parity(fast, bi.len, a, k)
+    # Stateful dunder: consecutive calls legitimately differ, so compare
+    # the outcome CLASS only (both return int, or both raise same type).
+    m = _MutatingLen()
+    try:
+        want = bi.len(m)
+        want_exc = None
+    except BaseException as e:  # noqa: BLE001
+        want, want_exc = None, e
+    try:
+        got = fast(m)
+        got_exc = None
+    except BaseException as e:  # noqa: BLE001
+        got, got_exc = None, e
+    assert (got_exc is None) == (want_exc is None)
+    if want_exc is not None:
+        assert type(got_exc) is type(want_exc)
+    else:
+        assert type(got) is type(want) is int
+
+
+def test_hostile_abs(fastmod):
+    import builtins as bi
+    fast = getattr(fastmod, _token("abs"))
+    cases = [
+        ((None,), {}), (("x",), {}), (([1],), {}),
+        ((), {}), ((1, 2), {}), ((1,), {"x": 1}),
+        ((2 ** 10000,), {}), ((-(2 ** 10000),), {}),
+        ((3.5,), {}), ((complex(3, 4),), {}),
+        ((_RaiseAbs(ValueError("boom")),), {}),
+        ((_RaiseAbs(KeyboardInterrupt()),), {}),
+        ((_RaiseAbs(SystemExit(3)),), {}),
+        ((_RecursiveAbs(),), {}),
+        ((_MarkerAbs(),), {}),
+    ]
+    for a, k in cases:
+        _assert_hostile_parity(fast, bi.abs, a, k)
+
+
+def test_hostile_bool(fastmod):
+    import builtins as bi
+    fast = getattr(fastmod, _token("bool"))
+    cases = [
+        ((None,), {}), ((0,), {}), ((0.0,), {}), (("",), {}),
+        (([],), {}), (({},), {}), ((False,), {}),
+        ((b"",), {}), ((bytearray(b"x"),), {}),
+        ((1, 2), {}), ((1,), {"x": 1}),
+        ((_RaiseBool(ValueError("boom")),), {}),
+        ((_RaiseBool(RuntimeError("boom")),), {}),
+        ((_RaiseBool(KeyboardInterrupt()),), {}),
+        ((_RaiseBool(SystemExit(3)),), {}),
+        ((_NonBoolRet(),), {}),
+        ((_RecursiveBool(),), {}),
+        ((_RaiseLenForBool(),), {}),
+        ((_HugeLenForBool(),), {}),
+    ]
+    for a, k in cases:
+        _assert_hostile_parity(fast, bi.bool, a, k)
+
+
+def test_hostile_int(fastmod):
+    import builtins as bi
+    fast = getattr(fastmod, _token("int"))
+    cases = [
+        ((None,), {}), (([],), {}), (({},), {}),
+        ((float("inf"),), {}), ((float("-inf"),), {}),
+        ((float("nan"),), {}),
+        (("9" * 5000,), {}), (("  42  ",), {}), (("0x10", 0), {}),
+        ((b"garbage",), {}), ((b"11", 2), {}),
+        ((3.9, 10), {}), ((1.5, 10), {}),
+        ((2 ** 100000,), {}), (("1" * 100 + "x",), {}),
+        ((_RaiseInt(ValueError("boom")),), {}),
+        ((_RaiseInt(KeyboardInterrupt()),), {}),
+        ((_NonIntRet(),), {}),
+        ((_RecursiveInt(),), {}),
+        ((_RaiseIndex(),), {}),
+    ]
+    for a, k in cases:
+        _assert_hostile_parity(fast, bi.int, a, k)
+    # Over-arity / kwarg shapes route through the fallback's rebuilt
+    # tuple+dict call, whose TypeError WORDING differs from the
+    # vectorcall path on some interpreters (same TYPE either way).
+    # Mirrors test_fast_fallback_errors_match_builtin's type_only list.
+    for a, k in [((1, 2, 3), {}), (("42",), {"x": 1}),
+                 ((), {"base": 16})]:
+        try:
+            fast(*a, **k)
+            fast_exc = None
+        except BaseException as e:  # noqa: BLE001
+            fast_exc = e
+        try:
+            bi.int(*a, **k)
+            plain_exc = None
+        except BaseException as e:  # noqa: BLE001
+            plain_exc = e
+        assert fast_exc is not None and plain_exc is not None, (a, k)
+        assert type(fast_exc) is type(plain_exc), (a, k)
+
+
+def test_hostile_str(fastmod):
+    import builtins as bi
+    fast = getattr(fastmod, _token("str"))
+    cases = [
+        ((None,), {}), ((b"\xff\xfe", "utf-8"), {}),
+        ((b"\xff\xfe", "utf-8", "ignore"), {}),
+        ((b"ab", "ascii"), {}),
+        (("x" * 10 ** 6,), {}),
+        ((_RaiseStr(ValueError("boom")),), {}),
+        ((_RaiseStr(KeyboardInterrupt()),), {}),
+        ((_RaiseStr(SystemExit(3)),), {}),
+        ((_NonStrRet(),), {}),
+        ((_RecursiveStr(),), {}),
+        ((_RaiseReprForStr(),), {}),
+    ]
+    for a, k in cases:
+        _assert_hostile_parity(fast, bi.str, a, k)
+    # Over-arity / kwarg shapes: same tuple+dict-vs-vectorcall wording
+    # drift as int() above (same TYPE either way).
+    for a, k in [((1, 2, 3, 4), {}), (("a", "b", "c", "d", "e"), {}),
+                 ((42,), {"x": 1})]:
+        try:
+            fast(*a, **k)
+            fast_exc = None
+        except BaseException as e:  # noqa: BLE001
+            fast_exc = e
+        try:
+            bi.str(*a, **k)
+            plain_exc = None
+        except BaseException as e:  # noqa: BLE001
+            plain_exc = e
+        assert fast_exc is not None and plain_exc is not None, (a, k)
+        assert type(fast_exc) is type(plain_exc), (a, k)
+
+
+def test_hostile_single_slot_invocation(fastmod):
+    """The C fast path must invoke a hostile slot exactly once per call
+    (no double-dispatch that a mutating dunder could observe)."""
+    import builtins as bi
+    calls = []
+
+    class Probe(object):
+        def __len__(self):
+            calls.append("len")
+            return 3
+
+        def __abs__(self):
+            calls.append("abs")
+            return 9
+
+        def __bool__(self):
+            calls.append("bool")
+            return True
+
+        def __int__(self):
+            calls.append("int")
+            return 4
+
+        def __str__(self):
+            calls.append("str")
+            return "p"
+
+    for op, meth, want in (("len", "len", 3), ("abs", "abs", 9),
+                           ("bool", "bool", True), ("int", "int", 4),
+                           ("str", "str", "p")):
+        calls.clear()
+        got = getattr(fastmod, _token(op))(Probe())
+        assert got == want and type(got) is type(want), (op, got)
+        assert calls == [meth], (op, calls)
+        calls.clear()
+        assert getattr(bi, op)(Probe()) == want
+        assert calls == [meth], ("plain-" + op, calls)

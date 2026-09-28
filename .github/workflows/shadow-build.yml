@@ -9,6 +9,10 @@ on:
         required: false
         default: ''
 
+# Least privilege: read-only default token.
+permissions:
+  contents: read
+
 jobs:
   shadow-build:
     runs-on: ubuntu-latest

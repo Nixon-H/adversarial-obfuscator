@@ -7,6 +7,10 @@ on:
     branches: [ "master", "main" ]
   workflow_dispatch:
 
+# Least privilege: read-only default token (no job here publishes releases).
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
