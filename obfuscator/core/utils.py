@@ -466,6 +466,78 @@ def tor_proxies(explicit=None):
     ep = resolve_tor_proxy(explicit)
     url = "socks5h://%s" % (ep,)
     return {"http": url, "https": url}
+
+
+def _artifact_sign_key(explicit_hex=None):
+    """Resolve the farm artifact HMAC key (bytes) or ``None``.
+
+    Precedence: explicit hex string > ``NIXON_ARTIFACT_KEY_HEX`` >
+    ``NIXON_SIGN_KEY`` (see ``scripts/artifact_sign.resolve_key``,
+    ADR-0005). Never raises: unconfigured/malformed means
+    opportunistic-unsigned operation with an auditable log line.
+    """
+    try:
+        if explicit_hex:
+            _k = bytes.fromhex(str(explicit_hex).strip())
+            if _k:
+                return _k
+    except (ValueError, TypeError, AttributeError):
+        pass
+    try:
+        from scripts.artifact_sign import resolve_key as _resolve_artifact_key
+        return _resolve_artifact_key()
+    except Exception:
+        return None
+
+
+def _verify_download_zip(zip_path, artifact_name, sign_key):
+    """Verify-before-extract gate for one downloaded farm zip.
+
+    Returns True when sidecars were present (each verified — a mismatch
+    raises ``ValueError`` fail-closed and the zip is deleted so the
+    caller must not extract). No key + sidecars present → loud warning
+    + proceed. No key + no sidecars → auditable warning + proceed. Key
+    + no sidecars → info note (farm-runner binaries are unsigned by
+    design: runners never hold the key — ADR-0005).
+    """
+    import logging as _logging
+    _log = _logging.getLogger("scripts.artifact_sign")
+    try:
+        from scripts import artifact_sign as _as
+        _names = _as.zip_sidecar_names(zip_path)
+    except Exception:
+        return False
+    if sign_key is not None:
+        if _names:
+            try:
+                _n = _as.verify_zip_sidecars(zip_path, sign_key)
+            except Exception as _e:
+                try:
+                    os.remove(zip_path)
+                except OSError:
+                    pass
+                raise ValueError(
+                    "artifact signature mismatch for %r: %s (refusing extract)"
+                    % (artifact_name, _e))
+            print("    [+] Signatures verified (%d) for: %s" % (_n, artifact_name))
+            return True
+        _log.info("ARTIFACT-AUTH: no signature sidecars for %r "
+                  "(farm-runner binaries are unsigned by design).",
+                  artifact_name)
+        return False
+    if _names:
+        _log.warning("ARTIFACT-AUTH: %d signature sidecar(s) present for %r "
+                     "but no signing key configured (NIXON_ARTIFACT_KEY_HEX / "
+                     "NIXON_SIGN_KEY) — proceeding WITHOUT verification. "
+                     "Set a key to enforce.", len(_names), artifact_name)
+        print("    [!] ARTIFACT-AUTH: signatures present for %s but no key "
+              "configured — proceeding UNVERIFIED (see log)." % artifact_name)
+    else:
+        _log.warning("ARTIFACT-AUTH: no signing key configured "
+                     "(NIXON_ARTIFACT_KEY_HEX / NIXON_SIGN_KEY) and no "
+                     "signatures present for %r — proceeding without "
+                     "verification (auditable downgrade).", artifact_name)
+    return bool(_names)
 class GitHubBuildFarm:
     def __init__(self,token, use_tor=False, tor_proxy=None):
         self.token=token
@@ -518,6 +590,38 @@ class GitHubBuildFarm:
         except Exception:
             print(f" [!] Upload failed: {r.status_code} {r.text}")
             return False
+        # Artifact-authenticity (ADR-0005, opportunistic): operator-side
+        # upload can access the env key, so attach a metadata-bound
+        # <remote_name>.sig.json sidecar when configured. Best-effort —
+        # never fails the upload. Absent key → logged + proceed unsigned.
+        try:
+            _skey = _artifact_sign_key()
+            if _skey is not None:
+                try:
+                    from scripts.artifact_sign import sign_artifact as _sa, default_metadata as _dm
+                    import json as _json
+                    _sig = _sa(local_path, _skey, _dm(extra={"file": remote_name}))
+                    _scontent = base64.b64encode(_json.dumps(_sig, sort_keys=True).encode()).decode()
+                    _surl = f"{self.base_url}/repos/{self.username}/{self.repo_name}/contents/{remote_name}.sig.json"
+                    try:
+                        _get = requests.get(_surl, headers=self.headers, proxies=self.proxies, verify=True, timeout=30)
+                        _sdata = {"message": f"Upload {remote_name}.sig.json", "content": _scontent}
+                        if _get.status_code == 200:
+                            _sha = _get.json().get("sha")
+                            if _sha: _sdata["sha"] = _sha
+                        _sr = requests.put(_surl, headers=self.headers, json=_sdata, proxies=self.proxies, verify=True, timeout=60)
+                        if _sr.status_code in [200, 201]:
+                            print(f"    [+] Signature sidecar uploaded: {remote_name}.sig.json")
+                        else:
+                            print(f"    [!] Sidecar upload skipped ({_sr.status_code}, non-fatal)")
+                    except Exception as _se:
+                        print(f"    [!] Sidecar upload skipped (non-fatal): {_se}")
+                except Exception as _se:
+                    print(f"    [!] Sidecar signing skipped (non-fatal): {_se}")
+            else:
+                print("    [i] No artifact signing key (NIXON_ARTIFACT_KEY_HEX/NIXON_SIGN_KEY); uploading unsigned (auditable).")
+        except Exception as _se:
+            print(f"    [!] Sidecar step skipped (non-fatal): {_se}")
         return True
     def create_workflow(self, payload_filename):
         script_content = f"""
@@ -712,7 +816,7 @@ jobs:
                 raise
             except Exception as e:
                 time.sleep(5)
-    def download_artifacts(self,run_id,output_dir):
+    def download_artifacts(self,run_id,output_dir,sign_key_hex=None):
         print(f" [*] [Cloud] Downloading binaries to {output_dir}...")
         import requests
         os.makedirs(output_dir,exist_ok=True)
@@ -721,6 +825,11 @@ jobs:
         # is the integrity mechanism (GitHub's API provides no artifact
         # content hash to pin against). Below adds timeouts, HTTP-status
         # enforcement, and ZipSlip confinement on top of that channel.
+        # ADR-0005 adds: verify-before-extract against any *.sig.json
+        # sidecars inside the zips when a key is configured (explicit hex
+        # or NIXON_ARTIFACT_KEY_HEX / NIXON_SIGN_KEY); mismatch raises
+        # fail-closed before extract. No key → auditable warning + proceed.
+        _sign_key = _artifact_sign_key(sign_key_hex)
         r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}/artifacts",headers=self.headers,proxies=self.proxies,verify=True,timeout=30)
         r.raise_for_status()
         artifacts=r.json().get('artifacts',[])
@@ -731,6 +840,7 @@ jobs:
             zip_resp.raise_for_status()
             zip_path=os.path.join(output_dir,f"{name}.zip")
             with open(zip_path,"wb")as f:f.write(zip_resp.content)
+            _verify_download_zip(zip_path, name, _sign_key)
             with zipfile.ZipFile(zip_path,'r')as z:
                 for _m in z.namelist():
                     _dest=os.path.realpath(os.path.join(output_dir,_m))
@@ -803,6 +913,36 @@ class GitHubNuitkaFarm:
                         r = requests.put(url, headers=self.headers, json=data, proxies=self.proxies, verify=True, timeout=300)
                         if r.status_code in [200, 201]:
                             t.success()
+                            # Artifact-authenticity (ADR-0005, opportunistic):
+                            # attach a metadata-bound sidecar when a key is
+                            # configured. Best-effort — never fails the upload.
+                            try:
+                                _skey = _artifact_sign_key()
+                                if _skey is not None:
+                                    try:
+                                        from scripts.artifact_sign import sign_artifact as _sa2, default_metadata as _dm2
+                                        import json as _json2
+                                        _sig = _sa2(local_path, _skey, _dm2(extra={"file": remote_name}))
+                                        _scontent = base64.b64encode(_json2.dumps(_sig, sort_keys=True).encode()).decode()
+                                        _surl = f"{self.base_url}/repos/{self.username}/{self.repo_name}/contents/{remote_name}.sig.json"
+                                        _sdata = {"message": f"Upload {remote_name}.sig.json", "content": _scontent}
+                                        try:
+                                            _get = requests.get(_surl, headers=self.headers, proxies=self.proxies, verify=True, timeout=30)
+                                            if _get.status_code == 200:
+                                                _sha = _get.json().get("sha")
+                                                if _sha: _sdata["sha"] = _sha
+                                        except Exception: pass
+                                        _sr = requests.put(_surl, headers=self.headers, json=_sdata, proxies=self.proxies, verify=True, timeout=60)
+                                        if _sr.status_code in [200, 201]:
+                                            print(f"    [+] Signature sidecar uploaded: {remote_name}.sig.json")
+                                        else:
+                                            print(f"    [!] Sidecar upload skipped ({_sr.status_code}, non-fatal)")
+                                    except Exception as _se:
+                                        print(f"    [!] Sidecar signing skipped (non-fatal): {_se}")
+                                else:
+                                    print("    [i] No artifact signing key (NIXON_ARTIFACT_KEY_HEX/NIXON_SIGN_KEY); uploading unsigned (auditable).")
+                            except Exception as _se:
+                                print(f"    [!] Sidecar step skipped (non-fatal): {_se}")
                             return True
                         elif r.status_code == 409:
                             time.sleep(1)
@@ -1286,11 +1426,18 @@ jobs:
                 with open(part, 'rb') as infile:
                     shutil.copyfileobj(infile, outfile)
                 os.remove(part)
-    def download_artifacts(self,run_id,output_dir):
+    def download_artifacts(self,run_id,output_dir,sign_key_hex=None):
         print(f" [*] [Cloud] Downloading binaries to {output_dir}...")
         import requests
         os.makedirs(output_dir,exist_ok=True)
         import time
+        # ADR-0005: verify-before-extract against any *.sig.json sidecars
+        # inside the zips when a key is configured (explicit hex or
+        # NIXON_ARTIFACT_KEY_HEX / NIXON_SIGN_KEY); mismatch aborts
+        # fail-closed (fast, no retry on tamper). No key → auditable
+        # warning + proceed. NOTE: no ZipSlip confinement on this path
+        # (unlike GitHubBuildFarm.download_artifacts) — residual risk.
+        _sign_key = _artifact_sign_key(sign_key_hex)
         time.sleep(3)
         try:
             r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}/artifacts",headers=self.headers,proxies=self.proxies,verify=True)
@@ -1330,12 +1477,16 @@ jobs:
                             t.update(value=f"(Attempt {attempt+1}/3)")
                         zip_path = os.path.join(output_dir, f"{name}.zip")
                         self._smart_download(down_url, zip_path, t, size_mb, optimal_threads)
+                        _verify_download_zip(zip_path, name, _sign_key)
                         with zipfile.ZipFile(zip_path, 'r') as z: z.extractall(output_dir)
                         os.remove(zip_path)
                         t.success()
                         success = True
                         break
                 except Exception as e:
+                    if "signature mismatch" in str(e):
+                        UI.fatal(f"Artifact signature mismatch for {name} (refusing extract).")
+                        raise
                     time.sleep(2 * (attempt + 1))
             if not success:
                 UI.fatal(f"Failed to download {name} after 3 attempts.")

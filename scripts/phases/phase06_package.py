@@ -47,21 +47,29 @@ def phase_package(payload, obfuscated_output, obfuscated_name, opts):
         shutil.copy2(obfuscated_output, dst)
         log("PACKAGE", f"  Payload: {dst}")
         os.remove(obfuscated_output)
-        # Phase-4 wiring: optional artifact signing sidecar (best-effort,
-        # never fails the build). --sign-key-env names an env var holding
-        # a hex key; the packaged payload is signed to <file>.sig.json.
+        # Phase-4 wiring + ADR-0005: optional artifact signing sidecar
+        # (best-effort, never fails the build). --sign-key-env names an env
+        # var holding a hex key; the packaged payload is signed with
+        # metadata binding (repo/commit/build-id/platform) to
+        # <file>.sig.json. Legacy bytes-only sigs still verify (weaker).
         try:
             _sign_env = str(getattr(opts, "sign_key_env", "") or "")
             if _sign_env:
-                from scripts.artifact_sign import sign_file as _phase4_sign
+                from scripts.artifact_sign import (
+                    sign_artifact as _phase4_sign,
+                    default_metadata as _phase4_meta,
+                    write_sidecar as _phase4_write,
+                )
                 _raw_key = os.environ.get(_sign_env, "")
                 if _raw_key:
                     try:
-                        _sig = _phase4_sign(dst, bytes.fromhex(_raw_key))
-                        with open(dst + ".sig.json", "w", encoding="utf-8") as _sf:
-                            json.dump({"algo": _sig.get("algo"), "hex": _sig.get("hex"),
-                                       "file": os.path.basename(dst)}, _sf)
-                        log("PACKAGE", f"  Signed: {dst}.sig.json")
+                        _meta = _phase4_meta(extra={
+                            "build_id": str(getattr(opts, "build_id", "") or ""),
+                            "file": os.path.basename(dst),
+                        })
+                        _sig = _phase4_sign(dst, bytes.fromhex(_raw_key), _meta)
+                        _sidecar = _phase4_write(dst, _sig)
+                        log("PACKAGE", f"  Signed: {_sidecar}")
                     except Exception as _se:
                         log("PACKAGE", f"  Signing failed (non-fatal): {_se}")
                 else:

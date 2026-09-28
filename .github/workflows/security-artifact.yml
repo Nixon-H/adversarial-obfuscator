@@ -1,0 +1,139 @@
+name: Security artifact validation
+
+# Hosted-CI real-artifact validation (the ENVIRONMENT_VALIDATED path).
+#
+# What this job proves that unit tests cannot: gated loader artifacts are
+# built, written to disk, and executed as FRESH processes on hosted
+# runners -- real os._exit kill ladder (rc 137), real clock (trial
+# expiry), real hosted VM signals. pytest (ci.yml) covers the same gates
+# in-process; this job covers them as deployed files.
+#
+# Design decisions (deliberate, documented):
+# - Triggers push + pull_request ONLY, no schedule: every gate asserted
+#   here is deterministic (forced verdicts, HMAC checks, real-clock
+#   expiry with wide margins). There is no time-drift signal a weekly
+#   run would add; supply-chain drift is already covered per-push by the
+#   pip-audit job in ci.yml.
+# - ubuntu-24.04 pinned (not ubuntu-latest): the VM-signal evidence
+#   (vm-report probe) is runner-image dependent; a pinned image keeps
+#   that evidence comparable across runs.
+# - Python 3.11 + 3.13: two minors prove loader bytecode / stdlib-snapshot
+#   portability. (3.10-3.14 skew is covered by ci.yml; two versions here
+#   keep this job under the 15-minute budget.)
+# - NO windows runner: the .py loader gates are OS-portable but the
+#   native Windows gates (driver blocklist, DLL reflective-load
+#   verification) ship in stub_win/MSVC, not in .py artifacts -- a
+#   windows .py run would add minutes without validating native gates.
+#   Windows execution stays future work (see THREAT_MODEL.md gaps).
+# - Fast `scripts/build.py --skip-*` artifacts carry NO loader gates:
+#   --trial/--watermark/--vm-threshold are parsed but silently dropped
+#   on that path (verified 2026-09-28: a 3s-trial artifact still ran 8s
+#   after the build). The happy-path step below therefore asserts only
+#   what that path guarantees (builds + runs + marker). All negative
+#   gate probes emit via the production hybrid-loader builder
+#   (generate_hybrid_loader_script -- the function the native/hybrid
+#   packaging path calls) in scripts/ci_security_artifact.py.
+# - KOD-armed kill on a hosted runner that IS a VM would kill the probe
+#   if the verdict were genuine -- so the kod probe forces the verdict
+#   with vm_threshold=0.0 (pct >= 0 always fires) instead of asserting a
+#   genuine detection. The genuine verdict is LOGGED (vm-report,
+#   informational) but never asserted: this host scores ~15/100 CLEAN,
+#   hosted SKUs vary.
+# - Every security assertion fails closed: no continue-on-error anywhere
+#   in this file. Setup steps (checkout/setup-python/pip install) are
+#   fail-closed too -- a security job that passes because its setup was
+#   skipped is worse than no job.
+# - Evidence upload uses actions/upload-artifact@v4 + if-no-files-found,
+#   matching build.yml / shadow-build.yml conventions. `if: always()` so
+#   failure logs upload precisely when they matter most.
+
+on: [push, pull_request]
+
+# Least privilege: read-only token (this job publishes nothing).
+permissions:
+  contents: read
+
+jobs:
+  security-artifact:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build tiny payload artifact (fast flags)
+        env:
+          NIXON_LOG_REDIRECT: "0"
+        run: |
+          printf 'print("CI_ARTIFACT_OK")\n' > "$RUNNER_TEMP/ci_probe_payload.py"
+          timeout 300 python3 scripts/build.py \
+            --payload "$RUNNER_TEMP/ci_probe_payload.py" \
+            --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras
+          test -f build/ci_probe_payload_obfuscated.py
+
+      - name: Run artifact, assert expected output
+        env:
+          NIXON_LOG_REDIRECT: "0"
+        run: |
+          OUT="$(timeout 60 python3 build/ci_probe_payload_obfuscated.py)"
+          test "$OUT" = "CI_ARTIFACT_OK"
+
+      - name: Gate probe happy (trial + watermark artifact runs)
+        env:
+          NIXON_LOG_REDIRECT: "0"
+        run: |
+          python3 scripts/ci_security_artifact.py \
+            --workdir "$RUNNER_TEMP/gates" --only happy
+
+      - name: Gate probe expired-trial refuses (rc 137, silent)
+        env:
+          NIXON_LOG_REDIRECT: "0"
+        run: |
+          python3 scripts/ci_security_artifact.py \
+            --workdir "$RUNNER_TEMP/gates" --only expired
+
+      - name: Gate probe watermark strip + tamper refuse (rc 137, silent)
+        env:
+          NIXON_LOG_REDIRECT: "0"
+        run: |
+          python3 scripts/ci_security_artifact.py \
+            --workdir "$RUNNER_TEMP/gates" --only wm-strip,wm-tamper
+
+      - name: Gate probe KOD kill ladder (armed 137 silent, calm rc 0)
+        env:
+          NIXON_LOG_REDIRECT: "0"
+        run: |
+          python3 scripts/ci_security_artifact.py \
+            --workdir "$RUNNER_TEMP/gates" --only kod,vm-report
+
+      - name: SBOM generated and well-formed
+        env:
+          SBOM_OUT: ${{ runner.temp }}/gates/sbom.json
+        run: |
+          python3 scripts/sbom.py \
+            --requirements requirements.txt \
+            --output "$SBOM_OUT"
+          python3 -c "import json,os; d=json.load(open(os.environ['SBOM_OUT'])); assert d['tool'].startswith('nixon-sbom '), d; assert d['packages'], 'no packages'; print('sbom ok: %d packages' % len(d['packages']))"
+
+      - name: pip-audit clean (hard gate)
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --desc
+
+      - name: Upload artifact + probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-artifact-py${{ matrix.python-version }}
+          path: |
+            build/ci_probe_payload_obfuscated.py
+            ${{ runner.temp }}/gates/
+          if-no-files-found: warn

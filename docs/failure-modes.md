@@ -21,7 +21,7 @@ continues as if protected.
 | 4 | `Cython` unavailable | `DEGRADE` (audited skip) | `scripts/phases/phase_pytoc.py:36-45,86-99`: missing Cython/setuptools/compiler/cythonize-fail all return `(None, reason)`; `scripts/build.py:2411-2467` logs `PYTOC … (non-fatal)` and continues; in-pipeline `compile_payload_to_cython` returns `None` on non-zero exit (`obfuscator/core/pipeline.py:349-361`); proven by `test_pytoc_missing_cython_graceful_skip` | `ACCEPTABLE` | Best-effort native path degrades with a log line. Correct. |
 | 5 | `torch` unavailable | `SILENT` (no-op) | No `import torch` anywhere under `obfuscator/ scripts/ relay/ vm/ irgen/ llvmgen/ encrypt/ runtime/` (grep); `import torch` fails on this host yet nothing breaks; `torch` appears only as classifier string labels (`scripts/classification/function_classifier.py:280,310`) | `ACCEPTABLE` | Not a dependency at all. No action. |
 | 6 | `numpy` unavailable | `DEGRADE` | `obfuscator/core/utils.py:386-390`: `HAS_NUMPY` flag via guarded import; `scripts/phases/phase_assumptions.py:64` guards `import numpy`; `scripts/gpu/gpu_execution.py:8-10` guards `pyopencl` — pattern is degraded-pure-Python/fallback | `ACCEPTABLE` (`UNVERIFIED` for exact `HAS_NUMPY=False` downstream surface) | Guard pattern verified; full no-numpy build not exercised here. |
-| 7 | Corrupted `config/default.json` (phase02) | `DEGRADE` (silent empty config) | `scripts/phases/phase02_config.py:67-75,99-104`: `JSONDecodeError` → `cfg = {}` / `pass`, then `cfg["features"] = {}`; no log, no abort; proven by `test_corrupted_config_degrades_to_empty` | `ACCEPTABLE` | Silent empty-feature build could surprise, but every downstream phase treats missing features as off (fail-safe direction: fewer protections, loud nothing). Recommend one `log("WARN",…)` line; deferred as cosmetic. |
+| 7 | Corrupted `config/default.json` (phase02) | `FAIL-CLOSED` (abort, clean error) | **fix applied**: `scripts/config_schema.py` validates on load; malformed JSON or security-critical violations raise `ConfigError`, `scripts/phases/phase02_config.py` propagates it, `scripts/build.py` logs `ERROR` + `sys.exit(1)`; proven by `test_corrupted_config_fails_closed` + `tests/test_config_schema.py` poison battery (was: `JSONDecodeError` → silent `{'features': {}}`) | `ACCEPTABLE` | Missing file still degrades to `{'features': {}}` with a `WARN` log (absence is not tampering); poisoned file now aborts. Correct polarity. |
 | 8 | Missing driver metadata (enum `[]`) | `FAIL-OPEN` (no evidence → no kill, even armed) | `obfuscator/driver_blocklist.py:160-181,266-277`: enum failures → `[]`; `check_current` → `[]`; emitted `driver_check` returns `[]`, kills only `if _hits and armed` (`driver_blocklist.py:944`); proven by `test_missing_driver_metadata_yields_no_kill` | `ACCEPTABLE` | Cannot kill on zero evidence without bricking every restricted host (`/proc` hidden, ctypes blocked). Correct polarity; documented limitation strings (`LIMITATION_HIDDEN`, lines 318-332). Armed kill is `os._exit(137)` (`kill_ladder.py:254`), uncatchable by design — verified when the first version of the probe killed the test runner itself. |
 | 9 | Contradictory evidence (stem hit + clean/fixed version) | `FAIL-CLOSED` | `obfuscator/driver_blocklist.py:717-720`: `vuln is False` appends `fixed_version_stem_only` but confidence stays `0.6`; `should_kill` (`781-797`) kills at `>= 0.6`; proven by `test_contradictory_driver_evidence_still_kills` | `ACCEPTABLE` | Stem hit always gates when armed, version signal only raises confidence. Documented ("stem match alone still reports at 0.6"). |
 | 10 | Stale `driver_versions.json` | `SILENT` (+ now evaluable) | `obfuscator/driver_blocklist.py:338-368`: cached load, no mtime/age/hash check; `LIMITATION_VERSIONS` admits staleness (331-332); **fix applied**: `version_fingerprints_mtime()` / `version_fingerprints_stale(max_age_s=90d)` added (additive, unreadable ⇒ stale); proven by `test_fingerprint_staleness_flag` | `ACCEPTABLE` (was `NEEDS-FIX`) | Fixed <15 lines. Callers should warn (not gate) on `stale() is True`; version signal only ever raises confidence, so staleness cannot fail open the gate. |
@@ -40,7 +40,7 @@ continues as if protected.
 | 23 | Subprocess failure (`run()` non-zero) | `CRASH` (abort) for core phases; `DEGRADE` (logged continue) for optional phases | Core: `scripts/common.py:136-141` raises on non-zero with `check=True`; `phase_generate_payload_h` calls `run(cmd)` unwrapped (`phase05_payload_h.py:50`), as do IR/encrypt stages (`build.py:1528,1545,1776`) → abort. Optional: optimizer catches, logs `ERROR`, continues (`build.py:1072-1075`); `--pytoc`/kernel-swap/spec are `try/except` + `PYTOC … (non-fatal)` (`build.py:2457-2467`) | `ACCEPTABLE` | Correct split: corrupting phases abort, advisory/best-effort phases degrade with a log line. The optimizer-continue path is the one to watch (build proceeds unoptimized, silently weaker — but logged as ERROR). |
 | 24 | Network failure (DoH / GitHub farm) | `DEGRADE` with blind spots | DoH `_resolve_doh` catches all → falls back to plain `https://domain` (`core/utils.py:479-491`); `GitHubBuildFarm._get_username` failure → `sys.exit(1)` (499-500) but `GitHubNuitkaFarm._get_username` → `"unknown"` and continues (751-756); `create_workflow` retries 3× `sleep(2)` regardless of error (`utils.py:590-607`); `trigger_and_wait` polls `while True` with no overall timeout (`utils.py:643-714`) | `NEEDS-FIX` | Deferred (behavioral change): `download_artifacts` has no timeout and no `raise_for_status` (`utils.py:715-735`); `trigger_and_wait` can hang forever; the DoH→direct fallback silently drops Tor posture. Add per-request timeouts + overall deadline. Build-farm is opt-in, so severity is contained. |
 | 25 | GitHub rate limiting (429) | `SILENT` (misclassified) / `RETRY`-blind | No `429` handling anywhere: `upload_file` treats only 200/201 as success, everything else (including 429/403 rate-limit) as terminal `False` (`utils.py:510-521,772-798`); `create_workflow` retries 3× on any outcome with fixed `sleep(2)`, no `Retry-After` honor (`utils.py:590-607`); `trigger_and_wait` polls in a 10s loop with no backoff (`utils.py:622-630`) | `NEEDS-FIX` | Deferred: honor `Retry-After`/`X-RateLimit-Reset` with capped exponential backoff. Opt-in path only. |
-| 26 | Corrupted downloaded artifact | `FAIL-OPEN` (no integrity check) | `download_artifacts` (`core/utils.py:715-735`): no `raise_for_status` on the GETs, writes `zip_resp.content` unconditionally, `ZipFile.extractall` with no hash/signature check; repo HAS `scripts/artifact_sign.py` (HMAC-SHA256 sign/verify) but nothing wires it into the farm download path | `NEEDS-FIX` | Deferred (needs protocol decision): verify `artifact_sign.verify_file` (or SHA256 manifest) before `extractall`; also a ZipSlip surface (`extractall` unguarded). Highest-severity deferred item: corrupted/malicious artifact becomes build input silently. |
+| 26 | Corrupted downloaded artifact | `DEGRADE` (warned) / `FAIL-CLOSED` (keyed) | `GitHubBuildFarm.download_artifacts` (`core/utils.py:819-843`): timeouts (30s/120s), `raise_for_status`, ZipSlip confinement, plus verify-before-extract over `*.sig.json` sidecars (`_verify_download_zip`, `utils.py:493`) — mismatch raises, zip deleted, no extract; `GitHubNuitkaFarm.download_artifacts` (`utils.py:1429-1490`): same gate, tamper aborts without retry (`:1487`). No key → auditable `ARTIFACT-AUTH` warning + proceed; key + no sidecars → `info` + proceed (runner binaries unsigned by design) | `ACCEPTABLE` | Enforced where configured; keyless default warns (grep-able) instead of breaking existing users — explicit ADR-0005 protocol decision. Residual: runner-origin binaries have no HMAC (TLS + provenance only); Nuitka path still lacks ZipSlip confinement; shared-secret limits (no per-farm identity/rotation/replay expiry). Proven by `tests/test_artifact_signing.py::test_zip_gate_tamper_fail_closed`, `::test_enforce_dir_no_key_warns_loudly` (helper level; `utils.py` glue is `py_compile` + review — ADR-0005 risk 7). |
 | 27 | Invalid C-extension output (cythonize fail) | `DEGRADE` (graceful skip) | Same as #4 plus in-pipeline `build_native_vm` returns `""` on non-zero (`core/pipeline.py:283-291`) and `compile_payload_to_cython` returns `None` with printed error (`349-361`); never raises | `ACCEPTABLE` | All Cython entry points degrade to pure-Python artifacts. |
 | 28 | Incompatible Python/Cython versions | `CRASH` (early, loud) | Floor `sys.version_info < (3, 10)` → `ERROR` + `ok=False` → `sys.exit(1)` (`scripts/build.py:288-291,342-343`); NYSER loader enforces exact `(major, minor)` match → `ValueError("version mismatch — rebuild required")` (`core/pipeline.py:1610-1611`); farm pins `python-version: '3.11'` (`core/utils.py:563`) | `ACCEPTABLE` | Version mismatch fails at startup with a message, never as silent miscompilation. |
 | 29 | Concurrent execution (trial flock vs build outputs) | `AUDITED` (trial) / `SILENT`-racy (build outputs) | Trial read-modify-write holds blocking `LOCK_EX` (`trial_bind.py:91-107,346-351`), snippet deliberately lock-free with documented benign race (`trial_bind.py:466-474`); `atomic_write` uses a FIXED `path + ".tmp"` name (`common.py:78`) → concurrent builds of the same target clobber each other's tmp file (rename is atomic, so readers see whole old/new, but one build's content can win unpredictably) | `NEEDS-FIX` | Deferred (small but touches shared helper): use `path + ".tmp.<pid>.<rand>"` in `atomic_write`. Trial side is fine. |
@@ -79,13 +79,16 @@ continues as if protected.
 
 ## Findings deferred (report, not implemented)
 
-- **D26 — farm artifact integrity (partially fixed)**: `download_artifacts`
-  now has per-request timeouts (30s/120s), `raise_for_status` on both GETs,
-  and a ZipSlip confinement check before `extractall`. Integrity rests on
-  the authenticated-TLS channel (documented in code). NOT done (needs
-  protocol decision): end-to-end `artifact_sign.verify_file` on download
-  requires the farm uploader to sign with a shared key — key distribution
-  between CI uploader and local downloader is undecided.
+- **D26 — farm artifact integrity (DONE per ADR-0005, residuals noted)**: package
+  step signs metadata-bound sidecars (`scripts/artifact_sign.py:
+  sign_artifact`, `scripts/phases/phase06_package.py:59`); both
+  `download_artifacts` paths verify-before-extract and fail closed on
+  mismatch (`obfuscator/core/utils.py:843,1480`); no-key → auditable
+  `ARTIFACT-AUTH` warning + proceed (fail-open by operator choice, never
+  silent). Still open: farm-runner binaries are unsigned by design
+  (runners keyless — TLS + provenance only); Nuitka download path still
+  lacks ZipSlip confinement; shared-secret limits (no per-farm identity
+  / rotation / replay expiry) per `docs/adr/0005-artifact-authenticity.md`.
 - **D24/D25 — farm network robustness**: overall deadline for
   `trigger_and_wait`, honor `Retry-After`/`X-RateLimit-Reset` with capped
   backoff, make DoH→direct fallback explicit/logged (it drops Tor posture).
@@ -98,11 +101,14 @@ continues as if protected.
 
 ## Behavior / verdict counts
 
-- By behavior (31 scenarios): `FAIL-CLOSED` 6 (#2,9,12,16-snippet,17,19);
-  `DEGRADE` 8 (#1,4,6,7,14,20,27,18); `CRASH` 4 (#3,15,21-artifacts,28);
-  `FAIL-OPEN` 3 (#8,#14-also,#26); `SILENT` 5 (#5,10-was,11,13,22-gates,25);
+- By behavior (31 scenarios): `FAIL-CLOSED` 7 (#2,7,9,12,16-snippet,17,19);
+  `DEGRADE` 8 (#1,4,6,14,20,26,27,18); `CRASH` 4 (#3,15,21-artifacts,28);
+  `FAIL-OPEN` 2 (#8,#14-also); `SILENT` 5 (#5,10-was,11,13,22-gates,25);
   `RETRY` 1 (#25-also); `AUDITED` 4 (#29-trial,30,31,23-also). Mixed rows
-  counted under their primary label; see table for dual labels.
-- By verdict: `ACCEPTABLE` 24, `NEEDS-FIX` 7 (#3,#13,#24,#25,#26,#29,D7-log
+  counted under their primary label; see table for dual labels (#26 is
+  `FAIL-CLOSED` when keyed, `DEGRADE`-warned otherwise — counted as
+  `DEGRADE`).
+- By verdict: `ACCEPTABLE` 25, `NEEDS-FIX` 6 (#3,#13,#24,#25,#29,D7-log
   note folded into ACCEPTABLE). After the applied staleness-flag fix, #10
-  moved from `NEEDS-FIX` to `ACCEPTABLE`.
+  moved from `NEEDS-FIX` to `ACCEPTABLE`; #26 moved likewise per
+  ADR-0005 (enforced where configured, warned elsewhere).

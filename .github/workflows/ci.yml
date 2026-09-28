@@ -45,10 +45,11 @@ jobs:
     # matches requirements.txt, and continue-on-error stays false (the
     # default) so a vulnerable pin breaks the build until a human bumps the
     # pin in requirements.txt after reviewing the advisory. Deliberately no
-    # --fix auto-mutation in CI. NOTE (2026-09-28): a local
-    # `pip-audit -r requirements.txt` run already reports advisories on
-    # requests/urllib3/cryptography/pytest pins — expect this job red until
-    # those pins are bumped. That is the gate working as designed.
+    # --fix auto-mutation in CI. NOTE (2026-09-28): pins were bumped
+    # (requests 2.33.0, urllib3 2.7.0, cryptography 50.0.0, pytest 9.0.3)
+    # and a local `pip-audit -r requirements.txt` run reports clean, so
+    # this job is green on current pins. That is the gate working as
+    # designed: it will go red the moment a new advisory matches a pin.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

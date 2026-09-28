@@ -26,6 +26,7 @@ import json
 import os
 
 from ..common import log, atomic_write, BUILD_DIR, CONFIG_FILE, DEFAULT_CONFIG
+from ..config_schema import ConfigError, load_config_file
 
 
 def phase_generate_config(opts):
@@ -61,18 +62,30 @@ def load_advanced_protection_config(opts) -> dict:
 
     Returns:
         dict with merged "features" sub-dict and optional "extras"
+
+    Raises:
+        ConfigError: the default config is malformed or violates the
+            security-critical schema (fail-closed: a poisoned config
+            aborts the build instead of silently weakening protections).
+            A *missing* file still degrades to {"features": {}} with a
+            WARN log (absence is not tampering; preserves prior behavior).
     """
     cfg = {}
     default = {}
     if os.path.exists(DEFAULT_CONFIG):
-        try:
-            with open(DEFAULT_CONFIG, "r") as f:
-                default = json.load(f)
-            advanced = default.get("shadow_compiler", {}).get("advanced_protection", {})
-            fallback = default.get("shadow_compiler", {}).get("phase2", {})
-            cfg = advanced if advanced else fallback
-        except (json.JSONDecodeError, KeyError):
-            cfg = {}
+        # Fail-closed gate: malformed or poisoned config raises ConfigError
+        # (never degrades to an empty feature set — that direction silently
+        # drops every protection). Warnings (unknown keys, cosmetic
+        # repairs, conflicts) are logged, never fatal.
+        default, schema_warnings = load_config_file(DEFAULT_CONFIG)
+        for w in schema_warnings:
+            log("CONFIG", "WARN: %s" % w)
+        advanced = default.get("shadow_compiler", {}).get("advanced_protection", {})
+        fallback = default.get("shadow_compiler", {}).get("phase2", {})
+        cfg = advanced if advanced else fallback
+    else:
+        log("CONFIG", "WARN: default config not found at %s "
+                      "-- continuing with empty feature set" % DEFAULT_CONFIG)
 
     if opts.advanced_protection or opts.phase2:
         cfg["enabled"] = True
@@ -95,13 +108,8 @@ def load_advanced_protection_config(opts) -> dict:
     if "features" not in cfg:
         cfg["features"] = {}
 
-    full_cfg = {}
-    if os.path.exists(DEFAULT_CONFIG):
-        try:
-            with open(DEFAULT_CONFIG, "r") as f:
-                full_cfg = json.load(f).get("shadow_compiler", {})
-        except (json.JSONDecodeError, KeyError):
-            pass
+    # full_cfg reuses the already-validated clean dict (no second parse).
+    full_cfg = default.get("shadow_compiler", {}) if default else {}
 
     if opts.adversarial_injection:
         cfg["features"]["adversarial"] = True

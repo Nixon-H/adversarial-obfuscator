@@ -55,6 +55,7 @@ sys.path.insert(0, _ROOT)
 
 from scripts.common import ROOT, BUILD_DIR, RELAY_DIR, OBFUSCATOR, CONFIG_FILE, DEFAULT_CONFIG
 from scripts.common import atomic_write, log, run
+from scripts.config_schema import ConfigError
 
 from scripts.binding.crypto_binding import CryptoFragmentBinder, Fragment
 from scripts.metrics import ResilienceMetrics
@@ -1012,7 +1013,13 @@ Examples:
             sys.exit(1)
 
     # Load Advanced Protection config from JSON (phase-2 feature matrix).
-    phase2_cfg = load_advanced_protection_config(opts)
+    # Fail-closed: a malformed/poisoned config aborts with a clean ERROR,
+    # never a traceback and never a silently unprotected build.
+    try:
+        phase2_cfg = load_advanced_protection_config(opts)
+    except ConfigError as e:
+        log("ERROR", "Refusing to build: %s" % e)
+        sys.exit(1)
     opts._phase2_cfg = phase2_cfg
 
     # RESEARCH STATUS (2026-09-27): the following phases emit JSON sidecars

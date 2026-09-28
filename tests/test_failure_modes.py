@@ -41,11 +41,19 @@ def test_z3_absence_breaks_build_import_closure():
             sys.modules.pop(name, None)
 
 
-# --- D7: corrupted config degrades to empty ----------------------------------
+# --- D7: corrupted config fails closed ---------------------------------------
+# (behavior changed DEGRADE -> FAIL-CLOSED by config schema validation;
+# see scripts/config_schema.py and tests/test_config_schema.py)
 
-def test_corrupted_config_degrades_to_empty(tmp_path):
-    """Malformed default.json -> {'features': {}} without raising."""
+def test_corrupted_config_fails_closed(tmp_path):
+    """Malformed default.json -> ConfigError (fail-closed, aborts build).
+
+    Previously degraded to {'features': {}} silently (docs/failure-modes.md
+    D7); schema validation now refuses to build with an unreadable
+    protection posture instead of emitting an unprotected artifact.
+    """
     import scripts.phases.phase02_config as p2
+    from scripts.config_schema import ConfigError
     bad = tmp_path / "default.json"
     bad.write_text("{not valid json,,,", encoding="utf-8")
     old = p2.DEFAULT_CONFIG
@@ -57,10 +65,10 @@ def test_corrupted_config_degrades_to_empty(tmp_path):
             phase2_extras=False, adversarial_injection=False,
             ephemeral_isa=False, microjit=False, oram=False, rop=False,
         )
-        cfg = p2.load_advanced_protection_config(opts)
+        with pytest.raises(ConfigError):
+            p2.load_advanced_protection_config(opts)
     finally:
         p2.DEFAULT_CONFIG = old
-    assert cfg == {"features": {}}
 
 
 # --- D8: missing driver metadata -> no hits, no kill -------------------------
