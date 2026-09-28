@@ -1,0 +1,1 @@
+{"functions": [{"name": "rle_encode", "arity": 1}, {"name": "rle_decode", "arity": 1}, {"name": "xor_bytes", "arity": 2}], "constants": [9, 2]}

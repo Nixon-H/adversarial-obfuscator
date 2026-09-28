@@ -1,0 +1,1 @@
+[{"func": "priority_pick", "args": [[["a", 1], ["b", 5], ["c", 3]]], "expected": "b"}, {"func": "priority_pick", "args": [[]], "expected": ""}, {"func": "slot_hash", "args": ["hello", 64], "expected": 41}, {"func": "rotate_list", "args": [["a", "b", "c"], 1], "expected": ["b", "c", "a"]}, {"func": "rotate_list", "args": [[], 3], "expected": []}]

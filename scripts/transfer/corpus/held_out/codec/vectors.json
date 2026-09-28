@@ -1,0 +1,1 @@
+[{"func": "rle_encode", "args": ["aaabbc"], "expected": "a3b2c1"}, {"func": "rle_encode", "args": [""], "expected": ""}, {"func": "rle_decode", "args": ["a3b2c1"], "expected": "aaabbc"}, {"func": "xor_bytes", "args": ["hi", "key"], "expected": "030c"}]

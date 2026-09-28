@@ -1,0 +1,1 @@
+[{"func": "slugify", "args": ["Hello World!"], "expected": "hello-world"}, {"func": "slugify", "args": ["a  b--c"], "expected": "a-b-c"}, {"func": "count_words", "args": ["one two three"], "expected": 3}, {"func": "count_words", "args": [""], "expected": 0}, {"func": "reverse_words", "args": ["a b c"], "expected": "c b a"}, {"func": "shout", "args": ["hey"], "expected": "HEY!"}]

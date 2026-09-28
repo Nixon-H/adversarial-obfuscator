@@ -1,0 +1,1 @@
+[{"func": "store_put", "args": [{"a": 1}, "b", 2], "expected": {"a": 1, "b": 2}}, {"func": "store_get", "args": [{"a": 1}, "a", 0], "expected": 1}, {"func": "store_get", "args": [{}, "z", 9], "expected": 9}, {"func": "store_keys", "args": [{"b": 1, "a": 2}], "expected": ["a", "b"]}, {"func": "store_merge", "args": [{"a": 1}, {"b": 2}], "expected": {"a": 1, "b": 2}}]

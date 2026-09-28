@@ -1,0 +1,1 @@
+{"functions": [{"name": "add", "arity": 2}, {"name": "mul", "arity": 2}, {"name": "fib", "arity": 1}, {"name": "gcd", "arity": 2}], "constants": [0, 1]}

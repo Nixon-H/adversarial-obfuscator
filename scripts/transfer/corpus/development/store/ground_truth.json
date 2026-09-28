@@ -1,0 +1,1 @@
+{"functions": [{"name": "store_put", "arity": 3}, {"name": "store_get", "arity": 3}, {"name": "store_keys", "arity": 1}, {"name": "store_merge", "arity": 2}], "constants": []}

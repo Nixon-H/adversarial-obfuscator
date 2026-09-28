@@ -1,0 +1,1 @@
+{"functions": [{"name": "slugify", "arity": 1}, {"name": "count_words", "arity": 1}, {"name": "reverse_words", "arity": 1}, {"name": "shout", "arity": 1}], "constants": ["-", "!"]}

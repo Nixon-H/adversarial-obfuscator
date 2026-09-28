@@ -1,0 +1,1 @@
+[{"func": "make_token", "args": ["alice", "s3cret"], "expected": "636ac7a907c4135a"}, {"func": "check_password", "args": ["pw", "salt", "deadbeef"], "expected": false}, {"func": "verify_token", "args": ["alice", "s3cret", "deadbeef"], "expected": false}, {"func": "verify_token", "args": ["alice", "s3cret", "636ac7a907c4135a"], "expected": true}]

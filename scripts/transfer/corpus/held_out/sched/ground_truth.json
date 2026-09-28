@@ -1,0 +1,1 @@
+{"functions": [{"name": "priority_pick", "arity": 1}, {"name": "slot_hash", "arity": 2}, {"name": "rotate_list", "arity": 2}], "constants": [31, 1000003]}
