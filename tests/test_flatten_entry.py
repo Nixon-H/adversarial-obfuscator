@@ -60,3 +60,55 @@ def test_flattened_multi_block_across_seeds():
         r = _run_variant(src, seed)
         assert r.returncode == 0, (seed, r.stderr[-500:])
         assert r.stdout.strip().splitlines() == ["54", "99"], seed
+
+
+def test_flattened_three_block_order_across_seeds():
+    # Regression: the flattener chained blocks in SHUFFLED order, so any
+    # >=3-block function executed out of order whenever the shuffle moved
+    # a later block ahead (codec rle_encode exclusions in H0/H1/H5).
+    # Execution must follow original program order on every seed.
+    src = textwrap.dedent("""\
+        def rle_encode(text):
+            if not text:
+                return ""
+            out = []
+            run = text[0]
+            count = 1
+            for ch in text[1:]:
+                if ch == run[-1] and count < 9:
+                    count += 1
+                else:
+                    out.append(run[-1] + str(count))
+                    run = ch
+                    count = 1
+            out.append(run[-1] + str(count))
+            return "".join(out)
+        print(rle_encode("aaabbc"))
+        print(rle_encode(""))
+        """)
+    for seed in range(1, 13):
+        r = _run_variant(src, seed)
+        assert r.returncode == 0, (seed, r.stderr[-500:])
+        assert r.stdout.splitlines() == ["a3b2c1", ""], seed
+
+
+def test_flattened_block_order_observable():
+    # Order-sensitive appends: any block permutation is observable.
+    src = textwrap.dedent("""\
+        def f(x):
+            log = []
+            log.append("first")
+            if x:
+                log.append("second")
+            else:
+                log.append("other")
+            log.append("third")
+            return "-".join(log)
+        print(f(True))
+        print(f(False))
+        """)
+    for seed in range(1, 9):
+        r = _run_variant(src, seed)
+        assert r.returncode == 0, (seed, r.stderr[-500:])
+        assert r.stdout.strip().splitlines() == [
+            "first-second-third", "first-other-third"], seed

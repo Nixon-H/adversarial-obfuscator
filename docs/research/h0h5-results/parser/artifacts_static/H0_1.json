@@ -1,0 +1,119 @@
+{
+  "arm": "static",
+  "develop_time_s": 0.136,
+  "developed_from": "h0_1.py",
+  "gt_feats": {
+    "count_words": {
+      "arity": 1,
+      "has_var": false,
+      "hist": {
+        "Attribute": 1,
+        "Call": 2,
+        "FunctionDef": 1,
+        "Load": 3,
+        "Name": 2,
+        "Return": 1,
+        "arg": 1,
+        "arguments": 1
+      },
+      "n_loops": 0,
+      "n_stmts": 1,
+      "n_str": 0,
+      "n_try": 0
+    },
+    "reverse_words": {
+      "arity": 1,
+      "has_var": false,
+      "hist": {
+        "Attribute": 2,
+        "Call": 2,
+        "Constant": 2,
+        "FunctionDef": 1,
+        "Load": 4,
+        "Name": 1,
+        "Return": 1,
+        "Slice": 1,
+        "Subscript": 1,
+        "USub": 1,
+        "UnaryOp": 1,
+        "arg": 1,
+        "arguments": 1
+      },
+      "n_loops": 0,
+      "n_stmts": 1,
+      "n_str": 1,
+      "n_try": 0
+    },
+    "shout": {
+      "arity": 1,
+      "has_var": false,
+      "hist": {
+        "Add": 1,
+        "Attribute": 1,
+        "BinOp": 1,
+        "Call": 1,
+        "Constant": 1,
+        "FunctionDef": 1,
+        "Load": 2,
+        "Name": 1,
+        "Return": 1,
+        "arg": 1,
+        "arguments": 1
+      },
+      "n_loops": 0,
+      "n_stmts": 1,
+      "n_str": 1,
+      "n_try": 0
+    },
+    "slugify": {
+      "arity": 1,
+      "has_var": false,
+      "hist": {
+        "And": 1,
+        "Assign": 1,
+        "Attribute": 6,
+        "BoolOp": 1,
+        "Call": 6,
+        "Compare": 1,
+        "Constant": 5,
+        "Expr": 2,
+        "For": 1,
+        "FunctionDef": 1,
+        "If": 2,
+        "List": 1,
+        "Load": 16,
+        "Name": 10,
+        "NotEq": 1,
+        "Return": 1,
+        "Store": 2,
+        "Subscript": 1,
+        "USub": 1,
+        "UnaryOp": 1,
+        "arg": 1,
+        "arguments": 1
+      },
+      "n_loops": 1,
+      "n_stmts": 3,
+      "n_str": 4,
+      "n_try": 0
+    }
+  },
+  "gt_names": [
+    "count_words",
+    "reverse_words",
+    "shout",
+    "slugify"
+  ],
+  "markers": {
+    "hex_blobs": 0,
+    "str_consts": 15,
+    "wrappers": 2
+  },
+  "version": "1.0.0",
+  "weights": {
+    "shape": 1.0,
+    "stmts": 1.0,
+    "struct": 0.5,
+    "var": 1.0
+  }
+}

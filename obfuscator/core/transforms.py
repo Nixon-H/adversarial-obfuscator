@@ -2055,29 +2055,34 @@ class ControlFlowFlattener(ast.NodeTransformer):
         if current_block: blocks.append(current_block)
         if len(blocks) < 2: return node
         num_blocks = len(blocks)
+        # Textual layout is shuffled; EXECUTION order is always the
+        # original program order. (Prior code chained the shuffled order,
+        # so >=3-block functions executed blocks out of order whenever
+        # the shuffle moved a later block ahead -- seed-dependent
+        # UnboundLocalError. Entry-rotation only masked it for 2-block
+        # functions. Diagnosed via codec rle_encode exclusions, H0/H1/H5.)
         indices = list(range(num_blocks))
         random.shuffle(indices)
-        # Entry block (original_idx 0, holding the function's first
-        # statement) MUST execute first: rotate the shuffled order so it
-        # leads. Otherwise dispatch starts mid-function and reads
-        # unbound locals (was: init state pointed at a random block).
-        # Rotation preserves all pairwise chain links; the new tail
-        # still terminates via is_last -> loop=False.
-        k = indices.index(0)
-        indices = indices[k:] + indices[:k]
-        lut_size = max(num_blocks * 4, 64)
+        order = list(range(num_blocks))
+        lut_size = max(num_blocks * 64, 512)
         dispatch_lut = [random.randint(0, num_blocks - 1) for _ in range(lut_size)]
-        for i in range(len(indices) - 1):
-            current_idx = indices[i]
-            next_idx = indices[i + 1]
+        slots = {}
+        for i in range(len(order) - 1):
             expected_hash = 0
             for j in range(i + 1):
-                expected_hash = (expected_hash * 1103515245 + 12345 + indices[j] * 2654435761) & 0xFFFFFFFF
+                expected_hash = (expected_hash * 1103515245 + 12345 + order[j] * 2654435761) & 0xFFFFFFFF
             lut_slot = expected_hash % lut_size
+            if lut_slot in slots:
+                # LUT slot collision between two chain links would
+                # misdispatch: skip flattening this function rather than
+                # emit a broken compiler.
+                return node
+            slots[lut_slot] = order[i + 1]
+        for lut_slot, next_idx in slots.items():
             dispatch_lut[lut_slot] = next_idx
         init_hash_val = 0
         new_body = [
-            ast.Assign(targets=[ast.Name(id=state_var, ctx=ast.Store())], value=ast.Constant(value=indices[0])),
+            ast.Assign(targets=[ast.Name(id=state_var, ctx=ast.Store())], value=ast.Constant(value=0)),
             ast.Assign(targets=[ast.Name(id=loop_var, ctx=ast.Store())], value=ast.Constant(value=True)),
             ast.Assign(targets=[ast.Name(id=cfi_hash_var, ctx=ast.Store())], value=ast.Constant(value=init_hash_val)),
             ast.Assign(targets=[ast.Name(id=cfi_lut_var, ctx=ast.Store())], value=ast.Constant(value=dispatch_lut)),
@@ -2086,7 +2091,9 @@ class ControlFlowFlattener(ast.NodeTransformer):
         for i in reversed(range(len(indices))):
             original_idx = indices[i]
             block = list(blocks[original_idx])
-            is_last = (i == len(indices) - 1)
+            # Last in EXECUTION (original) order terminates the loop;
+            # layout position is irrelevant.
+            is_last = (original_idx == num_blocks - 1)
             has_return = any(isinstance(s, ast.Return) for s in block)
             if not has_return:
                 cfi_update = ast.Assign(

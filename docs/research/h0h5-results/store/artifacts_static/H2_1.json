@@ -1,0 +1,104 @@
+{
+  "arm": "static",
+  "develop_time_s": 0.097,
+  "developed_from": "h2_1.py",
+  "gt_feats": {
+    "store_get": {
+      "arity": 3,
+      "has_var": false,
+      "hist": {
+        "Compare": 1,
+        "FunctionDef": 1,
+        "If": 1,
+        "In": 1,
+        "Load": 6,
+        "Name": 5,
+        "Return": 2,
+        "Subscript": 1,
+        "arg": 3,
+        "arguments": 1
+      },
+      "n_loops": 0,
+      "n_stmts": 2,
+      "n_str": 0,
+      "n_try": 0
+    },
+    "store_keys": {
+      "arity": 1,
+      "has_var": false,
+      "hist": {
+        "Attribute": 1,
+        "Call": 2,
+        "FunctionDef": 1,
+        "Load": 3,
+        "Name": 2,
+        "Return": 1,
+        "arg": 1,
+        "arguments": 1
+      },
+      "n_loops": 0,
+      "n_stmts": 1,
+      "n_str": 0,
+      "n_try": 0
+    },
+    "store_merge": {
+      "arity": 2,
+      "has_var": false,
+      "hist": {
+        "Assign": 2,
+        "Call": 1,
+        "For": 1,
+        "FunctionDef": 1,
+        "Load": 9,
+        "Name": 10,
+        "Return": 1,
+        "Store": 3,
+        "Subscript": 2,
+        "arg": 2,
+        "arguments": 1
+      },
+      "n_loops": 1,
+      "n_stmts": 3,
+      "n_str": 0,
+      "n_try": 0
+    },
+    "store_put": {
+      "arity": 3,
+      "has_var": false,
+      "hist": {
+        "Assign": 2,
+        "Call": 1,
+        "FunctionDef": 1,
+        "Load": 6,
+        "Name": 7,
+        "Return": 1,
+        "Store": 2,
+        "Subscript": 1,
+        "arg": 3,
+        "arguments": 1
+      },
+      "n_loops": 0,
+      "n_stmts": 3,
+      "n_str": 0,
+      "n_try": 0
+    }
+  },
+  "gt_names": [
+    "store_get",
+    "store_keys",
+    "store_merge",
+    "store_put"
+  ],
+  "markers": {
+    "hex_blobs": 0,
+    "str_consts": 11,
+    "wrappers": 1
+  },
+  "version": "1.0.0",
+  "weights": {
+    "shape": 1.0,
+    "stmts": 1.0,
+    "struct": 0.5,
+    "var": 1.0
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "arm": "static",
+  "develop_time_s": 0.139,
+  "developed_from": "h5_3.py",
+  "gt_feats": {
+    "_digest": {
+      "arity": 2,
+      "has_var": false,
+      "hist": {
+        "Assign": 1,
+        "Attribute": 6,
+        "Call": 6,
+        "Expr": 2,
+        "FunctionDef": 1,
+        "Load": 12,
+        "Name": 7,
+        "Return": 1,
+        "Store": 1,
+        "arg": 2,
+        "arguments": 1
+      },
+      "n_loops": 0,
+      "n_stmts": 4,
+      "n_str": 0,
+      "n_try": 0
+    },
+    "check_password": {
+      "arity": 3,
+      "has_var": false,
+      "hist": {
+        "Call": 1,
+        "Compare": 1,
+        "Eq": 1,
+        "FunctionDef": 1,
+        "Load": 4,
+        "Name": 4,
+        "Return": 1,
+        "arg": 3,
+        "arguments": 1
+      },
+      "n_loops": 0,
+      "n_stmts": 1,
+      "n_str": 0,
+      "n_try": 0
+    },
+    "make_token": {
+      "arity": 2,
+      "has_var": false,
+      "hist": {
+        "Call": 1,
+        "Constant": 1,
+        "FunctionDef": 1,
+        "Load": 4,
+        "Name": 3,
+        "Return": 1,
+        "Slice": 1,
+        "Subscript": 1,
+        "arg": 2,
+        "arguments": 1
+      },
+      "n_loops": 0,
+      "n_stmts": 1,
+      "n_str": 0,
+      "n_try": 0
+    },
+    "verify_token": {
+      "arity": 3,
+      "has_var": false,
+      "hist": {
+        "Call": 1,
+        "Compare": 1,
+        "Eq": 1,
+        "FunctionDef": 1,
+        "Load": 4,
+        "Name": 4,
+        "Return": 1,
+        "arg": 3,
+        "arguments": 1
+      },
+      "n_loops": 0,
+      "n_stmts": 1,
+      "n_str": 0,
+      "n_try": 0
+    }
+  },
+  "gt_names": [
+    "_digest",
+    "check_password",
+    "make_token",
+    "verify_token"
+  ],
+  "markers": {
+    "hex_blobs": 0,
+    "str_consts": 13,
+    "wrappers": 0
+  },
+  "version": "1.0.0",
+  "weights": {
+    "shape": 1.0,
+    "stmts": 1.0,
+    "struct": 0.5,
+    "var": 1.0
+  }
+}

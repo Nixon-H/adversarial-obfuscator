@@ -1,0 +1,106 @@
+{
+  "arm": "static",
+  "develop_time_s": 0.093,
+  "developed_from": "h3_5.py",
+  "gt_feats": {
+    "priority_pick": {
+      "arity": 1,
+      "has_var": false,
+      "hist": {
+        "Assign": 2,
+        "BoolOp": 1,
+        "Compare": 2,
+        "Constant": 5,
+        "For": 1,
+        "FunctionDef": 1,
+        "Gt": 1,
+        "If": 1,
+        "IfExp": 1,
+        "Is": 1,
+        "Load": 11,
+        "Name": 12,
+        "Or": 1,
+        "Return": 1,
+        "Store": 5,
+        "Subscript": 2,
+        "Tuple": 2,
+        "arg": 1,
+        "arguments": 1
+      },
+      "n_loops": 1,
+      "n_stmts": 3,
+      "n_str": 1,
+      "n_try": 0
+    },
+    "rotate_list": {
+      "arity": 2,
+      "has_var": false,
+      "hist": {
+        "Add": 1,
+        "Assign": 1,
+        "BinOp": 2,
+        "Call": 1,
+        "FunctionDef": 1,
+        "If": 1,
+        "List": 1,
+        "Load": 11,
+        "Mod": 1,
+        "Name": 9,
+        "Not": 1,
+        "Return": 2,
+        "Slice": 2,
+        "Store": 1,
+        "Subscript": 2,
+        "UnaryOp": 1,
+        "arg": 2,
+        "arguments": 1
+      },
+      "n_loops": 0,
+      "n_stmts": 3,
+      "n_str": 0,
+      "n_try": 0
+    },
+    "slot_hash": {
+      "arity": 2,
+      "has_var": false,
+      "hist": {
+        "Add": 1,
+        "Assign": 2,
+        "BinOp": 4,
+        "Call": 1,
+        "Constant": 3,
+        "For": 1,
+        "FunctionDef": 1,
+        "Load": 6,
+        "Mod": 2,
+        "Mult": 1,
+        "Name": 9,
+        "Return": 1,
+        "Store": 3,
+        "arg": 2,
+        "arguments": 1
+      },
+      "n_loops": 1,
+      "n_stmts": 3,
+      "n_str": 0,
+      "n_try": 0
+    }
+  },
+  "gt_names": [
+    "priority_pick",
+    "rotate_list",
+    "slot_hash"
+  ],
+  "markers": {
+    "hex_blobs": 0,
+    "str_consts": 11,
+    "wrappers": 0
+  },
+  "version": "1.0.0",
+  "weights": {
+    "shape": 1.0,
+    "stmts": 1.0,
+    "struct": 0.5,
+    "var": 1.0
+  }
+}
