@@ -589,13 +589,14 @@ def apply_ast_mutation(source_code, options=None):
             chk_inj = CodeChecksumInjector()
             tree = chk_inj.visit(tree)
         if options.get('fragment_strings'):
-            # GAP #55 (additive): string_crypto="chacha20" selects the
-            # authenticated ChaCha20 string mode; default stays legacy XOR.
+            # Hardening A1a: default is authenticated ChaCha20 string
+            # mode; explicit {"string_crypto": "xor"} selects legacy XOR.
             # string_allowlist=[...] keeps matching strings plaintext.
             # string_key=<32 bytes> pins the build key (tests/determinism).
             try:
                 from obfuscator.string_crypto import normalize_mode as _nx_norm
-                _nx_mode = _nx_norm(options.get('string_crypto', 'xor'))
+                _nx_mode = _nx_norm(options.get('string_crypto',
+                                                'chacha20'))
             except Exception:
                 _nx_mode = 'xor'
             str_obf = StringLiteralObfuscator(

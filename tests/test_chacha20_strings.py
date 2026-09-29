@@ -244,14 +244,21 @@ def test_sources_level_allowlist_stays_plaintext():
     assert ns["B"] == "hide this string!!"
 
 
-def test_sources_level_xor_default_unchanged():
+def test_sources_level_chacha_default():
+    # Hardening A1a: default seals are ChaCha20, never legacy XOR.
     from obfuscator.core.sources import apply_ast_mutation
     src = 'MSG = "hello world"\nVAL = MSG.upper()\n'
-    out_legacy, _ = apply_ast_mutation(src, {"fragment_strings": True})
+    out, _ = apply_ast_mutation(src, {"fragment_strings": True})
     ns = {}
-    exec(compile(out_legacy, "<t>", "exec"), ns)
+    exec(compile(out, "<t>", "exec"), ns)
     assert ns["VAL"] == "HELLO WORLD"
-    # legacy path emits the XOR stub, never the ChaCha20 stub
+    assert "string seal" in out
+    # legacy XOR remains available as explicit opt-in and still runs
+    out_legacy, _ = apply_ast_mutation(
+        src, {"fragment_strings": True, "string_crypto": "xor"})
+    ns2 = {}
+    exec(compile(out_legacy, "<t>", "exec"), ns2)
+    assert ns2["VAL"] == "HELLO WORLD"
     assert "string seal" not in out_legacy
 
 
@@ -277,10 +284,12 @@ def test_pinned_key_deterministic_with_seed():
 
 
 def test_legacy_string_obfuscator_untouched():
-    # Additive principle: default constructor path is byte-identical legacy.
+    # Hardening A1a: default constructor is ChaCha20; legacy explicit.
     from obfuscator.core.transforms import StringLiteralObfuscator
     slo = StringLiteralObfuscator()
-    assert slo.mode == "xor"
+    assert slo.mode == "chacha20"
+    slo_legacy = StringLiteralObfuscator(mode="xor")
+    assert slo_legacy.mode == "xor"
     tree = ast.parse('x = "secretsauce"')
     slo.visit(tree)
     assert isinstance(tree.body[0].value, ast.Call)
@@ -295,3 +304,17 @@ def test_emit_decoder_source_roundtrip():
     ns = {}
     exec(compile(stub + "\nR = d(%r)\n" % seal, "<t>", "exec"), ns)
     assert ns["R"] == "payload"
+
+
+def test_stub_has_no_64hex_key_signature():
+    # Hardening A1b: the `grep -o "[0-9a-f]{64}"` analyst signature must
+    # find nothing in an emitted decoder stub.
+    import re
+    from obfuscator.chacha20 import build_stub_decoder
+    stub = build_stub_decoder("d", "ab" * 32)
+    assert not re.search(r"[0-9a-f]{64}", stub), "key hex run leaked"
+    ns = {}
+    from obfuscator.string_crypto import encrypt_string
+    seal = encrypt_string("roundtrip", bytes.fromhex("ab" * 32))
+    exec(compile(stub + "\nR = d(%r)\n" % seal, "<t>", "exec"), ns)
+    assert ns["R"] == "roundtrip"

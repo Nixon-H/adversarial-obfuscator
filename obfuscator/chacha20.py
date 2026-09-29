@@ -191,13 +191,16 @@ def aead_decrypt(key, blob):
 # (stdlib imports only, function-local so no module namespace pollution).
 # Mirrors the module functions above; behavioral equivalence is enforced by
 # tests/test_chacha20_strings.py::test_stub_matches_module_implementation.
-# Tokens __NX_DEC__ (decoder name) and __NX_KEYHEX__ (build key, hex) are
-# substituted by obfuscator.string_crypto at build time via str.replace
-# (NOT str.format, so stub braces would be safe too).
+# Tokens __NX_DEC__ (decoder name) and __NX_KEYBYTES__ (build key as a
+# comma-joined int list) are substituted by obfuscator.string_crypto at
+# build time via str.replace (NOT str.format, so stub braces would be
+# safe too). Hardening A1b: the key is never a 64-hex run, so the
+# `grep -o "[0-9a-f]{64}"` signature finds nothing. (Key remains in
+# artifact by design here; env-bound KEK is a separate mode.)
 # ---------------------------------------------------------------------------
 STUB_TEMPLATE = """def __NX_DEC__(_s):
     import hashlib as _nx_ha, hmac as _nx_hm
-    _nx_k = bytes.fromhex('__NX_KEYHEX__')
+    _nx_k = bytes(__NX_KEYBYTES__)
     try:
         _nx_r = bytes.fromhex(_s)
     except ValueError:
@@ -273,5 +276,6 @@ def build_stub_decoder(decoder_name, key_hex):
         raise ValueError("key_hex must be hex")
     if len(raw) != KEY_SIZE:
         raise ValueError("key_hex must decode to exactly 32 bytes")
+    int_list = "[" + ", ".join(str(b) for b in raw) + "]"
     return STUB_TEMPLATE.replace("__NX_DEC__", decoder_name).replace(
-        "__NX_KEYHEX__", key_hex)
+        "__NX_KEYBYTES__", int_list)

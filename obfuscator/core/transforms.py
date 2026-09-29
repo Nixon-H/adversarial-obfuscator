@@ -433,14 +433,12 @@ class SymbolRenamer(ast.NodeTransformer):
                 pass
         return node
 class StringLiteralObfuscator(ast.NodeTransformer):
-    # AUDIT GAP #55 (additive): optional ChaCha20 string mode lives alongside
-    # the legacy single-byte XOR path. Default mode stays "xor" so existing
-    # builds/golden outputs are unchanged; opt in via
-    #   StringLiteralObfuscator(mode="chacha20", allowlist=[...])
-    # or via apply_ast_mutation options {"string_crypto": "chacha20",
-    # "string_allowlist": [...]}. Per-string nonces (secrets.token_bytes)
-    # make every build unique; tampered seals raise ValueError at runtime.
-    def __init__(self, mode="xor", allowlist=None, string_key=None):
+    # Hardening A1a: ChaCha20-AEAD is the default string mode; the legacy
+    # single-byte XOR path (key literal shipped inline) is explicit
+    # opt-in only via mode="xor"/"legacy" or {"string_crypto": "xor"}.
+    # Per-string nonces (secrets.token_bytes) make every build unique;
+    # tampered seals raise ValueError at runtime.
+    def __init__(self, mode="chacha20", allowlist=None, string_key=None):
         self.string_table = {}
         self.generated_vars = set()
         self.decoder_name = self._generate_babel_name()
