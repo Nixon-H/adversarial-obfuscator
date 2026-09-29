@@ -265,9 +265,14 @@ STUB_TEMPLATE = """def __NX_DEC__(_s):
     return bytes(_nx_p).decode('utf-8')"""
 
 
-def build_stub_decoder(decoder_name, key_hex):
-    # type: (str, str) -> str
-    """Fill the runtime stub template for one build (no str.format used)."""
+def build_stub_decoder(decoder_name, key_hex, kek_env=None):
+    # type: (str, str, object) -> str
+    """Fill the runtime stub template for one build (no str.format used).
+
+    kek_env (env var NAME, opt-in): the stub re-derives the seal key as
+    build_key XOR sha256(env_shard) and raises when the shard is absent
+    (fail-closed). Without it the stub uses the embedded build key.
+    """
     if not decoder_name.isidentifier():
         raise ValueError("decoder name must be a valid identifier")
     try:
@@ -277,5 +282,29 @@ def build_stub_decoder(decoder_name, key_hex):
     if len(raw) != KEY_SIZE:
         raise ValueError("key_hex must decode to exactly 32 bytes")
     int_list = "[" + ", ".join(str(b) for b in raw) + "]"
-    return STUB_TEMPLATE.replace("__NX_DEC__", decoder_name).replace(
+    stub = STUB_TEMPLATE.replace("__NX_DEC__", decoder_name).replace(
         "__NX_KEYBYTES__", int_list)
+    if kek_env is not None:
+        if not isinstance(kek_env, str) or not kek_env:
+            raise ValueError("kek_env must be a non-empty string")
+        prologue = (
+            "    import os as _nx_os\n"
+            "    try:\n"
+            "        _nx_sh = _nx_os.environ[%r]\n"
+            "        _nx_sd = bytes.fromhex(_nx_sh.strip())\n"
+            "        assert len(_nx_sd) >= 16\n"
+            "    except Exception:\n"
+            "        raise ValueError('string KEK unavailable')\n"
+            "    _nx_k = bytes(_a ^ _b for _a, _b in zip("
+            "_nx_k, _nx_ha.sha256(_nx_sd).digest()))\n" % (kek_env,))
+        # Insert prologue directly after the int-list key line.
+        lines = stub.split("\n")
+        for i, ln in enumerate(lines):
+            if ln.strip().startswith("_nx_k = bytes(["):
+                lines.insert(i + 1, prologue.replace("\\n", "\n")
+                             .rstrip("\n"))
+                break
+        else:
+            raise ValueError("stub template key line not found")
+        stub = "\n".join(lines)
+    return stub

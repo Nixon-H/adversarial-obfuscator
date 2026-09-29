@@ -156,23 +156,72 @@ def decrypt_string(seal_hex, key):
     return aead_decrypt(bytes(key), bytes.fromhex(seal_hex)).decode("utf-8")
 
 
-def make_session(key=None):
-    # type: (object) -> dict
-    """One per-build session: fresh random key + bound helpers."""
+def _read_env_shard(env_name):
+    # type: (str) -> bytes
+    """Read a hex shard from the environment (build-time requirement).
+
+    Raises ValueError when absent/unparseable/too short: fail loud at
+    build time rather than emitting seals nobody can open.
+    """
+    import os
+    if not isinstance(env_name, str) or not env_name:
+        raise ValueError("string_key_env must be a non-empty string")
+    raw = os.environ.get(env_name)
+    if not raw:
+        raise ValueError(
+            "string_key_env %r is not set: refusing to seal strings "
+            "without the KEK shard" % (env_name,))
+    try:
+        shard = bytes.fromhex(raw.strip())
+    except ValueError:
+        raise ValueError(
+            "string_key_env %r must hold hex" % (env_name,))
+    if len(shard) < 16:
+        raise ValueError(
+            "string_key_env %r shard too short (<16 bytes)" % (env_name,))
+    return shard
+
+
+def _kek_derive(build_key, shard):
+    # type: (bytes, bytes) -> bytes
+    """Effective seal key: build key blinded by the env shard digest.
+
+    Artifact alone is insufficient to decrypt (shard never embedded);
+    the runtime stub re-derives this from os.environ (fail-closed).
+    """
+    import hashlib
+    digest = hashlib.sha256(bytes(shard)).digest()
+    return bytes(a ^ b for a, b in zip(bytes(build_key), digest))
+
+
+def make_session(key=None, kek_env=None):
+    # type: (object, object) -> dict
+    """One per-build session: fresh random key + bound helpers.
+
+    kek_env (env var NAME, opt-in): seals are encrypted under
+    KDF(build_key, env_shard) instead of the bare build key, so the
+    artifact alone cannot be decrypted offline. Build-time env read
+    fails loud when the shard is absent.
+    """
     session_key = bytes(key) if key is not None else generate_key()
     _check_key(session_key)
+    eff_key = session_key
+    if kek_env is not None:
+        eff_key = _kek_derive(session_key, _read_env_shard(kek_env))
 
     def _encrypt(plaintext, allowlist=None):
-        return encrypt_string(plaintext, session_key, allowlist)
+        return encrypt_string(plaintext, eff_key, allowlist)
 
     def _decrypt(seal_hex):
-        return decrypt_string(seal_hex, session_key)
+        return decrypt_string(seal_hex, eff_key)
 
-    return {"key": session_key, "encrypt": _encrypt, "decrypt": _decrypt}
+    return {"key": session_key, "kek_env": kek_env,
+            "encrypt": _encrypt, "decrypt": _decrypt}
 
 
-def emit_decoder_source(decoder_name, key):
-    # type: (str, bytes) -> str
+def emit_decoder_source(decoder_name, key, kek_env=None):
+    # type: (str, bytes, object) -> str
     """Runtime stub source for one build (self-contained pure Python)."""
     _check_key(key)
-    return build_stub_decoder(decoder_name, bytes(key).hex())
+    return build_stub_decoder(decoder_name, bytes(key).hex(),
+                              kek_env=kek_env)

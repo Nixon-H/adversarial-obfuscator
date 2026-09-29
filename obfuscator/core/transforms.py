@@ -438,13 +438,19 @@ class StringLiteralObfuscator(ast.NodeTransformer):
     # opt-in only via mode="xor"/"legacy" or {"string_crypto": "xor"}.
     # Per-string nonces (secrets.token_bytes) make every build unique;
     # tampered seals raise ValueError at runtime.
-    def __init__(self, mode="chacha20", allowlist=None, string_key=None):
+    def __init__(self, mode="chacha20", allowlist=None, string_key=None,
+                 kek_env=None):
         self.string_table = {}
         self.generated_vars = set()
         self.decoder_name = self._generate_babel_name()
         self.xor_key = secrets.randbelow(255) + 1
         self._chacha_key = None
         self._allowlist = list(allowlist) if allowlist else []
+        # Hardening A1c (opt-in): kek_env names an env var holding a hex
+        # shard; seals bind to KDF(build_key, shard) and the stub fails
+        # closed without it. Build-time read fails loud when absent.
+        # Errors here must NOT fall back to weaker modes silently.
+        self._kek_env = kek_env
         try:
             from obfuscator.string_crypto import (
                 LEGACY_MODE as _LEGACY, normalize_mode as _norm_mode)
@@ -454,9 +460,11 @@ class StringLiteralObfuscator(ast.NodeTransformer):
         if self.mode == "chacha20":
             try:
                 from obfuscator.string_crypto import make_session as _mk
-                self._session = _mk(string_key)
+                self._session = _mk(string_key, kek_env=kek_env)
                 self._chacha_key = self._session["key"]
             except Exception:
+                if kek_env is not None:
+                    raise
                 self.mode = "xor"
                 self._session = None
         else:
@@ -524,7 +532,8 @@ class StringLiteralObfuscator(ast.NodeTransformer):
             try:
                 from obfuscator.string_crypto import (
                     emit_decoder_source as _emit, is_allowlisted as _allowed)
-                stub = _emit(self.decoder_name, self._chacha_key)
+                stub = _emit(self.decoder_name, self._chacha_key,
+                             kek_env=getattr(self, "_kek_env", None))
             except Exception:
                 return self._get_xor_preamble()
             lines = [stub]

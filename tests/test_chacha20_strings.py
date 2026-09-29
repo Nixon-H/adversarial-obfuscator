@@ -318,3 +318,43 @@ def test_stub_has_no_64hex_key_signature():
     seal = encrypt_string("roundtrip", bytes.fromhex("ab" * 32))
     exec(compile(stub + "\nR = d(%r)\n" % seal, "<t>", "exec"), ns)
     assert ns["R"] == "roundtrip"
+def test_kek_env_roundtrip_with_shard(monkeypatch):
+    # Hardening A1c: seals bound to env shard decrypt with shard present.
+    import os
+    monkeypatch.setenv("NXK_TEST_KEK_A1C", "cd" * 32)
+    from obfuscator.core.sources import apply_ast_mutation
+    src = 'MSG = "env bound secret"\nVAL = MSG.upper()\n'
+    out, _ = apply_ast_mutation(
+        src, {"fragment_strings": True, "string_key_env": "NXK_TEST_KEK_A1C",
+              "string_key": bytes([9]) * 32})
+    assert "NXK_TEST_KEK_A1C" in out  # env NAME embedded (not the value)
+    assert "cd" * 32 not in out  # shard value never embedded
+    ns = {}
+    exec(compile(out, "<t>", "exec"), ns)
+    assert ns["VAL"] == "ENV BOUND SECRET"
+
+
+def test_kek_env_fail_closed_without_shard(monkeypatch):
+    import os
+    monkeypatch.setenv("NXK_TEST_KEK_A1C", "cd" * 32)
+    from obfuscator.core.sources import apply_ast_mutation
+    src = 'MSG = "env bound secret"\nVAL = MSG.upper()\n'
+    out, _ = apply_ast_mutation(
+        src, {"fragment_strings": True, "string_key_env": "NXK_TEST_KEK_A1C",
+              "string_key": bytes([9]) * 32})
+    monkeypatch.delenv("NXK_TEST_KEK_A1C")
+    ns = {}
+    with __import__("pytest").raises(ValueError):
+        exec(compile(out, "<t>", "exec"), ns)
+
+
+def test_kek_env_build_fails_loud_without_shard(monkeypatch):
+    import os
+    monkeypatch.delenv("NXK_TEST_KEK_A1C", raising=False)
+    from obfuscator.core.sources import apply_ast_mutation
+    import pytest
+    with pytest.raises(ValueError):
+        apply_ast_mutation(
+            'MSG = "x"\n',
+            {"fragment_strings": True,
+             "string_key_env": "NXK_TEST_KEK_A1C"})

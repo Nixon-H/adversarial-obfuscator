@@ -298,6 +298,17 @@ def apply_ast_mutation(source_code, options=None):
                 pass
             if isinstance(_lv, bool) or _lv not in (1, 2, 3):
                 raise ValueError(f"unknown MBA level: {options.get('mba_level')!r} (valid: 1-3)")
+    # Hardening A1c: validate the KEK shard BEFORE the broad except below,
+    # so a missing shard fails loud instead of silently returning
+    # un-obfuscated source (a security downgrade that must never be quiet).
+    if options.get('fragment_strings') and options.get('string_key_env'):
+        try:
+            from obfuscator.string_crypto import _read_env_shard as _shard
+            _shard(options.get('string_key_env'))
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"string_key_env unreadable: {e}")
     try:
         tree = ast.parse(source_code)
         def get_depth(node, current=1):
@@ -602,7 +613,8 @@ def apply_ast_mutation(source_code, options=None):
             str_obf = StringLiteralObfuscator(
                 mode=_nx_mode,
                 allowlist=options.get('string_allowlist'),
-                string_key=options.get('string_key'))
+                string_key=options.get('string_key'),
+                kek_env=options.get('string_key_env'))
             tree = str_obf.visit(tree)
             preamble = str_obf.get_preamble()
         else: preamble = ""
