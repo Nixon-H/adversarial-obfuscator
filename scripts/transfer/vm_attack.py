@@ -79,11 +79,28 @@ def _match_a(stmts):
                 and sub.targets[0].id == "_ret"):
             return "RETURN"
     for sub in stmts:
+        # Hardening A4: masked CONST stages `_t = _code[_pc][1]` (Name
+        # target, double-subscript value) before the unmasking append.
+        # Excludes JMP (`_pc`) and BUILD (`_m`) stagers by temp name;
+        # those roles are matched by their own rules elsewhere.
+        if (isinstance(sub, ast.Assign) and len(sub.targets) == 1
+                and isinstance(sub.targets[0], ast.Name)
+                and sub.targets[0].id not in ("_pc", "_m")
+                and isinstance(sub.value, ast.Subscript)
+                and isinstance(sub.value.value, ast.Subscript)):
+            return "CONST"
+    for sub in stmts:
         if _is_append(sub):
             args = sub.value.args
             if not args:
                 continue
             arg = args[0]
+            # Hardening A4: masked CONST arg is (t[1][0] ^ t[1][1]).
+            # Exact shape: VM bodies are emitted after all expression
+            # passes, so no MBA wrapping is possible here.
+            if (isinstance(arg, ast.BinOp)
+                    and isinstance(arg.op, ast.BitXor)):
+                return "CONST"
             if isinstance(arg, ast.Subscript):
                 # LOAD indexes _slots[...] (value is the Name); CONST
                 # indexes _code[_pc][1] (value is a Subscript).

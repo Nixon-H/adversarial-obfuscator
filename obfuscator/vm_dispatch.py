@@ -111,10 +111,15 @@ def _check_supported(tree):
 class _Compiler:
     """Function body -> (slots, code) with jump fixups."""
 
-    def __init__(self, encoding):
+    def __init__(self, encoding, mask_rng=None):
         self.enc = encoding  # opname -> number
         self.slots = {}      # var name -> slot index
         self.code = []       # (number, arg) list
+        # Hardening A4: masks INT CONST args as (v^m, m) pairs so table
+        # literals never carry original integers in clear. Bools excluded
+        # (True/1 identity semantics under `is`); Nones/floats/strings
+        # pass through (strings are sealed upstream; floats documented).
+        self.mask_rng = mask_rng
 
     def slot(self, name):
         if name not in self.slots:
@@ -131,7 +136,15 @@ class _Compiler:
 
     def compile_expr(self, node):
         if isinstance(node, ast.Constant):
-            self.emit("CONST", node.value)
+            v = node.value
+            if isinstance(v, tuple):
+                raise _Unsupported("tuple constant passthrough")
+            if (isinstance(v, int) and not isinstance(v, bool)
+                    and self.mask_rng is not None):
+                m = self.mask_rng.randrange(1 << 30) or 1
+                self.emit("CONST", (v ^ m, m))
+            else:
+                self.emit("CONST", v)
         elif isinstance(node, ast.Name):
             if not isinstance(node.ctx, ast.Load):
                 raise _Unsupported("non-load name in expr")
@@ -354,9 +367,9 @@ def _check_loads_resolve(func):
             raise _Unsupported("unresolved load %s" % node.id)
 
 
-def compile_function(func, encoding):
+def compile_function(func, encoding, mask_rng=None):
     """Compile one FunctionDef -> (slots, code, params, defaults, n_posonly)."""
-    comp = _Compiler(encoding)
+    comp = _Compiler(encoding, mask_rng)
     params = [a.arg for a in list(func.args.posonlyargs) + list(func.args.args)]
     for p in params:
         comp.slot(p)
@@ -445,7 +458,7 @@ def emit_vm_a(func_name, params, defaults, n_posonly, slots, code,
     shuffled = ["        elif _op == %d: %s; _pc+=1" % (encoding[op], stmt)
                 for op, stmt in branches]
     body = "\n".join([
-        "        if _op == %d: _stack.append(_code[_pc][1]); _pc+=1  # CONST" % encoding["CONST"],
+        "        if _op == %d: _t=_code[_pc][1];_stack.append(_t[0]^_t[1] if type(_t) is tuple and len(_t)==2 and type(_t[0]) is int and type(_t[1]) is int else _t);_pc+=1  # CONST" % encoding["CONST"],
         "        elif _op == %d: _stack.append(_slots[_code[_pc][1]]); _pc+=1  # LOAD" % encoding["LOAD"],
         "        elif _op == %d: _slots[_code[_pc][1]]=_stack.pop(); _pc+=1  # STORE" % encoding["STORE"],
     ] + shuffled + [
@@ -497,7 +510,8 @@ def emit_vm_b(func_name, params, defaults, n_posonly, slots, code,
     inits = "\n".join("    _slots[%d] = %s" % (slots[p], p) for p in params)
     defs = [
         "    def _h_const(st):\n        _s,_k,_c,_p,_r=st\n"
-        "        _k.append(_c[_p][1])\n        return _p+1",
+        "        _t=_c[_p][1]\n"
+        "        _k.append(_t[0]^_t[1] if type(_t) is tuple and len(_t)==2 and type(_t[0]) is int and type(_t[1]) is int else _t)\n        return _p+1",
         "    def _h_load(st):\n        _s,_k,_c,_p,_r=st\n"
         "        _k.append(_s[_c[_p][1]])\n        return _p+1",
         "    def _h_store(st):\n        _s,_k,_c,_p,_r=st\n"
@@ -679,8 +693,11 @@ class VMDispatchTransformer(ast.NodeTransformer):
         import hashlib as _hl
         enc_seed = "%s:%s:%s" % (self.seed, self.family, node.name)
         encoding = _encoding(enc_seed, self.family)
+        mask_rng = random.Random(int.from_bytes(
+            _hl.sha256(("%s:constmask" % enc_seed).encode()).digest()[:8],
+            "little"))
         slots, code, params, defaults, n_posonly = compile_function(
-            node, encoding)
+            node, encoding, mask_rng)
         doc = ast.get_docstring(node)
         if self.family == "b":
             src = emit_vm_b(node.name, params, defaults, n_posonly,

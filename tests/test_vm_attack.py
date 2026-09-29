@@ -91,3 +91,45 @@ def test_committed_calc_builds_pass_gate():
         src = open(f, encoding="utf-8").read()
         s, npos, ntot, reason = V.self_score(src)
         assert s is not None and s >= 0.80, (f, s, reason)
+
+def test_masked_const_args_hide_literals():
+    # Hardening A4: original integers must not appear as bare table args.
+    import ast as _ast
+    from obfuscator.vm_dispatch import virtualize_source
+    src = "def f(n):\n    a = n + 12345\n    if a > 99999:\n        a = a - 7\n    return a\n"
+    code, stats = virtualize_source(src, seed=31, family="a")
+    assert stats.get("virtualized", 0) >= 1
+    tree = _ast.parse(code)
+    bare_ints = []
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.Assign) and any(
+                isinstance(t, _ast.Name) and t.id == "_code"
+                for t in node.targets):
+            for elt in node.value.elts:
+                if (isinstance(elt, _ast.Tuple) and len(elt.elts) == 2
+                        and isinstance(elt.elts[1], _ast.Constant)):
+                    bare_ints.append(elt.elts[1].value)
+    assert 12345 not in bare_ints and 99999 not in bare_ints and 7 not in bare_ints
+    ns = {}
+    exec(compile(code, "<t>", "exec"), ns)
+    assert ns["f"](10) == 10 + 12345
+    assert ns["f"](100000) == 100000 + 12345 - 7
+
+
+def test_masked_passthrough_types_execute():
+    # None/bool/float/str-tuple shapes survive masking exactly.
+    from obfuscator.vm_dispatch import virtualize_source
+    src = ("def f(n):\n"
+           "    a = n\n"
+           "    if a:\n"
+           "        a = 1.5\n"
+           "    else:\n"
+           "        a = 0\n"
+           "    return a\n")
+    for fam in ("a", "b"):
+        code, stats = virtualize_source(src, seed=32, family=fam)
+        assert stats.get("virtualized", 0) >= 1, fam
+        ns = {}
+        exec(compile(code, "<t>", "exec"), ns)
+        assert ns["f"](0) == 0, fam
+        assert ns["f"](5) == 1.5, fam
