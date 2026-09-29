@@ -91,7 +91,7 @@
   ],
   "markers": {
     "hex_blobs": 0,
-    "str_consts": 15,
+    "str_consts": 16,
     "wrappers": 0
   },
   "version": "1.0.0",

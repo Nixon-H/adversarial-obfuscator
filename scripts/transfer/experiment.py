@@ -42,7 +42,12 @@ def run_program(prog_entry, out_dir, n_per_arm, attack_arms=("static",),
 
     from scripts.diversity.generator import DiversityGenerator
     builds, excluded, costs = {}, [], {}
-    base_master = 41000 + (abs(hash(name)) % 1000)
+    # Reproducibility fix: hash() is PYTHONHASHSEED-randomized per
+    # process, which silently re-seeded every experiment run. Use a
+    # stable digest so identical code + config => identical builds.
+    import hashlib as _hl
+    base_master = 41000 + (int(_hl.sha256(name.encode()).hexdigest(),
+                             16) % 1000)
 
     for arm in arms_mod.ARM_ORDER:
         for i in range(n_per_arm):

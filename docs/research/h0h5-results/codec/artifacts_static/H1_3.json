@@ -1,6 +1,6 @@
 {
   "arm": "static",
-  "develop_time_s": 0.128,
+  "develop_time_s": 0.095,
   "developed_from": "h1_3.py",
   "gt_feats": {
     "rle_decode": {

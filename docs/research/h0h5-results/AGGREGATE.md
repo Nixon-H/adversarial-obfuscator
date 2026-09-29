@@ -131,3 +131,20 @@ per protocol order: Ghidra-transfer arm (primary), then LLM, then
 symbolic -- transfer must be tested against attacks that key on
 the diversified features before any planner (G1) calibration, which
 remains blocked on measurements that discriminate.
+
+## Post-hardening rerun (A1 string default + A4 CONST masking)
+
+216/216 usable, zero exclusions, T=1.00 in all 30 comparisons
+reconfirmed. Absolute-S regime unchanged: calc VM arms 0.50; auth
+H0/H1/H5 0.667 vs H2/H3/H4 1.00; sched H1/H5 0.778; codec H5 dip gone
+(1.00); parser/store ceiling. VM matrix on new-emission builds:
+self 1.00 (18/18); cross-seed H3 0.056 / H4 0.051 / H5 0.022;
+H3<->H4 0.028 -- positive preserved (chance-level regime identical;
+exact cell values shift with re-seeding, as expected for permutation
+agreement rates).
+
+Reproducibility fix (same batch): experiment seeds derived from
+`hash(name)` were PYTHONHASHSEED-randomized per process, silently
+re-seeding every run. Now sha256-based (stable); verified
+bit-identical calc builds across two processes. Reported numbers are
+distributionally stable; exact cell values are seed-regime draws.

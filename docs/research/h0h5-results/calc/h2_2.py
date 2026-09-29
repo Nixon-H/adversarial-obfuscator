@@ -14,18 +14,18 @@ def _nx_5c2deb(n):
 
 def _nx_331a5d(a, b):
     while b:
-        a, b = (b, a % b)
+        a, b = (b,) + (a % b,)
     return a
 
 def _demo(argv):
-    _nixon_ञע祶瓦Իğ = argv[0]
-    if _nixon_ञע祶瓦Իğ == chr(97) + chr(100) + chr(100):
-        print(_nx_34ec78(int(argv[1]), int(argv[2 + 0])))
-    elif _nixon_ञע祶瓦Իğ == ''.join(['m', 'u', 'l']):
-        print(_nx_353942(int(argv[1]), int(argv[1 + 1])))
-    elif _nixon_ञע祶瓦Իğ == 'fib':
+    _nixon_ᚸΫৡჼ夾鋛ৄΕ = argv[0]
+    if _nixon_ᚸΫৡჼ夾鋛ৄΕ == 'add':
+        print(_nx_34ec78(int(argv[1]), int(argv[2])))
+    elif _nixon_ᚸΫৡჼ夾鋛ৄΕ == 'mul':
+        print(_nx_353942(int(argv[1]), int(argv[2])))
+    elif _nixon_ᚸΫৡჼ夾鋛ৄΕ == 'fib':
         print(_nx_5c2deb(int(argv[1])))
-    elif _nixon_ञע祶瓦Իğ == 'gcd':
+    elif _nixon_ᚸΫৡჼ夾鋛ৄΕ == 'gcd':
         print(_nx_331a5d(int(argv[1]), int(argv[2])))
     else:
         print('unknown op')

@@ -1,6 +1,6 @@
 import sys
 
-def _nixon_ჀᏙᛆ抏ڰɥĬᎪՉᚭ(store, key, value):
+def _nixon_њ冃ჲЈЬСƮग輛(store, key, value):
     store = dict(store)
     store[key] = value
     return store
@@ -14,18 +14,18 @@ def _nx_ffd109(store):
     return sorted(store.keys())
 
 def _nx_eeb99d(a, b):
-    _nixon_ŎĄۙฯפऴϓᛛ = dict(a)
-    for _nixon_ᏈסᎳंचতӨฝᎭТ in b:
-        _nixon_ŎĄۙฯפऴϓᛛ[_nixon_ᏈסᎳंचতӨฝᎭТ] = b[_nixon_ᏈסᎳंचতӨฝᎭТ]
-    return _nixon_ŎĄۙฯפऴϓᛛ
+    _nixon_鐃Ⴑᛞฏᚫ = dict(a)
+    for _nixon_БृᛑշďᏨ in b:
+        _nixon_鐃Ⴑᛞฏᚫ[_nixon_БृᛑշďᏨ] = b[_nixon_БृᛑշďᏨ]
+    return _nixon_鐃Ⴑᛞฏᚫ
 
 def _demo(argv):
-    _nixon_ڱ翉ずͶɻĵ参ぎदĤ = argv[0]
-    if _nixon_ڱ翉ずͶɻĵ参ぎदĤ == 'store_get':
+    _nixon_ᛢ篢לفๆכרᏢげ禿 = argv[0]
+    if _nixon_ᛢ篢לفๆכרᏢげ禿 == 'store_get':
         print(_nx_e1c3b9({'a': 1}, argv[1], argv[2]))
-    elif _nixon_ڱ翉ずͶɻĵ参ぎदĤ == 'store_keys':
+    elif _nixon_ᛢ篢לفๆכרᏢげ禿 == 'store_keys':
         print(','.join(_nx_ffd109({'b': 1, 'a': 2})))
-    elif _nixon_ڱ翉ずͶɻĵ参ぎदĤ == 'store_merge':
+    elif _nixon_ᛢ篢לفๆכרᏢげ禿 == 'store_merge':
         print(sorted(_nx_eeb99d({'a': 1}, {'b': 2}).items()))
     else:
         print('unknown op')

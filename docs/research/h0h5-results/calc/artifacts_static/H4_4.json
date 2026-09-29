@@ -1,6 +1,6 @@
 {
   "arm": "static",
-  "develop_time_s": 0.139,
+  "develop_time_s": 0.12,
   "developed_from": "h4_4.py",
   "gt_feats": {
     "add": {

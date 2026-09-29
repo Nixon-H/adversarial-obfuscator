@@ -1,6 +1,6 @@
 {
   "arm": "static",
-  "develop_time_s": 0.181,
+  "develop_time_s": 0.124,
   "developed_from": "h0_4.py",
   "gt_feats": {
     "count_words": {
@@ -106,7 +106,7 @@
   ],
   "markers": {
     "hex_blobs": 0,
-    "str_consts": 13,
+    "str_consts": 15,
     "wrappers": 2
   },
   "version": "1.0.0",

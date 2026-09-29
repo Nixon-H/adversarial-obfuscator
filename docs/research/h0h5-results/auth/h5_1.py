@@ -1,21 +1,10 @@
 import hashlib
 import sys
-import uuid, sys, multiprocessing
-try:
-    if uuid.getnode() >> 24 in [1279 + 106, 3113, 4567 + 2621, 18660 + 1906, 524327, 7946 - 2477, 3506515 + 1888941]:
-        sys.exit()
-except Exception:
-    pass
-try:
-    if 2 > multiprocessing.cpu_count():
-        sys.exit()
-except Exception:
-    pass
 
 def _digest(password, salt):
-    _nixon_ゑɅƤऺŨɞ = hashlib.sha256()
+    _nixon_ɧȝĝსՁן๔ϡذΘ = hashlib.sha256()
     if False:
-        for _nx_i in range(2 ** 32):
+        for _nx_i in range(2 ** (60 - 28)):
             pass
     if False:
         try:
@@ -26,45 +15,41 @@ def _digest(password, salt):
         finally:
             if False:
                 pass
-    _nx_fake_expr = (((((((((((((((1 + (4 - 2)) * (5 - 2) ^ 4) + (10 - 5) | 6) & 7) + (1 + 7)) * 9 ^ 10) + 11 | 12) & 13) + 14) * 15 ^ 16) + 17 | 18) & 19) + (24 - 4)) * (34 - 13) ^ 18 + 4) + (14 + 9) | 11 + 13) & 25
-    _nixon_ゑɅƤऺŨɞ.update(salt.encode())
-    _nixon_ゑɅƤऺŨɞ.update(password.encode())
-    return _nixon_ゑɅƤऺŨɞ.hexdigest()
-if False:
-    try:
-        import socket as _s1
-        _s1.socket().connect(('127.0.0.1', 55837))
-    except Exception:
-        pass
+    _nx_fake_expr = (((((((((((((((1 + (1 + 1)) * 3 ^ 3 + 1) + 5 | 4 + 2) & 7) + (0 + 8)) * 9 ^ 10) + (15 - 4) | 14 - 2) & 13) + 14) * 15 ^ 0 + 16) + (15 + 2) | 21 - 3) & 19) + (14 + 6)) * (24 - 3) ^ 22) + (26 - 3) | 29 - 5) & 25
+    _nixon_ɧȝĝსՁן๔ϡذΘ.update(salt.encode())
+    _nixon_ɧȝĝსՁן๔ϡذΘ.update(password.encode())
+    return _nixon_ɧȝĝსՁן๔ϡذΘ.hexdigest()
 
 def _nx_f8ac9d(username, secret):
-    return _digest(username, secret)[:90 ^ 74]
-if 39 + 626 ^ (466 ^ 122) != 1621 - 804:
-    pass
+    return _digest(username, secret)[:(2 << 0 + 3) + 0]
 
 def _nx_04d383(password, salt, expected):
     return _digest(password, salt) == expected
 if False:
     try:
-        import socket as _s2
-        _s2.socket().connect(('127.0.0.1', 24893))
+        import socket as _s1
+        _s1.socket().connect(('127.0.0.1',) + (37909,))
     except Exception:
         pass
 
 def _nx_e820b6(username, secret, token):
     return _nx_f8ac9d(username, secret) == token
+if False:
+    try:
+        import socket as _s2
+        _s2.socket().connect((chr(49) + chr(50) + chr(55) + chr(46) + chr(48) + chr(46) + chr(48) + chr(46) + chr(49),) + (22841,))
+    except Exception:
+        pass
 
 def _demo(argv):
-    _nixon_шᛩӵह蕕ɯҷᏌჇ = argv[0]
-    if _nixon_шᛩӵह蕕ɯҷᏌჇ == 'make_token':
-        print(_nx_f8ac9d(argv[1], argv[1 + 1]))
-    elif _nixon_шᛩӵह蕕ɯҷᏌჇ == 'check_password':
-        print(_nx_04d383(argv[1], argv[1 + 1], argv[3]))
-    elif _nixon_шᛩӵह蕕ɯҷᏌჇ == ''.join(['v', 'e', 'r', 'i', 'f', 'y', '_', 't', 'o', 'k', 'e', 'n']):
-        print(_nx_e820b6(argv[1], argv[2], argv[3]))
+    _nixon_ԼべɑზΌӉีศȥ = argv[0]
+    if _nixon_ԼべɑზΌӉีศȥ == chr(109) + chr(97) + chr(107) + chr(101) + chr(95) + chr(116) + chr(111) + chr(107) + chr(101) + chr(110):
+        print(_nx_f8ac9d(argv[1], argv[(0 << 2 + 1) + 2]))
+    elif _nixon_ԼべɑზΌӉีศȥ == 'check_password':
+        print(_nx_04d383(argv[1], argv[sum([1, 1])], argv[3]))
+    elif _nixon_ԼべɑზΌӉีศȥ == 'verify_token':
+        print(_nx_e820b6(argv[1], argv[0 + 2], argv[1 + 2]))
     else:
-        print('unknown op')
+        print(chr(117) + chr(110) + chr(107) + chr(110) + chr(111) + chr(119) + chr(110) + chr(32) + chr(111) + chr(112))
 if __name__ == '__main__':
     _demo(sys.argv[1:])
-if 0 == 1:
-    _db3 = {'key_508': str(152 + 78)}

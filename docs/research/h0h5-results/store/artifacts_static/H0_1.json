@@ -1,6 +1,6 @@
 {
   "arm": "static",
-  "develop_time_s": 0.093,
+  "develop_time_s": 0.132,
   "developed_from": "h0_1.py",
   "gt_feats": {
     "store_get": {
@@ -91,7 +91,7 @@
   ],
   "markers": {
     "hex_blobs": 0,
-    "str_consts": 11,
+    "str_consts": 14,
     "wrappers": 1
   },
   "version": "1.0.0",

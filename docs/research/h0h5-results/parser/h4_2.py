@@ -1,13 +1,13 @@
 import sys
 
 def _nx_385816(text):
-    _nixon_Ꮺ腗Şɹখ = []
-    for _nixon_נıʌᎬċ in text.lower():
-        if _nixon_נıʌᎬċ.isalnum():
-            _nixon_Ꮺ腗Şɹখ.append(_nixon_נıʌᎬċ)
-        elif _nixon_Ꮺ腗Şɹখ and _nixon_Ꮺ腗Şɹখ[-1] != '-':
-            _nixon_Ꮺ腗Şɹখ.append('-')
-    return ''.join(_nixon_Ꮺ腗Şɹখ).strip('-')
+    _nixon_Ċれफঠĺǿऱً = []
+    for _nixon_ॷԱք८Շųי in text.lower():
+        if _nixon_ॷԱք८Շųי.isalnum():
+            _nixon_Ċれफঠĺǿऱً.append(_nixon_ॷԱք८Շųי)
+        elif _nixon_Ċれफঠĺǿऱً and _nixon_Ċれफঠĺǿऱً[-1] != '-':
+            _nixon_Ċれफঠĺǿऱً.append('-')
+    return ''.join(_nixon_Ċれफঠĺǿऱً).strip('-')
 
 def _nx_385101(text):
     return len(text.split())
@@ -19,16 +19,16 @@ def _nx_8ca8c6(text):
     return text.upper() + '!'
 
 def _demo(argv):
-    _nixon_ᏖղǕげŴլąჯड़ٖ = argv[0]
-    _nixon_सʃრԷؐةȿᏯা৾ = ' '.join(argv[1:])
-    if _nixon_ᏖղǕげŴլąჯड़ٖ == 'slugify':
-        print(_nx_385816(_nixon_सʃრԷؐةȿᏯা৾))
-    elif _nixon_ᏖղǕげŴլąჯड़ٖ == 'count_words':
-        print(_nx_385101(_nixon_सʃრԷؐةȿᏯা৾))
-    elif _nixon_ᏖղǕげŴլąჯड़ٖ == 'reverse_words':
-        print(_nx_31b169(_nixon_सʃრԷؐةȿᏯা৾))
-    elif _nixon_ᏖղǕげŴլąჯड़ٖ == 'shout':
-        print(_nx_8ca8c6(_nixon_सʃრԷؐةȿᏯা৾))
+    _nixon_əწ黔ᏎО = argv[0]
+    _nixon_ჃͲ৾るᎱょסぞᛞ = ' '.join(argv[1:])
+    if _nixon_əწ黔ᏎО == 'slugify':
+        print(_nx_385816(_nixon_ჃͲ৾るᎱょסぞᛞ))
+    elif _nixon_əწ黔ᏎО == 'count_words':
+        print(_nx_385101(_nixon_ჃͲ৾るᎱょסぞᛞ))
+    elif _nixon_əწ黔ᏎО == 'reverse_words':
+        print(_nx_31b169(_nixon_ჃͲ৾るᎱょסぞᛞ))
+    elif _nixon_əწ黔ᏎО == 'shout':
+        print(_nx_8ca8c6(_nixon_ჃͲ৾るᎱょסぞᛞ))
     else:
         print('unknown op')
 if __name__ == '__main__':

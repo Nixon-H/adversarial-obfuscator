@@ -1,16 +1,16 @@
 # H0-H5 transfer experiment: codec
 
-config `48221407c909` · corpus `67a434b2da75` · elapsed 55.1s
+config `48221407c909` · corpus `67a434b2da75` · elapsed 60.7s
 
 excluded builds: 0
 
 ## cost + coverage per arm (mean)
-- H0: n=6 build=0.05s size=7553B vm=0/0 gate-pass=6/6
-- H1: n=6 build=0.01s size=7654B vm=0/0 gate-pass=6/6
-- H2: n=6 build=0.01s size=2068B vm=0/0 gate-pass=6/6
-- H3: n=6 build=0.01s size=1966B vm=0/0 gate-pass=6/6
-- H4: n=6 build=0.01s size=1994B vm=0/0 gate-pass=6/6
-- H5: n=6 build=0.02s size=8176B vm=0/0 gate-pass=6/6
+- H0: n=6 build=0.02s size=7572B vm=0/0 gate-pass=6/6
+- H1: n=6 build=0.01s size=7717B vm=0/0 gate-pass=6/6
+- H2: n=6 build=0.01s size=2086B vm=0/0 gate-pass=6/6
+- H3: n=6 build=0.01s size=1984B vm=0/0 gate-pass=6/6
+- H4: n=6 build=0.01s size=1968B vm=0/0 gate-pass=6/6
+- H5: n=6 build=0.02s size=8330B vm=0/0 gate-pass=6/6
 
 ## arm: static
 - H0: T=['1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00', '1.00'] (control)

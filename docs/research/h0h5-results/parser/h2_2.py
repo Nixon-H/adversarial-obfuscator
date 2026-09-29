@@ -1,35 +1,35 @@
 import sys
 
 def _nx_385816(text):
-    _nixon_ə़ٟҷۿĬんۗ = []
-    for _nixon_ƃİ৫คび゚ in text.lower():
-        if _nixon_ƃİ৫คび゚.isalnum():
-            _nixon_ə़ٟҷۿĬんۗ.append(_nixon_ƃİ৫คび゚)
-        elif _nixon_ə़ٟҷۿĬんۗ and _nixon_ə़ٟҷۿĬんۗ[-1] != chr(45):
-            _nixon_ə़ٟҷۿĬんۗ.append(chr(45))
-    return ''.join(_nixon_ə़ٟҷۿĬんۗ).strip('-')
+    _nixon_স۲۰อǒะӘɲ = []
+    for _nixon_竃ᏓǱᎶנჺקעᚴӜ in text.lower():
+        if _nixon_竃ᏓǱᎶנჺקעᚴӜ.isalnum():
+            _nixon_স۲۰อǒะӘɲ.append(_nixon_竃ᏓǱᎶנჺקעᚴӜ)
+        elif _nixon_স۲۰อǒะӘɲ and _nixon_স۲۰อǒะӘɲ[-1] != ''.join(['-']):
+            _nixon_স۲۰อǒะӘɲ.append('-')
+    return ''.join(_nixon_স۲۰อǒะӘɲ).strip('-')
 
 def _nx_385101(text):
     return len(text.split())
 
 def _nx_31b169(text):
-    return ' '.join(text.split()[::-1])
+    return chr(32).join(text.split()[::-1])
 
 def _nx_8ca8c6(text):
-    return text.upper() + chr(33)
+    return text.upper() + ''.join(['!'])
 
 def _demo(argv):
-    _nixon_ɩᛀ檷Й॑Ⴧͱᛍ = argv[0]
-    _nixon_רᛘณॳƖ = ' '.join(argv[1:])
-    if _nixon_ɩᛀ檷Й॑Ⴧͱᛍ == chr(115) + chr(108) + chr(117) + chr(103) + chr(105) + chr(102) + chr(121):
-        print(_nx_385816(_nixon_רᛘณॳƖ))
-    elif _nixon_ɩᛀ檷Й॑Ⴧͱᛍ == 'count_words':
-        print(_nx_385101(_nixon_רᛘณॳƖ))
-    elif _nixon_ɩᛀ檷Й॑Ⴧͱᛍ == chr(114) + chr(101) + chr(118) + chr(101) + chr(114) + chr(115) + chr(101) + chr(95) + chr(119) + chr(111) + chr(114) + chr(100) + chr(115):
-        print(_nx_31b169(_nixon_רᛘณॳƖ))
-    elif _nixon_ɩᛀ檷Й॑Ⴧͱᛍ == ''.join(['s', 'h', 'o', 'u', 't']):
-        print(_nx_8ca8c6(_nixon_רᛘณॳƖ))
+    _nixon_ϷוᎣƈछ嬪Ŷ鄂ড়Ȝ = argv[0]
+    _nixon_ᏙँոӹӑΣᚮόჭ譞 = ' '.join(argv[1:])
+    if _nixon_ϷוᎣƈछ嬪Ŷ鄂ড়Ȝ == chr(115) + chr(108) + chr(117) + chr(103) + chr(105) + chr(102) + chr(121):
+        print(_nx_385816(_nixon_ᏙँոӹӑΣᚮόჭ譞))
+    elif _nixon_ϷוᎣƈछ嬪Ŷ鄂ড়Ȝ == 'count_words':
+        print(_nx_385101(_nixon_ᏙँոӹӑΣᚮόჭ譞))
+    elif _nixon_ϷוᎣƈछ嬪Ŷ鄂ড়Ȝ == 'reverse_words':
+        print(_nx_31b169(_nixon_ᏙँոӹӑΣᚮόჭ譞))
+    elif _nixon_ϷוᎣƈछ嬪Ŷ鄂ড়Ȝ == 'shout':
+        print(_nx_8ca8c6(_nixon_ᏙँոӹӑΣᚮόჭ譞))
     else:
-        print('unknown op')
-if __name__ == ''.join(['_', '_', 'm', 'a', 'i', 'n', '_', '_']):
+        print(chr(117) + chr(110) + chr(107) + chr(110) + chr(111) + chr(119) + chr(110) + chr(32) + chr(111) + chr(112))
+if __name__ == '__main__':
     _demo(sys.argv[1:])

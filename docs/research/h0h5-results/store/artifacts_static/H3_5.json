@@ -1,6 +1,6 @@
 {
   "arm": "static",
-  "develop_time_s": 0.085,
+  "develop_time_s": 0.092,
   "developed_from": "h3_5.py",
   "gt_feats": {
     "store_get": {

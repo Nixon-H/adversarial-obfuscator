@@ -1,6 +1,6 @@
 {
   "arm": "static",
-  "develop_time_s": 0.092,
+  "develop_time_s": 0.117,
   "developed_from": "h0_3.py",
   "gt_feats": {
     "rle_decode": {
@@ -108,7 +108,7 @@
   ],
   "markers": {
     "hex_blobs": 0,
-    "str_consts": 10,
+    "str_consts": 11,
     "wrappers": 0
   },
   "version": "1.0.0",

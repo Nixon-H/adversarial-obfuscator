@@ -2,10 +2,10 @@ import hashlib
 import sys
 
 def _digest(password, salt):
-    _nixon_ฌॠᏊɔᏴॢ救Ⴢ = hashlib.sha256()
-    _nixon_ฌॠᏊɔᏴॢ救Ⴢ.update(salt.encode())
-    _nixon_ฌॠᏊɔᏴॢ救Ⴢ.update(password.encode())
-    return _nixon_ฌॠᏊɔᏴॢ救Ⴢ.hexdigest()
+    _nixon_९ᚷড়ᛨৃ墝 = hashlib.sha256()
+    _nixon_९ᚷড়ᛨৃ墝.update(salt.encode())
+    _nixon_९ᚷড়ᛨৃ墝.update(password.encode())
+    return _nixon_९ᚷড়ᛨৃ墝.hexdigest()
 
 def _nx_f8ac9d(username, secret):
     return _digest(username, secret)[:16]
@@ -17,12 +17,12 @@ def _nx_e820b6(username, secret, token):
     return _nx_f8ac9d(username, secret) == token
 
 def _demo(argv):
-    _nixon_ঃ९ēǏᛃ = argv[0]
-    if _nixon_ঃ९ēǏᛃ == 'make_token':
+    _nixon_դႶȼॼุտזこא = argv[0]
+    if _nixon_դႶȼॼุտזこא == 'make_token':
         print(_nx_f8ac9d(argv[1], argv[2]))
-    elif _nixon_ঃ९ēǏᛃ == 'check_password':
+    elif _nixon_դႶȼॼุտזこא == 'check_password':
         print(_nx_04d383(argv[1], argv[2], argv[3]))
-    elif _nixon_ঃ९ēǏᛃ == 'verify_token':
+    elif _nixon_դႶȼॼุտזこא == 'verify_token':
         print(_nx_e820b6(argv[1], argv[2], argv[3]))
     else:
         print('unknown op')
