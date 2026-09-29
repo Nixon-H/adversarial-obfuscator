@@ -293,3 +293,41 @@ def test_module_order_preserved():
     ns2 = {}
     exec(compile(code, "<variant>", "exec"), ns2)  # NameError here = reorder bug
     assert 55 in ns2.values()
+
+
+def test_module_binding_use_agreement():
+    # Regression (5th binding/use desync): the sandbox-check template
+    # `import uuid, sys, multiprocessing` kept its spelling (visit_Import
+    # only renames asnames) while use sites renamed uuid/multiprocessing
+    # (absent from reserved) -> NameError at runtime (masked by
+    # try/except) and Cython compile error (broke the Ghidra arm).
+    # Fix: uuid/multiprocessing reserved in both renamers. Every Load of
+    # a plain-imported module must agree with its binding.
+    import ast as _ast
+    from scripts.diversity.generator import generate_variant
+    src = "import sys\n\ndef f(x):\n    return x + 1\nprint(f(1))\n"
+    seen_template = False
+    for seed in range(1, 31):
+        code = generate_variant(
+            src, 0,
+            {"master_seed": seed,
+             "pass_sets": [["rename", "dead_code", "mba", "cfg_flatten", "vm"]]})
+        tree = _ast.parse(code)
+        bound = set()
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.Import):
+                for a in node.names:
+                    bound.add((a.asname or a.name).split(".")[0])
+            elif isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef,
+                                   _ast.ClassDef)):
+                bound.add(node.name)
+        if "uuid" in bound:
+            seen_template = True
+            # uuid/multiprocessing uses must keep their spelling.
+            assert "uuid.getnode" in code, seed
+            loads = {n.id for n in _ast.walk(tree)
+                     if isinstance(n, _ast.Name) and isinstance(n.ctx, _ast.Load)}
+            for mod in ("uuid", "multiprocessing"):
+                if mod in loads:
+                    assert mod in bound, (seed, mod)
+    assert seen_template, "sandbox template never injected in 30 seeds"

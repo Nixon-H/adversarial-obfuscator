@@ -1,6 +1,6 @@
 {
   "arm": "static",
-  "develop_time_s": 0.094,
+  "develop_time_s": 0.085,
   "developed_from": "h2_2.py",
   "gt_feats": {
     "priority_pick": {
@@ -93,7 +93,7 @@
   ],
   "markers": {
     "hex_blobs": 0,
-    "str_consts": 25,
+    "str_consts": 12,
     "wrappers": 0
   },
   "version": "1.0.0",

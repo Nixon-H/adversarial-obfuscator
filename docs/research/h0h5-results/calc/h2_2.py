@@ -9,7 +9,7 @@ def _nx_353942(a, b):
 def _nx_5c2deb(n):
     _nx_0cc175, _nx_92eb5f = (0, 1)
     for _ in range(n):
-        _nx_0cc175, _nx_92eb5f = (_nx_92eb5f,) + (_nx_0cc175 + _nx_92eb5f,)
+        _nx_0cc175, _nx_92eb5f = (_nx_92eb5f, _nx_0cc175 + _nx_92eb5f)
     return _nx_0cc175
 
 def _nx_331a5d(a, b):
@@ -18,14 +18,14 @@ def _nx_331a5d(a, b):
     return a
 
 def _demo(argv):
-    _nixon_ǜյূҀϯ眙おᛢ = argv[0]
-    if _nixon_ǜյূҀϯ眙おᛢ == 'add':
-        print(_nx_34ec78(int(argv[1]), int(argv[0 + 2])))
-    elif _nixon_ǜյূҀϯ眙おᛢ == 'mul':
-        print(_nx_353942(int(argv[1]), int(argv[4 - 2])))
-    elif _nixon_ǜյূҀϯ眙おᛢ == ''.join(['f', 'i', 'b']):
+    _nixon_ञע祶瓦Իğ = argv[0]
+    if _nixon_ञע祶瓦Իğ == chr(97) + chr(100) + chr(100):
+        print(_nx_34ec78(int(argv[1]), int(argv[2 + 0])))
+    elif _nixon_ञע祶瓦Իğ == ''.join(['m', 'u', 'l']):
+        print(_nx_353942(int(argv[1]), int(argv[1 + 1])))
+    elif _nixon_ञע祶瓦Իğ == 'fib':
         print(_nx_5c2deb(int(argv[1])))
-    elif _nixon_ǜյূҀϯ眙おᛢ == 'gcd':
+    elif _nixon_ञע祶瓦Իğ == 'gcd':
         print(_nx_331a5d(int(argv[1]), int(argv[2])))
     else:
         print('unknown op')

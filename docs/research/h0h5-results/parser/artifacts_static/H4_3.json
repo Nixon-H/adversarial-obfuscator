@@ -1,6 +1,6 @@
 {
   "arm": "static",
-  "develop_time_s": 0.096,
+  "develop_time_s": 0.111,
   "developed_from": "h4_3.py",
   "gt_feats": {
     "count_words": {

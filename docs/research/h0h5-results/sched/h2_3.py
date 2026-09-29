@@ -1,17 +1,17 @@
 import sys
 
 def _nx_761882(tasks):
-    _nixon_Ŀ噵րაをᚷɞち泀 = None
-    for _nixon_ऴƴউ始ʫさʅԶใぼ, _nixon_Сϩ丯ͶۈႩ in tasks:
-        if _nixon_Ŀ噵րაをᚷɞち泀 is None or _nixon_Ŀ噵րაをᚷɞち泀[1] < _nixon_Сϩ丯ͶۈႩ:
-            _nixon_Ŀ噵րაをᚷɞち泀 = (_nixon_ऴƴউ始ʫさʅԶใぼ, _nixon_Сϩ丯ͶۈႩ)
-    return _nixon_Ŀ噵րაをᚷɞち泀[0] if _nixon_Ŀ噵րაをᚷɞち泀 else ''
+    _nixon_ŚՄॽჍӔٴ箫ゝ = None
+    for _nixon_ǳҚƪאΗძșů秦, _nixon_簪ąĺƸїॿქ in tasks:
+        if _nixon_ŚՄॽჍӔٴ箫ゝ is None or _nixon_ŚՄॽჍӔٴ箫ゝ[1] < _nixon_簪ąĺƸїॿქ:
+            _nixon_ŚՄॽჍӔٴ箫ゝ = (_nixon_ǳҚƪאΗძșů秦,) + (_nixon_簪ąĺƸїॿქ,)
+    return _nixon_ŚՄॽჍӔٴ箫ゝ[0] if _nixon_ŚՄॽჍӔٴ箫ゝ else ''
 
 def _nx_e2c87e(key, slots):
-    _nixon_ڒɿחیᚴɟ = 0
-    for _nixon_ҷ゙őचᏥƜʊՄ in key:
-        _nixon_ڒɿחیᚴɟ = (_nixon_ڒɿחیᚴɟ * 31 + ord(_nixon_ҷ゙őचᏥƜʊՄ)) % 1000003
-    return _nixon_ڒɿחیᚴɟ % slots
+    _nixon_泚ɧᏎैĭɐ险νসן = 0
+    for _nixon_อĊΛ鍾ȍ in key:
+        _nixon_泚ɧᏎैĭɐ险νসן = (_nixon_泚ɧᏎैĭɐ险νসן * 31 + ord(_nixon_อĊΛ鍾ȍ)) % (474630 + 525373)
+    return _nixon_泚ɧᏎैĭɐ险νসן % slots
 
 def _nx_6e8a62(items, n):
     if not items:
@@ -20,13 +20,13 @@ def _nx_6e8a62(items, n):
     return items[n:] + items[:n]
 
 def _demo(argv):
-    _nixon_Φᛔדڪ۰ϻךข = argv[0]
-    if _nixon_Φᛔדڪ۰ϻךข == 'priority_pick':
-        print(_nx_761882([(chr(97), 1)] + [('b', 5), ('c', 6 - 3)]))
-    elif _nixon_Φᛔדڪ۰ϻךข == 'slot_hash':
+    _nixon_ᎠᏲ旇へᚤıɚ = argv[0]
+    if _nixon_ᎠᏲ旇へᚤıɚ == 'priority_pick':
+        print(_nx_761882([(''.join(['a']), 1), ('b', 9 - 4), ('c', 3)]))
+    elif _nixon_ᎠᏲ旇へᚤıɚ == 'slot_hash':
         print(_nx_e2c87e(argv[1], int(argv[2])))
-    elif _nixon_Φᛔדڪ۰ϻךข == ''.join(['r', 'o', 't', 'a', 't', 'e', '_', 'l', 'i', 's', 't']):
-        print(','.join(_nx_6e8a62(argv[1].split(','), int(argv[2]))))
+    elif _nixon_ᎠᏲ旇へᚤıɚ == 'rotate_list':
+        print(','.join(_nx_6e8a62(argv[1].split(','), int(argv[2 + 0]))))
     else:
         print('unknown op')
 if __name__ == '__main__':

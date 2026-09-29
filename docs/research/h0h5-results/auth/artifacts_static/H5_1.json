@@ -1,6 +1,6 @@
 {
   "arm": "static",
-  "develop_time_s": 0.145,
+  "develop_time_s": 0.167,
   "developed_from": "h5_1.py",
   "gt_feats": {
     "_digest": {
@@ -91,7 +91,7 @@
   ],
   "markers": {
     "hex_blobs": 0,
-    "str_consts": 28,
+    "str_consts": 20,
     "wrappers": 0
   },
   "version": "1.0.0",

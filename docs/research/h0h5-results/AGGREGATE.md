@@ -11,6 +11,26 @@ arms per protocol order remain future work.
 every program. (Probe-stage calc: 12/12; codec pilot under flattener-v1:
 29/36 with 7 exclusions -> diagnosed -> fixed -> full rerun, see below.)
 
+## Second repair: renamer import/use desync (Cython blocker, disclosed)
+
+The Ghidra feasibility probe found Cython rejecting a seed-dependent
+subset of H0/H1/H5 builds: the sandbox-check template
+`import uuid, sys, multiprocessing` kept its spelling (visit_Import only
+renames asnames) while use sites renamed uuid/multiprocessing (absent
+from reserved) -- the 5th binding/use desync of one family. CPython
+tolerated it (NameError caught by try/except; gate passed); Cython
+fails statically, which silently gates the Ghidra arm (compile-or-skip
+= selection bias toward less-obfuscated builds). Fix: uuid +
+multiprocessing reserved in both renamers (SymbolRenamer,
+UnicodeIdentifierEncoder); regression test test_module_binding_use_
+agreement added (20 renamer tests green). Host verified safe for the
+re-armed check (12 CPUs, non-VM OUI). Full static H0-H5 rerun followed
+(outputs changed; one consistent compiler family; prior run superseded
+as pilot, never cited). Post-fix: 216/216 usable, T=1.00 in all 30
+comparisons (reconfirmed), codec H5 S now 1.00 (prior 0.944 dip was
+desync fallout), sched H1 0.889/H5 0.778 (seed-dependent absolute-S
+variation; T-anchored conclusions unchanged).
+
 ## Mid-experiment compiler repair (disclosed, not hidden)
 
 The codec pilot (flattener-v1 with entry-rotation hack) excluded 7/18

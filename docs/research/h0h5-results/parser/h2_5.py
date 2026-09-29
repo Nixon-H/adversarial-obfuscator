@@ -1,35 +1,35 @@
 import sys
 
 def _nx_385816(text):
-    _nixon_皅หへيϘᏇʋぴნび = []
-    for _nixon_ৼঊᎳȤȿよơ in text.lower():
-        if _nixon_ৼঊᎳȤȿよơ.isalnum():
-            _nixon_皅หへيϘᏇʋぴნび.append(_nixon_ৼঊᎳȤȿよơ)
-        elif _nixon_皅หへيϘᏇʋぴნび and _nixon_皅หへيϘᏇʋぴნび[-1] != '-':
-            _nixon_皅หへيϘᏇʋぴნび.append('-')
-    return ''.join(_nixon_皅หへيϘᏇʋぴნび).strip('-')
+    _nixon_նॠȈ۱ɔ輇אऒठ = []
+    for _nixon_קゃᏞפ鎏蒿 in text.lower():
+        if _nixon_קゃᏞפ鎏蒿.isalnum():
+            _nixon_նॠȈ۱ɔ輇אऒठ.append(_nixon_קゃᏞפ鎏蒿)
+        elif _nixon_նॠȈ۱ɔ輇אऒठ and _nixon_նॠȈ۱ɔ輇אऒठ[-1] != '-':
+            _nixon_նॠȈ۱ɔ輇אऒठ.append(chr(45))
+    return ''.join(_nixon_նॠȈ۱ɔ輇אऒठ).strip('-')
 
 def _nx_385101(text):
     return len(text.split())
 
 def _nx_31b169(text):
-    return chr(32).join(text.split()[::-1])
+    return ' '.join(text.split()[::-1])
 
 def _nx_8ca8c6(text):
-    return text.upper() + ''.join(['!'])
+    return text.upper() + '!'
 
 def _demo(argv):
-    _nixon_ɃļᏕংƽԾᏜĬҭ = argv[0]
-    _nixon_ɪڥॄशই়ʠهづʃ = chr(32).join(argv[1:])
-    if _nixon_ɃļᏕংƽԾᏜĬҭ == 'slugify':
-        print(_nx_385816(_nixon_ɪڥॄशই়ʠهづʃ))
-    elif _nixon_ɃļᏕংƽԾᏜĬҭ == 'count_words':
-        print(_nx_385101(_nixon_ɪڥॄशই়ʠهづʃ))
-    elif _nixon_ɃļᏕংƽԾᏜĬҭ == 'reverse_words':
-        print(_nx_31b169(_nixon_ɪڥॄशই়ʠهづʃ))
-    elif _nixon_ɃļᏕংƽԾᏜĬҭ == 'shout':
-        print(_nx_8ca8c6(_nixon_ɪڥॄशই়ʠهづʃ))
+    _nixon_ৰূゕᛔӔぃקব濢 = argv[0]
+    _nixon_ჽһႹֆᛤα = ' '.join(argv[1:])
+    if _nixon_ৰূゕᛔӔぃקব濢 == 'slugify':
+        print(_nx_385816(_nixon_ჽһႹֆᛤα))
+    elif _nixon_ৰূゕᛔӔぃקব濢 == 'count_words':
+        print(_nx_385101(_nixon_ჽһႹֆᛤα))
+    elif _nixon_ৰূゕᛔӔぃקব濢 == 'reverse_words':
+        print(_nx_31b169(_nixon_ჽһႹֆᛤα))
+    elif _nixon_ৰূゕᛔӔぃקব濢 == chr(115) + chr(104) + chr(111) + chr(117) + chr(116):
+        print(_nx_8ca8c6(_nixon_ჽһႹֆᛤα))
     else:
-        print('unknown op')
+        print(chr(117) + chr(110) + chr(107) + chr(110) + chr(111) + chr(119) + chr(110) + chr(32) + chr(111) + chr(112))
 if __name__ == '__main__':
     _demo(sys.argv[1:])

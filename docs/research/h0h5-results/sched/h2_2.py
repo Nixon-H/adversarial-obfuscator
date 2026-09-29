@@ -1,17 +1,17 @@
 import sys
 
 def _nx_761882(tasks):
-    _nixon_ӾʧבעĆշԼԴס = None
-    for _nixon_ՉঀסŽोᏅΐিėग़, _nixon_ȃϨ媫ゃŵ in tasks:
-        if _nixon_ӾʧבעĆշԼԴס is None or _nixon_ȃϨ媫ゃŵ > _nixon_ӾʧבעĆշԼԴס[1]:
-            _nixon_ӾʧבעĆշԼԴס = (_nixon_ՉঀסŽोᏅΐিėग़, _nixon_ȃϨ媫ゃŵ)
-    return _nixon_ӾʧבעĆշԼԴס[0] if _nixon_ӾʧבעĆշԼԴס else ''
+    _nixon_もĄխՀみ = None
+    for _nixon_ჸɣ২ɴझ, _nixon_のՒנЦᚭიぶԲঝॏ in tasks:
+        if _nixon_もĄխՀみ is None or _nixon_もĄխՀみ[1] < _nixon_のՒנЦᚭიぶԲঝॏ:
+            _nixon_もĄխՀみ = (_nixon_ჸɣ২ɴझ,) + (_nixon_のՒנЦᚭიぶԲঝॏ,)
+    return _nixon_もĄխՀみ[0] if _nixon_もĄխՀみ else ''
 
 def _nx_e2c87e(key, slots):
-    _nixon_ჼᎩৢᎠןᎿরᏊ = 0
-    for _nixon_洿ٵӗոȎπɐ in key:
-        _nixon_ჼᎩৢᎠןᎿরᏊ = (_nixon_ჼᎩৢᎠןᎿরᏊ * 31 + ord(_nixon_洿ٵӗոȎπɐ)) % (233935 + 766068)
-    return _nixon_ჼᎩৢᎠןᎿরᏊ % slots
+    _nixon_িΖᏁぅűかԴड़ŲЪ = 0
+    for _nixon_ƃᛪɡƆჹჅҖゖて in key:
+        _nixon_িΖᏁぅűかԴड़ŲЪ = (_nixon_িΖᏁぅűかԴड़ŲЪ * (61 - 30) + ord(_nixon_ƃᛪɡƆჹჅҖゖて)) % (834052 + 165951)
+    return _nixon_িΖᏁぅűかԴड़ŲЪ % slots
 
 def _nx_6e8a62(items, n):
     if not items:
@@ -20,13 +20,13 @@ def _nx_6e8a62(items, n):
     return items[n:] + items[:n]
 
 def _demo(argv):
-    _nixon_黊ɵץฒゖにΆċמ = argv[0]
-    if _nixon_黊ɵץฒゖにΆċמ == ''.join(['p', 'r', 'i', 'o', 'r', 'i', 't', 'y', '_', 'p', 'i', 'c', 'k']):
-        print(_nx_761882([('a',) + (1,), ('b', 5), (''.join(['c']),) + (3,)]))
-    elif _nixon_黊ɵץฒゖにΆċמ == 'slot_hash':
+    _nixon_ৄこঝႫฮέͶ沯 = argv[0]
+    if _nixon_ৄこঝႫฮέͶ沯 == 'priority_pick':
+        print(_nx_761882([('a',) + (1,), (''.join(['b']), 3 + 2), ('c', 3)]))
+    elif _nixon_ৄこঝႫฮέͶ沯 == 'slot_hash':
         print(_nx_e2c87e(argv[1], int(argv[2])))
-    elif _nixon_黊ɵץฒゖにΆċמ == chr(114) + chr(111) + chr(116) + chr(97) + chr(116) + chr(101) + chr(95) + chr(108) + chr(105) + chr(115) + chr(116):
-        print(''.join([',']).join(_nx_6e8a62(argv[1].split(','), int(argv[3 - 1]))))
+    elif _nixon_ৄこঝႫฮέͶ沯 == 'rotate_list':
+        print(','.join(_nx_6e8a62(argv[1].split(','), int(argv[2]))))
     else:
         print('unknown op')
 if __name__ == '__main__':

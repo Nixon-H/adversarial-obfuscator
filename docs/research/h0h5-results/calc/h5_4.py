@@ -1,14 +1,14 @@
 import sys
 if 0 == 1:
-    _db1 = {'key_627': str(198)}
+    _db1 = {'key_486': str(993)}
 import uuid, sys, multiprocessing
 try:
-    if _nixon_ľզӛ鳺ゔせᛦᏎ.getnode() >> 8 + 16 in [1630 - 245, 3113, 7188, 23182 - 2616, 165443 + 358884, 9727 - 4258, 5395456]:
+    if uuid.getnode() >> 24 in [1385, 3113, 9986 - 2798, 34803 - 14237, 524327, 1450 + 4019, 5395456]:
         sys.exit()
 except Exception:
     pass
 try:
-    if _nixon_ᛌぇתतมĩ.cpu_count() < 0 + 2:
+    if multiprocessing.cpu_count() < 2:
         sys.exit()
 except Exception:
     pass
@@ -18,125 +18,125 @@ def _nx_34ec78(a, b):
     _slots[0] = a
     _slots[1] = b
     _stack = []
-    _code = ((7, 0), (7, 1), (1, None), (27, None), (10, None), (27, None))
+    _code = ((22, 0), (22, 1), (2, None), (19, None), (29, None), (19, None))
     _n = len(_code)
     _pc = 0
     _ret = None
     while _pc < _n:
         _op = _code[_pc][0]
-        if _op == 10:
+        if _op == 29:
             _stack.append(_code[_pc][1])
             _pc += 1
-        elif _op == 7:
+        elif _op == 22:
             _stack.append(_slots[_code[_pc][1]])
             _pc += 1
         elif _op == 13:
             _slots[_code[_pc][1]] = _stack.pop()
             _pc += 1
-        elif _op == 15:
+        elif _op == 20:
             _b = _stack.pop()
             _a = _stack.pop()
             _stack.append(_a != _b)
             _pc += 1
-        elif _op == 20:
+        elif _op == 16:
             _b = _stack.pop()
             _a = _stack.pop()
-            _stack.append(_a <= _b)
+            _stack.append(_a is not _b)
             _pc += 1
-        elif _op == 21:
+        elif _op == 15:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a / _b)
+            _pc += 1
+        elif _op == 26:
             _b = _stack.pop()
             _a = _stack.pop()
             _stack.append(_a and _b)
             _pc += 1
-        elif _op == 14:
+        elif _op == 2:
             _b = _stack.pop()
             _a = _stack.pop()
-            _stack.append(_a - _b)
+            _stack.append(_a + _b)
             _pc += 1
-        elif _op == 11:
+        elif _op == 27:
+            _stack.append(not _stack.pop())
+            _pc += 1
+        elif _op == 21:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a % _b)
+            _pc += 1
+        elif _op == 7:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a or _b)
+            _pc += 1
+        elif _op == 18:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a < _b)
+            _pc += 1
+        elif _op == 0:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a is _b)
+            _pc += 1
+        elif _op == 9:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a ** _b)
+            _pc += 1
+        elif _op == 24:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a == _b)
+            _pc += 1
+        elif _op == 17:
             _b = _stack.pop()
             _a = _stack.pop()
             _stack.append(_a * _b)
             _pc += 1
-        elif _op == 23:
+        elif _op == 6:
             _b = _stack.pop()
             _a = _stack.pop()
-            _stack.append(_a % _b)
+            _stack.append(_a <= _b)
             _pc += 1
         elif _op == 8:
             _b = _stack.pop()
             _a = _stack.pop()
             _stack.append(_a > _b)
             _pc += 1
-        elif _op == 25:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a < _b)
-            _pc += 1
-        elif _op == 2:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a == _b)
-            _pc += 1
-        elif _op == 6:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a ** _b)
-            _pc += 1
-        elif _op == 5:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a >= _b)
-            _pc += 1
-        elif _op == 18:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a or _b)
-            _pc += 1
-        elif _op == 26:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a is not _b)
+        elif _op == 11:
+            _stack.append(-_stack.pop())
             _pc += 1
         elif _op == 3:
             _b = _stack.pop()
             _a = _stack.pop()
-            _stack.append(_a / _b)
+            _stack.append(_a >= _b)
             _pc += 1
-        elif _op == 12:
+        elif _op == 5:
             _b = _stack.pop()
             _a = _stack.pop()
-            _stack.append(_a is _b)
+            _stack.append(_a - _b)
             _pc += 1
-        elif _op == 1:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a + _b)
-            _pc += 1
-        elif _op == 16:
-            _stack.append(-_stack.pop())
-            _pc += 1
-        elif _op == 4:
-            _stack.append(not _stack.pop())
-            _pc += 1
-        elif _op == 28:
+        elif _op == 23:
             _pc = _code[_pc][1]
-        elif _op == 0:
+        elif _op == 28:
             _c = _stack.pop()
             _pc = _code[_pc][1] if not _c else _pc + 1
-        elif _op == 29:
+        elif _op == 25:
             _stack.pop()
             _pc += 1
-        elif _op == 27:
+        elif _op == 19:
             _ret = _stack.pop()
             _pc = _n
-        elif _op == 19:
+        elif _op == 14:
             _s = _stack.pop()
             _e = _stack.pop()
             _t = _stack.pop()
             _stack.append(iter(range(_t, _e, _s)))
             _pc += 1
-        elif _op == 17:
+        elif _op == 10:
             _it = _stack[-1]
             try:
                 _v = next(_it)
@@ -145,13 +145,13 @@ def _nx_34ec78(a, b):
             except StopIteration:
                 _stack.pop()
                 _pc = _code[_pc][1]
-        elif _op == 9:
+        elif _op == 12:
             _m = _code[_pc][1]
             _vs = [_stack.pop() for _ in range(_m)]
             _vs.reverse()
             _stack.append(tuple(_vs))
             _pc += 1
-        elif _op == 22:
+        elif _op == 1:
             _m = _code[_pc][1]
             _t = tuple(_stack.pop())
             _l = len(_t)
@@ -161,7 +161,7 @@ def _nx_34ec78(a, b):
                 raise ValueError('not enough values to unpack (expected %d, got %d)' % (_m, _l))
             _stack.extend(_t)
             _pc += 1
-        elif _op == 24:
+        elif _op == 4:
             _m = _code[_pc][1]
             _vs = [_stack.pop() for _ in range(_m)]
             _vs.reverse()
@@ -170,127 +170,125 @@ def _nx_34ec78(a, b):
         else:
             raise RuntimeError('bad opcode')
     return _ret
-if (40 << 1) + 1 ^ 233 + 17 != (85 << 1) + 1:
-    pass
 
 def _nx_353942(a, b):
     _slots = [None] * 2
     _slots[0] = a
     _slots[1] = b
     _stack = []
-    _code = ((19, 0), (19, 1), (29, None), (13, None), (11, None), (13, None))
+    _code = ((25, 0), (25, 1), (1, None), (23, None), (9, None), (23, None))
     _n = len(_code)
     _pc = 0
     _ret = None
     while _pc < _n:
         _op = _code[_pc][0]
-        if _op == 11:
+        if _op == 9:
             _stack.append(_code[_pc][1])
             _pc += 1
-        elif _op == 19:
+        elif _op == 25:
             _stack.append(_slots[_code[_pc][1]])
             _pc += 1
-        elif _op == 23:
+        elif _op == 10:
             _slots[_code[_pc][1]] = _stack.pop()
+            _pc += 1
+        elif _op == 8:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a is _b)
+            _pc += 1
+        elif _op == 17:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a and _b)
+            _pc += 1
+        elif _op == 12:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a ** _b)
+            _pc += 1
+        elif _op == 29:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a < _b)
             _pc += 1
         elif _op == 27:
             _b = _stack.pop()
             _a = _stack.pop()
             _stack.append(_a != _b)
             _pc += 1
-        elif _op == 12:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a + _b)
-            _pc += 1
-        elif _op == 7:
+        elif _op == 26:
             _b = _stack.pop()
             _a = _stack.pop()
             _stack.append(_a or _b)
             _pc += 1
-        elif _op == 1:
-            _stack.append(-_stack.pop())
-            _pc += 1
-        elif _op == 28:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a - _b)
-            _pc += 1
-        elif _op == 17:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a >= _b)
-            _pc += 1
-        elif _op == 2:
+        elif _op == 20:
             _b = _stack.pop()
             _a = _stack.pop()
             _stack.append(_a is not _b)
             _pc += 1
-        elif _op == 26:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a % _b)
-            _pc += 1
-        elif _op == 18:
+        elif _op == 3:
             _stack.append(not _stack.pop())
             _pc += 1
-        elif _op == 5:
+        elif _op == 7:
             _b = _stack.pop()
             _a = _stack.pop()
             _stack.append(_a / _b)
             _pc += 1
-        elif _op == 24:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a is _b)
-            _pc += 1
-        elif _op == 21:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a == _b)
-            _pc += 1
-        elif _op == 14:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a and _b)
-            _pc += 1
-        elif _op == 29:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a * _b)
-            _pc += 1
-        elif _op == 6:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a ** _b)
-            _pc += 1
-        elif _op == 4:
+        elif _op == 11:
             _b = _stack.pop()
             _a = _stack.pop()
             _stack.append(_a > _b)
             _pc += 1
-        elif _op == 20:
+        elif _op == 0:
             _b = _stack.pop()
             _a = _stack.pop()
-            _stack.append(_a < _b)
+            _stack.append(_a - _b)
             _pc += 1
-        elif _op == 0:
+        elif _op == 28:
             _b = _stack.pop()
             _a = _stack.pop()
             _stack.append(_a <= _b)
             _pc += 1
-        elif _op == 25:
-            _pc = _code[_pc][1]
-        elif _op == 8:
-            _c = _stack.pop()
-            _pc = _code[_pc][1] if not _c else _pc + 1
-        elif _op == 22:
-            _stack.pop()
+        elif _op == 6:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a == _b)
+            _pc += 1
+        elif _op == 15:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a % _b)
+            _pc += 1
+        elif _op == 1:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a * _b)
+            _pc += 1
+        elif _op == 2:
+            _stack.append(-_stack.pop())
+            _pc += 1
+        elif _op == 14:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a + _b)
             _pc += 1
         elif _op == 13:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a >= _b)
+            _pc += 1
+        elif _op == 5:
+            _pc = _code[_pc][1]
+        elif _op == 19:
+            _c = _stack.pop()
+            _pc = _code[_pc][1] if not _c else _pc + 1
+        elif _op == 18:
+            _stack.pop()
+            _pc += 1
+        elif _op == 23:
             _ret = _stack.pop()
             _pc = _n
-        elif _op == 3:
+        elif _op == 4:
             _s = _stack.pop()
             _e = _stack.pop()
             _t = _stack.pop()
@@ -305,13 +303,13 @@ def _nx_353942(a, b):
             except StopIteration:
                 _stack.pop()
                 _pc = _code[_pc][1]
-        elif _op == 9:
+        elif _op == 24:
             _m = _code[_pc][1]
             _vs = [_stack.pop() for _ in range(_m)]
             _vs.reverse()
             _stack.append(tuple(_vs))
             _pc += 1
-        elif _op == 15:
+        elif _op == 22:
             _m = _code[_pc][1]
             _t = tuple(_stack.pop())
             _l = len(_t)
@@ -321,7 +319,7 @@ def _nx_353942(a, b):
                 raise ValueError('not enough values to unpack (expected %d, got %d)' % (_m, _l))
             _stack.extend(_t)
             _pc += 1
-        elif _op == 10:
+        elif _op == 21:
             _m = _code[_pc][1]
             _vs = [_stack.pop() for _ in range(_m)]
             _vs.reverse()
@@ -330,11 +328,13 @@ def _nx_353942(a, b):
         else:
             raise RuntimeError('bad opcode')
     return _ret
+if 334 + 13 ^ (238 + 77 ^ 266 - 71) != 155 + 8:
+    pass
 
 def _nx_5c2deb(n):
     _nx_state = 0
     if False:
-        for _nx_i in range(2 ** (57 - 25)):
+        for _nx_i in range((0 + 2) ** (6 + 26)):
             pass
     if False:
         try:
@@ -345,139 +345,138 @@ def _nx_5c2deb(n):
         finally:
             if False:
                 pass
-    _nx_fake_expr = (((((((((((((((1 + 2) * 3 ^ 4) + 5 | 6) & 9 - 2) + 8) * 9 ^ 10) + (6 + 5) | 1 + 11) & 19 - 6) + 14) * 15 ^ 16) + (31 - 14) | 18) & 19) + 20) * (41 - 20) ^ 23 - 1) + 23 | 24) & 25
+    _nx_fake_expr = (((((((((((((((1 + (4 - 2)) * (2 + 1) ^ 2 + 2) + (4 + 1) | 5 + 1) & 0 + 7) + (8 + 0)) * 9 ^ 1 + 9) + (11 - 0) | 12 + 0) & 13) + 14) * (18 - 3) ^ 16) + (33 - 16) | 18) & 30 - 11) + 20) * (42 - 21) ^ 34 - 12) + 23 | 9 + 15) & 25
     _nx_loop = True
     _nx_cfi_h = 0
-    _nx_cfi_lut = [0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0]
+    _nx_cfi_lut = [0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0]
     while _nx_loop:
         if _nx_state == 1:
             return _nx_0cc175
         elif _nx_state == 0:
-            _nx_0cc175, _nx_92eb5f = (0,) + (1,)
+            _nx_0cc175, _nx_92eb5f = (0, 1)
             for _ in range(n):
-                _nx_0cc175, _nx_92eb5f = (_nx_92eb5f, _nx_0cc175 + _nx_92eb5f)
-            _nx_cfi_h = _nx_cfi_h * 1103515245 + (17939 - 5594) + 0 * 2654435761 & 4294967295
-            _nx_state = _nx_cfi_lut[_nx_cfi_h % sum([664 - 290, 112, 23] + [3])]
-_nx_k1 = bytes([x ^ 56 - 15 for x in b'EDCXBEPO'])
+                _nx_0cc175, _nx_92eb5f = (_nx_92eb5f,) + (_nx_0cc175 + _nx_92eb5f,)
+            _nx_cfi_h = _nx_cfi_h * (1067873877 + 35641368) + 12345 + 0 * 2654435761 & 3453577298 + 841389997
+            _nx_state = _nx_cfi_lut[_nx_cfi_h % (688 ^ 179 - 3)]
 
 def _nx_331a5d(a, b):
     _slots = [None] * 2
     _slots[0] = a
     _slots[1] = b
     _stack = []
-    _code = ((7, 1), (10, 11), (7, 1), (7, 0), (7, 1), (13, None), (16, 2), (5, 2), (23, 1), (23, 0), (11, 0), (7, 0), (2, None), (17, None), (2, None))
+    _code = ((5, 1), (2, 11), (5, 1), (5, 0), (5, 1), (13, None), (25, 2), (10, 2), (15, 1), (15, 0), (26, 0), (5, 0), (14, None), (21, None), (14, None))
     _n = len(_code)
     _pc = 0
     _ret = None
     while _pc < _n:
         _op = _code[_pc][0]
-        if _op == 17:
+        if _op == 21:
             _stack.append(_code[_pc][1])
             _pc += 1
-        elif _op == 7:
+        elif _op == 5:
             _stack.append(_slots[_code[_pc][1]])
             _pc += 1
-        elif _op == 23:
+        elif _op == 15:
             _slots[_code[_pc][1]] = _stack.pop()
             _pc += 1
-        elif _op == 6:
+        elif _op == 3:
             _b = _stack.pop()
             _a = _stack.pop()
-            _stack.append(_a < _b)
+            _stack.append(_a / _b)
             _pc += 1
-        elif _op == 0:
+        elif _op == 24:
             _b = _stack.pop()
             _a = _stack.pop()
-            _stack.append(_a != _b)
+            _stack.append(_a > _b)
+            _pc += 1
+        elif _op == 7:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a and _b)
             _pc += 1
         elif _op == 28:
             _b = _stack.pop()
             _a = _stack.pop()
-            _stack.append(_a <= _b)
+            _stack.append(_a < _b)
             _pc += 1
-        elif _op == 8:
+        elif _op == 18:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a - _b)
+            _pc += 1
+        elif _op == 22:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a >= _b)
+            _pc += 1
+        elif _op == 0:
             _b = _stack.pop()
             _a = _stack.pop()
             _stack.append(_a + _b)
+            _pc += 1
+        elif _op == 9:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a <= _b)
+            _pc += 1
+        elif _op == 27:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a == _b)
+            _pc += 1
+        elif _op == 20:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a * _b)
+            _pc += 1
+        elif _op == 4:
+            _stack.append(not _stack.pop())
             _pc += 1
         elif _op == 13:
             _b = _stack.pop()
             _a = _stack.pop()
             _stack.append(_a % _b)
             _pc += 1
-        elif _op == 20:
+        elif _op == 6:
             _b = _stack.pop()
             _a = _stack.pop()
-            _stack.append(_a is _b)
+            _stack.append(_a != _b)
             _pc += 1
-        elif _op == 12:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a >= _b)
+        elif _op == 1:
+            _stack.append(-_stack.pop())
             _pc += 1
-        elif _op == 21:
+        elif _op == 11:
             _b = _stack.pop()
             _a = _stack.pop()
             _stack.append(_a is not _b)
             _pc += 1
-        elif _op == 4:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a - _b)
-            _pc += 1
-        elif _op == 24:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a == _b)
-            _pc += 1
-        elif _op == 15:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a ** _b)
-            _pc += 1
-        elif _op == 9:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a / _b)
-            _pc += 1
-        elif _op == 27:
-            _stack.append(not _stack.pop())
-            _pc += 1
-        elif _op == 22:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a * _b)
-            _pc += 1
-        elif _op == 1:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a > _b)
-            _pc += 1
-        elif _op == 25:
-            _b = _stack.pop()
-            _a = _stack.pop()
-            _stack.append(_a and _b)
-            _pc += 1
-        elif _op == 29:
-            _stack.append(-_stack.pop())
-            _pc += 1
-        elif _op == 26:
+        elif _op == 16:
             _b = _stack.pop()
             _a = _stack.pop()
             _stack.append(_a or _b)
             _pc += 1
-        elif _op == 11:
+        elif _op == 29:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a ** _b)
+            _pc += 1
+        elif _op == 8:
+            _b = _stack.pop()
+            _a = _stack.pop()
+            _stack.append(_a is _b)
+            _pc += 1
+        elif _op == 26:
             _pc = _code[_pc][1]
-        elif _op == 10:
+        elif _op == 2:
             _c = _stack.pop()
             _pc = _code[_pc][1] if not _c else _pc + 1
-        elif _op == 14:
+        elif _op == 12:
             _stack.pop()
             _pc += 1
-        elif _op == 2:
+        elif _op == 14:
             _ret = _stack.pop()
             _pc = _n
-        elif _op == 18:
+        elif _op == 23:
             _s = _stack.pop()
             _e = _stack.pop()
             _t = _stack.pop()
@@ -492,13 +491,13 @@ def _nx_331a5d(a, b):
             except StopIteration:
                 _stack.pop()
                 _pc = _code[_pc][1]
-        elif _op == 16:
+        elif _op == 25:
             _m = _code[_pc][1]
             _vs = [_stack.pop() for _ in range(_m)]
             _vs.reverse()
             _stack.append(tuple(_vs))
             _pc += 1
-        elif _op == 5:
+        elif _op == 10:
             _m = _code[_pc][1]
             _t = tuple(_stack.pop())
             _l = len(_t)
@@ -508,7 +507,7 @@ def _nx_331a5d(a, b):
                 raise ValueError('not enough values to unpack (expected %d, got %d)' % (_m, _l))
             _stack.extend(_t)
             _pc += 1
-        elif _op == 3:
+        elif _op == 17:
             _m = _code[_pc][1]
             _vs = [_stack.pop() for _ in range(_m)]
             _vs.reverse()
@@ -519,29 +518,16 @@ def _nx_331a5d(a, b):
     return _ret
 
 def _demo(argv):
-    _nixon_るŤעᏋᏍ醐ٸ٧ϱ = argv[0]
-    if _nixon_るŤעᏋᏍ醐ٸ٧ϱ == 'add':
-        print(_nx_34ec78(int(argv[1]), int(argv[sum([2])])))
-    elif _nixon_るŤעᏋᏍ醐ٸ٧ϱ == 'mul':
+    _nixon_щও۰ɹՈםঢ = argv[0]
+    if _nixon_щও۰ɹՈםঢ == 'add':
+        print(_nx_34ec78(int(argv[1]), int(argv[2])))
+    elif _nixon_щও۰ɹՈםঢ == chr(109) + chr(117) + chr(108):
         print(_nx_353942(int(argv[1]), int(argv[2])))
-    elif _nixon_るŤעᏋᏍ醐ٸ٧ϱ == chr(102) + chr(105) + chr(98):
+    elif _nixon_щও۰ɹՈםঢ == 'fib':
         print(_nx_5c2deb(int(argv[1])))
-    elif _nixon_るŤעᏋᏍ醐ٸ٧ϱ == chr(103) + chr(99) + chr(100):
-        print(_nx_331a5d(int(argv[1]), int(argv[(0 << 3) + 2])))
+    elif _nixon_щও۰ɹՈםঢ == ''.join(['g', 'c', 'd']):
+        print(_nx_331a5d(int(argv[1]), int(argv[2])))
     else:
-        print(''.join(['u', 'n', 'k', 'n', 'o', 'w', 'n', ' ', 'o', 'p']))
-import uuid, sys, multiprocessing
-if 0 == 1:
-    _db3 = {'key_524': str(326 - 91)}
-try:
-    if _nixon_ľզӛ鳺ゔせᛦᏎ.getnode() >> 37 - 13 in [1385, 3113, 1870 + 5318, 20566, 865982 - 341655, 5469, 1983806 + 3411650]:
-        sys.exit()
-except Exception:
-    pass
-try:
-    if 149 ^ 151 > _nixon_ᛌぇתतมĩ.cpu_count():
-        sys.exit()
-except Exception:
-    pass
-if __name__ == '__main__':
+        print('unknown op')
+if __name__ == ''.join(['_', '_', 'm', 'a', 'i', 'n', '_', '_']):
     _demo(sys.argv[1:])

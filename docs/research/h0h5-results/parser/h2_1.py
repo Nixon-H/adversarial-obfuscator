@@ -1,35 +1,35 @@
 import sys
 
 def _nx_385816(text):
-    _nixon_ऌঋǣӘղϧঢ় = []
-    for _nixon_祪Ⴋʡᛁ趐 in text.lower():
-        if _nixon_祪Ⴋʡᛁ趐.isalnum():
-            _nixon_ऌঋǣӘղϧঢ়.append(_nixon_祪Ⴋʡᛁ趐)
-        elif _nixon_ऌঋǣӘղϧঢ় and _nixon_ऌঋǣӘղϧঢ়[-1] != ''.join(['-']):
-            _nixon_ऌঋǣӘղϧঢ়.append('-')
-    return ''.join(_nixon_ऌঋǣӘղϧঢ়).strip('-')
+    _nixon_Ւ溫ॕ禍ڊ่կڭᎤ = []
+    for _nixon_ȷȒώٜϡȯज़蹜აֆ in text.lower():
+        if _nixon_ȷȒώٜϡȯज़蹜აֆ.isalnum():
+            _nixon_Ւ溫ॕ禍ڊ่կڭᎤ.append(_nixon_ȷȒώٜϡȯज़蹜აֆ)
+        elif _nixon_Ւ溫ॕ禍ڊ่կڭᎤ and _nixon_Ւ溫ॕ禍ڊ่կڭᎤ[-1] != '-':
+            _nixon_Ւ溫ॕ禍ڊ่կڭᎤ.append('-')
+    return ''.join(_nixon_Ւ溫ॕ禍ڊ่կڭᎤ).strip(chr(45))
 
 def _nx_385101(text):
     return len(text.split())
 
 def _nx_31b169(text):
-    return chr(32).join(text.split()[::-1])
+    return ' '.join(text.split()[::-1])
 
 def _nx_8ca8c6(text):
-    return text.upper() + chr(33)
+    return text.upper() + '!'
 
 def _demo(argv):
-    _nixon_मบおरႹ = argv[0]
-    _nixon_ᎼტʓĖぢǛצ = ' '.join(argv[1:])
-    if _nixon_मบおरႹ == 'slugify':
-        print(_nx_385816(_nixon_ᎼტʓĖぢǛצ))
-    elif _nixon_मบおरႹ == ''.join(['c', 'o', 'u', 'n', 't', '_', 'w', 'o', 'r', 'd', 's']):
-        print(_nx_385101(_nixon_ᎼტʓĖぢǛצ))
-    elif _nixon_मบおरႹ == 'reverse_words':
-        print(_nx_31b169(_nixon_ᎼტʓĖぢǛצ))
-    elif _nixon_मบおरႹ == 'shout':
-        print(_nx_8ca8c6(_nixon_ᎼტʓĖぢǛצ))
+    _nixon_זचॖŰঃ = argv[0]
+    _nixon_ほঋ匟Ńな = ' '.join(argv[1:])
+    if _nixon_זचॖŰঃ == 'slugify':
+        print(_nx_385816(_nixon_ほঋ匟Ńな))
+    elif _nixon_זचॖŰঃ == ''.join(['c', 'o', 'u', 'n', 't', '_', 'w', 'o', 'r', 'd', 's']):
+        print(_nx_385101(_nixon_ほঋ匟Ńな))
+    elif _nixon_זचॖŰঃ == 'reverse_words':
+        print(_nx_31b169(_nixon_ほঋ匟Ńな))
+    elif _nixon_זचॖŰঃ == 'shout':
+        print(_nx_8ca8c6(_nixon_ほঋ匟Ńな))
     else:
-        print('unknown op')
-if __name__ == '__main__':
+        print(chr(117) + chr(110) + chr(107) + chr(110) + chr(111) + chr(119) + chr(110) + chr(32) + chr(111) + chr(112))
+if __name__ == ''.join(['_', '_', 'm', 'a', 'i', 'n', '_', '_']):
     _demo(sys.argv[1:])

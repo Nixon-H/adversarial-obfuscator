@@ -3,43 +3,43 @@ import sys
 def _nx_049ebf(text):
     if not text:
         return ''
-    _nixon_ทफŶΒՒբ = []
+    _nixon_٧սגᏋȎהϗる = []
     run = text[0]
-    _nixon_ჽڥѣᎶᛀीǠҠҘџ = 1
-    for _nixon_ɱปĢตჰ鲭Հبп in text[1:]:
-        if _nixon_ɱปĢตჰ鲭Հبп == run[-1] and 9 > _nixon_ჽڥѣᎶᛀीǠҠҘџ:
-            _nixon_ჽڥѣᎶᛀीǠҠҘџ += 1
+    _nixon_Ѡʓ४τᎤ = 1
+    for _nixon_żǯҹ遶ग़藧ן in text[1:]:
+        if _nixon_żǯҹ遶ग़藧ן == run[-1] and 10 - 1 > _nixon_Ѡʓ४τᎤ:
+            _nixon_Ѡʓ४τᎤ += 1
         else:
-            _nixon_ทफŶΒՒբ.append(run[-1] + str(_nixon_ჽڥѣᎶᛀीǠҠҘџ))
-            run = _nixon_ɱปĢตჰ鲭Հبп
-            _nixon_ჽڥѣᎶᛀीǠҠҘџ = 1
-    _nixon_ทफŶΒՒբ.append(run[-1] + str(_nixon_ჽڥѣᎶᛀीǠҠҘџ))
-    return ''.join(_nixon_ทफŶΒՒբ)
+            _nixon_٧սגᏋȎהϗる.append(run[-1] + str(_nixon_Ѡʓ४τᎤ))
+            run = _nixon_żǯҹ遶ग़藧ן
+            _nixon_Ѡʓ४τᎤ = 1
+    _nixon_٧սגᏋȎהϗる.append(run[-1] + str(_nixon_Ѡʓ४τᎤ))
+    return ''.join(_nixon_٧սגᏋȎהϗる)
 
 def _nx_b27c0a(code):
-    _nixon_ทफŶΒՒբ = []
-    _nixon_ᛁڪᛠǇӖॡҘॺ = 0
-    while len(code) > _nixon_ᛁڪᛠǇӖॡҘॺ:
-        _nixon_ɱปĢตჰ鲭Հبп = code[_nixon_ᛁڪᛠǇӖॡҘॺ]
-        _nixon_Ꮄٝɺ৯ฃᎽ = int(code[_nixon_ᛁڪᛠǇӖॡҘॺ + 1])
-        _nixon_ทफŶΒՒբ.append(_nixon_ɱปĢตჰ鲭Հبп * _nixon_Ꮄٝɺ৯ฃᎽ)
-        _nixon_ᛁڪᛠǇӖॡҘॺ += 2
-    return ''.join(_nixon_ทफŶΒՒբ)
+    _nixon_٧սגᏋȎהϗる = []
+    _nixon_سךג৬Մ = 0
+    while len(code) > _nixon_سךג৬Մ:
+        _nixon_żǯҹ遶ग़藧ן = code[_nixon_سךג৬Մ]
+        _nixon_धვᏢख़ᏌŪᛝȔშם = int(code[_nixon_سךג৬Մ + 1])
+        _nixon_٧սגᏋȎהϗる.append(_nixon_żǯҹ遶ग़藧ן * _nixon_धვᏢख़ᏌŪᛝȔშם)
+        _nixon_سךג৬Մ += 2 - 0
+    return ''.join(_nixon_٧սגᏋȎהϗる)
 
 def _nx_a02e30(data, key):
-    _nixon_挼৯յবよ = data.encode() if isinstance(data, str) else bytes(data)
-    _nixon_ѝսڻΘ६ฑ = key.encode() if isinstance(key, str) else bytes(key)
-    return bytes([_nixon_ۤゕॻჳধǈ ^ _nixon_ѝսڻΘ६ฑ[_nixon_ᛁڪᛠǇӖॡҘॺ % len(_nixon_ѝսڻΘ६ฑ)] for _nixon_ᛁڪᛠǇӖॡҘॺ, _nixon_ۤゕॻჳধǈ in enumerate(_nixon_挼৯յবよ)]).hex()
+    _nixon_ऍגמाᏜŃ = data.encode() if isinstance(data, str) else bytes(data)
+    _nixon_ǟգぜけᏕצל廼ճ = key.encode() if isinstance(key, str) else bytes(key)
+    return bytes([_nixon_בϺやΆছৌƓऒᎧ ^ _nixon_ǟգぜけᏕצל廼ճ[_nixon_سךג৬Մ % len(_nixon_ǟգぜけᏕצל廼ճ)] for _nixon_سךג৬Մ, _nixon_בϺやΆছৌƓऒᎧ in enumerate(_nixon_ऍגמाᏜŃ)]).hex()
 
 def _demo(argv):
-    _nixon_ĀʹʂუᎸŤᏞ = argv[0]
-    if _nixon_ĀʹʂუᎸŤᏞ == 'rle_encode':
+    _nixon_дᚲむیᛝזᎾぺᛩϪ = argv[0]
+    if _nixon_дᚲむیᛝזᎾぺᛩϪ == 'rle_encode':
         print(_nx_049ebf(argv[1]))
-    elif _nixon_ĀʹʂუᎸŤᏞ == 'rle_decode':
+    elif _nixon_дᚲむیᛝזᎾぺᛩϪ == 'rle_decode':
         print(_nx_b27c0a(argv[1]))
-    elif _nixon_ĀʹʂუᎸŤᏞ == ''.join(['x', 'o', 'r', '_', 'b', 'y', 't', 'e', 's']):
-        print(_nx_a02e30(argv[1], 'key'))
+    elif _nixon_дᚲむیᛝזᎾぺᛩϪ == 'xor_bytes':
+        print(_nx_a02e30(argv[1], ''.join(['k', 'e', 'y'])))
     else:
-        print('unknown op')
-if __name__ == '__main__':
+        print(''.join(['u', 'n', 'k', 'n', 'o', 'w', 'n', ' ', 'o', 'p']))
+if __name__ == ''.join(['_', '_', 'm', 'a', 'i', 'n', '_', '_']):
     _demo(sys.argv[1:])

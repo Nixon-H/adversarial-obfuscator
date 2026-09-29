@@ -1,6 +1,6 @@
 {
   "arm": "static",
-  "develop_time_s": 0.098,
+  "develop_time_s": 0.087,
   "developed_from": "h4_1.py",
   "gt_feats": {
     "priority_pick": {
