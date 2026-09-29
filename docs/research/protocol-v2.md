@@ -32,7 +32,7 @@ CFGs, split literals) rather than functional semantics.
 - T_VM_table: develop extracts opcode->handler map M_i from B_i
   (table-extraction machinery exists via D_VM); apply decodes B_j with
   frozen M_i; S = fraction of functions correctly attributed/traced.
-- T_CFG_hash: develop records block-hash n-gram profile of B_i;
+- T_CFG_hash: develop records bytecode-CFG profile of B_i; PRIMARY is out-degree-multiset Jaccard (pure topology; gate history: content-labeled edges failed H2->H2 at 0.767 due to rep tuple-rewrites, switched pre-cross-arm). Secondaries: content edge-Jaccard, block-hash Jaccard.
   apply Jaccard/graph-edit match on B_j. CFG extracted at Python
   AST/bytecode level (NOT binary: Cython scaffolding would recreate
   the mass-proxy confound).
