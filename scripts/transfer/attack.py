@@ -312,6 +312,17 @@ class GhidraAttack:
     name-overlap where available. Weaker than the static arm's
     semantic mapping — documented, not hidden.
     Skips gracefully with reason when toolchain/Ghidra are absent.
+
+    Script mechanism amendment (2026-09-29, arm-completion, no freeze
+    impact: freeze hashes cover pass sets + corpus configs, not this
+    file; transfer definition/endpoints/stats untouched): headless
+    Ghidra runs Python post-scripts only with PyGhidra initialized,
+    which stock analyzeHeadless does not do ("Python is not available").
+    develop() therefore tries the frozen Python script first and falls
+    back to POST_SCRIPT_JAVA (same query, same NXK_GHIDRA_JSON
+    contract, Java GhidraScript via -scriptPath). The artifact records
+    script_kind + script text; apply() honors it, so develop/apply
+    always use the identical mechanism within a pair.
     """
     arm = protocol.ATTACK_GHIDRA
 
@@ -329,6 +340,44 @@ class GhidraAttack:
         "print('NXK_GHIDRA_JSON:' + __import__('json').dumps("
         "{'count': count, 'names': names}))\n"
     )
+
+    # Same query as POST_SCRIPT, as a Java GhidraScript (runs under
+    # stock analyzeHeadless without PyGhidra). Staged as NxkPost.java
+    # and invoked via -scriptPath <dir> -postScript NxkPost.java.
+    # Contract identical: one NXK_GHIDRA_JSON line with count + names.
+    POST_SCRIPT_JAVA = (
+        "import ghidra.app.script.GhidraScript;\n"
+        "import ghidra.program.model.listing.Function;\n"
+        "import ghidra.program.model.listing.FunctionIterator;\n"
+        "import java.util.ArrayList;\n"
+        "import java.util.List;\n"
+        "\n"
+        "public class NxkPost extends GhidraScript {\n"
+        "    @Override\n"
+        "    public void run() throws Exception {\n"
+        "        FunctionIterator fns =\n"
+        "            currentProgram.getFunctionManager().getFunctions(true);\n"
+        "        List<String> names = new ArrayList<String>();\n"
+        "        int count = 0;\n"
+        "        while (fns.hasNext()) {\n"
+        "            Function f = fns.next();\n"
+        "            names.add(f.getName());\n"
+        "            count++;\n"
+        "        }\n"
+        "        StringBuilder sb = new StringBuilder();\n"
+        "        sb.append(\"NXK_GHIDRA_JSON:{\\\"count\\\": \").append(count)\n"
+        "          .append(\", \\\"names\\\": [\");\n"
+        "        for (int i = 0; i < names.size(); i++) {\n"
+        "            if (i > 0) sb.append(\", \");\n"
+        "            sb.append(\"\\\"\").append(names.get(i).replace(\"\\\\\", \"\\\\\\\\\")\n"
+        "                .replace(\"\\\"\", \"\\\\\\\"\")).append(\"\\\"\");\n"
+        "        }\n"
+        "        sb.append(\"]}\");\n"
+        "        println(sb.toString());\n"
+        "    }\n"
+        "}\n"
+    )
+    JAVA_SCRIPT_NAME = "NxkPost.java"
 
     def _compile(self, build, workdir):
         try:
@@ -357,6 +406,22 @@ class GhidraAttack:
                 return ah
         return None
 
+    @staticmethod
+    def _parse(out, rc):
+        i = out.find("NXK_GHIDRA_JSON:")
+        if i < 0:
+            if "PyGhidra" in out or "Python is not available" in out:
+                return None, "python-unavailable"
+            return None, "no-output rc=%s" % rc
+        try:
+            # raw_decode: accept the first complete object even if the
+            # console appends trailing data after long lines.
+            obj, _ = json.JSONDecoder().raw_decode(
+                out[i + len("NXK_GHIDRA_JSON:"):].lstrip())
+            return obj, "ok"
+        except Exception as e:
+            return None, "parse-failed: %s" % e
+
     def _run(self, so_path, workdir, script_text):
         ah = self._ghidra_headless()
         if not ah:
@@ -372,26 +437,53 @@ class GhidraAttack:
                 capture_output=True, text=True, timeout=300)
         except subprocess.TimeoutExpired:
             return None, "ghidra-timeout"
-        out = proc.stdout + proc.stderr
-        i = out.find("NXK_GHIDRA_JSON:")
-        if i < 0:
-            return None, "no-output rc=%s" % proc.returncode
+        return self._parse(proc.stdout + proc.stderr, proc.returncode)
+
+    def _run_java(self, so_path, workdir, script_text):
+        ah = self._ghidra_headless()
+        if not ah:
+            return None, "ghidra-not-found"
+        proj = tempfile.mkdtemp(prefix="nxk_ghidra_", dir=workdir)
+        sp = os.path.join(proj, self.JAVA_SCRIPT_NAME)
+        with open(sp, "w", encoding="utf-8") as f:
+            f.write(script_text)
         try:
-            return json.loads(out[i + len("NXK_GHIDRA_JSON:"):].splitlines()[0]), "ok"
-        except Exception as e:
-            return None, "parse-failed: %s" % e
+            proc = subprocess.run(
+                [ah, proj, "NXK", "-import", so_path,
+                 "-scriptPath", proj,
+                 "-postScript", self.JAVA_SCRIPT_NAME, "-deleteProject"],
+                capture_output=True, text=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            return None, "ghidra-timeout"
+        return self._parse(proc.stdout + proc.stderr, proc.returncode)
+
+    def _run_develop(self, so_path, workdir):
+        """Python first (frozen default); Java fallback only on the
+        PyGhidra-unavailable signal. Returns (data, reason, kind)."""
+        data, reason = self._run(so_path, workdir, self.POST_SCRIPT)
+        if data:
+            return data, reason, "python"
+        if reason == "python-unavailable":
+            data_j, reason_j = self._run_java(
+                so_path, workdir, self.POST_SCRIPT_JAVA)
+            if data_j:
+                return data_j, reason_j, "java"
+            return None, "java-" + reason_j, "java"
+        return None, reason, "python"
 
     def develop(self, build, workdir):
         so, msg = self._compile(build, workdir)
         if not so:
             return {"arm": self.arm, "version": ARTIFACT_VERSION,
                     "status": "skipped", "reason": msg}
-        data, msg2 = self._run(so, workdir, self.POST_SCRIPT)
+        data, msg2, kind = self._run_develop(so, workdir)
         if not data:
             return {"arm": self.arm, "version": ARTIFACT_VERSION,
-                    "status": "skipped", "reason": msg2}
+                    "status": "skipped", "reason": msg2,
+                    "script_kind": kind}
+        script = self.POST_SCRIPT if kind == "python" else self.POST_SCRIPT_JAVA
         return {"arm": self.arm, "version": ARTIFACT_VERSION,
-                "status": "ok", "script": self.POST_SCRIPT,
+                "status": "ok", "script": script, "script_kind": kind,
                 "baseline_count": data.get("count", 0),
                 "ghidra_home": self._ghidra_headless()}
 
@@ -402,7 +494,11 @@ class GhidraAttack:
         if not so:
             return {"status": "skipped", "reason": msg}
         t0 = time.monotonic()
-        data, msg2 = self._run(so, workdir, artifact["script"])
+        kind = artifact.get("script_kind", "python")
+        if kind == "java":
+            data, msg2 = self._run_java(so, workdir, artifact["script"])
+        else:
+            data, msg2 = self._run(so, workdir, artifact["script"])
         if not data:
             return {"status": "skipped", "reason": msg2}
         gt_n = len(target["ground_truth"]["functions"])

@@ -248,3 +248,51 @@ def test_taxonomy_uncovered_never_zero():
         assert tax[tname]["status"] == "uncovered"
         assert tax[tname]["T"] is None  # explicit gap, not a zero
     assert tax["semantic"]["entries"] == []
+
+
+def test_ghidra_parse_cases():
+    from scripts.transfer import attack as A
+    arm = A.GhidraAttack()
+    line = 'NXK_GHIDRA_JSON:{"count": 3, "names": ["a", "b"]}'
+    data, reason = arm._parse("noise\n" + line + "\n", 0)
+    assert reason == "ok" and data["count"] == 3
+    _, r2 = arm._parse("Ghidra was not started with PyGhidra. "
+                       "Python is not available", 0)
+    assert r2 == "python-unavailable"
+    _, r3 = arm._parse("nothing here", 1)
+    assert r3 == "no-output rc=1"
+
+
+def test_ghidra_java_script_contract():
+    from scripts.transfer import attack as A
+    js = A.GhidraAttack.POST_SCRIPT_JAVA
+    assert "public class NxkPost extends GhidraScript" in js
+    assert "NXK_GHIDRA_JSON" in js
+    assert A.GhidraAttack.JAVA_SCRIPT_NAME == "NxkPost.java"
+
+
+def test_ghidra_develop_fallback_kind(monkeypatch, tmp_path):
+    from scripts.transfer import attack as A
+    arm = A.GhidraAttack()
+    # Python path succeeds: frozen default kept, kind recorded.
+    monkeypatch.setattr(arm, "_compile", lambda b, w: ("x.so", "ok"))
+    monkeypatch.setattr(arm, "_run",
+                        lambda so, w, t: ({"count": 5}, "ok"))
+    art = arm.develop({"path": "b.py"}, str(tmp_path))
+    assert art["status"] == "ok" and art["script_kind"] == "python"
+    assert art["script"] == A.GhidraAttack.POST_SCRIPT
+    # Python unavailable: Java fallback, kind recorded, script matches.
+    monkeypatch.setattr(arm, "_run",
+                        lambda so, w, t: (None, "python-unavailable"))
+    monkeypatch.setattr(arm, "_run_java",
+                        lambda so, w, t: ({"count": 7}, "ok"))
+    art2 = arm.develop({"path": "b.py"}, str(tmp_path))
+    assert art2["status"] == "ok" and art2["script_kind"] == "java"
+    assert art2["script"] == A.GhidraAttack.POST_SCRIPT_JAVA
+    assert art2["baseline_count"] == 7
+    # Unrelated failure: no fallback, reason preserved.
+    monkeypatch.setattr(arm, "_run",
+                        lambda so, w, t: (None, "ghidra-timeout"))
+    art3 = arm.develop({"path": "b.py"}, str(tmp_path))
+    assert art3["status"] == "skipped"
+    assert art3["reason"] == "ghidra-timeout"
