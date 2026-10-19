@@ -277,7 +277,7 @@ def main() -> None:
         description="Generate native/payload.h header from obfuscated Python payload."
     )
     parser.add_argument("--obfuscated-py", required=True,
-                        help="Path to the obfuscated .py file from obfuscator/core.py")
+                        help="Path to the obfuscated .py file from obfuscator/core/transforms.py")
     parser.add_argument("--python-dll",
                         help="Path to Python DLL to embed (zlib-compressed)")
     parser.add_argument("--rust-exe",

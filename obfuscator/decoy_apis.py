@@ -164,6 +164,12 @@ class SemanticDecoyApiInjector(ast.NodeTransformer):
             func_name = self._unique_name(api_name)
             template = _DECOY_IMPLS[api_name]
             source = template.replace("{name}", func_name)
+            # The templates are written with str.format escapes ({{ -> {),
+            # but they are filled with str.replace, so the escapes have to
+            # be undone by hand.  Leaving them in emits `return {{...}}`,
+            # which parses as a set containing a dict: the decoy then
+            # raises TypeError instead of returning its dict.
+            source = source.replace("{{", "{").replace("}}", "}")
             try:
                 parsed = ast.parse(source)
                 for stmt in parsed.body:

@@ -34,7 +34,7 @@ make test
 
 1. Add implementation in the appropriate module
 2. Add tests in `tests/`
-3. If it's a Phase 2 feature, add to `test_phase2.py` (or `tests/phase2/`)
+3. If it's a Phase 2 feature, add to `tests/test_<feature>.py` (and register it in `tests/`)
 4. If it needs build integration, add to `scripts/build.py`
 5. Run `make test` to verify
 

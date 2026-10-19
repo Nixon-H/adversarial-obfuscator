@@ -240,6 +240,14 @@ class MemoryGuard:
         Returns:
             True if memory locked, False if not available.
         """
+        if self._closed:
+            # A closed guard must never re-lock the process: ``close()``
+            # will not run its unlock path again (it early-returns), so a
+            # lock taken here would stay in force for the lifetime of the
+            # process.  ``mlockall(MCL_FUTURE)`` caps every *future* page
+            # fault at RLIMIT_MEMLOCK, which silently turns later
+            # allocations into MemoryError / native crashes.
+            return False
         if not self._caps.mlock:
             return False
         if self._locked:
@@ -318,6 +326,10 @@ class MemoryGuard:
     def close(self) -> None:
         """Clean up all resources."""
         if self._closed:
+            # Still make sure no process-wide lock survives: mlockall is
+            # not scoped to this object, and a lock left in place caps
+            # every future page fault at RLIMIT_MEMLOCK.
+            self.unlock_memory()
             return
         self._closed = True
         self._monitoring_active = False

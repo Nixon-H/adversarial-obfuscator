@@ -11,6 +11,8 @@ numpy==2.2.4             # Optional — HAS_NUMPY check; used if present for num
 
 # ─── Build (C extension compilation) ─────────────────────────────────────────
 Cython==3.0.12           # C extension compilation (GitHubBuildFarm → .pyd/.so/.dylib)
+setuptools>=68.0.0       # build backend required by the Cython/setup.py path
+                         # (kernel_gen.cythonize_kernel, scripts/phases/phase_pytoc.py)
 
 # ─── Crypto (primary: cryptography → AES-CTR; fallback: pycryptodome; else XOR) ──
 cryptography==50.0.0     # pipeline.py _check_aes_ctr tries cryptography first

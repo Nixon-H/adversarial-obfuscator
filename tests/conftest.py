@@ -1,6 +1,10 @@
 import os
 
-os.environ.setdefault("NIXON_LOG_REDIRECT", "0")
+# Force the console log path for the test session.  ``setdefault`` would
+# let an exported NIXON_LOG_REDIRECT=1 hijack pytest's own stdout (the
+# redirect is installed at import time of obfuscator/core/utils.py and
+# truncates ./build.log), which silently swallows the test report.
+os.environ["NIXON_LOG_REDIRECT"] = "0"
 
 import sys
 import tempfile

@@ -105,9 +105,12 @@ def test_no_bare_141_claim_in_code():
     # it as the verified count (or vendor/unverified for history).
     # File-path mentions (tests/...parity_141.py) are self-referential,
     # not claims, and are also allowed.
+    # "h0h5-results" holds generated transfer-experiment artifacts: their
+    # CFI constants are random integers, so the digits "141" appear by
+    # coincidence (e.g. 314182922) — not as an op-count claim.
     bad = []
     skip_dirs = {"archive", "build", ".git", ".opencode", ".mypy_cache",
-                 ".pytest_cache", "__pycache__"}
+                 ".pytest_cache", "__pycache__", "h0h5-results"}
     skip_files = {"test_opcount_truth.py", "test_multi_func.py",
                   "test_lowering_parity_141.py"}
     for root, dirs, files in os.walk(REPO_ROOT):

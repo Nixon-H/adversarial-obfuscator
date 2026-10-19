@@ -1,5 +1,14 @@
 # Stub Integration Plan — Load Rust Binary from `nixon_stub.cpp`
 
+> **HISTORICAL / NOT CURRENT.**  This plan was written against
+> `nixon_stub.cpp`, which no longer exists in the tree.  The native
+> stubs are now `native/stub_win.cpp` and `native/stub_linux.cpp`, and
+> the Rust relay crate lives in `relay/` (not `orbital-relay/`).  The
+> line references below (`nixon_stub.cpp:1204-1480`,
+> `ReflectiveLoader::LoadPEFromMemory`, `cd orbital-relay`) are stale and
+> are kept only as a record of the original design.  For the current
+> native surface see `docs/PLATFORMS.md` and `native/`.
+
 ## 1. Current Architecture (Python Payload Loading)
 
 `nixon_stub.cpp:1204-1480` (`main()`) runs a state machine (`state` variable `0x10` → `0xFF`):

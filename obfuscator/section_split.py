@@ -1,5 +1,16 @@
 """Section-split sealed streaming (V10 adopt, medium).
 
+.. warning::
+
+   **NOT WIRED INTO THE BUILD.**  This module is implemented and unit
+   tested (``tests/test_section_split.py``, ``tests/test_section_ro.py``)
+   but no build, pipeline or loader path calls it: a repo-wide search
+   finds references only in those two test files.  Do not read the
+   presence of this file (or of its tests) as "the artifact is protected
+   by section splitting" — it is not.  Wiring it in needs a loader-side
+   streaming path and a ``--no-section-split`` escape hatch; until that
+   exists, treat this as library/experimental code.
+
 Splits a payload blob into N individually-sealed sections that the loader
 streams back one at a time, so the FULL code object is never resident in
 one readable buffer. Each section carries its own SHA-256 integrity tag

@@ -12,6 +12,7 @@ valid Python.
 import ast
 import io
 import random
+import string
 import textwrap
 from typing import Any
 
@@ -181,8 +182,11 @@ def _inject_func_dead_code(
     count: int,
     patterns: list[str],
     include_training: bool,
+    protected: frozenset = frozenset(),
 ) -> None:
     for node in _find_func_nodes(tree):
+        if id(node) in protected:
+            continue
         for _ in range(count):
             if include_training and rng.random() < 0.3:
                 kwargs = _random_kwargs(_FUNC_TRAINING_LOOP, rng)
@@ -220,10 +224,55 @@ def _inject_func_dead_code(
 # Prompt injection in string literals / docstrings
 # ---------------------------------------------------------------------------
 
+#: Minimum length of an emitted ChaCha20 seal, in hex chars: nonce (12
+#: bytes) + tag (16 bytes) = 28 bytes = 56 chars, plus at least one
+#: ciphertext byte.
+_SEAL_MIN_HEX_CHARS = 56
+
+#: Minimum length of a legacy XOR seal, in base64 chars.
+_SEAL_MIN_B64_CHARS = 40
+
+_B64_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
+
+
+def _is_seal_literal(text: str) -> bool:
+    """True when *text* is an emitted seal blob rather than a real string.
+
+    This module runs AFTER the string obfuscator, so the literals it
+    sees are mostly sealed blobs.  Rewriting one is fatal: the emitted
+    ChaCha20 stub raises ``ValueError("bad string seal")`` on a malformed
+    seal, so prefixing a prompt to a seal turns a working artifact into
+    one that dies at import (this broke roughly 80% of default builds
+    until the seal was excluded).
+
+    Recognised shapes:
+
+    * ChaCha20 seal — hex, even length, >= 28 bytes
+      (``obfuscator/chacha20.py``: ``nonce || ciphertext || tag``).
+    * legacy XOR seal — base64 of the ciphertext
+      (``obfuscator/core/transforms.py::_get_xor_preamble``).
+
+    The test is deliberately conservative: a false positive only means a
+    prompt is *not* injected into that literal, never that the artifact
+    breaks.
+    """
+    if not isinstance(text, str) or len(text) < _SEAL_MIN_HEX_CHARS:
+        return False
+    if len(text) % 2 == 0 and all(c in string.hexdigits for c in text):
+        return True
+    if (len(text) % 4 == 0
+            and len(text) >= _SEAL_MIN_B64_CHARS
+            and all(c in _B64_CHARS for c in text)):
+        return True
+    return False
+
+
 def _inject_prompt_strings(
     tree: ast.Module,
     rng: random.Random,
     count: int,
+    protected: frozenset = frozenset(),
 ) -> None:
     prompts = list(_PROMPT_STRINGS)
     rng.shuffle(prompts)
@@ -233,21 +282,65 @@ def _inject_prompt_strings(
         if injected >= count:
             break
 
+        # Never rewrite anything inside the emitted decoder stub.
+        if id(node) in protected:
+            continue
+
         # Docstrings on functions / classes / modules
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module)):
             body = node.body
             if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
                 val = body[0].value.value
-                if isinstance(val, str):
+                if isinstance(val, str) and not _is_seal_literal(val):
                     body[0].value.value = val.rstrip('"\' \n') + "\n\n" + prompts[injected]
                     injected += 1
                     continue
 
         # Regular string literals
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if len(node.value) > 15 and rng.random() < 0.15:
+            if (len(node.value) > 15 and rng.random() < 0.15
+                    and not _is_seal_literal(node.value)):
                 node.value = prompts[injected] + " | " + node.value
                 injected += 1
+
+    if injected < count:
+        # Every remaining literal was a sealed blob, so the prompt cannot
+        # ride along on one.  Land the rest as standalone plaintext module
+        # constants instead: this pass runs after the string obfuscator,
+        # so a literal added here stays readable in the artifact, which is
+        # the whole point of the prompt injection.
+        _inject_prompt_constants(tree, prompts[injected:count], injected)
+
+
+def _inject_prompt_constants(
+    tree: ast.Module,
+    prompts: list,
+    start_index: int,
+) -> None:
+    """Insert *prompts* as standalone plaintext module constants.
+
+    Used as the fallback when every literal in the tree is a sealed blob
+    (see :func:`_is_seal_literal`).  The constants are inserted after
+    the leading import block so a ``from __future__ import ...`` and the
+    module docstring keep their required positions.
+    """
+    if not prompts or not tree.body:
+        return
+    pos = _count_imports(tree)
+    # Never displace the module docstring: it must stay body[0].
+    first = tree.body[0]
+    if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)):
+        pos = max(pos, 1)
+    for offset, text in enumerate(prompts):
+        name = "_nx_prompt_%d" % (start_index + offset)
+        stmt = ast.Assign(
+            targets=[ast.Name(id=name, ctx=ast.Store())],
+            value=ast.Constant(value=text),
+        )
+        ast.copy_location(stmt, first)
+        tree.body.insert(pos, stmt)
+        pos += 1
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +384,47 @@ def _inject_comments(source: str, rng: random.Random, level: int) -> str:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+def _is_decoder_stub(node) -> bool:
+    """True when *node* is the emitted string-decoder stub.
+
+    The stub (see ``obfuscator/chacha20.py::STUB_TEMPLATE``) is
+    prepended to the payload before this pass runs, so the adversarial
+    injection must not rewrite it:
+
+    * dead code inside the ChaCha20 rotate-left helper makes every seal
+      decryption run a numpy training loop — the artifact then appears
+      to hang;
+    * rewriting the ``NX-CHACHA20-MAC-v1`` marker breaks the MAC key
+      derivation, so every string fails authentication.
+    """
+    if not isinstance(node, ast.FunctionDef):
+        return False
+    args = node.args
+    positional = list(args.posonlyargs) + list(args.args)
+    if len(positional) != 1 or positional[0].arg != "_s":
+        return False
+    try:
+        src = ast.unparse(node)
+    except Exception:
+        return False
+    return "fromhex" in src
+
+
+def _protected_function_ids(tree: ast.Module) -> set:
+    """ids of the decoder stub and of every node inside it.
+
+    The whole subtree is protected: ``ast.walk`` does not prune, so a
+    literal inside the stub would still be reached unless its ancestors
+    are excluded as well.
+    """
+    protected = set()
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and _is_decoder_stub(node):
+            for sub in ast.walk(node):
+                protected.add(id(sub))
+    return protected
+
 
 def inject_adversarial_code(source: str, config: dict) -> str:
     """
@@ -346,11 +480,13 @@ def inject_adversarial_code(source: str, config: dict) -> str:
 
     if mod_count > 0 and mod_patterns:
         _inject_module_dead_code(tree, rng, mod_count, mod_patterns)
+    protected = _protected_function_ids(tree)
     if func_count > 0 and func_patterns:
-        _inject_func_dead_code(tree, rng, func_count, func_patterns, include_training)
+        _inject_func_dead_code(tree, rng, func_count, func_patterns,
+                               include_training, protected=protected)
 
     if do_prompt and prompt_count > 0:
-        _inject_prompt_strings(tree, rng, prompt_count)
+        _inject_prompt_strings(tree, rng, prompt_count, protected=protected)
 
     ast.fix_missing_locations(tree)
     result = ast.unparse(tree)

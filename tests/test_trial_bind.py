@@ -192,6 +192,50 @@ def test_tampered_state_file_fails_closed(tmp_path):
                             now=t0 + 10) == "tampered"
 
 
+def test_symlink_state_path_fails_closed(tmp_path):
+    # A symlink at the trial-state path is an attacker-controlled
+    # filesystem condition, not a transient write failure: refusing to
+    # follow it must fail closed instead of silently degrading rollback
+    # detection (build-time helper).
+    key = b"s" * 32
+    fp = "SYMLINK-HOST"
+    t0 = 1_700_000_000.0
+    deadline = compute_deadline(86400, now=t0)
+    token = mint_token(key, fp, deadline)
+    state = str(tmp_path / "trial_symlink.state")
+    target = str(tmp_path / "elsewhere.state")
+    with open(target, "w", encoding="utf-8") as fh:
+        fh.write("decoy")
+    os.symlink(target, state)
+    assert check_and_update(key, fp, deadline, token, state_path=state,
+                            now=t0) == "tampered"
+
+
+def test_emit_snippet_symlink_fails_closed(monkeypatch, tmp_path):
+    # Same rule in the emitted runtime gate: a symlink at the state path
+    # must return "tampered" (the caller then runs _nx_kill).
+    key = b"y" * 32
+    fp = "SNIPPET-SYMLINK-HOST"
+    deadline = compute_deadline(3600, now=time.time())
+    token = mint_token(key, fp, deadline)
+    src = emit_trial_snippet(deadline, token, key.hex())
+    compile(src, "<trial_snippet>", "exec")
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    ns = {"__name__": "trial_snippet_test", "sys": sys}
+    exec(compile(src, "<trial_snippet>", "exec"), ns)
+    gate = ns["_nx_trial_gate"]
+    assert gate(fp) == "ok"
+    states = list(tmp_path.rglob(".trial_*.state"))
+    assert states, "gate did not create a state file"
+    state = states[0]
+    os.unlink(state)
+    target = str(tmp_path / "decoy.state")
+    with open(target, "w", encoding="utf-8") as fh:
+        fh.write("decoy")
+    os.symlink(target, state)
+    assert gate(fp) == "tampered"
+
+
 # -- emit snippet ----------------------------------------------------------
 
 def test_emit_snippet_compiles_and_enforces(tmp_path, monkeypatch):

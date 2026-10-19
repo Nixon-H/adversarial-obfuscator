@@ -24,7 +24,7 @@ Legend:
 - ❌ = Not supported
 
 ## Linux x86_64 (Primary Target)
-Full support. All 624 tests pass. CI/CD enabled.
+Full support. All 4108 tests pass (224 test files). CI/CD enabled.
 
 ## Linux ARM64
 Cross-compilation verified via `cargo check --target aarch64-unknown-linux-gnu`.
@@ -34,7 +34,7 @@ Inline assembly fully gated behind `#[cfg(target_arch = "aarch64")]`. Python com
 ## Windows x86_64
 Cross-compilation verified via `cargo check --target x86_64-pc-windows-gnu` with MinGW.
 Memory management uses `VirtualAlloc`/`VirtualFree`/`VirtualProtect`/`VirtualLock` via raw FFI.
-Anti-debug stub in `native/stub_win.cpp` (1550 lines, Windows-specific).
+Anti-debug stub in `native/stub_win.cpp` (2009 lines, Windows-specific).
 Build: `make stub-win` (requires `x86_64-w64-mingw32-gcc`).
 
 ## macOS

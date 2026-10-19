@@ -5588,7 +5588,7 @@ def {FUNC_STR_DEC}(idx):
         stored_hmac = combined[-8:]
         idx_key = _nixon_ハッシュ해시.sha256(tbl_key + str(tbl_idx).encode()).digest()
         expected_hmac = _nixon_エイチマック에이치.new(tbl_key, Nixon_Enc_bytes, _nixon_ハッシュ해시.sha256).digest()[:8]
-        if stored_hmac != expected_hmac: return ""
+        if not _nixon_エイチマック에이치.compare_digest(stored_hmac, expected_hmac): return ""
         _dec = bytes([b ^ idx_key[i % 32] for i, b in enumerate(Nixon_Enc_bytes)])
         try: return _dec.decode('utf-8')
         except: return _dec.decode('latin-1')
@@ -6153,12 +6153,11 @@ def {FUNC_BOOT}():
                             sz = _nixon_オペレーション운영.path.getsize(t)
                             with open(t, "rb+") as f: f.write(_nixon_オペレーション운영.urandom(sz))
                         except: pass
-                        if _nixon_プラットフォーム플랫폼.system() == "Windows":
-                            cmd = f'cmd.exe /c "ping 127.0.0.1 -n 2 > nul & del /f /q \"{{t}}\""'
-                            _nixon_サブプロセス서브.Popen(cmd, shell=True, creationflags=0x00000008 | 0x00000200, close_fds=True)
-                        else:
-                            try: _nixon_オペレーション운영.unlink(t)
-                            except: pass
+                        try:
+                            try: _nixon_オペレーション운영.chmod(t, 0o600)
+                            except Exception: pass
+                            _nixon_オペレーション운영.unlink(t)
+                        except: pass
             except: pass
         _nixon_アテクシット종료.register(_one_shot_cleanup)
     {FUNC_MASK}() 

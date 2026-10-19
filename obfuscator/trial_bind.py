@@ -325,6 +325,12 @@ def check_and_update(build_key, fingerprint, deadline_epoch, token,
     first run (sealed at ``now``); deleting the state file therefore
     resets the rollback window but never extends the absolute deadline.
 
+    Fail-closed case: a symlink (or link-loop) at the state path is
+    refused, not followed, and returns ``"tampered"`` — it is an
+    attacker-controlled filesystem condition rather than a transient
+    write failure, so it must not silently disable rollback detection.
+    The emitted runtime gate applies the same rule.
+
     Concurrency: the state read-modify-write runs under a best-effort
     POSIX ``fcntl.flock(LOCK_EX)`` (see :func:`_lock_state_file`; no-op
     on Windows).  Contending runs serialize; if the lock cannot be
@@ -386,9 +392,12 @@ def check_and_update(build_key, fingerprint, deadline_epoch, token,
                     if getattr(_e, "errno", None) in (
                             getattr(_errno, "ELOOP", 40),
                             getattr(_errno, "EMLINK", 31)):
-                        # Symlink (or link-loop) at state path: refuse to
-                        # follow; degrade rollback protection for this run.
-                        return "ok"
+                        # Symlink (or link-loop) at the state path: refuse to
+                        # follow.  This is an attacker-controlled filesystem
+                        # condition, not a transient write failure, so fail
+                        # closed like a tampered state file instead of
+                        # silently degrading rollback protection.
+                        return "tampered"
                     with open(path, "w", encoding="utf-8") as fh:
                         fh.write(seal_last_seen(build_key, moment))
                     return "ok"
@@ -462,6 +471,10 @@ def emit_trial_snippet(deadline_epoch, token_hex, build_key_hex,
     ``hwid_hint``: when the build used ``--hwid``, pass that string so the
     runtime checks the explicit HWID; otherwise the snippet re-derives the
     composite fallback (node + MAC + machine-id + platform) itself.
+
+    Fail-closed case: a symlink at the state path returns ``"tampered"``
+    (the caller then runs ``_nx_kill("trial-tampered")``), matching
+    build-time :func:`check_and_update`.
 
     Locking note: unlike build-time :func:`check_and_update`, the emitted
     snippet intentionally takes NO ``fcntl.flock`` around its state
@@ -621,7 +634,7 @@ def emit_trial_snippet(deadline_epoch, token_hex, build_key_hex,
          + "            _tb_fd = _tb_os.open(_tb_path, _tb_flags | _tb_nofollow, 0o600)\n"
          + "        except (AttributeError, OSError) as _tb_e:\n"
          + "            if getattr(_tb_e, \"errno\", None) in (getattr(_tb_errno, \"ELOOP\", 40), getattr(_tb_errno, \"EMLINK\", 31)):\n"
-         + "                raise\n"
+         + "                return \"tampered\"\n"
          + "            with open(_tb_path, \"w\", encoding=\"utf-8\") as _tb_fh2:\n"
          + "                _tb_fh2.write(\"%s:%s\" % (_tb_body2, _tb_mac3))\n"
          + "        else:\n"

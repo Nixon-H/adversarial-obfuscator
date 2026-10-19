@@ -1,7 +1,14 @@
 # Shadow Compiler — Nixon Protection Pipeline
 
 ## Overview
-The Shadow Compiler is a multi-stage pipeline that transforms Python source into an unrecoverable form delivered as a tiny native binary. Phases 1-6 form the baseline pipeline. Phases 7-15 (Phase 2) add advanced protections behind the `--phase2` flag. Phase 2 Extras (Section 19 techniques) are behind `--phase2-extras`.
+The Shadow Compiler is a multi-stage pipeline that transforms Python source into an unrecoverable form delivered as a tiny native binary. Phases 1-6 form the baseline pipeline. Phases 7-15 (Phase 2) add advanced protections; **Phase 2 is enabled by default** via `config/default.json` (`shadow_compiler.phase2.enabled = true`), and `--phase2` is a hidden (undocumented) flag kept for compatibility. Phase 2 Extras (Section 19 techniques) are behind `--phase2-extras`.
+
+> **Status note:** the phase list below records the original design. The
+> shipped pipeline is now driven by `obfuscator/core/transforms.py` +
+> `obfuscator/core/pipeline.py` (semantic lowering, loader gates, kill
+> ladder); several phases named here are implemented as flags rather
+> than separate stages, and the phase diagram is a design record, not a
+> description of the current control flow.
 
 ## Pipeline Architecture
 ```
@@ -9,7 +16,7 @@ Python Source
     │
     ▼
 ┌──────────────────────────────┐
-│ Phase 1: AST Obfuscation     │  obfuscator/core.py
+│ Phase 1: AST Obfuscation     │  obfuscator/core/transforms.py
 │ 6 transforms                 │  cfg-flatten, opaque-predicates,
 │                              │  bogus-exceptions, mba-subs,
 │                              │  fragment-strings, unicode-ids
@@ -83,7 +90,7 @@ Python Source
 ```
 
 ## Phase 1 — AST Pipeline (Done)
-- obfuscator/core.py with 6 transforms
+- obfuscator/core/transforms.py with 6 transforms
 - CLI with per-transform toggle
 - Whitebox AES payload encryption
 - Build pipeline integration
@@ -320,9 +327,9 @@ These techniques are available but **disabled by default**. They add complexity 
 - Phase 16: CI/CD pipeline, per-build seeds, build manifest, GitHub Actions
 - C++ native core (whitebox AES)
 - Anti-debug (12 checks)
-- Test suite (146 passing — 20 encrypt + 3 core + 4 obfuscator + 3 pipeline + 2 stub + 2 payload + 113 phase2)
+- Test suite (4108 tests across 224 `tests/test_*.py` files — `python3 -m pytest tests/ -q`; the per-phase counts below are from June 2026 and are kept as a design record)
 
-### Phase 2 Extensions (behind `--phase2` flag)
+### Phase 2 Extensions (enabled by default via `config/default.json`; `--phase2` is a hidden compatibility flag)
 - Phase 2: Classification pass (heuristic scoring + `@protect()` decorators) — 13 tests
 - Phase 8: VM ISA + bytecode compiler + interpreter (36 opcodes, computed dispatch) — 9+6+11 tests
 - Phase 9: Mutating ISA (3 levels: opcode shuffle, handler permute, fusion/split) — 11 tests
@@ -333,7 +340,7 @@ These techniques are available but **disabled by default**. They add complexity 
 - Phase 14: Semantic fragmentation (algorithm decomposition, coordinator, pointer table) — 6 tests
 - Phase 15: IR-level watermarking (BCH error correction, embed/detect, per-customer builds) — 13 tests
 - All 11 Phase 2 component imports verified working via `scripts/verify_phase2.py`
-- 113 Phase 2 unit tests total — all passing
+- Phase 2 unit tests: run `python3 scripts/verify_phase2.py` (per-component import + behaviour checks)
 
 ### Optional Extras (behind `--phase2-extras` flag, wired as pipeline step 17)
 - Anti-debug API calls, process/VM detection, header wiping, self-delete, AMSI/ETW bypass

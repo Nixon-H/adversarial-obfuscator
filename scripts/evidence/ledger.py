@@ -231,8 +231,8 @@ class EvidenceLedger:
         # Register source-code evidence for each claim.
         evidence_files: list[tuple[str, str, str]] = [
             ("AST obfuscation preserves semantics", "source_code", "scripts/phases/phase01_obfuscate.py"),
-            ("CFG flattening hides control flow", "source_code", "obfuscator/core.py"),
-            ("MBA substitutions resist SMT solvers", "source_code", "obfuscator/core.py"),
+            ("CFG flattening hides control flow", "source_code", "obfuscator/core/transforms.py"),
+            ("MBA substitutions resist SMT solvers", "source_code", "obfuscator/core/transforms.py"),
             ("Encrypted execution", "source_code", "scripts/phases/phase04_encrypt.py"),
             ("VM opcode obfuscation", "source_code", "scripts/phases/phase07_phase2.py"),
             ("ROP chain integrity", "source_code", "scripts/phases/phase08_rop.py"),

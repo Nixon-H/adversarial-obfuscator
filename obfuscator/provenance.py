@@ -103,11 +103,19 @@ def scan_error_messages(ast_tree: ast.AST) -> list[dict[str, Any]]:
     return results
 
 
-def replace_error_messages(ast_tree: ast.Module) -> ast.Module:
+def replace_error_messages(ast_tree: ast.Module,
+                           codes_path: str = None) -> ast.Module:
     """Replace error message strings with integer error codes.
 
-    Generates error_codes.json mapping codes->messages for dev use only.
+    Generates a codes->messages map for dev use only; it is written to
+    *codes_path* when given, otherwise next to the build output.
+
     Error codes: E0001, E0002, etc. Randomly assigned per build.
+
+    The map is deliberately NOT written to ``./error_codes.json``: the
+    repository ships a placeholder with that name, so writing the real
+    messages there both dirties the working tree and puts back the very
+    strings this pass removes from the artifact.
     """
     found = scan_error_messages(ast_tree)
     code_map: dict[str, str] = {}
@@ -138,9 +146,14 @@ def replace_error_messages(ast_tree: ast.Module) -> ast.Module:
     ast.fix_missing_locations(result)
 
     try:
-        codes_path = os.path.join(os.getcwd(), "error_codes.json")
-        with open(codes_path, "w") as f:
-            json.dump(error_codes, f, indent=2)
+        target = codes_path
+        if target is None:
+            out_dir = os.path.join(os.getcwd(), "build")
+            target = (os.path.join(out_dir, "error_codes.json")
+                      if os.path.isdir(out_dir) else None)
+        if target:
+            with open(target, "w") as f:
+                json.dump(error_codes, f, indent=2)
     except Exception:
         pass
 

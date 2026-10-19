@@ -36,7 +36,7 @@ prints to the console — but any library import path without that
 ```bash
 echo 'print("hello-nixon")' > /tmp/hello.py
 NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
-  --payload /tmp/hello.py -o /tmp/qs_hello.py \
+  --payload /tmp/hello.py -o /tmp/qs_hello.py --force-output \
   --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras
 # [   OBFUSCATE] Done: 1.1KB (was 0.0KB)
 # [     PACKAGE]   Payload: /home/nixon/Projects/adversarial-obfuscator/build/hello_obfuscated.py
@@ -61,7 +61,7 @@ Notes:
 |---|---|---|
 | AST obfuscation ladder `--opt-level 0-5` (default 4, 14/17 flags on) | cfg-flatten, opaque predicates, MBA, string fragmentation, unicode ids, junk/decoys/minify/dataflow/provenance | `tests/test_opt_levels.py`, `tests/test_obfuscator.py` |
 | Semantic lowering, 20 families / 140 kernel ops | rewrites covered call sites to `_nxk_*` kernel calls; op-count truth-locked | `tests/test_lowering.py`, `tests/test_opcount_truth.py`, `tests/test_lowering_parity_141.py` |
-| Anti-VM loader snippet, 12 Linux-checkable signals incl `clock_bias` | weighted verdict vs `--vm-threshold` (default 50.0); report-only unless KOD armed | `tests/test_vm_subset.py`, `tests/test_vm_score.py`, `tests/test_clock_bias.py` |
+| Anti-VM loader snippet, 12 of 14 signals Linux-checkable incl `clock_bias` (`registry_keys`/`wmi_bios` are Windows-only) | weighted verdict vs `--vm-threshold` (default 50.0); report-only unless KOD armed | `tests/test_vm_subset.py`, `tests/test_vm_score.py`, `tests/test_clock_bias.py` |
 | Frozen-stdlib snapshot gate (default ON) | refuse-to-run on stdlib tamper; runtime off via `NIXON_SNAPSHOT_OFF` | `tests/test_frozen_snapshot.py` |
 | Stdlib function-audit gate (default ON) | audit of stdlib functions; runtime off via `NIXON_STDLIB_AUDIT_OFF` | `tests/test_stdlib_audit.py` |
 | Audit-hook plant detector (default ON) | kills on site-packages `.pth`/sitecustomize plants; off via `--no-audit-hook-plant` / `NIXON_AUDITHOOK_PLANT_OFF` | `tests/test_sitepackages_hook.py` |
@@ -122,6 +122,7 @@ Measured numbers (host-specific, reproducible in-repo):
 --no-snapshot         Omit frozen-stdlib snapshot gate (default: gate ON)
 --no-stdlib-audit     Omit stdlib function-audit gate (default: gate ON)
 --no-audit-hook-plant Omit site-packages audit-hook plant detector (default: detector ON)
+--build-id BUILD_ID   Stable build id for reproducible builds (default: random per build)
 --version             Prints e.g. 'shadow-compiler 2.0.0'
 ```
 
@@ -155,7 +156,16 @@ Default-ON vs default-OFF matrix:
 | Audit timing enforcement | `NIXON_AUDIT_TIMING=<any non-"0" value>` arms at runtime |
 | `--lowering` itself | `--lowering <csv>` |
 | Opt-in lowering families (`arithmetic,truth,slice,format,augassign`) | `+fam` / bare names / `all` |
-| Tor SOCKS endpoint for `--tor` build-farm traffic | `NIXON_TOR_PROXY=<host:port>` (default `127.0.0.1:9050`); or `--tor-proxy`; also read at runtime by the emitted Tor client |
+| Tor SOCKS endpoint for build-farm traffic | `NIXON_TOR_PROXY=<host:port>` (default `127.0.0.1:9050`); also read at runtime by the emitted Tor client. `--tor`/`--tor-proxy` belong to the `obfuscator/core/pipeline.py` CLI (`build`/`build-farm` subparsers) — `scripts/build.py` has no Tor flag |
+
+## Audit
+
+The most recent full repository audit is [`docs/AUDIT-2026-10-19.md`](docs/AUDIT-2026-10-19.md) — 20 sections, the
+vendor v1.1→V10 version matrix, and a completeness verdict. It also records
+the two highest-severity findings of the year: the adversarial injection
+corrupting the emitted ChaCha20 seal (~80% of default builds produced a dead
+artifact) and a process-wide `mlockall(MCL_FUTURE)` leak. Both are fixed,
+and the whole suite is green (4098 passed, 14 skipped, 0 failed).
 
 ## Security model + honest limitations
 
@@ -199,10 +209,10 @@ examples/hello.py         Sample payload (print-based)
 ```bash
 NIXON_LOG_REDIRECT=0 timeout 200 python3 -m pytest tests/test_lowering.py \
   tests/test_opcount_truth.py tests/test_vm_subset.py tests/test_clock_bias.py -q
-# 44 passed in 0.95s (measured 2026-09-23)
+# 60 passed in 0.83s (measured 2026-10-19)
 ```
 
-Full suite is large (190+ `tests/test_*.py` files); run
+Full suite is large (220+ `tests/test_*.py` files); run
 `python3 -m pytest tests/ -q` per `docs/DEVELOPER.md` if you need the whole
 thing. A broader verified subset (lowering parity, diagnostic, trial, hwid,
 pytoc, spec, snapshot, stdlib, watermark, gates, split-bootstrap, driver):
@@ -214,7 +224,7 @@ NIXON_LOG_REDIRECT=0 timeout 200 python3 -m pytest tests/test_lowering_parity_14
   tests/test_stdlib_audit.py tests/test_frozen_snapshot.py tests/test_watermark_gate.py \
   tests/test_name_gate.py tests/test_internal_rename.py tests/test_split_bootstrap.py \
   tests/test_driver_blocklist.py -q
-# 313 passed in 7.23s (measured 2026-09-23)
+# 340 passed in 7.72s (measured 2026-10-19)
 ```
 
 `NIXON_LOG_REDIRECT=0` keeps pytest output on the console instead of

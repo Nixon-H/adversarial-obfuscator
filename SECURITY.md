@@ -40,10 +40,12 @@ until one is.)
   (`--key-hex`, marked "testing only" in `--help`). Never commit a key,
   token, or hex secret to the tree, docs, or tests.
 - Build keys are generated per build (`os.urandom` /
-  `secrets.token_bytes`, e.g. `obfuscator/section_split.py:69`,
-  `obfuscator/watermark_gate.py:build_watermark_context`) and embedded
-  only in the artifact that needs them — never logged, never written to
-  shared sidecars.
+  `secrets.token_bytes`, e.g. `obfuscator/watermark_gate.py:build_watermark_context`)
+  and embedded only in the artifact that needs them — never logged, never
+  written to shared sidecars. The section-split module
+  (`obfuscator/section_split.py`) mints per-section nonces the same way,
+  but it is **not wired into the build** (library-only, referenced only by
+  its own tests), so no shipped artifact is section-split.
 
 ## Enforceable rules (security invariants)
 

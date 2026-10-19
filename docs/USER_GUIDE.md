@@ -16,7 +16,7 @@ but library import paths without that `setdefault` still redirect).
 ```bash
 echo 'print("hello-nixon")' > /tmp/hello.py
 NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
-  --payload /tmp/hello.py -o /tmp/qs_hello.py \
+  --payload /tmp/hello.py -o /tmp/qs_hello.py --force-output \
   --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras
 # [   OBFUSCATE] Done: 1.1KB (was 0.0KB)
 # [     PACKAGE]   Payload: /home/nixon/Projects/adversarial-obfuscator/build/hello_obfuscated.py
@@ -41,7 +41,7 @@ Default `''` = disabled. Value is a CSV with three forms
 
 ```bash
 NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
-  --payload /tmp/hello.py -o /tmp/out3.py \
+  --payload /tmp/hello.py -o /tmp/out3.py --force-output \
   --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras \
   --lowering io,scalar
 # [         OPT] Semantic lowering families: io,scalar
@@ -76,7 +76,7 @@ Vendor-native 0.19x–1.56x figures are not reproduced in-repo.
 
 ```bash
 NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
-  --payload /tmp/hello.py -o /tmp/stage_hw.py \
+  --payload /tmp/hello.py -o /tmp/stage_hw.py --force-output \
   --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras \
   --trial 7d
 # [         OPT] Trial spec requested: 7d
@@ -101,7 +101,7 @@ Two modes (`obfuscator/hwid_lock.py`):
 
 ```bash
 NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
-  --payload /tmp/hello.py -o /tmp/stage_hw.py \
+  --payload /tmp/hello.py -o /tmp/stage_hw.py --force-output \
   --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras \
   --hwid HWID:9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c \
   --hwid-lock
@@ -116,7 +116,7 @@ Malformed `HWID:`-prefixed values raise `ValueError`
 
 ```bash
 NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
-  --payload /tmp/hello.py -o /tmp/stage_hw.py \
+  --payload /tmp/hello.py -o /tmp/stage_hw.py --force-output \
   --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras \
   --watermark testmark-123
 #  1. skip_irgen <-> watermark (requires)
@@ -136,7 +136,7 @@ verifies after embedding (`tests/test_watermark.py`).
 
 ```bash
 NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
-  --payload /tmp/hello.py -o /tmp/out2.py \
+  --payload /tmp/hello.py -o /tmp/out2.py --force-output \
   --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras \
   --diagnostic
 # [         OPT] DIAGNOSTIC BUILD (not for release)
@@ -154,7 +154,7 @@ Both are best-effort and never fail the build
 
 ```bash
 NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
-  --payload /tmp/hello.py -o /tmp/stage_hw.py \
+  --payload /tmp/hello.py -o /tmp/stage_hw.py --force-output \
   --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras \
   --pyinstaller-spec
 # [         OPT] PyInstaller .spec generation requested (best-effort)

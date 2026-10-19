@@ -41,6 +41,25 @@ import subprocess
 import sys
 import tempfile
 
+#: Diagnostics opt-in env var (default silent).  The C fast tier is a
+#: best-effort optimization: when ``obfuscator.kernel_fast`` cannot be
+#: imported, or has no hand-optimized body for an op, the kernel falls
+#: back to the portable passthrough.  That fallback used to be silent,
+#: so a fast tier that never engaged was indistinguishable from one
+#: that was never requested.  ``NIXON_KERNEL_FAST_DEBUG=1`` reports it.
+DEBUG_VAR = "NIXON_KERNEL_FAST_DEBUG"
+
+
+def _debug(msg):
+    # type: (str) -> None
+    """Print a fast-tier diagnostic to stderr when opted in."""
+    if os.environ.get(DEBUG_VAR, "0") == "1":
+        try:
+            sys.stderr.write("[kernel_gen] %s\n" % (msg,))
+            sys.stderr.flush()
+        except Exception:
+            pass
+
 # Ops the native kernel implements (must stay in sync with lowering_shim).
 # Dotted ops (str.join) become method-style helpers (sep, it).
 # 139 callable ops + the "fuse" dispatch = 140 total entries.
@@ -144,8 +163,11 @@ def _impl_body(op: str, impl: str, fast: bool = False) -> str:
             _body = _fb(op, impl)
             if _body is not None:
                 return _body
-        except Exception:
-            pass
+            _debug("no fast body for op %r (%s) — using passthrough"
+                   % (op, impl))
+        except Exception as _e:
+            _debug("fast tier unavailable for op %r (%s): %s"
+                   % (op, impl, _e))
     if "." in op:
         recv, meth = op.split(".", 1)
         if op == "str.join":
@@ -191,8 +213,9 @@ def render_pyx(seed: bytes, ops=None, fast=None) -> tuple[str, str, dict[str, st
         try:
             from obfuscator.kernel_fast import _FAST_CIMPORTS as _fc
             parts.append(_fc)
-        except Exception:
-            pass
+        except Exception as _e:
+            _debug("fast-tier C imports unavailable (%s) — "
+                   "kernel keeps portable bodies" % (_e,))
         parts.append("_nxk_fast_missing = object()\n")
     for op in ops:
         parts.append(_impl_body(op, op_map[_token(op)],

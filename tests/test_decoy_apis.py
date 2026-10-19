@@ -134,3 +134,46 @@ def main():
         assert "crc32" in _REAL_ALGO_SOURCES
         assert "xor_block" in _REAL_ALGO_SOURCES
         assert "json_parse" in _REAL_ALGO_SOURCES
+
+    def test_decoy_bodies_have_no_unescaped_braces(self):
+        # The templates carry str.format escapes ({{ -> {) but are filled
+        # with str.replace, so the escapes must be undone.  Leaving them
+        # emits `return {{...}}`, which parses as a set containing a dict.
+        injector = SemanticDecoyApiInjector(count=8)
+        tree = ast.parse(SIMPLE_SCRIPT)
+        tree = injector.inject(tree)
+        code = ast.unparse(tree)
+        assert "{{" not in code, "unescaped '{{' left in a decoy body"
+        assert "}}" not in code, "unescaped '}}' left in a decoy body"
+
+    def test_dict_returning_decoys_return_dicts(self):
+        # A `return {{...}}` body parses but raises TypeError
+        # (unhashable dict) when the decoy is actually called.
+        injector = SemanticDecoyApiInjector(count=8)
+        tree = ast.parse(SIMPLE_SCRIPT)
+        tree = injector.inject(tree)
+        checked = 0
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            if not node.name.startswith("_nx_decoy_"):
+                continue
+            src = ast.unparse(node)
+            if "license_key" in src:
+                args = ("abc", b"12345678")
+            elif "activation_code" in src:
+                args = ("ac", b"m" * 8)
+            elif "subscription_id" in src:
+                args = ("sub", b"m" * 8)
+            elif "customer_id" in src:
+                args = ("cust", b"m" * 8)
+            else:
+                continue
+            namespace = {}
+            exec(compile(src, "<decoy>", "exec"), namespace)
+            result = namespace[node.name](*args)
+            assert isinstance(result, dict), (
+                "%s returned %r, expected dict"
+                % (node.name, type(result)))
+            checked += 1
+        assert checked >= 1, "no dict-returning decoy was exercised"

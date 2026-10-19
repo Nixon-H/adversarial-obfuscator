@@ -382,8 +382,14 @@ def test_output_traversal_guard_confines_write(tmp_path):
                     reason="needs POSIX O_NOFOLLOW")
 def test_state_symlink_not_followed(tmp_path):
     """[security] Trial state writes use O_NOFOLLOW: a symlinked state
-    path degrades to "ok" WITHOUT following the link (no write through
-    it, no file created for a dangling link)."""
+    path is refused WITHOUT following the link (no write through it, no
+    file created for a dangling link).
+
+    The verdict is "tampered", not "ok": a symlink at the state path is
+    an attacker-controlled filesystem condition, so it must fail closed
+    rather than silently disable rollback detection.  The emitted
+    runtime gate applies the same rule.
+    """
     if os.name == "nt":  # pragma: no cover - posix symlink semantics
         pytest.skip("posix symlink semantics")
     key = b"L" * 32
@@ -394,7 +400,7 @@ def test_state_symlink_not_followed(tmp_path):
     target = str(tmp_path / "nope.state")
     os.symlink(target, link)
     assert _trial.check_and_update(key, "h", ctx["deadline"], ctx["token"],
-                                   state_path=link, now=now + 1) == "ok"
+                                   state_path=link, now=now + 1) == "tampered"
     # The lock open may create an EMPTY target; sealed data must never
     # be written through the link.
     assert (not os.path.lexists(target)
@@ -406,7 +412,7 @@ def test_state_symlink_not_followed(tmp_path):
     link2 = str(tmp_path / "link2.state")
     os.symlink(real, link2)
     assert _trial.check_and_update(key, "h", ctx["deadline"], ctx["token"],
-                                   state_path=link2, now=now + 2) == "ok"
+                                   state_path=link2, now=now + 2) == "tampered"
     with open(real, encoding="utf-8") as fh:
         assert fh.read() == sealed
 

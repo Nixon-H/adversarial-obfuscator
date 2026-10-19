@@ -1438,6 +1438,7 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
     _phase4_suffix += (
         "def _nx_hwid_unlock(blob_bytes):\n"
         "    import hashlib as _hl_hashlib, json as _hl_json, uuid as _hl_uuid\n"
+        "    import hmac as _hl_hmac\n"
         "    if _NX_HWID_LOCK == \"DISABLED\":\n"
         "        return blob_bytes\n"
         "    try:\n"
@@ -1460,7 +1461,7 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         "    if len(_tagged) < 32:\n"
         "        raise ValueError(\"hwid unlock failed (truncated)\")\n"
         "    _tag, _data = _tagged[:32], _tagged[32:]\n"
-        "    if _hl_hashlib.sha256(_data).digest() != _tag:\n"
+        "    if not _hl_hmac.compare_digest(_hl_hashlib.sha256(_data).digest(), _tag):\n"
         "        raise ValueError(\"hwid unlock failed: wrong host or tampered data\")\n"
         "    return _data\n"
     )

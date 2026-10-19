@@ -176,7 +176,7 @@ def phase_obfuscate(payload, output, opts):
             f.write(result)
 
     if not os.path.exists(output):
-        log("ERROR", "Obfuscation produced no output — check obfuscator/core.py")
-        raise RuntimeError("Obfuscation produced no output — check obfuscator/core.py")
+        log("ERROR", "Obfuscation produced no output — check obfuscator/core/transforms.py")
+        raise RuntimeError("Obfuscation produced no output — check obfuscator/core/transforms.py")
     size = os.path.getsize(output)
     log("OBFUSCATE", f"Done: {size/1024:.1f}KB (was {os.path.getsize(payload)/1024:.1f}KB)")
