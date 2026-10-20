@@ -548,8 +548,6 @@ class MicroJITEngine:
                     next(g for g in dep_groups if x in g)
                 ))
                 new_block = bytearray()
-                pos = 0
-                instr_positions = sorted([i for instrs_g in dep_groups for i, _, _ in instrs_g])
                 for idx_in_group_list in range(len(reordered)):
                     def find_next(groups, current_list_idx):
                         target = reordered[current_list_idx]
@@ -774,12 +772,10 @@ class MicroJITEngine:
             if length == 0:
                 pos += 1
                 continue
-            rex_idx = -1
             p = pos
             while p < pos + min(length, 4):
                 b = result[p]
                 if _rex_prefix(b):
-                    rex_idx = p
                     p += 1
                 elif b in (0x66, 0x67, 0xF0, 0xF2, 0xF3, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65):
                     p += 1
@@ -928,7 +924,7 @@ def _cli_polymorph(args: list[str]):
 def main():
     """CLI entry point for Micro-JIT engine."""
     if not _phase2_enabled():
-        cfg = _load_config()
+        _load_config()
         print("Advanced Protection disabled. Set advanced_protection.enabled = true in config/default.json")
         sys.exit(0)
 

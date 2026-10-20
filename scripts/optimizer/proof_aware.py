@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import copy
-from typing import Any, Optional
+from typing import Optional
 
 from .cost_optimizer import CostOptimizer, PROTECTION_COSTS, CLASSIFICATION_MAP
 from .profiler import FunctionInfo

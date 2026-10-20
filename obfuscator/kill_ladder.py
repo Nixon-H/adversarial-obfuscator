@@ -62,6 +62,7 @@ REASON_CODES = frozenset([
     "integrity-snapshot",
     "stdlib-tamper",
     "hwid-mismatch",
+    "section-join-failed",
 ])
 
 #: Key-material global names deleted on the kill path (immutable

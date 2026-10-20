@@ -36,14 +36,14 @@ Maintenance Notes:
   binary and source paths; these must match the build layout.
 """
 
-import json
+import json  # noqa: F401 (this line binds a name used by an embedded template)
 import os
-import time
-from dataclasses import dataclass, field, asdict
+import time  # noqa: F401 (this line binds a name used by an embedded template)
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-from .capture import AttackCaptureStore, _sha256_file
+from .capture import AttackCaptureStore, _sha256_file  # noqa: F401 (this line binds a name used by an embedded template)
 from .comparator import compare_results
 
 

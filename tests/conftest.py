@@ -45,7 +45,7 @@ def ir_module():
     from irgen.compile import IrModule, IrFunction, IrType
     mod = IrModule("test_mod")
     func = IrFunction("test_func", IrType.i32())
-    entry = func.new_block("entry")
+    func.new_block('entry')
     mod.functions.append(func)
     return mod
 

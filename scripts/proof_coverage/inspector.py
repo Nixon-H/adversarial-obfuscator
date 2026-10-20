@@ -21,9 +21,9 @@ from __future__ import annotations
 import importlib
 import os
 import pkgutil
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-from scripts.proof_coverage.coverage import ProofCoverage
+from scripts.proof_coverage.coverage import ProofCoverage  # noqa: F401 (this line binds a name used by an embedded template)
 
 
 def inspect_preservation_module() -> Dict[str, bool]:
@@ -119,7 +119,7 @@ def check_proof_validity(proof_module: str) -> bool:
             obj = getattr(mod, name)
             if isinstance(obj, type) and "Prover" in name:
                 try:
-                    instance = obj(timeout_ms=5000)
+                    obj(timeout_ms=5000)
                     return True
                 except Exception:
                     continue

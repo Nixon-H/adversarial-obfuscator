@@ -26,7 +26,7 @@ def _generate_large_source(num_lines: int) -> str:
         elif i % 100 == 0:
             lines.append(f"def verify_{i}():\n    pass\n")
         elif i % 150 == 0:
-            lines.append(f"return True  # success\n")
+            lines.append("return True  # success\n")
         else:
             lines.append(f"x_{i} = {i}\n")
     return "".join(lines)

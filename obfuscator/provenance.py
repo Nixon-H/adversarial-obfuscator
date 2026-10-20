@@ -10,8 +10,7 @@ import os
 import random
 import re
 import struct
-import sys
-from typing import Any, Optional
+from typing import Any
 
 _PHASE2_ENABLED = True
 
@@ -132,7 +131,6 @@ def replace_error_messages(ast_tree: ast.Module,
         code_map[msg] = code_str
         error_codes[code_str] = msg
 
-    seen_msgs = set(f["message"] for f in found)
 
     class ErrorReplacer(ast.NodeTransformer):
         def visit_Constant(self, node: ast.Constant) -> ast.AST:
@@ -286,7 +284,7 @@ def encode_sensitive_strings(
         s = entry["string"]
         if not isinstance(node, ast.Constant):
             continue
-        key = _derive_string_key(seed, string_index, len(s))
+        _derive_string_key(seed, string_index, len(s))
         frag_size = max(4, len(s) // 3)
         fragments: list[bytes] = []
         frag_keys: list[bytes] = []

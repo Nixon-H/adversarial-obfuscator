@@ -5,11 +5,9 @@ Benchmarks for Attack Replay and Verification.
 
 Measures capture, comparison, and replay history performance.
 """
-import json
 import os
 import sys
 import tempfile
-import time
 
 import pytest
 
@@ -150,7 +148,7 @@ class TestAttackReplayBenchmarks:
         assert isinstance(result[0], bool)
 
     def test_bench_full_replay_simulation(self, store_with_captures, benchmark):
-        from scripts.attack_replay.replay import AttackReplay, ReplayResult
+        from scripts.attack_replay.replay import AttackReplay
         tmpdir, store = store_with_captures
 
         class MockConfig:

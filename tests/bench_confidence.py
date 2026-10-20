@@ -6,7 +6,6 @@ Benchmarks for Security Confidence Interval Computation (Feature 179).
 Measures confidence interval computation across sample sizes.
 """
 
-import math
 import os
 import sys
 import time
@@ -14,8 +13,8 @@ import time
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
-from scripts.confidence import compute_confidence_interval, SecurityConfidenceInterval
-from scripts.confidence.interval import _t_critical, _normal_critical
+from scripts.confidence import compute_confidence_interval
+from scripts.confidence.interval import _normal_critical
 
 
 def _bench(fn, *args, iterations=1000, label="bench"):

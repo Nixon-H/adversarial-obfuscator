@@ -1,10 +1,8 @@
 import ast
 import hashlib
 import math
-import os
 import platform
-import struct
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional
 
 
 _EMULATOR_DETECTED = False

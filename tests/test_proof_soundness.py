@@ -7,12 +7,10 @@ Test coverage:
 - Positive tests verify soundness test generation, mutation, oracle checks, and harness runs
 - Negative tests verify empty modules, unknown proof modules, determinism
 """
-import json
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
 
 from scripts.proof_soundness.harness import (
     ProofSoundnessHarness,

@@ -33,7 +33,6 @@ new instance or escalate to administrative intervention.
 import hashlib
 import os
 import random
-import struct
 import time
 from dataclasses import dataclass
 from typing import Optional

@@ -7,14 +7,10 @@ Measures coverage map generation, merging, and serialization performance.
 """
 import os
 import sys
-import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from scripts.coverage.coverage_map import (
-    generate_coverage_map, merge_coverage_maps,
-    coverage_to_json, coverage_to_text, coverage_to_html, PROTECTION_NAMES,
-)
+from scripts.coverage.coverage_map import generate_coverage_map, coverage_to_json, coverage_to_text, coverage_to_html, PROTECTION_NAMES
 from scripts.coverage.pipeline_tracker import PipelineTracker
 from scripts.coverage.ir_scanner import scan_ir_module
 from irgen.compile import compile_py_to_ir
@@ -69,7 +65,7 @@ def test_bench_coverage_map_generation_large(benchmark):
     lines = []
     for i in range(100):
         lines.append(f"def func_{i}(x):")
-        lines.append(f"    r = x")
+        lines.append("    r = x")
         for j in range(10):
             lines.append(f"    r = r + {j}")
         lines.append("    return r")

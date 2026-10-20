@@ -16,10 +16,8 @@ vectors are covered by existing protections and which remain unaddressed.
 """
 from __future__ import annotations
 
-import json
 import os
 import re
-import sys
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
@@ -224,7 +222,7 @@ class AttackCorpus:
         feature_pattern = re.compile(r"##\s+(F\d+):\s+(.+)")
         severity_pattern = re.compile(r"\*\*(HIGH|CRITICAL|MEDIUM|LOW)\*\*")
         attack_pattern = re.compile(r"\*\*(BYPASS|TAMPER|CONFUSE|MISCONFIGURE)")
-        fix_pattern = re.compile(r"\*\*Fix:\*\*\s*(.+)")
+        re.compile('\\*\\*Fix:\\*\\*\\s*(.+)')
 
         current_feature: str = ""
         current_title: str = ""

@@ -1,5 +1,4 @@
 """Shared AES-256-CTR test vectors for all implementations."""
-import pytest
 
 # NIST AES-256 Known Answer Test vectors
 KEY_256 = bytes.fromhex("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4")
@@ -11,7 +10,7 @@ NONCE = bytes.fromhex("0000000000000000")
 def test_python_aes_kat():
     from encrypt.aes import aes256_encrypt_block
     result = aes256_encrypt_block(PLAINTEXT_256, KEY_256)
-    assert result == CIPHERTEXT_256, f"Python AES KAT mismatch"
+    assert result == CIPHERTEXT_256, "Python AES KAT mismatch"
 
 
 def test_python_aes_ctr_roundtrip():

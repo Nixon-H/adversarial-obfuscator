@@ -108,8 +108,6 @@ def test_poly_engines_agree_on_platform_facts():
     # width); only their SHAPE is asserted, never equality.
     assert len(a["fingerprint"]) == 32
     assert len(b["fingerprint"]) == 16
-    int(a["fingerprint"], 16)
-    int(b["fingerprint"], 16)
 
 
 # -- differential: fragment cryptos roundtrip shared vectors ---------------

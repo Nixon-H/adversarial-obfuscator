@@ -36,12 +36,10 @@ produces deterministic but meaningless plaintext).
 
 from __future__ import annotations
 import hashlib
-import json
 import os
 import struct
-from typing import Optional
 
-from .vm_isa import VMInstruction, VMOpcode, VMOperand, VM_PROPERTIES, _phase2_enabled
+from .vm_isa import VMInstruction, VMOpcode, VMOperand, _phase2_enabled
 
 
 def secure_zero(data):

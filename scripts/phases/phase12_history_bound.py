@@ -24,7 +24,7 @@ order — reordering or skipping is detectable at runtime.
 import hashlib
 import json
 import os
-import struct
+import struct  # noqa: F401 (this line binds a name used by an embedded template)
 
 from ..common import log, BUILD_DIR
 

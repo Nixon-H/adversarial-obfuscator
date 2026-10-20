@@ -1,5 +1,4 @@
 import ast
-import pytest
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -63,7 +62,7 @@ def process(data):
         from irgen.compile import IrModule, IrFunction, IrType
         mod = IrModule("test")
         func = IrFunction("test_func", IrType.i32())
-        entry = func.new_block("entry")
+        func.new_block('entry')
         mod.functions.append(func)
         result = inject_cfg_poisoning(mod, {"cfgp_num_dead_cases": 4})
         assert isinstance(result, IrModule)

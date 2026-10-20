@@ -25,7 +25,6 @@ Naming follows the existing textual-test pattern
 import os
 import re
 
-import pytest
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 WIN_STUB = os.path.join(ROOT, "native", "stub_win.cpp")

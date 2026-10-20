@@ -38,7 +38,7 @@ def phase_micro_fragment(code: str, opts) -> dict:
     Returns:
         dict with master_key, fragment_size, total_fragments, enabled
     """
-    log("MICRO_FRAGMENT", f"Running micro-fragment phase (Item 50)...")
+    log("MICRO_FRAGMENT", "Running micro-fragment phase (Item 50)...")
     try:
         from scripts.fragment.micro_fragment import MicroFragmentExecutor
         micro_frag_key = secrets.token_bytes(32)

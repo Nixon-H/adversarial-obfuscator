@@ -1,7 +1,6 @@
 import os
 import ctypes
 import marshal
-import struct
 import pytest
 
 BUILD_DIR = os.path.join(os.path.dirname(__file__), "..", "build")

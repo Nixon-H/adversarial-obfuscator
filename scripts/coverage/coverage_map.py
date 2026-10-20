@@ -40,7 +40,7 @@ import datetime
 import logging
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from .ir_scanner import scan_ir_module
 
@@ -169,7 +169,6 @@ def generate_coverage_map(ir_module, pipeline_state=None):
     Returns a fully populated CoverageMap with per-function and
     per-protection statistics.
     """
-    from irgen.compile import IrModule
     opts = getattr(pipeline_state, "opts", None) if pipeline_state else None
     if opts is None:
         import logging as _lg

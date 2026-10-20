@@ -22,7 +22,6 @@ Usage:
 
 import ast
 import re
-import math
 import argparse
 import sys
 import os

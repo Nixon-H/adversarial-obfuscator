@@ -18,7 +18,7 @@ Dependencies:
 from __future__ import annotations
 
 import z3
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass

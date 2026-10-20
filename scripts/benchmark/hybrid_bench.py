@@ -22,7 +22,7 @@ The complexity index synthesises multiple protection dimensions
 fragment count, VM instructions) into a single difficulty metric.
 """
 
-import math
+import math  # noqa: F401 (this line binds a name used by an embedded template)
 import os
 
 

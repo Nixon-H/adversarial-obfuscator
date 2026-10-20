@@ -38,7 +38,6 @@ Maintenance Notes:
 
 from scripts.synthesis.engine import ProtectionCost
 
-from scripts.synthesis.engine import ProtectionCost
 
 PROTECTION_COSTS = {
     "cfg_flatten": ProtectionCost(

@@ -22,11 +22,15 @@ from __future__ import annotations
 import ast
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from scripts.validation.ast_to_smt import ASTToSMT
 from scripts.validation.ir_to_smt import IRToSMT
 from scripts.validation.equivalence import EquivalenceChecker, CheckResult
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from irgen.compile import IrModule
 
 
 @dataclass

@@ -1,9 +1,7 @@
 import ast
 import hashlib
-import json
 import os
 import random
-import shutil
 import secrets
 import sys
 from typing import List
@@ -25,9 +23,9 @@ def generate_variant(source: str, variant_id: int, config: dict) -> str:
     ast_seed = derive_subseed(seed, "ast")
     mba_seed = derive_subseed(seed, "mba")
     cfg_seed = derive_subseed(seed, "cfg")
-    vm_seed = derive_subseed(seed, "vm")
-    opaque_seed = derive_subseed(seed, "opaque")
-    string_seed = derive_subseed(seed, "string")
+    derive_subseed(seed, 'vm')
+    derive_subseed(seed, 'opaque')
+    derive_subseed(seed, 'string')
 
     pass_sets = config.get("pass_sets", None)
     if pass_sets is not None:

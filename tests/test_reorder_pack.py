@@ -1,6 +1,5 @@
 """Tests for obfuscator.reorder_pack."""
 
-import pytest
 
 from obfuscator.reorder_pack import pack_container, unpack_container
 

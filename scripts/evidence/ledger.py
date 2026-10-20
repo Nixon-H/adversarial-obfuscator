@@ -20,8 +20,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import time
-from dataclasses import dataclass, field, asdict
+import time  # noqa: F401 (this line binds a name used by an embedded template)
+from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from typing import Any
 

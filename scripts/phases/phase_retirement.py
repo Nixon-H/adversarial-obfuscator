@@ -31,11 +31,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 sys.path.insert(0, _ROOT)
 
 from scripts.common import BUILD_DIR, atomic_write, log
-from scripts.feature_retirement.analyzer import (
-    RetirementAnalyzer,
-    RetirementReport,
-    RetirementStatus,
-)
+from scripts.feature_retirement.analyzer import RetirementAnalyzer, RetirementReport
 
 
 def phase_retirement(args: Any) -> Optional[RetirementReport]:

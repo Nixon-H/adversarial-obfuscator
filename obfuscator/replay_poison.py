@@ -1,5 +1,5 @@
 import ast
-import os
+import os  # noqa: F401 (this line binds a name used by an embedded template)
 
 
 class _EntropyBranchInjector(ast.NodeTransformer):
@@ -134,7 +134,6 @@ def inject_entropy_branches(source: str, config: dict) -> str:
 
 def inject_cfg_poisoning(ir_module, config: dict):
     num_dead_cases = config.get("cfgp_num_dead_cases", 4)
-    poison_prob = config.get("cfgp_poison_probability", 1.0 / 1024.0)
 
     if hasattr(ir_module, "functions"):
         for func in ir_module.functions:

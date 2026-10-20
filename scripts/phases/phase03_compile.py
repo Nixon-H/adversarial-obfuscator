@@ -40,7 +40,7 @@ def phase_compile_relay():
         RuntimeError: if the binary is not produced.
     """
     log("RELAY", "Compiling orbital-relay (Rust)...")
-    result = run(["make", "relay"], timeout=1800)
+    run(['make', 'relay'], timeout=1800)
     binary = os.path.join(BUILD_DIR, "orbital-relay")
     if not os.path.exists(binary):
         log("ERROR", "Rust build failed — binary not found")
@@ -75,7 +75,7 @@ def phase_cross_compile(targets_str):
         triple = target_map.get(t, t)
         log("CROSS", f"Building for {triple}...")
         try:
-            result = run(["cargo", "build", "--release", "--target", triple], cwd=RELAY_DIR, timeout=1800)
+            run(['cargo', 'build', '--release', '--target', triple], cwd=RELAY_DIR, timeout=1800)
             src = os.path.join(RELAY_DIR, "target", triple, "release", "orbital-relay")
             if os.path.exists(src):
                 ext = ".exe" if "windows" in triple else ""

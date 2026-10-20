@@ -41,7 +41,6 @@ consts but NOT the Code.replace field set we serialize — verified by the
 from __future__ import annotations
 
 import hashlib
-import struct
 import sys
 import types
 

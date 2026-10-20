@@ -16,10 +16,7 @@ by risk level (CRITICAL/HIGH/MEDIUM/LOW) prioritizes remediation.
 """
 from __future__ import annotations
 
-import ast
-import json
 import os
-import re
 import sys
 from dataclasses import dataclass, field
 from typing import Any

@@ -20,10 +20,10 @@ Rolling keys ensure that fragments must be decrypted in order —
 reordering is immediately detected.
 """
 
-import hashlib
+import hashlib  # noqa: F401 (this line binds a name used by an embedded template)
 import json
 import os
-import struct
+import struct  # noqa: F401 (this line binds a name used by an embedded template)
 from ..common import log, BUILD_DIR
 from ..binding.crypto_binding import CryptoFragmentBinder, Fragment
 

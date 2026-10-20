@@ -6,7 +6,6 @@ deobfuscation agent feedback to create self-improving obfuscation.
 
 import copy
 import hashlib
-import json
 import os
 import secrets
 from typing import List
@@ -92,8 +91,13 @@ class CompilerMutationEngine:
                 steps.append(f"{lhs_vars[i]} = {a} >> {shift}")
 
         result_var = lhs_vars[-1]
-        formula = f"((({')\\n  '.join(steps)}))"
+        # The newline join lives outside the f-string expression: a
+        # backslash inside an f-string expression is Python 3.12+ only,
+        # and this module must import on 3.10.
+        _joined = ")\n  ".join(steps)
+        formula = f"((({_joined}))"
         result = f"def mba_{seed}({', '.join(variables)}):\n  {formula}\n  return {result_var}"
+
 
         self.mba_cache[cache_key] = result
         return result

@@ -1,4 +1,4 @@
-import sys,os,zipfile,base64,io,tokenize,py_compile,shutil,tempfile,random,hashlib,lzma,struct,time,json,argparse,uuid,re,inspect,platform,subprocess,marshal,hmac,secrets,ctypes,importlib.util,atexit,warnings,zlib,codecs,string,builtins,math,dis,multiprocessing,types,traceback,gc,ast,socket,threading,concurrent.futures,logging;from io import StringIO;from datetime import datetime; _nixon_ハッシュ해시 = hashlib
+import sys, os, zipfile, base64, io, shutil, tempfile, random, hashlib, lzma, struct, time, json, argparse, uuid, re, inspect, platform, subprocess, marshal, hmac, secrets, ctypes, importlib.util, atexit, warnings, zlib, codecs, string, builtins, math, dis, multiprocessing, types, traceback, gc, ast, socket, threading, concurrent.futures, logging  # noqa: F401 (this line binds a name used by an embedded template)
 from .utils import get_random_var_name
 
 class TypeHintStripper(ast.NodeTransformer):
@@ -551,27 +551,27 @@ class StringLiteralObfuscator(ast.NodeTransformer):
     def _get_xor_preamble(self):
         lines = []
         lines.append(f"def {self.decoder_name}(_s):")
-        lines.append(f"    try:")
-        lines.append(f"        _b = bytes.fromhex(_s)")
-        lines.append(f"    except ValueError:")
-        lines.append(f"        _a = ''")
-        lines.append(f"        for _i in range(65, 91): _a += chr(_i)")
-        lines.append(f"        for _i in range(97, 123): _a += chr(_i)")
-        lines.append(f"        for _i in range(48, 58): _a += chr(_i)")
-        lines.append(f"        _a += '+/'")
-        lines.append(f"        _v = 0; _n = 0; _r = []")
-        lines.append(f"        for _x in _s.rstrip('='):")
-        lines.append(f"            _i = _a.find(_x)")
-        lines.append(f"            if _i >= 0:")
-        lines.append(f"                _v = (_v << 6) | _i")
-        lines.append(f"                _n += 6")
-        lines.append(f"                if _n >= 8:")
-        lines.append(f"                    _n -= 8")
-        lines.append(f"                    _r.append((_v >> _n) & 0xFF)")
-        lines.append(f"        try:")
-        lines.append(f"            _b = bytes.fromhex(bytes(_r).decode('ascii'))")
-        lines.append(f"        except (ValueError, UnicodeDecodeError):")
-        lines.append(f"            return _s")
+        lines.append("    try:")
+        lines.append("        _b = bytes.fromhex(_s)")
+        lines.append("    except ValueError:")
+        lines.append("        _a = ''")
+        lines.append("        for _i in range(65, 91): _a += chr(_i)")
+        lines.append("        for _i in range(97, 123): _a += chr(_i)")
+        lines.append("        for _i in range(48, 58): _a += chr(_i)")
+        lines.append("        _a += '+/'")
+        lines.append("        _v = 0; _n = 0; _r = []")
+        lines.append("        for _x in _s.rstrip('='):")
+        lines.append("            _i = _a.find(_x)")
+        lines.append("            if _i >= 0:")
+        lines.append("                _v = (_v << 6) | _i")
+        lines.append("                _n += 6")
+        lines.append("                if _n >= 8:")
+        lines.append("                    _n -= 8")
+        lines.append("                    _r.append((_v >> _n) & 0xFF)")
+        lines.append("        try:")
+        lines.append("            _b = bytes.fromhex(bytes(_r).decode('ascii'))")
+        lines.append("        except (ValueError, UnicodeDecodeError):")
+        lines.append("            return _s")
         lines.append(f"    return bytes([_c ^ {self.xor_key} for _c in _b[::-1]]).decode()")
         for original, var_name in self.string_table.items():
             try:
@@ -952,19 +952,7 @@ class OpaquePredicateInjector(ast.NodeTransformer):
         self.generic_visit(node)
         _nonce = random.randint(3, 30)
         if random.random() < 0.60:
-            cond = ast.Compare(
-                left=ast.BinOp(
-                    left=ast.Constant(value=_nonce * _nonce),
-                    op=ast.Mod(),
-                    right=ast.Constant(value=_nonce + 1),
-                ),
-                ops=[ast.Eq()],
-                comparators=[ast.BinOp(
-                    left=ast.Constant(value=_nonce),
-                    op=ast.Mod(),
-                    right=ast.Constant(value=_nonce + 1),
-                )]
-            )
+            ast.Compare(left=ast.BinOp(left=ast.Constant(value=_nonce * _nonce), op=ast.Mod(), right=ast.Constant(value=_nonce + 1)), ops=[ast.Eq()], comparators=[ast.BinOp(left=ast.Constant(value=_nonce), op=ast.Mod(), right=ast.Constant(value=_nonce + 1))])
             # Dead-branch marker: must NEVER execute. The modular cond
             # above is actually FALSE for 3 <= n <= 30 (n*n % (n+1) = 1,
             # n % (n+1) = n), so the print in `orelse` RUNS — a real
@@ -1014,8 +1002,8 @@ class InstructionSubstitutor(ast.NodeTransformer):
         self.level = level
 
     def _expr_to_binop_funcdef(self, expr: ast.AST) -> ast.FunctionDef:
-        a_var = ast.Name(id="a", ctx=ast.Load())
-        b_var = ast.Name(id="b", ctx=ast.Load())
+        ast.Name(id='a', ctx=ast.Load())
+        ast.Name(id='b', ctx=ast.Load())
         ret = ast.Return(value=expr)
         args = ast.arguments(
             posonlyargs=[], args=[
@@ -1833,7 +1821,6 @@ def {node.name}(*args, **kwargs):
 '''
 
     def _make_rust_jit_wrapper(self, node, func_code, key, template_name):
-        import base64
         b64_code = base64.b64encode(func_code.encode()).decode()
         return f'''
 import base64, ctypes, os, subprocess, tempfile

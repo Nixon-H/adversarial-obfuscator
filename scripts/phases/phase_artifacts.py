@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import os
-import time
+import time  # noqa: F401 (this line binds a name used by an embedded template)
 
 from ..common import log, BUILD_DIR
 from ..artifacts.builder import ArtifactBuilder

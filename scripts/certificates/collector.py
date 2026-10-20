@@ -17,10 +17,10 @@ Dependencies:
 from __future__ import annotations
 
 import hashlib
-import json
+import json  # noqa: F401 (this line binds a name used by an embedded template)
 import os
 from datetime import datetime, timezone
-from typing import List, Optional, Any
+from typing import List, Any
 
 from .certificate import Certificate, CertificateChain
 

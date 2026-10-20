@@ -1,10 +1,7 @@
-import os
 import shutil
 import subprocess
-import tempfile
 
 from .tool_simulator import ToolSimulator
-from .tool_profiles import TOOL_PROFILES
 from .angr_bench import AngrBenchmark
 from .ghidra_bench import GhidraBenchmark
 from .bninja_bench import BinaryNinjaBenchmark

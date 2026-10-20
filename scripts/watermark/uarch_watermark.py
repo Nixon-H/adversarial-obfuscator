@@ -25,8 +25,6 @@ Dependencies:
 """
 import ctypes
 import ctypes.util
-import os
-import struct
 import sys
 import time
 from typing import List, Optional, Tuple
@@ -35,7 +33,7 @@ from typing import List, Optional, Tuple
 def _get_rdtsc() -> Optional[ctypes.CFUNCTYPE]:
     """Attempt to get a raw RDTSC function via ctypes. Returns None on failure."""
     try:
-        libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=False)
+        ctypes.CDLL(ctypes.util.find_library('c'), use_errno=False)
         return None
     except Exception:
         pass

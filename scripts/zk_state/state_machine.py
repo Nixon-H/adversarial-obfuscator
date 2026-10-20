@@ -64,10 +64,10 @@ Maintenance Notes:
 from __future__ import annotations
 
 import hashlib
-import os
+import os  # noqa: F401 (this line binds a name used by an embedded template)
 import time
-from dataclasses import dataclass, field
-from typing import Dict, Optional, Set
+from dataclasses import dataclass
+from typing import Optional, Set
 
 from .sigma_protocol import GroupParameters, Proof, SigmaProver, SigmaVerifier
 

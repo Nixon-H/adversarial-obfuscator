@@ -40,3 +40,18 @@ from .scheme import BGVScheme, BGVKeyPair, BGVParameters
 from .circuit import FHECircuit, CircuitEvaluator, build_circuit_from_ir
 from .ir_adapter import SSAToFHECircuit, is_fhe_compatible
 from .executor import FHEExecutor, verify_equivalence
+
+# Re-exported names: listed explicitly so the intent is
+# unambiguous and the unused-import check does not flag them.
+__all__ = [
+    "BGVKeyPair",
+    "BGVParameters",
+    "BGVScheme",
+    "CircuitEvaluator",
+    "FHECircuit",
+    "FHEExecutor",
+    "SSAToFHECircuit",
+    "build_circuit_from_ir",
+    "is_fhe_compatible",
+    "verify_equivalence",
+]

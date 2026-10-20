@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
 
-from scripts.validation.equivalence import EquivalenceChecker, CheckResult
+from scripts.validation.equivalence import EquivalenceChecker
 from scripts.preservation.report import StageResult, PreservationReport
 
 

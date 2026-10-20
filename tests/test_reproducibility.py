@@ -7,11 +7,9 @@ Test coverage:
 - Positive tests verify environment snapshots, scoring by artifact type
 - Negative tests verify nonexistent files, empty directories, random content
 """
-import hashlib
 import json
 import os
 import platform
-import shutil
 import sys
 import tempfile
 
@@ -22,11 +20,7 @@ from scripts.reproducibility.environment import (
     compare_environments,
     environment_fingerprint,
 )
-from scripts.reproducibility.scorer import (
-    compute_reproducibility,
-    ReproducibilityResult,
-    ReproducibilityReport,
-)
+from scripts.reproducibility.scorer import compute_reproducibility, ReproducibilityReport
 from scripts.reproducibility.checker import (
     check_result_reproducibility,
     check_benchmark_reproducibility,

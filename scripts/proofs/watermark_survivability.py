@@ -18,7 +18,6 @@ Dependencies:
 from __future__ import annotations
 
 import hashlib
-import struct
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -152,7 +151,6 @@ class WatermarkSurvivabilityProver:
     def _check_watermark_preserved(
         self, before: dict, after: dict, watermark: str
     ) -> tuple[bool, Optional[dict]]:
-        h = int(hashlib.sha256(watermark.encode()).hexdigest(), 16)
 
         solver = z3.Solver()
         solver.set("timeout", self.timeout_ms)

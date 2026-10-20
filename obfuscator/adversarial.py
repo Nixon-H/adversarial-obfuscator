@@ -10,7 +10,6 @@ valid Python.
 """
 
 import ast
-import io
 import random
 import string
 import textwrap

@@ -1,6 +1,5 @@
 """Measure actual runtime overhead of protected vs unprotected code."""
 import time
-import os
 import subprocess
 import sys
 from typing import Dict
@@ -11,7 +10,7 @@ def measure_execution_time(script_path: str, iterations: int = 3) -> Dict:
     times = []
     for _ in range(iterations):
         start = time.perf_counter()
-        result = subprocess.run([sys.executable, script_path], capture_output=True, timeout=30)
+        subprocess.run([sys.executable, script_path], capture_output=True, timeout=30)
         elapsed = time.perf_counter() - start
         times.append(elapsed)
     return {

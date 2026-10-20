@@ -84,7 +84,6 @@ def make_stub_xor_decrypt(text_size: int, original_entry: int,
 
     # .loop:
     # mov r10b, [r8 + r9]  (load keystream byte)
-    loop_start = len(code)
     code += b'\x47\x8a\x14\x0e'
     # xor [rax + r9], r10b (decrypt text byte)
     code += b'\x46\x30\x14\x08'
@@ -139,7 +138,6 @@ def make_stub_with_keystream(text_size: int, original_entry: int,
     off_keystream_pos = len(code)
     code += b'\x4c\x8d\x43\x00'
     code += b'\x45\x31\xc9'
-    loop_start = len(code)
     code += b'\x47\x8a\x14\x0e'
     code += b'\x46\x30\x14\x08'
     code += b'\x41\xff\xc1'

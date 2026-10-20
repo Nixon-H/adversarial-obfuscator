@@ -9,14 +9,11 @@ Test coverage:
 """
 from __future__ import annotations
 
-import json
 import os
 import sys
-import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
 
 from scripts.evidence_completeness.scorer import (
     CLAIM_PATTERNS,
@@ -132,7 +129,7 @@ class TestEvidenceCompletenessScorer:
     def test_scan_file_for_claims_empty(self):
         scorer = EvidenceCompletenessScorer()
         tmp_file = "/tmp/_test_empty.py"
-        with open(tmp_file, "w") as f:
+        with open(tmp_file, "w"):
             pass
         matches = scorer._scan_file_for_claims(tmp_file)
         assert matches == []

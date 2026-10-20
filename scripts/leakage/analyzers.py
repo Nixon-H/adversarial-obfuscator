@@ -38,7 +38,7 @@ Maintenance Notes:
 
 from __future__ import annotations
 from typing import Any
-from collections import Counter
+from collections import Counter  # noqa: F401 (this line binds a name used by an embedded template)
 
 from .taxonomy import LeakageLevel, LeakageScore
 from .metrics import (

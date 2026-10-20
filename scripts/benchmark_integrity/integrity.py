@@ -20,7 +20,6 @@ from __future__ import annotations
 import hashlib
 import os
 import platform
-import subprocess
 import sys
 import importlib.metadata
 

@@ -1,13 +1,10 @@
 """Tests for Item 13, 16, 31, 40, 45, 46, 60, 64, 67, 68, 70, 72, 74 fixes."""
 
-import ast
-import hashlib
 import os
 import sys
-import tempfile
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import ast
 
 
 # ── Item 13: Variant pool ─────────────────────────────────────────────
@@ -49,7 +46,7 @@ def test_dynamic_code_generator_rust_jit():
 
 # ── Item 31: AES-CTR ──────────────────────────────────────────────────
 def test_aes_ctr_encrypt_decrypt():
-    from obfuscator.core.pipeline import Nixon_Enc_AES_CTR, _check_aes_ctr
+    from obfuscator.core.pipeline import Nixon_Enc_AES_CTR
     data = b"Hello, World! This is test data for AES-CTR encryption."
     key = b"test_key_12345678"
     nonce = b"nonce1234567890"
@@ -108,7 +105,7 @@ def test_provenance_replace_mode():
 
 
 def test_provenance_replacement():
-    from obfuscator.provenance import replace_error_messages, encode_sensitive_strings, obfuscate_algorithmic_constants
+    from obfuscator.provenance import replace_error_messages
     code = '''
 def test():
     msg = "Error: something failed"
@@ -129,7 +126,6 @@ def test_adaptive_classifier_loop_exists():
 # ── Item 60: SMT validation ───────────────────────────────────────────
 def test_smt_validator_real_z3():
     from scripts.validation.smt_validator import SMTValidator
-    import ast as ast_mod
     from irgen.compile import compile_py_to_ir
     source = "def f(x, y): return x + y"
     ir_module = compile_py_to_ir(source)
@@ -140,7 +136,7 @@ def test_smt_validator_real_z3():
 
 # ── Item 64: Challenge-response ───────────────────────────────────────
 def test_challenge_response_module():
-    from scripts.runtime.challenge_response import ChallengeResponse, Challenge, Response
+    from scripts.runtime.challenge_response import ChallengeResponse
     cr = ChallengeResponse(timeout=5.0)
     challenge = cr.create_challenge("peer1")
     assert challenge is not None
@@ -234,7 +230,7 @@ def test_decoy_api_options_forwarded():
 
 # ── Item 74: Adaptive rewriting wiring ────────────────────────────────
 def test_adaptive_rewriting_no_mock():
-    from scripts.benchmark.feedback import BenchmarkFeedbackAnalyzer, WeaknessProfile
+    from scripts.benchmark.feedback import BenchmarkFeedbackAnalyzer
     from obfuscator.adaptive_rewriter import AdaptiveRewriter
 
     real_results = {

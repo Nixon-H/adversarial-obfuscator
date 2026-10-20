@@ -18,11 +18,9 @@ from __future__ import annotations
 
 import ast
 import os
-import random
+import random  # noqa: F401 (this line binds a name used by an embedded template)
 import re
-import sys
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

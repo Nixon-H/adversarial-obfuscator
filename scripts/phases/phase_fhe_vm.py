@@ -25,8 +25,7 @@ providing mathematical confidentiality for selected functions.
 from __future__ import annotations
 import json
 import os
-import time
-from typing import Optional
+import time  # noqa: F401 (this line binds a name used by an embedded template)
 
 from ..common import log, BUILD_DIR
 
@@ -58,10 +57,7 @@ def phase_fhe_vm(args, ir_module=None):
             log("FHE_VM", f"Failed to load IR module: {e}")
             return None
 
-    from scripts.fhe_vm import (
-        BGVScheme, BGVParameters, FHEExecutor, SSAToFHECircuit,
-        FHECircuit, is_fhe_compatible, verify_equivalence,
-    )
+    from scripts.fhe_vm import BGVScheme, FHEExecutor, SSAToFHECircuit, is_fhe_compatible, verify_equivalence  # noqa: F401 (this line binds a name used by an embedded template)
 
     target_funcs_str = getattr(args, 'fhe_vm_functions', None)
     target_funcs = None

@@ -7,13 +7,11 @@ Test coverage:
 - Positive tests verify attack simulation, result collection, scoring
 - Negative tests verify empty results, missing targets, edge cases
 """
-import json
+import json  # noqa: F401 (this line binds a name used by an embedded template)
 import os
 import sys
 import tempfile
-import time
 
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

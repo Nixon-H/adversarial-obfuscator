@@ -1,10 +1,7 @@
 import ast
 import copy
-import hashlib
-import os
 import random
 import secrets
-from typing import Any
 
 
 class DataProtector:
@@ -494,7 +491,7 @@ class DataProtector:
 
                     elif isinstance(stmt, ast.If):
                         transformed = self._rewrite_if(
-                            stmt, var_to_vaddr, _virt_read,
+                            stmt, var_to_vaddr, _virt_read, _virt_write,
                         )
                         new_body.append(transformed)
 
@@ -548,23 +545,23 @@ class DataProtector:
                 return expr
 
             def _rewrite_if(
-                self, stmt: ast.If, var_to_vaddr: dict, virt_read,
+                self, stmt: ast.If, var_to_vaddr: dict, virt_read, virt_write,
             ) -> ast.If:
                 stmt.test = self._rewrite_expr(stmt.test, var_to_vaddr, virt_read)
                 stmt.body = [
-                    self._rewrite_if(b, var_to_vaddr, virt_read) if isinstance(b, ast.If)
-                    else self._rewrite_stmt(b, var_to_vaddr, virt_read)
+                    self._rewrite_if(b, var_to_vaddr, virt_read, virt_write) if isinstance(b, ast.If)
+                    else self._rewrite_stmt(b, var_to_vaddr, virt_read, virt_write)
                     for b in stmt.body
                 ]
                 stmt.orelse = [
-                    self._rewrite_if(b, var_to_vaddr, virt_read) if isinstance(b, ast.If)
-                    else self._rewrite_stmt(b, var_to_vaddr, virt_read)
+                    self._rewrite_if(b, var_to_vaddr, virt_read, virt_write) if isinstance(b, ast.If)
+                    else self._rewrite_stmt(b, var_to_vaddr, virt_read, virt_write)
                     for b in stmt.orelse
                 ]
                 return stmt
 
             def _rewrite_stmt(
-                self, stmt: ast.stmt, var_to_vaddr: dict, virt_read,
+                self, stmt: ast.stmt, var_to_vaddr: dict, virt_read, virt_write,
             ) -> ast.stmt:
                 if isinstance(stmt, ast.Assign):
                     for t in stmt.targets:
@@ -572,7 +569,7 @@ class DataProtector:
                             new_rhs = self._rewrite_expr(
                                 stmt.value, var_to_vaddr, virt_read,
                             )
-                            return _virt_write(t.id, new_rhs)
+                            return virt_write(t.id, new_rhs)
                 if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
                     stmt.value.args = [
                         virt_read(a.id) if isinstance(a, ast.Name) and a.id in var_to_vaddr else a

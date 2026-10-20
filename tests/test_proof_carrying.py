@@ -3,7 +3,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import z3
-from scripts.proofs.proof_carrying import ProofCarryingObfuscator, ProofCertificate
+from scripts.proofs.proof_carrying import ProofCarryingObfuscator
 from scripts.certificates.certificate import CertificateChain
 
 

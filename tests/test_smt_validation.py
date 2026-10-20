@@ -1,8 +1,7 @@
 import ast
-import pytest
 import z3
 
-from scripts.validation.ast_to_smt import ASTToSMT, ast_to_smt_formula
+from scripts.validation.ast_to_smt import ASTToSMT
 from scripts.validation.equivalence import EquivalenceChecker
 from scripts.validation.smt_validator import SMTValidator
 

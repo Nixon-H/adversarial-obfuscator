@@ -1,6 +1,5 @@
 import math
 import os
-import struct
 from collections import Counter
 from typing import Dict, List
 

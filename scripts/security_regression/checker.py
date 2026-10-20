@@ -43,12 +43,11 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from .gate import GateResult, GateSeverity, SecurityGate
-from .metrics_collector import MetricsCollector
-from .report import GateReport, generate_gate_report
+from .metrics_collector import MetricsCollector  # noqa: F401 (this line binds a name used by an embedded template)
+from .report import GateReport, generate_gate_report  # noqa: F401 (this line binds a name used by an embedded template)
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

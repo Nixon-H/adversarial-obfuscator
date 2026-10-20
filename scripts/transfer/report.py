@@ -5,7 +5,6 @@ program: build matrix -> develop attacks per build -> apply cross matrix
 -> endpoints -> T -> CIs -> falsification verdict -> report with
 config_freeze_hash, exclusions, timing, overhead.
 """
-import hashlib
 import json
 import os
 import tempfile
@@ -13,7 +12,6 @@ import time
 
 from scripts.transfer import attack as attack_mod
 from scripts.transfer import builds as builds_mod
-from scripts.transfer import corpus as corpus_mod
 from scripts.transfer import measure as measure_mod
 from scripts.transfer import protocol
 

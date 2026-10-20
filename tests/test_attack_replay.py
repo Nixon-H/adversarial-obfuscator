@@ -7,12 +7,10 @@ Test coverage:
 - Positive tests verify attack capture, replay, result comparison
 - Negative tests verify empty captures, missing traces, edge cases
 """
-import json
 import os
 import sys
 import tempfile
 
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

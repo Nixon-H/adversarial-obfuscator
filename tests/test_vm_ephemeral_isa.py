@@ -12,9 +12,7 @@ Verifies:
 import ctypes
 import hashlib
 import os
-import struct
 import subprocess
-import sys
 import time
 
 import pytest
@@ -35,17 +33,7 @@ from vm.ephemeral_isa import (
     DISPATCH_MODES,
     ENCODING_MODES,
 )
-from vm.interpreter import (
-    VMInterpreter,
-    DISPATCH_SWITCH,
-    DISPATCH_INDIRECT,
-    DISPATCH_COMPUTED_GOTO,
-    ENCODING_FIXED,
-    ENCODING_VARIABLE,
-    ENCODING_FIELD_SHUFFLE,
-    DISPATCH_NAMES,
-    ENCODING_NAMES,
-)
+from vm.interpreter import VMInterpreter, ENCODING_VARIABLE, ENCODING_FIELD_SHUFFLE, ENCODING_NAMES
 
 VM_STUB_C = os.path.join(os.path.dirname(__file__), "..", "native", "vm_stub.c")
 VM_STUB_SO = os.path.join(os.path.dirname(__file__), "..", "native", "vm_stub_test.so")
@@ -336,12 +324,11 @@ def test_dispatch_mode_differs_per_instance():
 def test_dispatch_mode_differs_per_epoch():
     bc = make_mov_bytecode_phys(0, 42) + make_rekey_bytecode_phys() + make_mov_bytecode_phys(1, 99)
     vm = VMInterpreter(bc, dynamic_isa=True, entropy_seed=_seed_for_test(30))
-    pre_mode = vm.dispatch_mode
     vm.step()
     if not vm.state.get("halted", False):
         vm.step()
         if vm.epoch > 0:
-            post_mode = vm.dispatch_mode
+            pass
 
 
 def test_rekey_rotates_dispatch_encoding():
@@ -758,7 +745,6 @@ def test_rekey_rotates_encoding():
         seed = _seed_for_test(1200 + test_idx)
         bc = make_mov_bytecode_phys(0, 42) + make_rekey_bytecode_phys() + make_mov_bytecode_phys(1, 99)
         vm = VMInterpreter(bc, dynamic_isa=True, entropy_seed=seed)
-        enc_before = vm.encoding_mode
 
         vm.step()
         if vm.state.get("halted", False):
@@ -881,7 +867,6 @@ def test_all_instances_produce_same_regs():
 
     if results:
         reg0_vals = set(r[1] for r in results)
-        reg1_vals = set(r[2] for r in results)
         assert len(reg0_vals) == 1, \
             f"All working instances should compute same reg[0]: {reg0_vals}"
         assert list(reg0_vals)[0] == 100, \

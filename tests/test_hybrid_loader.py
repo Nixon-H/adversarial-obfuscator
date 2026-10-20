@@ -18,8 +18,6 @@ def _load_fragment():
     tpl = m.group(1)
     # Batch-3: BLOB_KEY now reconstructs from XOR shares + build-id salt.
     # Substitute dummy shares of the zero key (salted by a fixed test id).
-    import base64 as _b64
-    import hashlib as _hl
     from obfuscator.key_emit import split_key, split_seed_for_build
     _bid = "testfrag-build-id"
     _s0, _s1 = split_key(b"\x00" * 32, split_seed_for_build(_bid))

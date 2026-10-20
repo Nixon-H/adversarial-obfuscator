@@ -22,10 +22,10 @@ Security Relevance:
 from __future__ import annotations
 
 import os
-import time
-from typing import Dict, List, Optional
+import time  # noqa: F401 (this line binds a name used by an embedded template)
+from typing import Dict, List
 
-from .detector import CLAIM_PATTERNS, ClaimDetector, ClaimAuditResult, ClaimMatch
+from .detector import ClaimDetector, ClaimAuditResult, ClaimMatch
 
 
 def check_evidence(match: ClaimMatch, scan_root: str) -> Dict[str, bool]:

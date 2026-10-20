@@ -57,7 +57,7 @@ def phase_release_confidence(args: Any) -> dict:
     print(f"  Interval:          {result['confidence_interval']}")
     print(f"  Grade:             {result['confidence_grade']}")
     print(f"  {'─' * 40}")
-    print(f"  Factor breakdown:")
+    print("  Factor breakdown:")
     for factor in result["per_factor_scores"]:
         print(
             f"    {factor['factor_name']:25s} {factor['raw_score']:.4f} × {factor['weight']:.2f} = {factor['weighted_score']:.4f}"

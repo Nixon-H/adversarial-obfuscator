@@ -26,16 +26,10 @@ from __future__ import annotations
 
 import json
 import os
-import datetime
+import datetime  # noqa: F401 (this line binds a name used by an embedded template)
 
 from scripts.common import BUILD_DIR, atomic_write, log
-from scripts.synthesis import (
-    SynthesisEngine,
-    ProtectionPlan,
-    optimize_protections,
-    plan_to_cli_args,
-    PROTECTION_COSTS,
-)
+from scripts.synthesis import SynthesisEngine, ProtectionPlan, plan_to_cli_args
 
 
 def phase_synthesis(args) -> ProtectionPlan:
@@ -106,7 +100,6 @@ def phase_synthesis(args) -> ProtectionPlan:
         # downgrades an explicit user flag. The sidecar JSON is still
         # written for auditability.
         try:
-            from scripts.synthesis.engine import ProtectionPlan as _PP
             _applied = []
             for _p in list(getattr(plan, "protections", []) or []):
                 _dest = str(_p).replace("-", "_")

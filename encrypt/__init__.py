@@ -92,7 +92,7 @@ def main(argv=None):
     info_parser = sub.add_parser('info', help='Show container info')
     info_parser.add_argument('input', help='Input container path')
 
-    gen_parser = sub.add_parser('gen-seed', help='Generate a random 32-byte seed')
+    sub.add_parser('gen-seed', help='Generate a random 32-byte seed')
 
     args = parser.parse_args(argv)
 

@@ -8,10 +8,8 @@ import ast
 import json
 import os
 import random
-import secrets
 import shutil
 import sys
-import tempfile
 from typing import Any
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -46,7 +44,7 @@ class GuidedDiversityGenerator:
             benchmark = None
 
         with open(source_path, encoding="utf-8") as f:
-            source = f.read()
+            f.read()
 
         pop_dir = os.path.join(output_dir, "population")
         os.makedirs(pop_dir, exist_ok=True)

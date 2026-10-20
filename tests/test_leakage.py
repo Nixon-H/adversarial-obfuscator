@@ -20,12 +20,11 @@ Coverage:
 import os
 import sys
 import json
-import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from irgen.compile import compile_py_to_ir, IrModule, IrFunction, IrBlock, IrInstruction, IrType, IrValue
+from irgen.compile import compile_py_to_ir, IrModule, IrValue
 from scripts.leakage.taxonomy import LeakageLevel, LeakageScore, LeakageReport
 from scripts.leakage.analyzers import (
     VariableLeakageAnalyzer,

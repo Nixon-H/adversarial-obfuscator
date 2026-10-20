@@ -8,3 +8,20 @@ from .dist_attestation import DistributedAttestation
 from .dist_watermark import DistributedWatermark
 from .diversity_pool import DistributedDiversityPool
 from .recovery_prevention import ExecutionRecoveryPreventer
+
+# Re-exported names: listed explicitly so the intent is
+# unambiguous and the unused-import check does not flag them.
+__all__ = [
+    "CrossProcessBinder",
+    "CrossProcessChain",
+    "DistributedAttestation",
+    "DistributedDiversityPool",
+    "DistributedVMExecutor",
+    "DistributedWatermark",
+    "ExecutionRecoveryPreventer",
+    "FragmentMigrator",
+    "MultiBinaryDistributor",
+    "MultiHostExecutor",
+    "RemoteUnlockClient",
+    "RemoteUnlockServer",
+]

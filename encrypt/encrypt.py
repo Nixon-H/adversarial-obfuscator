@@ -13,7 +13,6 @@ Dependencies:
     - encrypt.aes, encrypt.elf, encrypt.stub
 """
 
-import os
 import struct
 import hashlib
 
@@ -66,7 +65,6 @@ def encrypt_binary(input_path: str, output_path: str,
         text_data = text_data[:text_size]
         text_sec['size'] = len(text_data)
         elf._set_shdr_field(idx, 'size', len(text_data))
-    text_start = text_sec['offset']
     text_addr = text_sec['addr']
     text_size = len(text_data)
 
@@ -192,7 +190,6 @@ def encrypt_binary_per_block(input_path: str, output_path: str,
     text_addr = text_sec['addr']
     entry_offset_in_text = elf.get_entry_offset_in_text()
 
-    STUB_OVERHEAD = stubmod.STUB_CODE_SIZE + stubmod.STUB_HEADER_SIZE
 
     blocks = _split_blocks(text_data, block_size)
     num_blocks = len(blocks)

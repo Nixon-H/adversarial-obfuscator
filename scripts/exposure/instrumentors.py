@@ -36,9 +36,9 @@ Maintenance Notes:
 """
 
 from __future__ import annotations
-import hashlib
-import secrets
-from typing import Any, Dict, List, Optional
+import hashlib  # noqa: F401 (this line binds a name used by an embedded template)
+import secrets  # noqa: F401 (this line binds a name used by an embedded template)
+from typing import Any
 
 from .tracker import ExposureTracker
 

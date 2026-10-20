@@ -7,10 +7,9 @@ and generate feedback for the Compiler Mutation Engine.
 import ast
 import os
 import re
-import random
 import sys
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 
 @dataclass

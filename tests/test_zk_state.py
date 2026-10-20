@@ -12,7 +12,6 @@ import time
 import json
 import tempfile
 
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -21,7 +20,7 @@ from scripts.zk_state.sigma_protocol import (
 )
 from scripts.zk_state.state_machine import StateMachine
 from scripts.zk_state.prover import StateBoundProver
-from scripts.zk_state.verifier import StateBoundVerifier, VerificationResult
+from scripts.zk_state.verifier import StateBoundVerifier
 from scripts.zk_state.state_config import ZKStateConfig, load_config, check_prerequisites
 
 

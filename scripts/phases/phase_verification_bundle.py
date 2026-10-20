@@ -32,9 +32,6 @@ sys.path.insert(0, _ROOT)
 
 from scripts.common import BUILD_DIR, atomic_write, log
 from scripts.verification_bundle.bundler import VerificationBundler
-from scripts.verification_bundle.collector import ArtifactCollector
-from scripts.verification_bundle.manifest import ManifestBuilder
-from scripts.verification_bundle.hasher import file_sha256, data_sha256
 
 
 def phase_verification_bundle(args: Any) -> dict:

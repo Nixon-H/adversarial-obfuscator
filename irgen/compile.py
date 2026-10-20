@@ -26,7 +26,6 @@ Dependencies:
 
 from __future__ import annotations
 import ast
-import sys
 from typing import Optional
 
 
@@ -213,6 +212,9 @@ class IrInstruction:
     def _is_literal_value(v: IrValue) -> bool:
         """Check if an IrValue name represents a literal constant."""
         try:
+            # A validation probe: the exception IS the test.  Do not
+            # let a cleanup drop it -- without it every IrValue would
+            # look like a literal.
             int(v.name)
             return True
         except (ValueError, TypeError):

@@ -11,16 +11,10 @@ import os
 import sys
 import textwrap
 
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from obfuscator.vm_dispatch import (
-    _eligible,
-    _encoding,
-    compile_function,
-    virtualize_source,
-)
+from obfuscator.vm_dispatch import _eligible, _encoding, virtualize_source
 import ast
 
 

@@ -1,8 +1,5 @@
 import os
 import sys
-import tempfile
-import struct
-import hashlib
 
 import pytest
 
@@ -14,10 +11,7 @@ from encrypt.aes import (
 )
 from encrypt.elf import ELFParser
 from encrypt.stub import make_stub_xor_decrypt, make_stub_with_keystream, stub_size
-from encrypt.container import (
-    pack_encrypted_payload, unpack_encrypted_payload, container_info,
-    pack_bytes, unpack_bytes,
-)
+from encrypt.container import container_info, pack_bytes, unpack_bytes
 from encrypt.encrypt import encrypt_binary, encrypt_binary_per_block, _split_blocks
 
 
@@ -108,7 +102,7 @@ class TestELF:
         elf = ELFParser(sample_elf)
         idx, sec = elf.get_text_section()
         old_size = sec["size"]
-        old_data = elf.section_data(sec)
+        elf.section_data(sec)
 
         new_data = b"\x90" * old_size
         elf.replace_text(new_data, add_stub_size=0)

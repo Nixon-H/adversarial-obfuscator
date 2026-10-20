@@ -156,7 +156,6 @@ class TestEmbedExtractRoundtrip:
 
     def test_roundtrip_preserves_semantics(self, simple_module):
         msg = "test_watermark"
-        module_str_before = str(simple_module)
         embed_watermark(simple_module, msg)
         _ = str(simple_module)
         assert verify_watermark(simple_module, msg)

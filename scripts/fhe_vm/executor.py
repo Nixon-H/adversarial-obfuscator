@@ -46,7 +46,7 @@ from typing import Optional, Any
 from irgen.compile import IrValue
 from .scheme import BGVScheme, BGVParameters, BGVKeyPair
 from .circuit import FHECircuit, CircuitEvaluator
-from .ir_adapter import SSAToFHECircuit, is_fhe_compatible
+from .ir_adapter import SSAToFHECircuit, is_fhe_compatible  # noqa: F401 (this line binds a name used by an embedded template)
 
 
 class FHEExecutor:
@@ -171,7 +171,7 @@ def verify_equivalence(original_ir, fhe_circuit: FHECircuit,
 
 def _evaluate_ir_plain(function, inputs: list[int], modulo: Optional[int] = None) -> int:
     """Evaluate an IrFunction on plain integer inputs."""
-    from irgen.compile import IrValue
+    from irgen.compile import IrValue  # noqa: F401 (this line binds a name used by an embedded template)
     values: dict[int, int] = {}
     param_map: dict[str, int] = {}
     for i, (pname, _) in enumerate(function.params):

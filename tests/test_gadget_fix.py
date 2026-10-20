@@ -1,6 +1,5 @@
 """Tests for speculation/attention/nyser/timing/intent fixes (items 9-14)."""
 import ast
-import types
 
 import pytest
 

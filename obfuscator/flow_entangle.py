@@ -10,7 +10,7 @@ and program state.
 import hashlib
 import os
 import struct
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 
 _AES_SBOX = [

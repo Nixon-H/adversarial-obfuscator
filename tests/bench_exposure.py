@@ -12,7 +12,6 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
 from scripts.exposure.tracker import ExposureTracker
 from scripts.exposure.metric import PlaintextExposureMetric
 from scripts.exposure.simulator import ExposureSimulator

@@ -281,16 +281,25 @@ def measure_decompilation_resistance(protected_source: str) -> dict:
         if _shutil_which(decompiler):
             decompiler_available = True
             try:
+                # The decompiler check needs a .pyc of the protected
+                # source.  `tempfile_name` never existed: the NameError
+                # was swallowed by the except below, so the decompiler
+                # probe never ran and the score was never reduced.
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".py",
+                                                 delete=False) as _sf:
+                    _sf.write(protected_source)
+                    _src_path = _sf.name
                 with tempfile.NamedTemporaryFile(mode="w", suffix=".pyc", delete=False) as f:
                     pyc_path = f.name
                 import py_compile
-                py_compile.compile(tempfile_name, cfile=pyc_path)
+                py_compile.compile(_src_path, cfile=pyc_path)
                 result = subprocess.run(
                     [decompiler, pyc_path],
                     capture_output=True, text=True, timeout=30,
                 )
                 decompiler_success = result.returncode == 0
                 os.unlink(pyc_path)
+                os.unlink(_src_path)
             except Exception:
                 pass
             break

@@ -135,7 +135,6 @@ def phase_obfuscate(payload, output, opts):
 
         # Item 123: Speculation obfuscation (post-pipeline AST pass)
         if getattr(opts, "speculation_obfuscation", False):
-            import ast as _ast_spec
             from obfuscator.speculation_obfuscation import obfuscate_with_speculation
             log("SPECULATION", "Applying AST-level speculation obfuscation...")
             result = obfuscate_with_speculation(result, seed=getattr(opts, 'randomization_seed', None) or 0xCAFEBABE)
@@ -155,7 +154,6 @@ def phase_obfuscate(payload, output, opts):
         # call sites to _nxk_* kernel calls + prepend the shim import.
         # Runs AFTER the main pipeline so lowering sees final call shapes.
         if getattr(opts, "lowering", ""):
-            import ast as _ast_low
             try:
                 from obfuscator.lowering import (
                     emit_shim_import as _low_import,

@@ -14,8 +14,6 @@ bug Nyami had:
    ConstantUnfolder + MBA must preserve index/type semantics
 """
 import ast
-import dis
-import io
 
 from obfuscator.core.transforms import (
     ConstantUnfolder,

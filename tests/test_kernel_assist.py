@@ -15,7 +15,6 @@ import os
 import sys
 import tempfile
 
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -71,7 +70,6 @@ class TestDetector:
 
     def test_detector_no_crash_on_missing_proc(self):
         """Negative: no crash when /proc entries are missing."""
-        original_proc = "/proc"
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_proc = os.path.join(tmpdir, "proc")
             os.makedirs(fake_proc, exist_ok=True)

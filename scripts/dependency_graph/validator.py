@@ -18,10 +18,9 @@ indicate structural risk.
 from __future__ import annotations
 
 import ast
-import json
 import os
 import sys
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 

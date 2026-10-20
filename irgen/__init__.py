@@ -33,7 +33,6 @@ __all__ = [
 
 
 def main():
-    import sys
     import argparse
 
     parser = argparse.ArgumentParser(

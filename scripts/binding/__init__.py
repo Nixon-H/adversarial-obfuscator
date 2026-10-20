@@ -19,3 +19,11 @@ unit with optional encryption.
 """
 
 from .crypto_binding import CryptoFragmentBinder, BoundFragment, Fragment
+
+# Re-exported names: listed explicitly so the intent is
+# unambiguous and the unused-import check does not flag them.
+__all__ = [
+    "BoundFragment",
+    "CryptoFragmentBinder",
+    "Fragment",
+]

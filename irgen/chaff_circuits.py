@@ -33,7 +33,6 @@ Dependencies:
 from __future__ import annotations
 import ast
 import copy
-import hashlib
 import json
 import os
 import random
@@ -352,12 +351,16 @@ class ChaffCircuitGenerator:
 
     def _emit_minmax(self, block: IrBlock, t: IrType, a: IrValue, b: IrValue) -> IrValue:
         """
-        Min-max chaff: uses comparison to select between operands.
+        Min-max chaff.
 
-        Computes min(a, b) * xor(a, b) as a chaff expression.
+        Emits a comparison between the operands (IR noise) and returns
+        a * xor(a, b) as the chaff expression.  The comparison RESULT is
+        not consumed: the IR builder has no select primitive, so the
+        "min(a, b)" of the original design is not produced.  The
+        comparison is still emitted, because it is the point of the
+        chaff.
         """
-        lt = block.lt(t, a, b).result
-        min_val = block.and_(t, block.xor(t, a, b).result, lt).result
+        block.lt(t, a, b)
         sel = block.xor(t, a, b).result
         return block.mul(t, a, sel).result
 
@@ -652,10 +655,10 @@ class ChaffCircuitGenerator:
 
         lines.append(f"def verify_{original_func_name}(input):")
         lines.append("    # Opaque predicate: always-true identity via MBA")
-        lines.append(f"    _t1 = (input * 0x9E3779B9 + 0x61C88647) & 0xFFFFFFFF")
-        lines.append(f"    _t2 = (_t1 ^ 0x5DEECE66D) * 0x6C078965")
-        lines.append(f"    # (t2 | ~t2) == -1 is always true -- opaque predicate")
-        lines.append(f"    if (_t2 | (~_t2)) == -1:")
+        lines.append("    _t1 = (input * 0x9E3779B9 + 0x61C88647) & 0xFFFFFFFF")
+        lines.append("    _t2 = (_t1 ^ 0x5DEECE66D) * 0x6C078965")
+        lines.append("    # (t2 | ~t2) == -1 is always true -- opaque predicate")
+        lines.append("    if (_t2 | (~_t2)) == -1:")
         lines.append(f"        return {original_func_name}(input)")
         lines.append("    else:")
         lines.append(f"        _idx = hash(input) % {num_chaff}")
@@ -676,7 +679,6 @@ class ChaffCircuitGenerator:
         """
         num_chaff = len(chaff_funcs)
         exp_low = expected_input & 0xFFFFFFFF
-        exp_high = (expected_input >> 32) & 0xFFFFFFFF
 
         lines = [f"# Obfuscated chaff wrapper for {original_func_name}", ""]
         lines.append(f"__chaff_pool_{original_func_name} = [")
@@ -688,8 +690,8 @@ class ChaffCircuitGenerator:
         lines.append(f"def verify_obf_{original_func_name}(input):")
         lines.append("    # MBA expression: obfuscated comparison with expected_input")
         lines.append(f"    _mba_a = (input ^ {exp_low}) + 0x9E3779B9")
-        lines.append(f"    _mba_b = (_mba_a * 0x6C078965) & 0xFFFFFFFF")
-        lines.append(f"    _mba_c = _mba_b ^ 0x5DEECE66D")
+        lines.append("    _mba_b = (_mba_a * 0x6C078965) & 0xFFFFFFFF")
+        lines.append("    _mba_c = _mba_b ^ 0x5DEECE66D")
         lines.append("    # Opaque predicate: always follows the 'else' branch for real input")
         lines.append(f"    _opq1 = (_mba_c & 0xFF) == ({exp_low & 0xFF} & 0xFF)")
         lines.append(f"    _opq2 = ((_mba_c >> 8) & 0xFF) == (({exp_low} >> 8) & 0xFF)")
@@ -697,8 +699,8 @@ class ChaffCircuitGenerator:
         lines.append(f"        return {original_func_name}(input)")
         lines.append("    else:")
         lines.append("        # MBA hash for chaff index selection")
-        lines.append(f"        _h1 = (input * 0x6C078965 + 0x5DEECE66D) & 0x7FFFFFFF")
-        lines.append(f"        _h2 = (_h1 ^ (_h1 >> 13)) * 0x9E3779B9")
+        lines.append("        _h1 = (input * 0x6C078965 + 0x5DEECE66D) & 0x7FFFFFFF")
+        lines.append("        _h2 = (_h1 ^ (_h1 >> 13)) * 0x9E3779B9")
         lines.append(f"        _idx = (_h2 ^ (_h2 >> 15)) % {num_chaff}")
         lines.append(f"        return __chaff_pool_{original_func_name}[_idx](input)")
         lines.append("")
@@ -734,7 +736,6 @@ def generate_chaff_pipeline(
 
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name in target_functions:
-            func_source = ast.unparse([node])
             chaff_funcs = []
             template_names = list(_OPCODE_REMAP.keys())
             for tname in template_names:
@@ -757,7 +758,6 @@ def generate_chaff_pipeline(
 def main():
     """CLI entry point for chaff circuit generation."""
     import argparse
-    import sys
 
     parser = argparse.ArgumentParser(
         description="Nixon Advanced Protection -- Chaff Circuits Generator"

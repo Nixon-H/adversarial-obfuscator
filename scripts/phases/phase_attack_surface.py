@@ -57,7 +57,7 @@ def phase_attack_surface(args: Any) -> dict:
     print("  ATTACK SURFACE ENUMERATION")
     print("=" * 60)
     print(f"  Total entry points: {result['total_entry_points']}")
-    print(f"  Risk summary:")
+    print("  Risk summary:")
     for level, count in sorted(result["risk_summary"].items()):
         print(f"    {level:>10s}: {count}")
     print("=" * 60)

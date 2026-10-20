@@ -58,7 +58,6 @@ import os
 import platform
 import sys
 import time
-from typing import Any, Callable, Dict, List, Optional
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))

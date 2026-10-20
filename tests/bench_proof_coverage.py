@@ -36,8 +36,8 @@ def bench_aggregation():
     start = time.perf_counter()
     for _ in range(100):
         aggregated = aggregate_proof_coverage(results)
-        score = compute_overall_score(aggregated)
-        recs = generate_recommendations(aggregated)
+        compute_overall_score(aggregated)
+        generate_recommendations(aggregated)
     elapsed = (time.perf_counter() - start) / 100
     print(f"  aggregate+score+recommend:     {elapsed * 1000:.3f}ms avg ({100} runs)")
     return elapsed
@@ -57,18 +57,8 @@ def bench_report_generation():
     }
     start = time.perf_counter()
     for _ in range(200):
-        d = {k: v.to_dict() for k, v in scores.items()}
-        overall = compute_overall_score(scores)
-        uncovered = [s for s, pc in scores.items() if not pc.has_proof]
-        partial = [s for s, pc in scores.items() if pc.has_proof and not pc.proof_validated]
-        recs = generate_recommendations(scores)
-        report_data = {
-            "overall_coverage": overall,
-            "stage_scores": d,
-            "uncovered_stages": uncovered,
-            "partially_covered_stages": partial,
-            "recommendations": recs,
-        }
+        compute_overall_score(scores)
+        generate_recommendations(scores)
     elapsed = (time.perf_counter() - start) / 200
     print(f"  report generation (dict build): {elapsed * 1000:.3f}ms avg ({200} runs)")
     return elapsed

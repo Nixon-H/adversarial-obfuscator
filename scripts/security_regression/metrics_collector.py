@@ -39,8 +39,7 @@ from __future__ import annotations
 
 import json
 import os
-import math
-import sys
+import math  # noqa: F401 (this line binds a name used by an embedded template)
 from typing import Any, Dict, Optional
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

@@ -24,7 +24,6 @@ the adaptive mutation strategy.
 
 import json
 import os
-import sys
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

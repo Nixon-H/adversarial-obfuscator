@@ -21,3 +21,14 @@ from .collector import ArtifactCollector
 from .bundler import VerificationBundler
 from .manifest import ManifestBuilder
 from .hasher import file_sha256, data_sha256, sha256_manifest
+
+# Re-exported names: listed explicitly so the intent is
+# unambiguous and the unused-import check does not flag them.
+__all__ = [
+    "ArtifactCollector",
+    "ManifestBuilder",
+    "VerificationBundler",
+    "data_sha256",
+    "file_sha256",
+    "sha256_manifest",
+]

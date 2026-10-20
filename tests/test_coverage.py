@@ -23,8 +23,7 @@ from scripts.coverage.coverage_map import (
 from scripts.coverage.pipeline_tracker import PipelineTracker
 from scripts.coverage.ir_scanner import scan_ir_module, classify_function
 
-from irgen.compile import IrModule, IrFunction, IrType, compile_py_to_ir
-from irgen.compile import IrValue
+from irgen.compile import IrModule, compile_py_to_ir
 
 
 # =========================================================================

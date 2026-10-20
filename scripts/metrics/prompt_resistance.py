@@ -23,7 +23,7 @@ Dependencies:
 """
 
 import ast
-import math
+import math  # noqa: F401 (this line binds a name used by an embedded template)
 from collections import Counter
 
 

@@ -63,15 +63,12 @@ from __future__ import annotations
 
 import hashlib
 import time
-from dataclasses import dataclass, field
-from typing import Dict, Optional, Set
+from dataclasses import dataclass
+from typing import Optional, Set
 
 from .sigma_protocol import GroupParameters, SigmaVerifier, generate_parameters
 from .prover import ExecutionProof
-from typing import Dict, Optional, Set
 
-from .sigma_protocol import GroupParameters, SigmaVerifier, generate_parameters
-from .prover import ExecutionProof
 
 
 @dataclass

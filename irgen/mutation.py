@@ -34,9 +34,7 @@ import hashlib
 import json
 import os
 import struct
-from typing import Optional
 
-from .compile import IrModule
 
 
 def _phase2_enabled() -> bool:
@@ -136,7 +134,6 @@ def permute_handler(
     if not _phase2_enabled():
         raise RuntimeError("Advanced Protection (IR mutation) is disabled in config")
 
-    op_set = set(handler_ops)
     loads = [op for op in handler_ops if "load" in op.lower()]
     computes = [op for op in handler_ops if "compute" in op.lower()]
     stores = [op for op in handler_ops if "store" in op.lower() or "writeback" in op.lower()]
@@ -295,9 +292,7 @@ def apply_fusion_plan(
     if not _phase2_enabled():
         raise RuntimeError("Advanced Protection (IR mutation) is disabled in config")
 
-    from vm.vm_isa import VMOpcode
 
-    logical_to_name = VMOpcode.LOGICAL_NAMES
 
     result = bytearray(bytecode)
 
@@ -364,4 +359,3 @@ def mutate_instruction_universe(
     return bytecode, metadata
 
 
-import os

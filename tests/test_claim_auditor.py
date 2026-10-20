@@ -15,7 +15,7 @@ import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from scripts.claim_auditor.detector import ClaimDetector, CLAIM_PATTERNS, scan_for_claims
+from scripts.claim_auditor.detector import CLAIM_PATTERNS, scan_for_claims
 from scripts.claim_auditor.auditor import audit_source, check_evidence, compute_claim_score
 
 

@@ -32,10 +32,10 @@ class PreservationReport:
         }, indent=2)
 
     def print_summary(self):
-        print(f"Preservation Report:")
+        print("Preservation Report:")
         print(f"  All passed: {self.all_passed}")
         print(f"  Total time: {self.total_duration_ms:.2f} ms")
-        print(f"  Stages:")
+        print("  Stages:")
         for s in self.stages:
             status = "PASS" if s.passed else "FAIL"
             print(f"    [{status}] {s.stage_name} ({s.duration_ms:.1f}ms)")

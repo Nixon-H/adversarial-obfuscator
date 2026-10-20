@@ -11,8 +11,6 @@ import json
 import os
 import sys
 import tempfile
-import time
-import math
 
 import pytest
 
@@ -481,7 +479,6 @@ class TestPhaseSecurityGates:
         from scripts.phases.phase_security_gates import phase_security_gates
         import tempfile
         tmp_build = tempfile.mkdtemp()
-        orig_build = os.environ.get("BUILD_DIR")
 
         class Args:
             security_gates = True

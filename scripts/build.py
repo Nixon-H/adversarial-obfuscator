@@ -53,14 +53,14 @@ import tempfile
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
-from scripts.common import ROOT, BUILD_DIR, RELAY_DIR, OBFUSCATOR, CONFIG_FILE, DEFAULT_CONFIG
-from scripts.common import atomic_write, log, run
+from scripts.common import ROOT, BUILD_DIR, DEFAULT_CONFIG
+from scripts.common import atomic_write, log, run  # noqa: F401 (this line binds a name used by an embedded template)
 from scripts.config_schema import ConfigError
 
 from scripts.binding.crypto_binding import CryptoFragmentBinder, Fragment
 from scripts.metrics import ResilienceMetrics
 
-from scripts.validation.smt_validator import SMTValidator
+from scripts.validation.smt_validator import SMTValidator  # noqa: F401 (this line binds a name used by an embedded template)
 
 from scripts.classification import FunctionClassifier, StrategySelector
 
@@ -943,13 +943,7 @@ Examples:
     if getattr(opts, "diagnostic", False):
         log("OPT", "DIAGNOSTIC BUILD (not for release)")
         try:
-            from scripts.diagnostic import (
-                DiagClock as _DiagClock,
-                banner as _diag_banner,
-                key_freshness as _diag_key_freshness,
-                mark_diagnostic as _mark_diagnostic,
-                summarize_transforms as _diag_summarize,
-            )
+            from scripts.diagnostic import DiagClock as _DiagClock, banner as _diag_banner
             opts._diag_clock = _DiagClock()
             opts._diag_clock.mark("obfuscate")
             log("DIAG", _diag_banner().splitlines()[0])
@@ -1259,7 +1253,6 @@ Examples:
             try:
                 import ast as _ast_val
                 from irgen.compile import compile_py_to_ir
-                from scripts.validation.equivalence import EquivalenceChecker
                 from scripts.validation.mba_validator import MBAValidator
 
                 with open(opts.payload) as f:
@@ -1911,7 +1904,6 @@ Examples:
                 log("EPHEMERAL_ISA", "Applying ephemeral per-build opcode mapping...")
                 try:
                     from vm.ephemeral_isa import generate_ephemeral_opcode_map
-                    from vm import generate_ephemeral_interpreter_source
                     build_seed = secrets.token_bytes(32)
                     opcode_map = generate_ephemeral_opcode_map(build_seed)
                     isa_path = os.path.join(BUILD_DIR, "ephemeral_isa.json")
@@ -2308,7 +2300,7 @@ Examples:
                 log("SIMD_VM", f"SIMD-VM test binary: {simd_test_bin}")
                 test_result = subprocess.run([simd_test_bin], capture_output=True, text=True)
                 if test_result.returncode == 0:
-                    log("SIMD_VM", f"SIMD-VM tests ALL PASSED")
+                    log("SIMD_VM", "SIMD-VM tests ALL PASSED")
                 else:
                     log("ERROR", f"SIMD-VM tests FAILED:\n{test_result.stdout}\n{test_result.stderr}")
             else:
@@ -2364,12 +2356,7 @@ Examples:
     # fails the build. Marks the packaged artifact when resolvable.
     if getattr(opts, "diagnostic", False):
         try:
-            from scripts.diagnostic import (
-                banner as _diag_banner2,
-                key_freshness as _diag_key_freshness2,
-                mark_diagnostic as _mark_diagnostic2,
-                summarize_transforms as _diag_summarize2,
-            )
+            from scripts.diagnostic import banner as _diag_banner2
             _dc = getattr(opts, "_diag_clock", None)
             if _dc is not None:
                 try:
@@ -2380,6 +2367,7 @@ Examples:
                 except Exception:
                     pass
             try:
+                from scripts.diagnostic import key_freshness as _diag_key_freshness2, mark_diagnostic as _mark_diagnostic2, summarize_transforms as _diag_summarize2
                 _ts = _diag_summarize2(
                     int(getattr(opts, "opt_level", 4) or 4),
                     name_gate=bool(getattr(opts, "name_gate", False)),
@@ -2423,12 +2411,7 @@ Examples:
             _low_spec = str(getattr(opts, "lowering", "") or "")
             if _low_spec:
                 try:
-                    from obfuscator.kernel_gen import (
-                        build_kernel as _kb,
-                        cythonize_kernel as _kc,
-                        derive_symbols as _kd,
-                        emit_native_import as _ke,
-                    )
+                    from obfuscator.kernel_gen import build_kernel as _kb, cythonize_kernel as _kc, emit_native_import as _ke
                     from obfuscator.lowering import resolve_families as _kr
                     import ast as _ka
                     _kseed_src = str(getattr(opts, "build_id", "") or "") or None
@@ -2569,7 +2552,6 @@ Examples:
     if opts.verify_preservation:
         try:
             from scripts.preservation.engine import PreservationEngine
-            from scripts.preservation.report import PreservationReport, StageResult
             engine = PreservationEngine()
             stage_fns = []
 
@@ -3433,6 +3415,11 @@ Examples:
         log("PROOF", "Running fragment safety proofs (Item 93)...")
         try:
             from scripts.proofs.fragment_safety import FragmentSafetyProver, Fragment as _SafetyFragment
+            # z3 is an optional dependency: import it here so a missing
+            # install fails loudly here instead of being swallowed by the
+            # except below (which made --prove-fragments always report a
+            # failed proof).
+            import z3
             prover = FragmentSafetyProver(timeout_ms=30000)
             x = z3.BitVec("x", 64)
             y = z3.BitVec("y", 64)
@@ -3720,7 +3707,7 @@ Examples:
     if opts.cpu_gpu_hybrid:
         log("GPU_HYBRID", "Running CPU/GPU hybrid protection (Item 126)...")
         try:
-            from scripts.gpu.hybrid_protection import HybridProtector, cpu_obfuscation_pass, gpu_parallel_transform
+            from scripts.gpu.hybrid_protection import HybridProtector
             hp = HybridProtector(seed=0xCAFEBABE)
             cpu_data = b"hello world cpu path test"
             cpu_result = hp.execute_cpu_path(cpu_data)
@@ -3815,7 +3802,6 @@ Examples:
     # Plaintext Exposure Metric (Feature 151)
     if opts.plaintext_exposure:
         try:
-            from scripts.exposure import ExposureTracker
             from scripts.phases.phase_exposure import phase_exposure
             phase_exposure(opts, ir_module, {
                 "microjit": opts.microjit,
@@ -3833,7 +3819,6 @@ Examples:
     # Protection Coverage Map (Feature 147) — after ALL protection stages
     coverage_map_result = None
     if opts.coverage_map and ir_module is not None:
-        from scripts.coverage.pipeline_tracker import PipelineTracker
         pipeline_state = type('PipelineState', (), {
             'opts': opts,
             'globals': {},

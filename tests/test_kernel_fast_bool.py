@@ -18,7 +18,6 @@ def test_hot_returns_wrapped_in_bool():
 
 
 def test_no_bare_c_int_return():
-    import re
     for op in _BOOL_OPS:
         for line in _FAST_BODIES[op].splitlines():
             s = line.strip()

@@ -74,7 +74,7 @@ def phase_embed_crypto_binding(payload_h_path: str):
         log("CRYPTO_BINDING", f"Bound fragments not found: {crypto_binding_path}")
         return
 
-    log("CRYPTO_BINDING", f"Embedding crypto binding data into payload.h...")
+    log("CRYPTO_BINDING", "Embedding crypto binding data into payload.h...")
 
     with open(crypto_binding_path, "rb") as f:
         bound_data = f.read()
@@ -122,6 +122,6 @@ def phase_runtime_manifest(output_manifest):
     log("RUNTIME", f"Generating {output_manifest}")
     script = os.path.join(ROOT, "runtime", "gen_manifest.py")
     if not os.path.exists(script):
-        log("SKIP", f"runtime/gen_manifest.py not found, skipping")
+        log("SKIP", "runtime/gen_manifest.py not found, skipping")
         return
     run([sys.executable, script, "--output", output_manifest])

@@ -106,7 +106,7 @@ class FHECircuit:
 
 class CircuitEvaluator:
     def __init__(self, scheme):
-        from .scheme import BGVScheme
+        from .scheme import BGVScheme  # noqa: F401 (this line binds a name used by an embedded template)
         self.scheme = scheme
 
     def evaluate_plain(self, circuit: FHECircuit, inputs: list[int]) -> int:

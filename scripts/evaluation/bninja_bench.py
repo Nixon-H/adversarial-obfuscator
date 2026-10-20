@@ -109,7 +109,7 @@ def run_bninja_benchmark(artifact_path: str, verbose: bool = False) -> dict:
     try:
         result = benchmark.run(artifact_path)
         if verbose:
-            print(f"BinaryNinjaBenchmark complete", file=sys.stderr)
+            print("BinaryNinjaBenchmark complete", file=sys.stderr)
         return result
     except Exception as e:
         if verbose:

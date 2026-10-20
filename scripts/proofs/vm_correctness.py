@@ -18,12 +18,10 @@ Dependencies:
 from __future__ import annotations
 
 import hashlib
-import json
-import struct
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Optional  # noqa: F401 (this line binds a name used by an embedded template)
 
 import z3
 

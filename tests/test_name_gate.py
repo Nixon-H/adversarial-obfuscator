@@ -1,12 +1,7 @@
 """Tests for obfuscator/name_gate.py — runtime API name gate."""
 import ast
 
-from obfuscator.name_gate import (
-    PRIVILEGED,
-    build_mapping,
-    emit_gate_snippet,
-    rewrite_calls,
-)
+from obfuscator.name_gate import build_mapping, emit_gate_snippet, rewrite_calls
 
 
 def test_mapping_deterministic_and_distinct():

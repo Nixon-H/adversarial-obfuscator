@@ -26,7 +26,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
 import time
 from dataclasses import dataclass, field, asdict
 from typing import Any
@@ -335,7 +334,7 @@ class SelfCritiqueEngine:
         for feat, count in lowest:
             refs.append(f"{feat}: {count} test classes")
         msg = (
-            f"Features with fewest test classes: "
+            "Features with fewest test classes: "
             + ", ".join(f"{f}({c})" for f, c in lowest)
             if lowest
             else "No test files found."
@@ -419,7 +418,6 @@ class SelfCritiqueEngine:
         """
         severity_scores = {"critical": 3, "high": 2, "medium": 1, "low": 0}
         total = sum(severity_scores.get(f.severity, 0) for f in self.findings)
-        max_possible = len(self.findings) * 3
         if total <= 2:
             return "Strong: most critiques are low-severity"
         if total <= 6:

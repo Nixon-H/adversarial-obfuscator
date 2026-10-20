@@ -5,11 +5,9 @@ Benchmarks for autonomous red team pipeline.
 
 Measures attack runner initialization and result collection performance.
 """
-import json
 import os
 import sys
 import tempfile
-import time
 
 import pytest
 
@@ -55,8 +53,9 @@ class TestRedTeamBenchmarks:
         assert "execution_time_ms" in result
 
     def test_report_generation_time(self, benchmark):
-        from scripts.redteam.unified_attack import RedTeamReport, _compute_security_score, _find_weakest_link, _generate_recommendations
+        from scripts.redteam.unified_attack import _compute_security_score, _find_weakest_link, _generate_recommendations
 
+        from scripts.redteam.unified_attack import RedTeamReport
         report = RedTeamReport(
             angr_result={"status": "completed", "cfg_recovered": True, "num_functions_found": 10, "strings_recovered": ["a"], "symbolic_paths": 3, "success_rate": 0.6},
             ghidra_result={"status": "completed", "decompilation_quality": 0.5, "function_recovery_rate": 0.4, "strings_recovered": 5},
@@ -76,7 +75,7 @@ class TestRedTeamBenchmarks:
         assert result[0] is not None and 0 <= result[0] <= 100
 
     def test_unified_orchestration_time(self, test_binary, test_source, output_dir, benchmark):
-        from scripts.redteam.unified_attack import RedTeamConfig, RedTeamReport, run_redteam_attack
+        from scripts.redteam.unified_attack import run_redteam_attack
 
         class Args:
             red_team_output = None

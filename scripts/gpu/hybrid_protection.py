@@ -1,8 +1,7 @@
 import ctypes
 import hashlib
 import multiprocessing
-import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from scripts.gpu.gpu_execution import GPUExecutor, is_gpu_available
 

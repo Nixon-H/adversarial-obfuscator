@@ -8,7 +8,6 @@ Test coverage:
 - Negative tests verify negative values, large variance, zero values, mixed types
 """
 
-import math
 import json
 import os
 import sys

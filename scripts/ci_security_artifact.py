@@ -35,7 +35,7 @@ annotations.
 """
 
 import argparse
-import json
+import json  # noqa: F401 (this line binds a name used by an embedded template)
 import marshal
 import os
 import re

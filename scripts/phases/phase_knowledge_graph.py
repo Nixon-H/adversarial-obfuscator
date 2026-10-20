@@ -24,10 +24,9 @@ revealing relationships between protections and attack vectors.
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
 
-from ..common import BUILD_DIR, atomic_write, log
-from ..knowledge_graph import build_knowledge_graph, graph_to_json, graph_to_graphml
+from ..common import BUILD_DIR, log
+from ..knowledge_graph import build_knowledge_graph
 
 
 def phase_knowledge_graph(args, coverage_map=None, conflict_graph=None):

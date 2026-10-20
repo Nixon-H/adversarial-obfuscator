@@ -253,7 +253,13 @@ install-deps:
 	pip3 install -r requirements.txt
 
 lint:
-	-pylint obfuscator/ native/ scripts/ 2>/dev/null || pyflakes obfuscator/ native/ scripts/ 2>/dev/null || true
+	ruff check --no-cache .
+
+# Re-run the deterministic lint cleanups (unused imports / unused locals).
+# These are idempotent and only remove code the linter proves unused.
+lint-clean:
+	python3 scripts/lint/clean_unused_imports.py obfuscator/ scripts/ tests/ irgen/ vm/ llvmgen/ encrypt/ *.py --apply
+	python3 scripts/lint/clean_unused_locals.py obfuscator/ scripts/ tests/ irgen/ vm/ llvmgen/ encrypt/ *.py --apply
 
 test:
 	python3 -m pytest tests/ -v

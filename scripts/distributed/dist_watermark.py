@@ -3,7 +3,7 @@ import multiprocessing as mp
 import os
 import struct
 from dataclasses import dataclass
-from typing import List, Optional, Set, Tuple
+from typing import List, Optional, Tuple
 
 
 @dataclass

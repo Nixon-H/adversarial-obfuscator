@@ -1,4 +1,3 @@
-import pytest
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -52,7 +51,7 @@ class TestPortEntangle:
         assert 'port_entangle_corrupt' in epilogue
 
     def test_different_target_cpus_produce_different_configs(self):
-        from irgen.port_entangle import PortEntanglementPass, CPU_PORT_MAP
+        from irgen.port_entangle import PortEntanglementPass
         rpl = PortEntanglementPass('raptor_lake')
         zn4 = PortEntanglementPass('zen4')
         assert rpl.port_config != zn4.port_config

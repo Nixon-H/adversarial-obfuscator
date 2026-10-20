@@ -1,7 +1,6 @@
 """Tests for Execution-Path-Specific Codegen (Item 81)."""
 
 import os
-import struct
 import sys
 import pytest
 

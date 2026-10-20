@@ -1,7 +1,4 @@
-import hashlib
-import struct
-import sys
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 _HAVE_PYOPENCL = False
 try:
@@ -178,7 +175,6 @@ class GPUExecutor:
 
             num_threads = min(kernel["num_threads"], self.MAX_THREADS)
             n = max(num_threads, 1)
-            buf_size = n * 8
 
             h_data = (cl.cltypes.ulong * n)()
             for i in range(min(n, len(self.global_mem) // 8)):

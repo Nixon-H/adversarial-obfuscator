@@ -32,7 +32,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 sys.path.insert(0, _ROOT)
 
 from scripts.common import BUILD_DIR, atomic_write, log
-from scripts.reachability.analyzer import ReachabilityAnalyzer, ReachabilityReport, ReachabilityStatus
+from scripts.reachability.analyzer import ReachabilityAnalyzer, ReachabilityReport
 
 
 def phase_reachability(args: Any) -> Optional[ReachabilityReport]:

@@ -7,12 +7,11 @@ KeyboardInterrupt), or crash fails the test. Deterministic: ``random``
 with fixed seed 0xNYSER.
 """
 import random
-import sys
 
 import pytest
 
-from obfuscator import nyser
-from obfuscator.nyser import FORMAT_VERSION, MAGIC, SUPPORTED_MINORS, dumps, loads
+from obfuscator import nyser  # noqa: F401 (this line binds a name used by an embedded template)
+from obfuscator.nyser import FORMAT_VERSION, MAGIC, dumps, loads
 
 SEED = 0x59E2
 ITERATIONS = 240

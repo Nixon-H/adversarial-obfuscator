@@ -27,11 +27,10 @@ Dependencies:
 from __future__ import annotations
 import json
 import os
-import struct
 import sys
 import argparse
 from typing import Optional
-from .compile import IrModule, IrFunction, IrBlock, IrInstruction, IrValue, IrType
+from .compile import IrModule, IrFunction, IrInstruction, IrValue, IrType
 
 
 def _load_config():
@@ -198,10 +197,10 @@ def fragment_function(
         "state_buffer_layout": {},
     }
     for i, frag_info in enumerate(plan["fragments"]):
-        fname = _name_from_pool(f"frag", seed, i)
+        fname = _name_from_pool("frag", seed, i)
         frag_func = IrFunction(fname, IrType.void())
         frag_func.params = [("state_buf", IrType.ptr()), ("state_len", IrType.i32())]
-        entry = frag_func.new_block("entry")
+        frag_func.new_block('entry')
         coordinator_meta["calling_sequence"].append(i)
         fragments.append(frag_func)
     offset = max(1, num_fragments // 2)
@@ -210,7 +209,7 @@ def fragment_function(
         seq = seq[offset:] + seq[:offset]
     coordinator_meta["calling_sequence"] = seq
     coordinator_meta["argument_routing"] = {
-        str(i): {"input": f"state_buf", "output": f"state_buf"} for i in range(len(fragments))
+        str(i): {"input": "state_buf", "output": "state_buf"} for i in range(len(fragments))
     }
     coordinator_meta["state_buffer_layout"] = {
         "size": 1024,
@@ -238,8 +237,7 @@ def generate_coordinator(
     entry = coord.new_block("entry")
     seq = metadata.get("calling_sequence", [])
     iv = int.from_bytes(seed[:8], 'little')
-    enc_seq = [s ^ ((iv >> (i % 32)) & 0xFF) for i, s in enumerate(seq)]
-    key_var = IrValue(IrType.i32(), name="%key")
+    IrValue(IrType.i32(), name='%key')
     entry.instructions.append(IrInstruction('add', IrType.i32(), operands=[IrValue.const_int(iv & 0xFF), IrValue.const_int(0)]))
     for i, raw_idx in enumerate(seq):
         dec_idx = raw_idx ^ ((iv >> (i % 32)) & 0xFF)

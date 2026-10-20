@@ -1,4 +1,3 @@
-import pytest
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -54,9 +53,6 @@ small:
         result = apply_transient_execution(self.MULTI_BLOCK_IR, {})
         assert "__transient_block_entry" in result
         # first block (entry) should not have a call (no predecessor)
-        entry_call = "blockaddress(@multi, %entry)"
-        neg_call = "blockaddress(@multi, %neg)"
-        pos_call = "blockaddress(@multi, %pos)"
         # entry erases nothing (no prev), so no call with entry as prev_addr
         # neg and pos each get a call erasing their predecessor (entry)
         count = result.count("call void @__transient_block_entry")

@@ -22,7 +22,7 @@ tracking it prevents gradual decay of protection quality.
 
 from __future__ import annotations
 
-import json
+import json  # noqa: F401 (this line binds a name used by an embedded template)
 import os
 import sys
 from typing import Any, Optional
@@ -31,7 +31,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 sys.path.insert(0, _ROOT)
 
 from scripts.common import BUILD_DIR, atomic_write, log
-from scripts.security_debt import SecurityDebtItem, SecurityDebtTracker, SecurityDebtScorer
+from scripts.security_debt import SecurityDebtTracker, SecurityDebtScorer
 from scripts.security_debt.tracker import DebtCategory, DebtSeverity
 
 

@@ -20,19 +20,16 @@ from __future__ import annotations
 
 import ast
 import importlib
-import inspect
-import json
 import os
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, _ROOT)
 
-from scripts.common import BUILD_DIR, atomic_write, log
 from scripts.reachability.feature_map import ALL_FEATURES
 
 

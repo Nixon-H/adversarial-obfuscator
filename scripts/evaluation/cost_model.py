@@ -1,6 +1,4 @@
-import math
 from dataclasses import dataclass
-from .calibration_data import CALIBRATION_SOURCES
 
 
 @dataclass

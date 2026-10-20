@@ -22,7 +22,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 import z3
 
@@ -538,8 +538,6 @@ class JITReassemblyProver:
             result = solver.check()
             elapsed = (time.time() - start) * 1000
 
-            all_inputs = [v for name, v in joint_vars.items()
-                          if not name.endswith("_o") and name in [d for d in all_defs]]
 
             if result == z3.unsat:
                 proof = JITProof(

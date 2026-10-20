@@ -206,7 +206,7 @@ def _run_extra_hpc_entanglement(cfg):
 def _run_extra_replay_poison(cfg):
     log("EXTRAS", "  Generating replay poison config...")
     try:
-        from obfuscator.replay_poison import inject_entropy_branches, generate_rdrand_ir_stub
+        from obfuscator.replay_poison import generate_rdrand_ir_stub
         stub = generate_rdrand_ir_stub()
         stub_path = os.path.join(BUILD_DIR, "rdrand_stub.ll")
         atomic_write(stub_path, stub)

@@ -351,8 +351,6 @@ def test_loader_expired_trial_refuses_import(tmp_path, monkeypatch):
                       "_NX_TRIAL_DEADLINE = %d" % (past_deadline,), 1)
     # The emitted gate snippet inlines the same literals at def time
     # (_tb_deadline = <int>, _tb_token = '<hex>'): patch those too.
-    old_deadline_reprs = sorted(
-        set(re.findall(r"%d" % (int(m_dead.group(1))), src)), key=len)
     src = src.replace("_tb_deadline = %s" % (m_dead.group(1),),
                       "_tb_deadline = %d" % (past_deadline,), 1)
     old_tok = re.search(r"_NX_TRIAL_TOKEN = '([0-9a-f]{64})'", src)
@@ -444,8 +442,7 @@ def test_e2e_expired_trial_nonzero_exit(tmp_path):
     past_base = _time.time() - 2.0
     ctx = build_trial_context(1, hwid="", now=past_base)
     from obfuscator import trial_bind as _tb
-    src_snippet = _tb.emit_trial_snippet(
-        int(ctx["deadline"]), str(ctx["token"]), bytes(ctx["build_key"]).hex())
+    _tb.emit_trial_snippet(int(ctx['deadline']), str(ctx['token']), bytes(ctx['build_key']).hex())
     # Reuse the loader generator for the decrypt path, then swap its
     # trial block for our pre-expired one: simplest is to generate with
     # trial_seconds=1 and then replace the three literals + snippet defs.

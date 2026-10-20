@@ -21,19 +21,15 @@ Coverage:
 
 import sys
 import os
-import tempfile
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from scripts.fhe_vm.scheme import BGVParameters, BGVScheme, BGVKeyPair
+from scripts.fhe_vm.scheme import BGVParameters, BGVScheme
 from scripts.fhe_vm.circuit import FHECircuit, CircuitEvaluator, build_circuit_from_ir
 from scripts.fhe_vm.ir_adapter import SSAToFHECircuit, is_fhe_compatible
 from scripts.fhe_vm.executor import FHEExecutor, verify_equivalence
-from irgen.compile import (
-    compile_py_to_ir, IrModule, IrFunction, IrBlock, IrInstruction,
-    IrValue, IrType,
-)
+from irgen.compile import compile_py_to_ir, IrModule, IrFunction, IrValue, IrType
 
 
 # =========================================================================

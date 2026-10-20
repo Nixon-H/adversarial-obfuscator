@@ -26,7 +26,7 @@ httpx[socks], os, json, logging, secrets, uuid
 
 import json
 import logging
-import os
+import os  # noqa: F401 (this line binds a name used by an embedded template)
 import secrets
 import uuid
 from typing import Optional
@@ -168,7 +168,7 @@ Code to evaluate:
 ```"""
 
     def _parse_llm_response(self, text: str) -> dict:
-        import re, json
+        import re
         json_match = re.search(r'\{[^{}]*"decompilation_success"[^{}]*\}', text, re.DOTALL)
         if json_match:
             try:

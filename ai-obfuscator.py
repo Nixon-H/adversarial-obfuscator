@@ -19,13 +19,11 @@ import argparse
 import ast
 import re
 import sys
-import os
 from pathlib import Path
 
 # Optional: attempt to use HuggingFace transformers for local LLM
 TRANSFORMERS_AVAILABLE = False
 try:
-    import torch
     from transformers import AutoTokenizer, AutoModelForCausalLM
     TRANSFORMERS_AVAILABLE = True
 except Exception:
@@ -183,8 +181,8 @@ def _load_llm(model_path: str = None, model_name: str = "gpt2", device: str = "c
 
 def _generate_with_llm(tokenizer, model, prompt: str, max_new_tokens: int = 1024,
                      temperature: float = 0.3, top_p: float = 0.95, device: str = "cpu") -> str:
-    import torch
     model.eval()
+    import torch
     if device == "cuda" and torch.cuda.is_available():
         model = model.to("cuda")
     inputs = tokenizer(prompt, return_tensors="pt")

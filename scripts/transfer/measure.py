@@ -167,7 +167,7 @@ def mann_whitney_u(x, y):
     if n1 == 0 or n2 == 0:
         return 0.0, 1.0
     pooled = sorted([(v, 0) for v in x] + [(v, 1) for v in y])
-    ranks, i = {}, 0
+    i = 0
     n = n1 + n2
     rank_of = [0.0] * n
     while i < n:

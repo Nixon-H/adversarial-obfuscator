@@ -1,4 +1,3 @@
-import copy
 from typing import Dict, List, Tuple
 
 from .profiler import FunctionInfo

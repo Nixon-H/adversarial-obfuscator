@@ -2,7 +2,6 @@
 import ast
 import os
 import sys
-import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -99,7 +98,7 @@ def test_misleading_imports_generated():
     code = ast.unparse(tree)
     misleading_keywords = ["cryptography", "socket", "ssl", "requests"]
     found = any(kw in code for kw in misleading_keywords)
-    assert found, f"Expected at least one misleading import, got none"
+    assert found, "Expected at least one misleading import, got none"
     _execute(code)
 
 
@@ -210,8 +209,8 @@ def test_deterministic_with_seed():
 
 
 def test_poison_level_mapping():
-    tree = _parse(SIMPLE_SCRIPT)
-    poisoner = ProvenancePoisoner(seed=42)
+    _parse(SIMPLE_SCRIPT)
+    ProvenancePoisoner(seed=42)
     for level, expected in [(1, ["fake_call_graphs"]),
                             (2, ["fake_call_graphs", "fake_apis"]),
                             (3, ["fake_call_graphs", "fake_apis", "fake_protocol_parsers"])]:

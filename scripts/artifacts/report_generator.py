@@ -34,7 +34,7 @@ Maintenance Notes:
 
 from __future__ import annotations
 
-import json
+import json  # noqa: F401 (this line binds a name used by an embedded template)
 import os
 import time
 
@@ -270,8 +270,6 @@ def generate_security_summary(
         if isinstance(metric_data, dict):
             value = metric_data.get("value", metric_data.get("score", "N/A"))
             status = metric_data.get("status", "unknown")
-            threshold_good = metric_data.get("threshold_good")
-            threshold_warning = metric_data.get("threshold_warning")
         else:
             value = metric_data
             status = "unknown"

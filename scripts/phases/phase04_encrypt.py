@@ -21,11 +21,11 @@ Binary encryption prevents static analysis of the compiled payload;
 entropy flattening avoids detection via entropy-based malware scanners.
 """
 
-import json
+import json  # noqa: F401 (this line binds a name used by an embedded template)
 import os
 import sys
 
-from ..common import log, run, BUILD_DIR, ROOT
+from ..common import log, run, ROOT
 
 
 def phase_encrypt_binary(input_o, output_enc):
@@ -39,7 +39,7 @@ def phase_encrypt_binary(input_o, output_enc):
     log("ENCRYPT", f"{input_o} → {output_enc}")
     script = os.path.join(ROOT, "encrypt", "encrypt.py")
     if not os.path.exists(script):
-        log("SKIP", f"encrypt/encrypt.py not found, skipping")
+        log("SKIP", "encrypt/encrypt.py not found, skipping")
         return
     run([sys.executable, script, "encrypt", input_o, "-o", output_enc])
 

@@ -33,7 +33,6 @@ Dependencies: None (standard library only: re, hashlib).
 """
 
 import re
-import hashlib
 
 CPU_PORT_MAP = {
     'raptor_lake': {'alu_ports': 4, 'branch_ports': 1, 'load_ports': 2, 'store_ports': 1},
@@ -183,7 +182,7 @@ declare void @__corrupt_key()
 store i64 {threshold}, ptr %pe_seed
 %pe_t0 = call i64 @__rdtsc()
 """
-        epilogue = f"""
+        epilogue = """
 ; Port entangle timing check epilogue
 %pe_t1 = call i64 @__rdtsc()
 %pe_delta = sub i64 %pe_t1, %pe_t0

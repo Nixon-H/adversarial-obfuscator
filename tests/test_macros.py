@@ -44,7 +44,6 @@ def test_self_corrupt_detached_macro():
     # Collected; stub embeds the spawner + child script; never runs at build.
     assert "SELF_CORRUPT_DETACHED" in collect_macros("SELF_CORRUPT_DETACHED()\n")
     assert "SELF_CORRUPT_DETACHED" in collect_macros("SELF_CORRUPT_DETACHED('/x')\n")
-    import re
     from obfuscator.macros import (
         _self_corrupt_detached_child_code,
         _stub_self_corrupt_detached,
@@ -57,7 +56,6 @@ def test_self_corrupt_detached_macro():
     assert "token_bytes" in child and "unlink" in child
     # End-to-end: spawn with wait_parent=False against a temp file;
     # poll for corruption/unlink (child overwrites then unlinks).
-    import subprocess
     import tempfile
     import time
     fd, path = tempfile.mkstemp(prefix="_nx_test_detached_")

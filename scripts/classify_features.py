@@ -318,7 +318,7 @@ def build_report():
 def print_summary(report):
     s = report["summary"]
     print(f"\n{'=' * 60}")
-    print(f"  FEATURE CLASSIFICATION REPORT")
+    print("  FEATURE CLASSIFICATION REPORT")
     print(f"{'=' * 60}")
     print(f"  Total features: {s['total']}")
     key_map = {"IMPLEMENTED": "implemented", "PARTIAL": "partial",
@@ -329,7 +329,7 @@ def print_summary(report):
     print(f"{'=' * 60}")
     partial = [f for f in report["features"] if f["classification"] == "PARTIAL"]
     if partial:
-        print(f"\n  PARTIAL FEATURES:")
+        print("\n  PARTIAL FEATURES:")
         for f in partial:
             print(f"    Item {f['id']:3d}  {f['name']:35s}  ({f['category']})")
             ev = f["evidence"]
@@ -338,7 +338,7 @@ def print_summary(report):
                 print(f"         Missing: {', '.join(reasons)}")
     dead = [f for f in report["features"] if f["classification"] == "DEAD CODE"]
     if dead:
-        print(f"\n  DEAD CODE FEATURES:")
+        print("\n  DEAD CODE FEATURES:")
         for f in dead:
             print(f"    Item {f['id']:3d}  {f['name']:35s}  ({f['category']})")
     print()

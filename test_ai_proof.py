@@ -6,10 +6,9 @@ Version A: simple base64+marshal (AI cracked this)
 Version B: AI-proof with opaque predicates, MBA, CFG flattening, anti-analysis
 """
 
-import json, logging, os, secrets, sys, time, uuid
+import json, logging, os, secrets, sys, time, uuid  # noqa: F401 (this line binds a name used by an embedded template)
 from pathlib import Path
 from typing import Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import httpx
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")

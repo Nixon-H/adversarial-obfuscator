@@ -69,7 +69,7 @@ def bench_hashing_alone() -> dict:
         detector = AuditDriftDetector(root_dir=tmpdir)
         detector.scripts_dir = scripts_dir
         start = time.perf_counter()
-        snapshot = detector.hash_source_files()
+        detector.hash_source_files()
         elapsed = time.perf_counter() - start
         return {
             "file_count": 100,

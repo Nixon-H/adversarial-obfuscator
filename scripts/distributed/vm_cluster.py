@@ -1,11 +1,9 @@
-import hashlib
 import multiprocessing as mp
-import os
 import struct
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 
 class VMStatePartition(IntEnum):
@@ -186,7 +184,7 @@ class DistributedVMExecutor:
             self.state.program_counter += 1
             return self.state.program_counter < len(self._instructions)
 
-        result = self._execute_on_host(host_id, inst)
+        self._execute_on_host(host_id, inst)
 
         self.state.program_counter += 1
         if self.state.program_counter % 2 == 0:

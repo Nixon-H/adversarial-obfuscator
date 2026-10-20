@@ -9,8 +9,6 @@ Every variant passes the semantic gate (script-level behavior identical
 to the original on fixed demo invocations) or it is excluded and
 reported — transfer over non-equivalent builds is confounded.
 """
-import hashlib
-import json
 import os
 import subprocess
 import sys

@@ -29,7 +29,6 @@ S(B_j | P_i): mean edge-Jaccard over aligned pairs. Symmetric in (i,j)
 by construction (documented, not hidden); directionality lives in the
 arm-pair cells (H2->H0 vs H0->H0), not in the measure.
 """
-import ast
 import dis
 from collections import Counter
 

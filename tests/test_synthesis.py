@@ -19,10 +19,8 @@ Coverage:
 - Plan comparison (delta, shared protections)
 """
 
-import json
 import os
 import sys
-import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

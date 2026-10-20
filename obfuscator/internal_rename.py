@@ -33,7 +33,6 @@ Python 3.10 compatible: no match statements, no X|Y annotations.
 from __future__ import annotations
 
 import ast
-from typing import Dict, List, Optional, Set, Tuple
 
 
 # Decorators that do NOT imply an external contract. Only these (used

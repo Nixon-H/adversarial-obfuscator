@@ -37,11 +37,7 @@ def add(a, b):
         assert dead_after_imports >= 1, "Dead code should appear after imports"
 
     def test_prompt_injection_strings_appear(self):
-        from obfuscator.adversarial import (
-            inject_adversarial_code,
-            _PROMPT_STRINGS,
-            _FAKE_COMMENTS,
-        )
+        from obfuscator.adversarial import inject_adversarial_code, _PROMPT_STRINGS
         result = inject_adversarial_code(self.SIMPLE_SOURCE, {
             "seed": 7, "level": 5, "prompt_injection": True,
         })

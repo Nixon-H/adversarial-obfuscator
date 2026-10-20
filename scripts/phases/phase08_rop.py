@@ -24,7 +24,7 @@ making static analysis and decompilation significantly harder.
 
 import json
 import os
-import sys
+import sys  # noqa: F401 (this line binds a name used by an embedded template)
 
 from ..common import log, atomic_write
 

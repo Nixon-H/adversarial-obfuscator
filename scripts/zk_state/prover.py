@@ -62,16 +62,13 @@ Maintenance Notes:
 from __future__ import annotations
 
 import hashlib
-import secrets
+import secrets  # noqa: F401 (this line binds a name used by an embedded template)
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, Optional
 
 from .sigma_protocol import GroupParameters, Proof, SigmaProver, generate_parameters
-from dataclasses import dataclass, field
-from typing import Dict, Optional
 
-from .sigma_protocol import GroupParameters, Proof, SigmaProver, generate_parameters
 
 
 @dataclass

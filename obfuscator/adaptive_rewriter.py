@@ -9,7 +9,6 @@ import json
 import os
 import random
 import secrets
-import sys
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DEFAULT_HISTORY = os.path.join(_ROOT, "build", "feedback_history.json")

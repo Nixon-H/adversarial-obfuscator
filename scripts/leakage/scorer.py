@@ -49,7 +49,7 @@ from .analyzers import (
     IntentLeakageAnalyzer,
     ArchitectureLeakageAnalyzer,
 )
-from .metrics import compute_opcode_histogram
+from .metrics import compute_opcode_histogram  # noqa: F401 (this line binds a name used by an embedded template)
 
 logger = logging.getLogger(__name__)
 

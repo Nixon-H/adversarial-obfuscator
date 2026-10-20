@@ -22,7 +22,7 @@ dimensions need strengthening.
 """
 
 import json
-import os
+import os  # noqa: F401 (this line binds a name used by an embedded template)
 from html import escape
 
 

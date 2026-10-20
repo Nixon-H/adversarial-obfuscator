@@ -6,16 +6,14 @@ determinism (same seed twice), variety (seeds differ on suitable
 input), docstring preservation, exactness edge cases (NaN, empty,
 non-ASCII, negatives, zero).
 """
-import math
 import os
 import sys
 import textwrap
 
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from obfuscator.rep_diversify import RepDiversifier, diversify_source
+from obfuscator.rep_diversify import diversify_source
 
 
 def run_pair(source, probe, seed=7, **flags):

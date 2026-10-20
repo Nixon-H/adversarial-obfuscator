@@ -107,10 +107,9 @@ def run_angr_attack(binary_path, output_dir):
                 simgr = proj.factory.simulation_manager(state)
                 simgr.run(n=10)
                 result["symbolic_paths"] = len(simgr.active) + len(simgr.deadended)
-        except Exception as e:
+        except Exception:
             result["symbolic_paths"] = 0
 
-        total_fns = max(result["num_functions_found"], 1)
         recovered = len(result["strings_recovered"])
         result["success_rate"] = min(recovered / 100.0, 1.0) * 0.3
         if result["cfg_recovered"]:

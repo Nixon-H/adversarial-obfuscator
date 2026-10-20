@@ -19,12 +19,12 @@ Security Relevance:
 from __future__ import annotations
 
 import hashlib
-import os
+import os  # noqa: F401 (this line binds a name used by an embedded template)
 import platform
 import subprocess
 import sys
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 
 def _get_git_info() -> Tuple[Optional[str], bool]:

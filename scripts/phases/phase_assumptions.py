@@ -24,10 +24,10 @@ surfaces them before the pipeline proceeds.
 
 from __future__ import annotations
 
-import json
+import json  # noqa: F401 (this line binds a name used by an embedded template)
 import os
 import platform
-import sys
+import sys  # noqa: F401 (this line binds a name used by an embedded template)
 
 from ..assumptions import AssumptionTracker, AssumptionReport
 from ..assumptions.registry import register_all
@@ -121,7 +121,7 @@ def phase_assumptions(args) -> AssumptionReport:
 
     print()
     print(f"  {'='*60}")
-    print(f"  ASSUMPTION REPORT")
+    print("  ASSUMPTION REPORT")
     print(f"  {'='*60}")
     print(f"  Total assumptions:    {report.total_count}")
     print(f"  Satisfied:            {report.satisfied_count}")

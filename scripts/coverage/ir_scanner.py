@@ -41,7 +41,7 @@ def scan_ir_module(ir_module) -> Dict[str, dict]:
     function-name -> scan metadata (block count, instruction count,
     op types, control flow presence, call targets, memory ops).
     """
-    from irgen.compile import IrModule
+    from irgen.compile import IrModule  # noqa: F401 (this line binds a name used by an embedded template)
     result: Dict[str, dict] = {}
     for func in ir_module.functions:
         info = _scan_function(func)

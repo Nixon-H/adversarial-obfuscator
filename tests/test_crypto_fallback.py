@@ -46,7 +46,6 @@ Documented FINDINGS (see also the final report):
       bare ``TypeError`` from ``bytes()/hashlib``, not a ``ValueError``.
 """
 
-import base64
 import hashlib
 import inspect
 import os

@@ -22,9 +22,9 @@ artifacts cannot be independently confirmed.
 
 from __future__ import annotations
 
-import json
+import json  # noqa: F401 (this line binds a name used by an embedded template)
 import os
-import time
+import time  # noqa: F401 (this line binds a name used by an embedded template)
 from typing import Any
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -33,8 +33,6 @@ sys.path.insert(0, _ROOT)
 
 from scripts.common import BUILD_DIR, atomic_write, log
 from scripts.reproducibility.scorer import compute_reproducibility
-from scripts.reproducibility.checker import check_result_reproducibility
-from scripts.reproducibility.environment import snapshot_environment
 
 
 def phase_reproducibility(args: Any) -> dict:

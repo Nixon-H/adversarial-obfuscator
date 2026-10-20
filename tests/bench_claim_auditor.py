@@ -15,7 +15,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from scripts.claim_auditor.detector import ClaimDetector, CLAIM_PATTERNS
+from scripts.claim_auditor.detector import ClaimDetector
 from scripts.claim_auditor.auditor import audit_source
 
 
@@ -33,7 +33,7 @@ def _generate_large_source(num_lines: int) -> str:
             phrase = claim_phrases[i % len(claim_phrases)]
             lines.append(f"# This code is {phrase} against all threats\n")
         elif i % 50 == 0:
-            lines.append(f"# TODO: verify this works\n")
+            lines.append("# TODO: verify this works\n")
         else:
             lines.append(f"x_{i} = {i * 2}\n")
     return "".join(lines)

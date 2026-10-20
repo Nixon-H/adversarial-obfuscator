@@ -54,10 +54,10 @@ def phase_attack_corpus(args: Any) -> dict:
     print("  ATTACK CORPUS REPORT")
     print("=" * 60)
     print(f"  Total attack entries: {corpus['total_attacks']}")
-    print(f"  Categories:")
+    print("  Categories:")
     for cat, count in sorted(corpus["categories"].items()):
         print(f"    {cat:25s} {count}")
-    print(f"  Severity distribution:")
+    print("  Severity distribution:")
     for sev, count in sorted(corpus["severity_distribution"].items()):
         print(f"    {sev:25s} {count}")
     print("=" * 60)

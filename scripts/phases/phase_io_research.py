@@ -61,11 +61,7 @@ def phase_io_research(args, ir_module=None):
             log("IO_RESEARCH", f"Failed to load IR module: {e}")
             return None
 
-    from scripts.io_research import (
-        IndistinguishabilityObfuscator,
-        is_io_compatible,
-        ir_to_branching_program,
-    )
+    from scripts.io_research import IndistinguishabilityObfuscator, is_io_compatible
 
     target_funcs_str = getattr(args, 'io_research_functions', None)
     target_funcs = None

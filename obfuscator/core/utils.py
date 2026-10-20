@@ -1,13 +1,40 @@
-import sys,os,zipfile,base64,io,tokenize,py_compile,shutil,tempfile,random,hashlib,lzma,struct,time,json,argparse,uuid,re,inspect,platform,subprocess,marshal,hmac,secrets,ctypes,importlib.util,atexit,warnings,zlib,codecs,string,builtins,math,dis,multiprocessing,types,traceback,gc,ast,socket,threading,concurrent.futures,logging;from io import StringIO;from datetime import datetime; _nixon_ハッシュ해시 = hashlib
+import sys, os, zipfile, base64, io, shutil, tempfile, random, hashlib, lzma, struct, time, json, argparse, uuid, re, platform, subprocess, hmac, secrets, ctypes, importlib.util, warnings, string, multiprocessing, socket, threading, concurrent.futures  # noqa: F401 (this line binds a name used by an embedded template)
 sys.setrecursionlimit(10000)
 sys.stderr.flush()
 warnings.filterwarnings("ignore")
 _console = sys.stdout
-if os.environ.get('NIXON_LOG_REDIRECT', '1') == '1':
+
+#: Default file for the build log when logging is redirected.
+DEFAULT_LOG_FILE = "build.log"
+
+#: True when the environment asked for the console-to-file redirect.
+#: The redirect itself is NOT performed at import time: importing a
+#: module must not create or truncate a file in the current working
+#: directory.  Entry points call :func:`enable_log_redirect` explicitly.
+_LOG_REDIRECT_REQUESTED = os.environ.get('NIXON_LOG_REDIRECT', '1') == '1'
+
+def enable_log_redirect(path=None):
+    """Send stdout/stderr to a log file, and return the log path.
+
+    This is the explicit replacement for the import-time side effect
+    that used to open ``./build.log`` (mode ``"w"``) as soon as
+    ``obfuscator.core.utils`` was imported.  That truncated any
+    ``build.log`` in the current working directory — including a file
+    that had nothing to do with this project — and it did so merely
+    because something imported the module.
+
+    Call it from an entry point that wants a log file.  Returns the log
+    path, or ``None`` when the redirect was not requested
+    (``NIXON_LOG_REDIRECT=0``) or could not be set up.
+    """
+    global _console, _log_fd
+    if not _LOG_REDIRECT_REQUESTED:
+        return None
+    target = os.path.abspath(path or DEFAULT_LOG_FILE)
     try:
-        _log_fd = open("build.log", "w", encoding='utf-8')
+        _log_fd = open(target, "w", encoding='utf-8')
         try:
-            os.chmod("build.log", 0o600)
+            os.chmod(target, 0o600)
         except Exception:
             pass
         _console_fd = os.dup(1)
@@ -17,6 +44,12 @@ if os.environ.get('NIXON_LOG_REDIRECT', '1') == '1':
     except Exception as _e:
         import sys as _sys
         print(f"[utils] Failed to redirect log: {_e}", file=_sys.__stderr__)
+        return None
+    try:
+        _print_banner()
+    except Exception:
+        pass
+    return target
 class UI:
     RESET = "\033[0m"; BOLD = "\033[1m"; DIM = "\033[2m"
     BLUE = "\033[34m"; CYAN = "\033[36m"; GREEN = "\033[32m"
@@ -262,7 +295,7 @@ def check_dependencies():
         UI.item("Python Version", ver_str, "OK")
     else:
         UI.item("Python Version", ver_str, "FAIL")
-        UI.fail(f"Python 3.8+ recommended")
+        UI.fail("Python 3.8+ recommended")
     tools_to_check = ["strip", "llvm-strip", "upx", "docker", "nuitka"]
     for tool in tools_to_check:
         results["tools"][tool] = shutil.which(tool) is not None
@@ -297,7 +330,6 @@ def get_random_var_name(prefix="NX"):
         (0x3040, 0x309F), 
         (0x4E00, 0x9FFF), 
     ]
-    safe_fallbacks = ['_var', '_val', '_x', '_y', '_z']
     suffix = ""
     for _ in range(random.randint(5, 10)):
         found = False
@@ -381,10 +413,12 @@ def _print_banner():
 └───────────────────────────────────┘
 """
     print(banner)
-if os.environ.get('NIXON_LOG_REDIRECT', '1') == '1':
-    _print_banner()
 try:
-    import numpy as np
+    # An availability probe: numpy is not used here, the import is the
+    # test.  Do not let a cleanup drop it -- without it HAS_NUMPY is
+    # always True and the numpy paths fail with NameError instead of
+    # taking their fallback.
+    import numpy as np  # noqa: F401
     HAS_NUMPY = True
 except ImportError:
     HAS_NUMPY = False
@@ -705,7 +739,7 @@ jobs:
                         return
                     else:
                         time.sleep(2)
-                except Exception as e:
+                except Exception:
                     time.sleep(2)
             t.fail("Workflow Update Failed")
             raise Exception("Failed to update workflow")
@@ -751,7 +785,6 @@ jobs:
                 jobs_data = r.json()
                 jobs = jobs_data.get("jobs", [])
                 states = {"Wind": "Q", "Linux": "Q", "macOS": "Q", "Android": "Q"}
-                any_failed = False
                 for job in jobs:
                     name = job['name']
                     short_code = None
@@ -764,6 +797,7 @@ jobs:
                         if not t: return 0.0
                         try:
                             t = t.replace('Z', '+00:00')
+                            from datetime import datetime
                             return datetime.datetime.fromisoformat(t).timestamp()
                         except Exception: return 0.0
                     s_time = parse_ts(job.get('started_at'))
@@ -773,7 +807,6 @@ jobs:
                     if status == "completed":
                         if conclusion == "success": states[short_code] = "✓"
                         elif conclusion == "skipped": states[short_code] = "-"
-                        else: states[short_code] = "✗"; any_failed = True
                     elif status == "in_progress":
                         states[short_code] = "IP"
                     else:
@@ -814,7 +847,7 @@ jobs:
                         return None
             except KeyboardInterrupt:
                 raise
-            except Exception as e:
+            except Exception:
                 time.sleep(5)
     def download_artifacts(self,run_id,output_dir,sign_key_hex=None):
         print(f" [*] [Cloud] Downloading binaries to {output_dir}...")
@@ -949,7 +982,7 @@ class GitHubNuitkaFarm:
                             continue
                         else:
                             time.sleep(2 * (attempt + 1))
-                    except Exception as e:
+                    except Exception:
                         time.sleep(2 * (attempt + 1))
                 t.fail(f"Failed to upload {remote_name}")
                 return False
@@ -971,11 +1004,11 @@ class GitHubNuitkaFarm:
         try:
             r = requests.delete(url, headers=self.headers, proxies=self.proxies, verify=True)
             if r.status_code == 204:
-                UI.dot_item("Cleanup", f"Repo Deleted", "SCORCHED")
+                UI.dot_item("Cleanup", "Repo Deleted", "SCORCHED")
             elif r.status_code == 403:
-                UI.dot_item("Cleanup", f"Permission Denied (Check 'delete_repo' scope)", "FAIL")
+                UI.dot_item("Cleanup", "Permission Denied (Check 'delete_repo' scope)", "FAIL")
             elif r.status_code == 404:
-                UI.dot_item("Cleanup", f"Repo already gone", "OK")
+                UI.dot_item("Cleanup", "Repo already gone", "OK")
             else:
                 UI.dot_item("Cleanup", f"Failed ({r.status_code})", "FAIL")
         except Exception as e:
@@ -1346,6 +1379,12 @@ jobs:
                 print(f"\n [!] Connection unstable ({e}). Retrying... (Build is safe on server)")
     def _measure_bandwidth(self, test_url):
         try:
+             # Lazy import: `requests` is an optional dependency and this
+             # method runs on the build-farm upload path.  Without the
+             # import the call raised NameError, was swallowed by the
+             # except below, and EVERY measurement returned the lowest
+             # score (4) — the bandwidth probe never worked.
+             import requests
              start_time = time.time()
              headers = self.headers.copy()
              headers['Range'] = 'bytes=0-2097152' 
@@ -1472,7 +1511,7 @@ jobs:
             success = False
             for attempt in range(3):
                 try:
-                    with UI.Task(clean_name, f"...", prefix=prefix) as t:
+                    with UI.Task(clean_name, "...", prefix=prefix) as t:
                         if attempt > 0:
                             t.update(value=f"(Attempt {attempt+1}/3)")
                         zip_path = os.path.join(output_dir, f"{name}.zip")
@@ -1493,7 +1532,6 @@ jobs:
                 sys.exit(1)
 def ensure_upx_installed():
     import shutil
-    import subprocess
     import urllib.request
     import zipfile as zf
     import tarfile
@@ -1565,7 +1603,6 @@ def ensure_upx_installed():
         print(f"    [!] UPX download failed: {e}")
         return False
 def strip_binary(path):
-    import subprocess
     import shutil
     if not os.path.isfile(path):
         return False
@@ -1614,7 +1651,7 @@ def strip_binary(path):
             print(f"    [!] Cannot strip {target_os} binary on {host_os} host (install llvm-strip for cross-platform support)")
             return False
     else:
-        print(f"    [!] No strip tool available")
+        print("    [!] No strip tool available")
         return False
     if not can_strip or not strip_cmd:
         return False
@@ -1629,7 +1666,6 @@ def strip_binary(path):
         print(f"    [!] Strip failed for {os.path.basename(path)}: {e}")
         return False
 def compress_with_upx(path, level=9):
-    import subprocess
     if not os.path.isfile(path):
         return False
     try:
@@ -1649,7 +1685,6 @@ def compress_with_upx(path, level=9):
         return False
 def optimize_and_pack_binaries(dist_dir):
     import tarfile
-    import io
     binary_files = {}
     for fname in os.listdir(dist_dir):
         fpath = os.path.join(dist_dir, fname)
@@ -1668,10 +1703,10 @@ def optimize_and_pack_binaries(dist_dir):
         print("    [!] No binaries found to optimize")
         return None
     print(f"    [*] Found {len(binary_files)} binaries to optimize...")
-    for platform, fpath in binary_files.items():
+    for _plat, fpath in binary_files.items():
         strip_binary(fpath)
     if ensure_upx_installed():
-        for platform, fpath in binary_files.items():
+        for _plat, fpath in binary_files.items():
             compress_with_upx(fpath)
     else:
         print("    [!] Skipping UPX compression (not available)")

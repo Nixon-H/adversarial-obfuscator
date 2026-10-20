@@ -1,5 +1,4 @@
 import time
-import pytest
 
 
 def test_obfuscation_overhead():
@@ -22,15 +21,11 @@ def test_aes_throughput():
     nonce = b"\x00" * 8
     data = b"X" * 1000
 
-    start = time.perf_counter()
-    ks = aes256_ctr_keystream(key, nonce, len(data))
-    elapsed = time.perf_counter() - start
+    aes256_ctr_keystream(key, nonce, len(data))
 
     pt = b"Y" * 16
-    start = time.perf_counter()
     for _ in range(100):
         aes256_encrypt_block(pt, key)
-    elapsed = time.perf_counter() - start
 
 
 def test_pipeline_phases_timing():
@@ -40,7 +35,7 @@ def test_pipeline_phases_timing():
 
     start = time.perf_counter()
     t = ObfuscationTransformer(seed=42)
-    result = t.transform(source)
+    t.transform(source)
     elapsed = time.perf_counter() - start
     print(f"\nObfuscation: {elapsed:.3f}s")
     assert elapsed < 60.0

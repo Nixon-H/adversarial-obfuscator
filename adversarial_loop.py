@@ -6,8 +6,7 @@ Benchmark → analyze AI deobfuscation → improve obfuscator → rebuild → re
 until all 4 free models score PROOF 3 consecutive rounds.
 """
 
-import json, logging, os, sys, re, shutil, subprocess, time, ast
-import importlib.util as iutil
+import json, logging, os, sys, shutil, subprocess, ast
 from pathlib import Path
 from typing import Optional
 
@@ -132,8 +131,6 @@ def _is_unrelated_code(output: str, original: str) -> bool:
 def analyze_model_output(model: str, result: dict, original: str) -> list[str]:
     signals = []
     output = result.get("deobfuscated", "") or ""
-    score = result.get("score", {}).get("score", 0)
-    details = result.get("score", {}).get("details", [])
 
     if not output:
         return ["no_output"]
@@ -168,7 +165,6 @@ def analyze_model_output(model: str, result: dict, original: str) -> list[str]:
 def is_genuine_deobfuscation(result: dict, original: str) -> bool:
     """True if model genuinely deobfuscated (not copy-paste, not unrelated, not analysis)."""
     output = result.get("deobfuscated", "") or ""
-    score = result.get("score", {}).get("score", 0)
     if not output:
         return False
     if _is_unrelated_code(output, original):

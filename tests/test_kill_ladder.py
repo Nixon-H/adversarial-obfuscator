@@ -15,14 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from obfuscator.kill_ladder import (
-    DEBUG_VAR,
-    KEY_GLOBALS,
-    KILL_CODE,
-    REASON_CODES,
-    emit_kill_snippet,
-    nx_kill,
-)
+from obfuscator.kill_ladder import DEBUG_VAR, KILL_CODE, REASON_CODES, emit_kill_snippet, nx_kill
 
 
 def test_kill_code_is_137():

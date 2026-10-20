@@ -43,7 +43,6 @@ def test_empty_spec_no_rewrite():
 
 
 def test_shim_covers_registry():
-    import ast as _ast
     missing = []
     for fam, info in lowering.FAMILIES.items():
         for op in info["ops"]:

@@ -110,7 +110,7 @@ def run_ghidra_benchmark(artifact_path: str, verbose: bool = False) -> dict:
     try:
         result = benchmark.run(artifact_path)
         if verbose:
-            print(f"GhidraBenchmark complete", file=sys.stderr)
+            print("GhidraBenchmark complete", file=sys.stderr)
         return result
     except Exception as e:
         if verbose:

@@ -40,10 +40,10 @@ Maintenance Notes:
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from .graph import KnowledgeGraph, GraphNode, GraphEdge, NodeType, EdgeType
-from .feature_registry import ALL_FEATURES, FEATURE_NAMES
+from .feature_registry import ALL_FEATURES, FEATURE_NAMES  # noqa: F401 (this line binds a name used by an embedded template)
 
 ATTACK_VECTORS: List[Dict[str, Any]] = [
     {"id": "ghidra_static", "name": "Ghidra Static Analysis", "targets": ["cfg_flatten", "opaque_predicates"]},

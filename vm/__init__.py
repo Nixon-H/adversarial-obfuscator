@@ -27,9 +27,6 @@ deobfuscation.
 
 from __future__ import annotations
 import hashlib
-import json
-import os
-from typing import Optional
 
 from .vm_isa import VMOpcode, VMInstruction, VMOperand, VM_PROPERTIES, _phase2_enabled
 from .bytecode_compiler import compile_to_bytecode, encrypt_bytecode, decrypt_bytecode

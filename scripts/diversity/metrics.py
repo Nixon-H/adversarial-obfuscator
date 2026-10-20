@@ -3,10 +3,7 @@ import hashlib
 import json
 import math
 import os
-import subprocess
-import sys
-import tempfile
-from collections import Counter, defaultdict
+from collections import Counter
 from typing import Dict, Tuple
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

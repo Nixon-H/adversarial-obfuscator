@@ -25,7 +25,6 @@ import json
 import os
 import struct
 from ..common import log, BUILD_DIR
-from ..binding.crypto_binding import CryptoFragmentBinder, Fragment
 
 
 def phase_class_dispatch(num_classes=4):

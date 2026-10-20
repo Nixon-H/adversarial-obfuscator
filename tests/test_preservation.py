@@ -1,6 +1,5 @@
 import ast
 import json
-import hashlib
 
 from scripts.preservation.report import StageResult, PreservationReport
 from scripts.preservation.engine import PreservationEngine
@@ -9,11 +8,11 @@ from scripts.preservation.stage_ir_llvm import check_ir_llvm
 
 
 def _make_simple_ir():
-    from irgen.compile import IrModule, IrFunction, IrType, IrBlock
+    from irgen.compile import IrModule, IrFunction, IrType
     mod = IrModule("test")
     func = IrFunction("test_func", IrType.i32())
     mod.functions.append(func)
-    entry = func.new_block("entry")
+    func.new_block('entry')
     return mod
 
 
@@ -112,7 +111,6 @@ def f(x):
 """
     from irgen.compile import compile_py_to_ir
     from llvmgen.lower import lower_ir_to_llvm
-    from scripts.validation.ir_to_smt import IRToSMT
     ir_module = compile_py_to_ir(source)
     ir_text = str(ir_module)
     llvm_ir = lower_ir_to_llvm(ir_text)
@@ -127,13 +125,13 @@ def test_preservation_engine_check_stage():
     engine = PreservationEngine()
     from irgen.compile import compile_py_to_ir
     from scripts.validation.ast_to_smt import ASTToSMT
-    from scripts.validation.ir_to_smt import IRToSMT
     source = """
 def f(x):
     return x + 1
 """
     tree = ast.parse(source)
     ir_module = compile_py_to_ir(source)
+    from scripts.validation.ir_to_smt import IRToSMT
     result = engine.check_stage(
         "test_stage", tree, ir_module,
         lambda x: (ASTToSMT().translate(x), ASTToSMT()),

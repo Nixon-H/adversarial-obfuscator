@@ -34,7 +34,7 @@ Maintenance Notes:
 
 from __future__ import annotations
 
-import json
+import json  # noqa: F401 (this line binds a name used by an embedded template)
 import os
 
 

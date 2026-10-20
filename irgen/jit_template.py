@@ -32,8 +32,7 @@ import os
 import struct
 import sys
 import argparse
-from typing import Optional
-from .compile import IrModule, IrFunction, IrBlock, IrInstruction, IrValue, IrType
+from .compile import IrModule, IrFunction, IrInstruction, IrType
 
 
 def _load_config():

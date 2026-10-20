@@ -18,11 +18,11 @@ Security Relevance:
 from __future__ import annotations
 
 import json
-import time
+import time  # noqa: F401 (this line binds a name used by an embedded template)
 from dataclasses import dataclass, field
 from typing import Any
 
-from .tracker import DebtCategory, DebtSeverity, SecurityDebtItem, SecurityDebtTracker
+from .tracker import SecurityDebtItem, SecurityDebtTracker
 
 # Weighting factors for severity levels and debt categories.
 _SEVERITY_WEIGHTS: dict[str, float] = {

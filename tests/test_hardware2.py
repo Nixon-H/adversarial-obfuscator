@@ -2,7 +2,6 @@
 Tests for Hardware Research Integration (Items 125-129).
 """
 import subprocess
-import json
 import os
 import sys
 import importlib.util

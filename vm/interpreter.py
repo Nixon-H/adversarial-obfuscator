@@ -66,9 +66,15 @@ import hashlib
 import json
 import os
 import struct
-from typing import Optional, Callable
+from typing import Callable
 
-from .vm_isa import VMOpcode, VM_PROPERTIES, _phase2_enabled
+from .vm_isa import VMOpcode, VM_PROPERTIES
+# Re-exported: the interpreter's Phase 2 gate is monkeypatched through
+# this module's namespace by the test suite, so the name must be bound
+# here even though the module does not call it.
+from .vm_isa import _phase2_enabled  # noqa: F401
+from .ephemeral_isa import (select_dispatch_mode, select_encoding_mode,
+                            generate_field_permutation, shuffle_handler_order)
 
 
 def secure_zero(data):
@@ -177,11 +183,7 @@ class VMInterpreter:
         self.state_isa_rotation = 0
 
         if dynamic_isa:
-            from .ephemeral_isa import (
-                runtime_collect_entropy, runtime_derive_isa,
-                select_dispatch_mode, select_encoding_mode,
-                generate_field_permutation, shuffle_handler_order,
-            )
+            from .ephemeral_isa import runtime_collect_entropy, runtime_derive_isa
             seed = entropy_seed if entropy_seed is not None else runtime_collect_entropy()
             self.entropy_seed = bytearray(seed)
             isa_table = runtime_derive_isa(bytes(self.entropy_seed))
@@ -205,10 +207,8 @@ class VMInterpreter:
         observing one rekey can determine the mode for that epoch but
         not for future epochs.
         """
-        from .ephemeral_isa import (
-            select_dispatch_mode, select_encoding_mode,
-            generate_field_permutation, shuffle_handler_order,
-        )
+        from .ephemeral_isa import (select_dispatch_mode, select_encoding_mode,
+                                   generate_field_permutation, shuffle_handler_order)
         dm = select_dispatch_mode(seed, self.epoch)
         em = select_encoding_mode(seed, self.epoch)
         self.dispatch_mode = DISPATCH_NAMES.index(dm)
@@ -657,7 +657,7 @@ class VMInterpreter:
         frame_size is a 16-bit value read from the instruction stream
         but not currently used in the Python interpreter.
         """
-        frame_size = self._read_u16()
+        self._read_u16()
         self.state["stack"].append(self._reg(self.REG_PC))
         self.state["stack"].append(self._reg(self.REG_FLAGS))
 
@@ -806,11 +806,7 @@ class VMInterpreter:
           re-selected.
         - Handler order is re-shuffled.
         """
-        from .ephemeral_isa import (
-            vm_rekey_seed, runtime_derive_isa,
-            select_dispatch_mode, select_encoding_mode,
-            generate_field_permutation, shuffle_handler_order,
-        )
+        from .ephemeral_isa import vm_rekey_seed, runtime_derive_isa
         new_seed = vm_rekey_seed(bytes(self.entropy_seed), self.epoch, self.bb_hash)
         self.entropy_seed = bytearray(new_seed)
         self.epoch += 1

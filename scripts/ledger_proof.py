@@ -41,13 +41,11 @@ def read_elf_text_section(binary_path: str):
         if is_64:
             p_type = struct.unpack_from('<I', data, off)[0]
             p_flags = struct.unpack_from('<I', data, off + 4)[0]
-            p_offset = struct.unpack_from('<Q', data, off + 8)[0]
             p_vaddr = struct.unpack_from('<Q', data, off + 16)[0]
             p_filesz = struct.unpack_from('<Q', data, off + 32)[0]
             p_memsz = struct.unpack_from('<Q', data, off + 40)[0]
         else:
             p_type = struct.unpack_from('<I', data, off)[0]
-            p_offset = struct.unpack_from('<I', data, off + 4)[0]
             p_vaddr = struct.unpack_from('<I', data, off + 8)[0]
             p_filesz = struct.unpack_from('<I', data, off + 16)[0]
             p_memsz = struct.unpack_from('<I', data, off + 20)[0]

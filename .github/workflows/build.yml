@@ -24,7 +24,7 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
       - name: Lint Python
-        run: pip install pyflakes && make lint
+        run: pip install ruff && make lint
       - name: Run Python tests
         run: python3 -m pytest tests/ -v
       - name: Obfuscate test payload

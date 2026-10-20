@@ -39,8 +39,8 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from .tracker import ExposureEventType, ExposureTracker
-from .metric import PlaintextExposureMetric, ExposureReport
+from .tracker import ExposureEventType, ExposureTracker  # noqa: F401 (this line binds a name used by an embedded template)
+from .metric import PlaintextExposureMetric, ExposureReport  # noqa: F401 (this line binds a name used by an embedded template)
 
 
 class ExposureSimulator:

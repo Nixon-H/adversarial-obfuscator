@@ -1,4 +1,4 @@
-import sys,os,zipfile,base64,io,tokenize,py_compile,shutil,tempfile,random,hashlib,lzma,struct,time,json,argparse,uuid,re,inspect,platform,subprocess,marshal,hmac,secrets,ctypes,importlib.util,atexit,warnings,zlib,codecs,string,builtins,math,dis,multiprocessing,types,traceback,gc,ast,socket,threading,concurrent.futures,logging;from io import StringIO;from datetime import datetime; _nixon_ハッシュ해시 = hashlib
+import sys, os, zipfile, base64, io, shutil, tempfile, random, hashlib, lzma, struct, time, json, uuid, inspect, platform, marshal, secrets, ctypes, importlib.util, atexit, warnings, zlib, codecs, string, dis, types, traceback, gc, ast, socket, threading, concurrent.futures, logging  # noqa: F401 (this line binds a name used by an embedded template)
 from .utils import *
 from .transforms import *
 MEMORY_PROTECTION_SOURCE = '''def {FUNC_SEC_WIPE}(data):
@@ -579,7 +579,7 @@ def apply_ast_mutation(source_code, options=None):
             _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             if _project_root not in sys.path:
                 sys.path.insert(0, _project_root)
-            from scripts.benchmark.feedback import BenchmarkFeedbackAnalyzer, WeaknessProfile
+            from scripts.benchmark.feedback import WeaknessProfile
             profile_data = options.get('weakness_profile', {})
             profile = WeaknessProfile(
                 failed_metrics=profile_data.get('failed_metrics', []),
@@ -871,6 +871,7 @@ _VARS_MAP = {
     "FUNC_HOOK": "HOOK_CHK", "FUNC_JOIN": "JOIN", "FUNC_STAGE0": "STG0",
     "FUNC_PARENT": "P_CHK", "FUNC_MEM": "MEM_CHK", "FUNC_SELF": "SELF",
     "FUNC_NET": "NET", "FUNC_RES": "RES", "FUNC_SEC_MEM": "SEC_MEM",
+    "FUNC_TLS_CTX": "TLS_CTX",
     "FUNC_ADV_HK": "ADV_HOOK", "EXC_STATE": "JUMP", "DECOY_FUNC": "DECOY",
     "IS_DEBUG": "DBG", "ENTROPY_MARKER": "MARKER", "FUNC_LOG": "LOG",
     "FUNC_HW_BIND": "HW_BND", "FUNC_HARD": "HARDEN", "CLS_HARD": "KERNEL_HARD",
@@ -897,16 +898,16 @@ _VARS_MAP = {
     "METHOD_EXEC_IMPL": "EXEC_I", "METHOD_T": "T",
     "WHITEBOX_CLS": "WB_AES", "IO_ENCODER_CLS": "IO_ENC", "DUAL_CIPHER_CLS": "DUAL_C",
     "METHOD_ENCODE_INPUT": "ENC_IN", "METHOD_DECODE_OUTPUT": "DEC_OUT",
-    "METHOD_WB_ROUND": "WB_RND", "METHOD_WB_ENCRYPT": "WB_E", "METHOD_WB_DECRYPT": "WB_D",
+    "METHOD_WB_ROUND": "WB_RND",
     "METHOD_IO_ENCODE": "IO_E", "METHOD_IO_DECODE": "IO_D",
     "METHOD_DUAL_ENCRYPT": "DL_E", "METHOD_DUAL_DECRYPT": "DL_D",
-    "OPAQUE_CONST_CLS": "OP_CONST", "DECOY_DECRYPT_CLS": "DCY_DEC", "EXEC_TRACE_CLS": "EX_TRC",
+    "OPAQUE_CONST_CLS": "OP_CONST", "DECOY_DECRYPT_CLS": "DCY_DEC",
     "METHOD_CPU_TEMP": "CPU_T", "METHOD_ENTROPY_INJECT": "ENT_INJ",
     "METHOD_TIME_BRANCH": "T_BRANCH", "METHOD_OPAQUE_PRED": "OP_PRED",
     "METHOD_DECOY_DEC": "DCY_D", "METHOD_BATCH_FAKE": "BATCH_F",
     "METHOD_TRACE_STEP": "TR_STEP", "METHOD_TRACE_BRANCH": "TR_BR",
     "METHOD_TRACE_OBFUSCATE": "TR_OBF", "METHOD_TRACE_VERIFY": "TR_VER",
-    "DYNAMIC_MORPH_CLS": "DYN_MORPH", "FRAME_ANTI_DEBUG_CLS": "FRM_AD", "METAMORPHIC_CLS": "META_CODE",
+    "DYNAMIC_MORPH_CLS": "DYN_MORPH", "FRAME_ANTI_DEBUG_CLS": "FRM_AD",
     "GC_ANTI_DUMP_CLS": "GC_AD", "JIT_AST_CLS": "JIT_AST", "BYTECODE_PAGING_CLS": "BC_PAGE",
     "METHOD_GET_MAP": "G_MAP", "METHOD_WIPE_HISTORY": "W_HIST",
     "METHOD_MORPH_CODE": "M_CODE", "METHOD_RESTORE_CODE": "R_CODE",
@@ -1671,7 +1672,7 @@ ANTMAN_SOURCE = r'''def {FUNC_ANTMAN}():
                         libc = _nixon_シータイプ씨타입.CDLL("libc.so.6")
                     except Exception:
                         try: libc = _nixon_シータイプ씨타입.CDLL("libc.so")
-                    except Exception: return True
+                        except Exception: return True
                 libc.prctl.argtypes = [_nixon_シータイプ씨타입.c_int, _nixon_シータイプ씨타입.c_ulong, _nixon_シータイプ씨타입.c_ulong, _nixon_シータイプ씨타입.c_ulong, _nixon_シータイプ씨타입.c_ulong]
                 libc.prctl.restype = _nixon_シータイプ씨타입.c_int
                 res = libc.prctl(4, 0, 0, 0, 0)
@@ -1708,6 +1709,36 @@ DOH_SOURCE = r'''def {FUNC_DOH}(domain):
                 return data["Answer"][0]["data"].strip('"')
     except: pass
     return None'''
+TLS_CTX_SOURCE = r'''def {FUNC_TLS_CTX}():
+    # Verified TLS for the emitted key fetch.
+    #
+    # The certificate chain AND the hostname are checked against a trusted
+    # CA bundle.  The bundle is the system trust store, plus an optional
+    # private CA embedded at build time (--tls-ca-bundle): embedding ADDS
+    # trust for an operator-owned endpoint, it never disables verification.
+    #
+    # This replaces the old unverified-context helper, which accepted any
+    # certificate and therefore let a network attacker choose the session
+    # key the artifact derives from the response.
+    import ssl as _nx_ssl
+    try:
+        _nx_ctx = _nx_ssl.create_default_context()
+    except Exception:
+        return None
+    _nx_ca = {tls_ca_b64}
+    if _nx_ca:
+        try:
+            import base64 as _nx_b64
+            _nx_ctx.load_verify_locations(
+                cadata=_nx_b64.b64decode(_nx_ca).decode("ascii"))
+        except Exception:
+            pass
+    try:
+        _nx_ctx.verify_mode = _nx_ssl.CERT_REQUIRED
+        _nx_ctx.check_hostname = True
+    except Exception:
+        pass
+    return _nx_ctx'''
 OPAQUE_CONST_SOURCE = r'''
 class {OPAQUE_CONST_CLS}:
     _cache = {}
@@ -5096,8 +5127,19 @@ IMPORTER_SOURCE = r'''class {LOADER_CLS}(_nixon_インポート임포트.abc.Met
                 if isinstance(raw, str): raw = raw.replace('\x00', '')
                 elif isinstance(raw, bytes): raw = raw.replace(b'\x00', b'')
                 try:
-                    with open("/home/nixon/Desktop/2/dump.py", "wb") as _dump_f:
-                        _dump_f.write(raw if isinstance(raw, bytes) else raw.encode('utf-8'))
+                    # Debug aid only.  This used to write the raw
+                    # (decrypted) payload source to a hardcoded absolute
+                    # path on the build machine: everywhere else the write
+                    # silently failed, and on that machine it dropped a
+                    # plaintext copy of the protected payload into a
+                    # directory.  Now it is opt-in (NIXON_DUMP_RAW=1) and
+                    # goes to a private 0600 temp file with a random name.
+                    if _nixon_オペレーション運営.environ.get("NIXON_DUMP_RAW", "0") == "1":
+                        _nx_dfd, _nx_dpath = _nixon_テンプ임시.mkstemp(prefix="nixon_raw_", suffix=".py")
+                        try:
+                            _nixon_オペレーション運営.write(_nx_dfd, raw if isinstance(raw, bytes) else raw.encode('utf-8'))
+                        finally:
+                            _nixon_オペレーション運営.close(_nx_dfd)
                 except: pass
                 exec(raw, module.__dict__)
                 with self._lock:
@@ -5679,6 +5721,7 @@ VM_SEED_VAL = {vm_seed_val}
 {antman_source}
 {rdtsc_source}
 {doh_source}
+{tls_ca_source}
 {api_hash_source}
 {stack_str_source}
 {integrity_check_source}
@@ -5990,7 +6033,7 @@ def {FUNC_NET}():
                 hw = str(_nixon_ユーユーアイ유유아.getnode())
                 p = _nixon_ジェイソン제이슨.dumps({{"hw": hw, "ts": int(_nixon_時間시간.time()), "nonce": _nixon_シークレット시크릿.token_hex(8)}}).encode()
                 r = _nixon_ウラルユーアールエル유알엘.request.Request(url, data=p, headers={{"User-Agent": "Mozilla/5.0"}})
-                c = _nixon_エスエスエル에스._create_unverified_context()
+                c = {FUNC_TLS_CTX}()
                 res = _nixon_ウラルユーアールエル유알엘.request.urlopen(r, timeout=5, context=c)
                 d = _nixon_ジェイソン제이슨.loads(res.read())
                 if d.get("valid"): return b"\x00"*32 
@@ -6125,7 +6168,7 @@ def {FUNC_FETCH_CRITICAL}(auth_input):
         final_payload.extend(nonce)
         final_payload.extend(enc_pass)
         req = _nixon_ウラルユーアールエル유알엘.request.Request(url, data=bytes(final_payload), headers={{"User-Agent": "Nixon/2.0"}})
-        ctx = ssl._create_unverified_context()
+        ctx = {FUNC_TLS_CTX}()
         resp_raw = _nixon_ウラルユーアールエル유알엘.request.urlopen(req, timeout=15, context=ctx).read()
         resp_iv = resp_raw[:12]
         resp_blob = resp_raw[12:]

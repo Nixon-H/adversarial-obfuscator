@@ -1,10 +1,9 @@
 import hashlib
-import hmac
 import multiprocessing as mp
 import os
 import struct
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 
@@ -312,7 +311,6 @@ class MultiBinaryDistributor:
         offset = 4
         bid, bcount, total_frag_count, bthreshold = struct.unpack(">IIII", binary[offset:offset+16])
         offset += 16
-        frag_count = struct.unpack(">I", binary[offset:offset+4])[0]
         offset += 4
 
         frag_map = []

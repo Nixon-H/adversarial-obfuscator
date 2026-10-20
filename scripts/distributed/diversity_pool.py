@@ -4,8 +4,8 @@ import os
 import random
 import struct
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional, Set
 
 
 @dataclass
@@ -167,7 +167,6 @@ class DistributedDiversityPool:
 
         deployment: Dict[int, int] = {}
         variant_ids = list(self._variants.keys())
-        num_nodes = len(self._nodes)
 
         for nid in sorted(self._nodes.keys()):
             vid = variant_ids[nid % len(variant_ids)]
@@ -230,7 +229,6 @@ class DistributedDiversityPool:
 
         deployment: Dict[int, int] = {}
         variant_ids = list(self._variants.keys())
-        num_nodes = len(self._nodes)
 
         now = time.time()
         for nid in sorted(self._nodes.keys()):

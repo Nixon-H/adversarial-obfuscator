@@ -22,7 +22,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Tuple
 
 from .environment import snapshot_environment, environment_fingerprint
 

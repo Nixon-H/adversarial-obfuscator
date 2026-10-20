@@ -4,7 +4,6 @@ Identical payload+key pairs must emit different blobs/loaders per build
 (salted effective key ``xor(key, sha256(build_id))``); both decrypt
 correctly; a tampered build id fails; a fixed build id is deterministic.
 """
-import base64
 import marshal
 import os
 import re

@@ -44,7 +44,7 @@ Maintenance Notes:
 from __future__ import annotations
 from typing import Optional
 
-from irgen.compile import IrFunction, IrInstruction, IrValue, IrModule
+from irgen.compile import IrFunction, IrInstruction, IrValue
 from .circuit import FHECircuit
 
 
@@ -247,6 +247,7 @@ class SSAToFHECircuit:
     @staticmethod
     def _is_numeric_str(s: str) -> bool:
         try:
+            # A validation probe: the exception IS the test.
             int(s)
             return True
         except (ValueError, TypeError):

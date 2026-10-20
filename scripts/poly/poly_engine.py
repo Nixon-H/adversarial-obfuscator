@@ -120,7 +120,6 @@ class PolyEngine:
         profile = self.get_environment_profile()
         fp = profile["fingerprint"]
         expected_os = profile["os"]
-        expected_python = profile["python"]
         expected_arch = profile["arch"]
 
         encrypted_b64 = base64.b64encode(encrypted_data).decode()

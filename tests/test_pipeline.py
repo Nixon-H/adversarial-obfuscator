@@ -11,7 +11,6 @@ import subprocess
 import sys
 import os
 import tempfile
-import pytest
 
 PIPELINE = os.path.join(os.path.dirname(__file__), "..", "scripts", "build.py")
 

@@ -9,11 +9,9 @@ from __future__ import annotations
 
 import sys
 import os
-import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
 
 from scripts.kernel_assist.detector import (
     detect_kernel_capabilities,

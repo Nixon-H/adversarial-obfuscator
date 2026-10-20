@@ -3,7 +3,6 @@ from __future__ import annotations
 import ctypes
 import logging
 import mmap
-import time
 from typing import Any, Callable, Optional
 
 from .detector import detect_kernel_capabilities, KernelCapabilities

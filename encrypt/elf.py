@@ -85,7 +85,7 @@ class ELFParser:
         if self.elf_class not in (ELFCLASS32, ELFCLASS64):
             raise ValueError(f"Unsupported ELF class: {self.elf_class}")
         if self.elf_data != ELFDATA2LSB:
-            raise ValueError(f"Only little-endian ELF is supported")
+            raise ValueError("Only little-endian ELF is supported")
         self.is_64 = self.elf_class == ELFCLASS64
 
     def _parse_headers(self):

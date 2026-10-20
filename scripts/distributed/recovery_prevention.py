@@ -6,8 +6,8 @@ import random
 import struct
 import threading
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -288,7 +288,7 @@ class ExecutionRecoveryPreventer:
             return True
 
     def run_multiprocess(self, algorithm_ops: List[str]) -> bool:
-        partitions = self.partition_algorithm(algorithm_ops)
+        self.partition_algorithm(algorithm_ops)
         processes = []
         queues = []
         noise_queues = []
@@ -338,7 +338,6 @@ def _slice_process(node_id: int, visible_ops: List[str], queue, noise_queue):
     import hashlib
     import os
     import struct
-    import time
     local_data = os.urandom(16)
     checksum = hashlib.sha256(local_data + "\n".join(visible_ops).encode()).digest()
 

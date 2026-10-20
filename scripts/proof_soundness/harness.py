@@ -21,10 +21,9 @@ from __future__ import annotations
 import ast
 import time
 import random
-from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from scripts.proof_soundness.mutator import ProofMutationEngine
 from scripts.proof_soundness.oracle import TransformationOracle
@@ -223,7 +222,7 @@ class ProofSoundnessHarness:
                     )
                     test.actual_rejected = not proof.equivalent
                 except AttributeError:
-                    proxy = prover.prove_all_instructions()
+                    prover.prove_all_instructions()
                     test.actual_rejected = True
             elif test.target_proof == "fragment_safety":
                 test.actual_rejected = False

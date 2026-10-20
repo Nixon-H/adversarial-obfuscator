@@ -10,14 +10,11 @@ Test coverage:
 """
 from __future__ import annotations
 
-import json
 import os
 import sys
-import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
 
 from scripts.invariant_engine.engine import (
     InvariantViolation,

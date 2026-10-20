@@ -4,7 +4,7 @@ import argparse
 
 import pytest
 
-from obfuscator.opt_levels import ALL_FLAGS, LEVELS, apply_to_args, describe, resolve
+from obfuscator.opt_levels import ALL_FLAGS, apply_to_args, describe, resolve
 
 
 def test_l0_all_false():

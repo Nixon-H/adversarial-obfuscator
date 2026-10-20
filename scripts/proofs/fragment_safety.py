@@ -24,7 +24,7 @@ import hashlib
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 import z3
 
@@ -179,7 +179,6 @@ class FragmentSafetyProver:
             )
 
         ids = [f.id for f in fragments]
-        fragment_ids_str = "_".join(str(i) for i in ids)
 
         all_inputs = set()
         all_outputs = set()
@@ -302,7 +301,6 @@ class FragmentSafetyProver:
         """
         start = time.time()
 
-        input_vars = {v: self._mk_bv(v) for v in fragment.input_vars}
         output_vars = {v: self._mk_bv(f"iso_out_{v}") for v in fragment.output_vars}
 
         solver = z3.Solver()

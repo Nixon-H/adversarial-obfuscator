@@ -21,7 +21,7 @@ import json
 import time
 from typing import Any
 
-from .hasher import data_sha256, sha256_manifest
+from .hasher import sha256_manifest
 
 
 class ManifestBuilder:

@@ -11,14 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from scripts.fragment import (
-    Fragment,
-    CompiledFragment,
-    FragmentAnalyzer,
-    FragmentCompiler,
-    derive_fragment_key,
-    aes_ctr_encrypt_fragment,
-)
+from scripts.fragment import Fragment, FragmentAnalyzer, FragmentCompiler, derive_fragment_key, aes_ctr_encrypt_fragment  # noqa: F401 (this line binds a name used by an embedded template)
 
 
 # =========================================================================

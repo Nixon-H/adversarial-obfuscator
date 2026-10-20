@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
+import shutil  # noqa: F401 (this line binds a name used by an embedded template)
 import time
 
 from .diagram_generator import (
@@ -56,12 +56,7 @@ from .table_generator import (
     generate_threat_model_table,
     generate_coverage_table,
 )
-from .report_generator import (
-    generate_verification_report,
-    generate_regression_report,
-    generate_security_summary,
-    generate_executive_summary,
-)
+from .report_generator import generate_verification_report, generate_security_summary, generate_executive_summary
 from .bundler import ReproducibilityBundle
 
 
@@ -117,7 +112,6 @@ class ArtifactBuilder:
         return artifacts
 
     def _scan_build_for_modules(self) -> dict:
-        modules = {}
         functions = {}
         if not os.path.isdir(self.build_dir):
             return {"functions": {}, "per_protection_stats": {}, "summary": {"total_functions": 0}}

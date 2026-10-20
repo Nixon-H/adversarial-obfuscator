@@ -14,8 +14,6 @@ import ast
 import base64
 import random
 import secrets
-import hashlib
-import struct
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +159,6 @@ class ContextCollapseObfuscator(ast.NodeTransformer):
             a = self._rng.randint(2, 250)
             b = self._rng.randint(2, 250)
             c = a + self._rng.randint(1, 100)
-            d = c - a
             node = ast.If(
                 test=ast.Compare(
                     left=ast.BinOp(
@@ -252,7 +249,10 @@ class HoneyFunctionInjector(ast.NodeTransformer):
         new_funcs: list[ast.FunctionDef] = []
         for algo_key in chosen:
             source_template = _REAL_ALGO_SOURCES[algo_key]
-            func_name = f"{self._naming_prefix}_{algo_key}_{(f"{self._rng.getrandbits(32):08x}")}"
+            # Single quotes inside the f-string expression: reusing the
+            # outer quote character is Python 3.12+ only (PEP 701) and
+            # this module must import on 3.10.
+            func_name = f"{self._naming_prefix}_{algo_key}_{(f'{self._rng.getrandbits(32):08x}')}"
             source = source_template.replace("{name}", func_name)
             try:
                 parsed = ast.parse(source)

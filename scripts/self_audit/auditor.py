@@ -29,12 +29,12 @@ import os
 import re
 import sys
 import time
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
-from scripts.common import BUILD_DIR, ROOT, log
+from scripts.common import BUILD_DIR
 from scripts.self_audit import AuditFinding, AuditCategory, AuditReport, score_to_grade
 
 
@@ -78,7 +78,6 @@ class SelfAuditor:
                 return cat
 
             fn_count = sum(1 for n in ast.walk(tree) if isinstance(n, ast.FunctionDef))
-            cls_count = sum(1 for n in ast.walk(tree) if isinstance(n, ast.ClassDef))
             line_count = len(source.splitlines())
 
             cat.max_score = 100
@@ -522,7 +521,6 @@ class SelfAuditor:
         cat.max_score = 100
 
         total_claims = evidence_report.get("total_claims", 0)
-        verified = evidence_report.get("verified_evidence", evidence_report.get("verified", 0))
         total_evidence = evidence_report.get("total_evidence", 0)
         coverage_pct = evidence_report.get("coverage_pct", evidence_report.get("evidence_coverage", 0))
         unverified = evidence_report.get("unverified_claims", evidence_report.get("claims_without_evidence", []))
@@ -764,7 +762,6 @@ class SelfAuditor:
 
         cat.max_score = 100
 
-        total = assumption_report.get("total_count", assumption_report.get("total", 0))
         unsatisfied = assumption_report.get("unsatisfied_count", assumption_report.get("unsatisfied", 0))
         critical = assumption_report.get("critical_unsatisfied", [])
         if isinstance(critical, int):
@@ -779,7 +776,7 @@ class SelfAuditor:
             findings.append(AuditFinding(
                 category="assumptions", severity="critical",
                 title=f"{critical_unsatisfied} critical unsatisfied assumptions",
-                description=f"Critical assumptions that are not met in the runtime environment",
+                description="Critical assumptions that are not met in the runtime environment",
                 recommendation="Fix critical assumptions or document the gaps",
                 metric_name="critical_unsatisfied", metric_value=float(critical_unsatisfied), threshold=0.0,
             ))

@@ -12,7 +12,7 @@ import struct
 import threading
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Optional, Tuple
 
 
 @dataclass
@@ -282,7 +282,6 @@ def _attest_node(node_id: int, secret: bytes, in_queue, out_queue,
     import hashlib
     import os
     import random
-    import struct
     import time
 
     failed = 0

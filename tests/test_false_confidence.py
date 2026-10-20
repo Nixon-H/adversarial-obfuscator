@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 import sys
-import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -201,7 +200,7 @@ class TestDetector:
     def test_scan_non_python_files_ignored(self, tmpdir):
         _make_file(tmpdir, "data.txt", "TODO: implement\n")
         detector = FalseConfidenceDetector(str(tmpdir))
-        result = detector.scan_all()
+        detector.scan_all()
         assert True
 
     def test_generate_report_string(self, tmpdir):

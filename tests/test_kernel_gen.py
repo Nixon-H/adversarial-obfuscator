@@ -10,14 +10,7 @@ import sys
 
 import pytest
 
-from obfuscator.kernel_gen import (
-    NATIVE_OPS,
-    build_kernel,
-    cythonize_kernel,
-    derive_symbols,
-    emit_native_import,
-    render_pyx,
-)
+from obfuscator.kernel_gen import build_kernel, cythonize_kernel, derive_symbols, emit_native_import, render_pyx
 
 TMP = "/tmp/nxk_tests"
 

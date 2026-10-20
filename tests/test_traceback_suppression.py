@@ -5,7 +5,6 @@ Suppression lives at the TOP of the hybrid-loader template
 excepthook ("fatal error" + exit 1, no paths). Opt-out via
 NIXON_TRACEBACKS=1 (full tracebacks for diagnostics).
 """
-import ast
 import os
 import subprocess
 import sys

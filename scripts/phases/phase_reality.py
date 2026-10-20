@@ -32,7 +32,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 sys.path.insert(0, _ROOT)
 
 from scripts.common import BUILD_DIR, atomic_write, log
-from scripts.reality import compute_reality_scores, load_from_build, RealityReport, score_to_grade
+from scripts.reality import compute_reality_scores, RealityReport, score_to_grade
 
 
 def _build_pipeline_state(args: Any) -> dict:

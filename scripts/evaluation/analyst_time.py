@@ -7,10 +7,9 @@ and produces time estimates with confidence intervals.
 """
 
 import ast
-import math
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-from scripts.evaluation.cost_model import ReverseEngineeringCostModel, CostBreakdown
+from scripts.evaluation.cost_model import ReverseEngineeringCostModel
 from scripts.metrics.resilience import (
     compute_cfg_entropy, compute_cyclomatic, _opaque_predicate_count, _mba_depth,
 )

@@ -8,14 +8,7 @@ import types
 
 import pytest
 
-from obfuscator.nyser import (
-    FORMAT_VERSION,
-    MAGIC,
-    SUPPORTED_MINORS,
-    dumps,
-    loads,
-    roundtrip_supported,
-)
+from obfuscator.nyser import FORMAT_VERSION, MAGIC, dumps, loads, roundtrip_supported
 
 
 def _dis_text(co):

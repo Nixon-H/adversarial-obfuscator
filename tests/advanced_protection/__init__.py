@@ -30,3 +30,40 @@ from .test_test_bitslice import TestBitSlice
 from .test_test_transientexec import TestTransientExec
 from .test_test_cryptocfg import TestCryptoCFG
 from .test_test_chaffcircuits import TestChaffCircuits
+
+# Re-exported names: listed explicitly so the intent is
+# unambiguous and the unused-import check does not flag them.
+__all__ = [
+    "TestAdversarial",
+    "TestAdversarialLoop",
+    "TestBitSlice",
+    "TestBytecodeCompiler",
+    "TestChaffCircuits",
+    "TestClassification",
+    "TestCryptoCFG",
+    "TestDataflow",
+    "TestDegradation",
+    "TestEntropyFlatten",
+    "TestEphemeralVM",
+    "TestExecGuard",
+    "TestFragmentation",
+    "TestHPC",
+    "TestInterpreter",
+    "TestJitTemplate",
+    "TestLedger",
+    "TestMicroJIT",
+    "TestMutation",
+    "TestORAM",
+    "TestPortEntangle",
+    "TestProvenance",
+    "TestROP",
+    "TestReplayPoison",
+    "TestSpeculative",
+    "TestTEE",
+    "TestTimingInjection",
+    "TestTimingTraps",
+    "TestTransientExec",
+    "TestVariantPool",
+    "TestVmIsa",
+    "TestWatermark",
+]

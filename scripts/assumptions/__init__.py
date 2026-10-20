@@ -32,3 +32,13 @@ def build_assumption_report(runtime_caps: dict | None = None) -> AssumptionRepor
 def check_assumptions(runtime_caps: dict) -> AssumptionReport:
     """Alias for build_assumption_report; checks all assumptions against provided runtime capabilities."""
     return build_assumption_report(runtime_caps)
+
+# Re-exported names: listed explicitly so the intent is
+# unambiguous and the unused-import check does not flag them.
+__all__ = [
+    "Assumption",
+    "AssumptionReport",
+    "AssumptionTracker",
+    "FEATURE_ASSUMPTIONS",
+    "register_all",
+]

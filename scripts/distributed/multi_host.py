@@ -1,10 +1,9 @@
 import hashlib
 import multiprocessing as mp
-import os
 import random
 import struct
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -291,7 +290,6 @@ def _host_process_rpc(host_id: int, host_functions: List[HostFunction],
                       out_queues: Dict[int, mp.Queue],
                       rpc_queues: Dict[Tuple[int, int], mp.Queue]):
     import struct
-    import hashlib
     context = {"executed": []}
     fn_map = {hf.function_id: hf for hf in host_functions}
     cross_call_results = []
@@ -299,7 +297,7 @@ def _host_process_rpc(host_id: int, host_functions: List[HostFunction],
         cmd, args = in_queues[host_id].get(timeout=5)
         if cmd == "execute":
             for edge in host_edges:
-                caller = fn_map.get(edge.caller_id)
+                fn_map.get(edge.caller_id)
                 callee_fn = fn_map.get(edge.callee_id)
                 if callee_fn and edge.is_cross_host:
                     callee_hid = callee_fn.host_id

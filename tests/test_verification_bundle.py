@@ -7,10 +7,8 @@ Test coverage:
 - Positive tests verify hashing, manifest building, artifact collection, bundling
 - Negative tests verify corrupt bundles, missing files, hash mismatches
 """
-import hashlib
 import json
 import os
-import shutil
 import sys
 import tarfile
 import tempfile

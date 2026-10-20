@@ -59,7 +59,6 @@ def test_inline_unlock_disabled_is_passthrough():
 
 
 def test_inline_unlock_wrong_hwid_raises():
-    import obfuscator.hwid_lock as hl
 
     real_pack = lock_payload(b"secret", "some-other-host")
     blob = json.dumps(real_pack, sort_keys=True).encode("utf-8")

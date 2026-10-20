@@ -1,8 +1,6 @@
 import ast
 import os
 import re
-import subprocess
-import tempfile
 from typing import Set
 
 _CANONICAL_OPCODES: Set[str] = {

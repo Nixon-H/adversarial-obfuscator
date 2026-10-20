@@ -14,7 +14,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from scripts.evidence.ledger import EvidenceLedger, build_evidence_ledger, verify_evidence
+from scripts.evidence.ledger import EvidenceLedger, build_evidence_ledger
 
 
 def _create_large_ledger(tmp_path: str, num_claims: int = 100, files_per_claim: int = 5) -> EvidenceLedger:
@@ -63,7 +63,6 @@ def bench_ledger_serialize(tmp_path):
 
     start = time.perf_counter()
     d = ledger.to_dict()
-    elapsed = time.perf_counter() - start
 
     json_path = os.path.join(str(tmp_path), "bench_ledger.json")
     with open(json_path, "w") as f:

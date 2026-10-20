@@ -22,7 +22,7 @@ Dependencies:
 """
 
 import ast
-import math
+import math  # noqa: F401 (this line binds a name used by an embedded template)
 from collections import Counter
 
 _NOISE_PREFIXES = ("_nx_", "_gpt_", "_claude_", "_gemini_", "_nx_fp_", "_nx_trap_", "_nx_gc_", "_nx_sentinel_")

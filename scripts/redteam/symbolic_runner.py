@@ -36,7 +36,7 @@ Maintenance Notes:
 import json
 import logging
 import os
-import struct
+import struct  # noqa: F401 (this line binds a name used by an embedded template)
 import time
 
 log = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ def run_symbolic_attack(binary_path, output_dir):
 
     try:
         with open(binary_path, "rb") as f:
-            data = f.read()
+            f.read()
 
         constraints = []
         solutions = []

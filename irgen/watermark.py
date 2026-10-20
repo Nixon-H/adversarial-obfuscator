@@ -36,7 +36,6 @@ import json
 import os
 import random
 import struct
-import sys
 from typing import Any, Optional
 
 _CONFIG_PATH = os.path.join(
@@ -630,9 +629,7 @@ def embed_watermark(
             continue
         for bit_idx, bit_val in enumerate(encoded_bits):
             pattern_key = patterns.get(bit_idx, f"bit_{bit_idx}")
-            wm_block = _make_watermark_block(
-                func, pattern_key, bit_val, rand
-            )
+            _make_watermark_block(func, pattern_key, bit_val, rand)
 
             insert_pos = (
                 int.from_bytes(
@@ -687,14 +684,6 @@ def detect_watermark(
 
             if block.terminator and block.terminator.opcode == "br":
                 if len(block.terminator.operands) >= 3:
-                    true_label = block.terminator.operands[1]
-                    false_label = block.terminator.operands[2]
-
-                    dead_block_exists = (
-                        true_label != block.label
-                        or false_label != block.label
-                    )
-
                     has_alloca = any(
                         inst.opcode == "alloca"
                         for inst in block.instructions
@@ -879,7 +868,7 @@ def load_ir(path: str) -> IrModule:
     definitions. Populates blocks with NOP instructions for
     structure detection.
     """
-    from .compile import IrModule, IrFunction, IrBlock, IrInstruction, IrType, IrValue
+    from .compile import IrModule, IrFunction, IrBlock, IrInstruction
 
     module = IrModule(os.path.basename(path))
     current_func: Optional[IrFunction] = None
@@ -902,7 +891,7 @@ def load_ir(path: str) -> IrModule:
                 label = stripped.rstrip(":")
                 current_block = current_func.new_block(label)
             elif current_block and current_func:
-                inst = IrInstruction("nop")
+                IrInstruction('nop')
                 if stripped.startswith("ret"):
                     current_block.set_terminator("ret")
                 elif stripped.startswith("jmp"):

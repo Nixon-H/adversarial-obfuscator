@@ -7,12 +7,10 @@ Test coverage:
 - Positive tests verify proof module detection, coverage computation, report generation
 - Negative tests verify empty modules, missing proofs, edge cases
 """
-import json
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
 
 from scripts.proof_coverage.coverage import ProofCoverage, ProofCoverageReport
 from scripts.proof_coverage.scanner import ProofCoverageScanner
@@ -287,7 +285,7 @@ class TestNegativeCases:
     Negative test cases — exercises error handling and edge cases for negativecases.
     """
     def test_empty_stages(self):
-        scanner = ProofCoverageScanner()
+        ProofCoverageScanner()
         empty = {}
         aggregated = aggregate_proof_coverage(empty)
         assert aggregated == {}

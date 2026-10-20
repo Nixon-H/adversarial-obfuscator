@@ -37,3 +37,16 @@ from .ghidra_runner import run_ghidra_attack
 from .bninja_runner import run_binaryninja_attack
 from .llm_runner import run_llm_attack
 from .symbolic_runner import run_symbolic_attack
+
+# Re-exported names: listed explicitly so the intent is
+# unambiguous and the unused-import check does not flag them.
+__all__ = [
+    "RedTeamConfig",
+    "RedTeamReport",
+    "run_angr_attack",
+    "run_binaryninja_attack",
+    "run_ghidra_attack",
+    "run_llm_attack",
+    "run_redteam_attack",
+    "run_symbolic_attack",
+]

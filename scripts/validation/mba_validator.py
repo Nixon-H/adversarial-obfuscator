@@ -19,10 +19,9 @@ from __future__ import annotations
 
 import ast
 import time
-from typing import Optional
 
 from scripts.validation.ast_to_smt import ASTToSMT
-from scripts.validation.equivalence import EquivalenceChecker, CheckResult
+from scripts.validation.equivalence import EquivalenceChecker
 
 
 class MBAValidator:
@@ -133,7 +132,7 @@ class MBAValidator:
             self.stats["total_time_ms"] / self.stats["attempted"]
             if self.stats["attempted"] > 0 else 0.0
         )
-        print(f"MBA Validation Stats:")
+        print("MBA Validation Stats:")
         print(f"  Attempted: {self.stats['attempted']}")
         print(f"  Passed:    {self.stats['passed']}")
         print(f"  Failed:    {self.stats['failed']}")

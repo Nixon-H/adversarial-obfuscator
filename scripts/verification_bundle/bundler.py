@@ -26,7 +26,7 @@ import time
 from typing import Any
 
 from .collector import ArtifactCollector
-from .hasher import file_sha256, data_sha256
+from .hasher import file_sha256
 from .manifest import ManifestBuilder
 
 

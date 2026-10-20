@@ -21,9 +21,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
-from .environment import snapshot_environment, compare_environments, environment_fingerprint
+from .environment import snapshot_environment, compare_environments
 from .scorer import ReproducibilityResult
 
 

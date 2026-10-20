@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 @pytest.mark.parametrize("transformer", ["TypeHintStripper", "FStringLowering"])
 def test_ast_transformer_runs(transformer):
     import importlib
-    mod = importlib.import_module(f"obfuscator.core.transforms")
+    mod = importlib.import_module("obfuscator.core.transforms")
     cls = getattr(mod, transformer)
     tr = cls()
     t = ast.parse('x=1\ny=2\ndef f(): pass')

@@ -12,7 +12,6 @@ the platform to pick code variants. Different output; do not merge.
 import hashlib
 import os
 import platform
-import struct
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 

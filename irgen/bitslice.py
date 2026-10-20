@@ -446,7 +446,7 @@ def _transform_inst(block: IrBlock, inst: IrInstruction, compiler: BitSliceCompi
     elif opcode in ('eq', 'ne', 'lt', 'le', 'gt', 'ge'):
         a_bits = _extract_bits(block, a, word_size, ty, new_insts)
         b_bits = _extract_bits(block, b, word_size, ty, new_insts)
-        i1 = IrType.i1()
+        IrType.i1()
 
         if opcode == 'eq':
             result_val = _bitwise_cmp_eq_ir(block, a_bits, b_bits, ty, new_insts)

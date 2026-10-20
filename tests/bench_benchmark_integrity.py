@@ -35,7 +35,7 @@ def bench_hashing() -> dict:
             verifier = BenchmarkIntegrityVerifier(root_dir=tmpdir)
             verifier.tests_dir = tmpdir
             start = time.perf_counter()
-            hashes = verifier.hash_benchmark_files()
+            verifier.hash_benchmark_files()
             elapsed = time.perf_counter() - start
             results[label] = {
                 "file_count": count,

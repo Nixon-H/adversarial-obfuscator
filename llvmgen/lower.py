@@ -1,5 +1,4 @@
 import re
-from typing import Any
 
 NIXON_TYPE_MAP = {
     "i1": "i1",

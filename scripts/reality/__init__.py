@@ -26,3 +26,16 @@ from .scorer import (
     load_from_build,
     FEATURE_REGISTRY,
 )
+
+# Re-exported names: listed explicitly so the intent is
+# unambiguous and the unused-import check does not flag them.
+__all__ = [
+    "FEATURE_REGISTRY",
+    "FeatureReality",
+    "RealityReport",
+    "aggregate_reality_score",
+    "compute_feature_reality",
+    "compute_reality_scores",
+    "load_from_build",
+    "score_to_grade",
+]

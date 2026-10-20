@@ -1,10 +1,6 @@
-import hashlib
 import multiprocessing
 import os
-import socket
 import sys
-import threading
-import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -23,7 +19,7 @@ from scripts.distributed.recovery_prevention import ExecutionRecoveryPreventer
 # ===========================================================================
 
 def _binary_holder_process(binary: bytes, result_queue: multiprocessing.Queue):
-    mbd = MultiBinaryDistributor()
+    MultiBinaryDistributor()
     result_queue.put(binary)
 
 
@@ -72,7 +68,6 @@ def _fragment_holder_process(shm_name: str, fragment_id: int, data: bytes,
                               result_queue: multiprocessing.Queue):
     from multiprocessing.shared_memory import SharedMemory
     import struct
-    import hashlib
 
     try:
         shm = SharedMemory(name=shm_name, create=False)
@@ -86,7 +81,7 @@ def _fragment_holder_process(shm_name: str, fragment_id: int, data: bytes,
         result_shm.close()
         shm.close()
         result_queue.put(True)
-    except Exception as e:
+    except Exception:
         result_queue.put(False)
 
 
@@ -106,6 +101,7 @@ class TestCrossProcessIntegration:
         entropy = cpb._process_entropy()
         expected_key = cpb._derive_process_key(pid_val, entropy, 0)
 
+        import hashlib
         key = hashlib.sha256(
             cpb.shared_secret + struct.pack(">IQQ", pid_val, entropy, 0)
         ).digest()
@@ -125,7 +121,6 @@ class TestCrossProcessIntegration:
             args=(shm_name, 0, fragment_data, pid_val, cpb.shared_secret, result_queue),
         )
         p.start()
-        p.join()
         result = result_queue.get(timeout=5)
         assert result is True
 

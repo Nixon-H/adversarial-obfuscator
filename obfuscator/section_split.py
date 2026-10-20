@@ -1,15 +1,19 @@
 """Section-split sealed streaming (V10 adopt, medium).
 
-.. warning::
+.. note::
 
-   **NOT WIRED INTO THE BUILD.**  This module is implemented and unit
-   tested (``tests/test_section_split.py``, ``tests/test_section_ro.py``)
-   but no build, pipeline or loader path calls it: a repo-wide search
-   finds references only in those two test files.  Do not read the
-   presence of this file (or of its tests) as "the artifact is protected
-   by section splitting" — it is not.  Wiring it in needs a loader-side
-   streaming path and a ``--no-section-split`` escape hatch; until that
-   exists, treat this as library/experimental code.
+   **Wired into the hybrid loader** (``obfuscator/core/pipeline.py``)
+   as the opt-in ``--section-split`` / ``--section-count`` flags.  The
+   payload then travels as N independently sealed sections instead of one
+   blob, so the whole encrypted payload is never resident in a single
+   buffer and a partial dump yields no complete code object.  The
+   sections are sealed with the same effective key the loader already
+   derives at runtime, so no second key is introduced.  A tampered,
+   truncated or mis-keyed pack fails closed through the kill ladder
+   (silent, exit 137).
+
+   The loader-side half is :func:`emit_loader_snippet`; the build-side
+   half is :func:`pack_json`.  Without the flag the loader is unchanged.
 
 Splits a payload blob into N individually-sealed sections that the loader
 streams back one at a time, so the FULL code object is never resident in
@@ -466,3 +470,70 @@ def stream_join_sealed(pack: dict, key: bytes,
     sealed = SealedSection(mapping, view, 0)
     sealed.readonly = False
     return sealed
+
+
+# ---------------------------------------------------------------------------
+# Loader-side snippet
+# ---------------------------------------------------------------------------
+
+#: Name of the join function emitted into the loader.
+JOIN_FUNC = "_nx_section_join"
+
+#: The loader-side join, as source.  Stdlib only (json, hashlib, base64);
+#: it mirrors :func:`stream_join` exactly, including the failure cases:
+#: wrong count, index mismatch, a tampered section, a length mismatch or a
+#: key that does not match the pack's key hint.  It returns ``None`` on any
+#: failure so the caller can fail closed.
+LOADER_JOIN_SOURCE = '''def {FUNC}(pack_b85, key):
+    """Join the sealed sections of a payload pack.
+
+    The pack travels base85-encoded (one string, no quoting hazards) and
+    the key is the one the loader already derives at runtime, so the
+    section seal never needs a second key in the artifact.
+    """
+    import base64 as _nx_sb64
+    import hashlib as _nx_sh
+    import json as _nx_sj
+    try:
+        pack = _nx_sj.loads(_nx_sb64.b85decode(pack_b85).decode("utf-8"))
+        sections = pack["sections"]
+        if len(sections) != pack["count"]:
+            raise ValueError("section count mismatch")
+        if _nx_sh.sha256(bytes(key)).hexdigest()[:16] != pack.get("key_hint"):
+            raise ValueError("section key mismatch")
+        ordered = sorted(sections, key=lambda s: s["i"])
+        if [s["i"] for s in ordered] != list(range(pack["count"])):
+            raise ValueError("section index mismatch")
+        out = bytearray()
+        for sec in ordered:
+            nonce = bytes.fromhex(sec["nonce"])
+            enc = bytes.fromhex(sec["data"])
+            ks = bytearray()
+            c = 0
+            while len(ks) < len(enc):
+                ks.extend(_nx_sh.sha256(bytes(key) + nonce + c.to_bytes(8, "big")).digest())
+                c += 1
+            tagged = bytes(a ^ b for a, b in zip(enc, bytes(ks[:len(enc)])))
+            if len(tagged) < 32:
+                raise ValueError("section truncated")
+            tag, part = tagged[:32], tagged[32:]
+            if _nx_sh.sha256(part).digest() != tag:
+                raise ValueError("section integrity failure")
+            out.extend(part)
+        if len(out) != pack["total"]:
+            raise ValueError("joined length mismatch")
+        return out
+    except Exception:
+        return None
+'''
+
+
+def emit_loader_snippet(func_name: str = None) -> str:
+    """Return the loader-side join source, ready to embed.
+
+    The emitted function is self-contained (stdlib imports only) and
+    returns ``None`` on any verification failure, so the caller can fail
+    closed instead of running a partially joined payload.
+    """
+    name = func_name or JOIN_FUNC
+    return LOADER_JOIN_SOURCE.replace("{FUNC}", name)

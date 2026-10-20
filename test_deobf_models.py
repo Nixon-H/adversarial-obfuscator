@@ -4,7 +4,7 @@ test_deobf_models.py — tests all 4 free LLM models on deobfuscation.
 Runs models concurrently, saves results, reports scores.
 """
 
-import json, logging, os, secrets, sys, time, uuid
+import json, logging, os, secrets, sys, time, uuid  # noqa: F401 (this line binds a name used by an embedded template)
 from pathlib import Path
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed

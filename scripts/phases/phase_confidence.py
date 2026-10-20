@@ -26,17 +26,13 @@ from __future__ import annotations
 import json
 import os
 import sys
-from typing import Any, List, Optional
+from typing import Any
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, _ROOT)
 
 from scripts.common import BUILD_DIR, atomic_write, log
-from scripts.confidence import (
-    compute_confidence_interval,
-    format_confidence_interval,
-    SecurityConfidenceInterval,
-)
+from scripts.confidence import compute_confidence_interval, SecurityConfidenceInterval  # noqa: F401 (this line binds a name used by an embedded template)
 
 
 def collect_metric_samples(args: Any) -> dict:

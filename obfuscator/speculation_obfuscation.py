@@ -1,6 +1,6 @@
 import ast
 import random
-from typing import List, Optional, Set
+from typing import List, Set
 
 
 class SpeculationObfuscator(ast.NodeTransformer):

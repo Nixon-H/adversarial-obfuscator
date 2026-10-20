@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
@@ -145,7 +144,6 @@ class AssumptionTracker:
         for feature, assumptions in self._assumptions.items():
             for a in assumptions:
                 key = a.assumption.replace(" ", "_").replace("-", "_").lower()
-                expected_os = runtime_caps.get("os", {}).get(key if key.startswith("linux") else None)
                 if key in runtime_caps:
                     a.satisfied = bool(runtime_caps[key])
                     a.checked_at_runtime = True

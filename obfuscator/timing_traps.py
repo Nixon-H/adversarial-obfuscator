@@ -122,6 +122,13 @@ def generate_rdtsc_ir_pattern(config: dict) -> str:
     hard_exit = config.get("timing_hard_exit", False)
     exit_label = "degradation_exit" if hard_exit else "degradation_silent"
 
+    # The newline lives in a plain string: a backslash inside an f-string
+    # expression is Python 3.12+ only, and this module must import on
+    # 3.10.
+    _exit_body = ("call void @exit(i32 1)" + chr(10) + "  unreachable"
+                  if hard_exit else "ret void")
+    _exit_line = "  " + _exit_body + chr(10)
+
     ir = (
         f"\n"
         f"; RDTSC check pattern injected at IR level\n"
@@ -144,7 +151,7 @@ def generate_rdtsc_ir_pattern(config: dict) -> str:
         f"  ret void\n"
         f"\n"
         f"{exit_label}:\n"
-        f'  {"call void @exit(i32 1)\n  unreachable" if hard_exit else "ret void"}\n'
+        f"{_exit_line}"
         f"}}\n"
     )
     return ir

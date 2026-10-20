@@ -10,7 +10,6 @@ Writes <out_root>/<program>/experiment.json + .md. The locked config
 (scripts/transfer/experiment_H0H5.json) hash is embedded; arms.py hash
 too. Any post-results change to either hash = a different experiment.
 """
-import hashlib
 import json
 import os
 import tempfile
@@ -23,7 +22,6 @@ from scripts.transfer import corpus as corpus_mod
 from scripts.transfer import extended as ext_mod
 from scripts.transfer import measure as measure_mod
 from scripts.transfer import protocol
-from scripts.transfer import report as report_mod
 
 
 def _demo_argv(prog_name):

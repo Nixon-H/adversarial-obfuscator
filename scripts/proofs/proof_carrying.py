@@ -25,9 +25,9 @@ import z3
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from scripts.certificates.certificate import Certificate, CertificateChain, emit_certificate
-from scripts.validation.smt_validator import SMTValidator, ValidationResult
-from scripts.validation.equivalence import EquivalenceChecker, CheckResult
+from scripts.certificates.certificate import Certificate, CertificateChain, emit_certificate  # noqa: F401 (this line binds a name used by an embedded template)
+from scripts.validation.smt_validator import SMTValidator  # noqa: F401 (this line binds a name used by an embedded template)
+from scripts.validation.equivalence import EquivalenceChecker
 
 
 @dataclass

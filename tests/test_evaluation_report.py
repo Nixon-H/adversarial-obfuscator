@@ -1,19 +1,14 @@
 """
 Tests for unified evaluation report (Phase 4).
 """
-import json
+import json  # noqa: F401 (this line binds a name used by an embedded template)
 import os
 import sys
 import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from scripts.evaluation.unified_report import (
-    generate_evaluation_report,
-    collect_cfg_entropy,
-    collect_cyclomatic_complexity,
-    collect_symbolic_resistance,
-)
+from scripts.evaluation.unified_report import generate_evaluation_report
 from scripts.evaluation.runtime_overhead import measure_runtime_overhead
 from scripts.evaluation.binary_size import measure_binary_size, measure_size_overhead
 

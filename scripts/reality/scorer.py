@@ -375,7 +375,6 @@ def compute_feature_reality(feature: Dict[str, Any], pipeline_state: Dict[str, A
     redteam = pipeline_state.get("redteam_report", {})
     metrics = pipeline_state.get("metrics_report", {})
     security_gates = pipeline_state.get("security_gate_report", {})
-    benchmark = pipeline_state.get("benchmark_report", {})
 
     rt_score = 0.0
     for attack_type in ["angr_result", "ghidra_result", "bninja_result", "llm_result", "symbolic_result"]:

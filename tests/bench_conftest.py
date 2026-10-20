@@ -16,7 +16,7 @@ def large_source():
     lines = []
     for i in range(50):
         lines.append(f"def func_{i}(x):")
-        lines.append(f"    r = x")
+        lines.append("    r = x")
         for j in range(50):
             lines.append(f"    r = r + {j} if r > {j} else r - {j}")
         lines.append("    return r")

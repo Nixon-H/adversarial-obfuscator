@@ -24,7 +24,7 @@ analyzers.
 
 import json
 import os
-import sys
+import sys  # noqa: F401 (this line binds a name used by an embedded template)
 from ..common import log, BUILD_DIR
 
 
@@ -40,8 +40,8 @@ def phase_gpu_hybrid():
     """
     log("GPU_HYBRID", "Running CPU/GPU hybrid protection")
     try:
-        from scripts.gpu.gpu_execution import GPUExecutor, is_gpu_available
-        from scripts.gpu.hybrid_protection import HybridProtector, cpu_obfuscation_pass, gpu_parallel_transform
+        from scripts.gpu.gpu_execution import is_gpu_available
+        from scripts.gpu.hybrid_protection import HybridProtector
 
         gpu_avail = is_gpu_available()
         hybrid = HybridProtector(seed=0xCAFEBABE)

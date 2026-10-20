@@ -27,7 +27,7 @@ import os
 
 from ..common import log, BUILD_DIR
 from ..coverage.coverage_map import generate_coverage_map, coverage_to_json, coverage_to_html, coverage_to_text
-from ..coverage.pipeline_tracker import PipelineTracker
+from ..coverage.pipeline_tracker import PipelineTracker  # noqa: F401 (this line binds a name used by an embedded template)
 
 
 def phase_coverage(args, ir_module, pipeline_state=None):

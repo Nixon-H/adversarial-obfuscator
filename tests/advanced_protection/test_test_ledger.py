@@ -1,4 +1,3 @@
-import pytest
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -41,7 +40,7 @@ class TestLedger:
         import os
 
         data = b"cross-platform merkle verification test payload " * 50
-        expected_root = self._merkle_root(data)
+        self._merkle_root(data)
 
         test_bin = os.path.join(os.path.dirname(__file__), "..", "..", "runtime")
         result = subprocess.run(

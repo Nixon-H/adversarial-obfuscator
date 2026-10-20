@@ -10,7 +10,6 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
 from scripts.fhe_vm.scheme import BGVParameters, BGVScheme
 from scripts.fhe_vm.circuit import FHECircuit, CircuitEvaluator
 from scripts.fhe_vm.executor import FHEExecutor

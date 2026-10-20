@@ -10,13 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from obfuscator.residue_random import (
-    RESIDUE_FAMILIES,
-    apply_residue,
-    build_residue_map,
-    resolve_token,
-    residue_literals_in,
-)
+from obfuscator.residue_random import RESIDUE_FAMILIES, apply_residue, build_residue_map, resolve_token
 from obfuscator.core.pipeline import build_pipeline
 
 _SRC = "print(6 * 7)\n"

@@ -36,11 +36,11 @@ Maintenance Notes:
 
 import json
 import os
-import time
+import time  # noqa: F401 (this line binds a name used by an embedded template)
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from .capture import AttackCaptureStore
+from .capture import AttackCaptureStore  # noqa: F401 (this line binds a name used by an embedded template)
 
 
 class AttackHistory:

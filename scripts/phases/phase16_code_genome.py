@@ -22,7 +22,7 @@ Evolutionary code generation discovers obfuscation patterns that
 are resistant to current analysis tools.
 """
 
-import ast
+import ast  # noqa: F401 (this line binds a name used by an embedded template)
 import json
 import os
 
@@ -49,8 +49,8 @@ def phase_code_genome(base_genome_path=None, generations=50, population_size=30)
         source_text = "x = 1\ny = 2\nz = x + y\n"
 
     try:
-        from scripts.evolution.code_genome import evolve, CodeGenome, evolve_ir_genome
-        from scripts.evolution.ir_genome import IrGenome, IrInstruction, IR_INSTRUCTIONS
+        from scripts.evolution.code_genome import evolve, evolve_ir_genome
+        from scripts.evolution.ir_genome import IrInstruction, IR_INSTRUCTIONS
 
         best_genome, fitness, history = evolve(
             source_text,

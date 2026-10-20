@@ -61,7 +61,7 @@ Maintenance Notes:
 from __future__ import annotations
 
 import hashlib
-import os
+import os  # noqa: F401 (this line binds a name used by an embedded template)
 import secrets
 from dataclasses import dataclass
 from typing import Optional, Tuple

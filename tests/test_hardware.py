@@ -2,10 +2,8 @@
 Tests for Hardware Research Integration (Items 120-124).
 """
 import subprocess
-import json
 import os
 import sys
-import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

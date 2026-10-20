@@ -572,7 +572,6 @@ def decode_instruction_length(
         return 0, b""
 
     if encoding_mode == "fixed":
-        opcode = bytecode[pc]
         n_op = OPCODE_OPERAND_BYTES.get(logical_opcode, 0)
         end = pc + 1 + n_op
         consumed = min(end, len(bytecode)) - pc

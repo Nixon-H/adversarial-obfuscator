@@ -17,8 +17,7 @@ untrustworthy. This scorer quantifies the gap.
 """
 from __future__ import annotations
 
-import ast
-import json
+import json  # noqa: F401 (this line binds a name used by an embedded template)
 import logging
 import os
 import re

@@ -1,5 +1,4 @@
 import hashlib
-from datetime import datetime
 import math
 import os
 
@@ -53,7 +52,6 @@ def _nx_decoy_authenticate_session(session_id: str, secret: bytes) -> bool:
 def _nx_decoy_check_subscription(license_key: str, product_id: int) -> dict:
     """Check subscription status for a product."""
     try:
-        import json
         parts = license_key.split('-')
         status = 'active' if len(parts) >= 4 else 'expired'
         days_left = 365 if status == 'active' else 0

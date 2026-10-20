@@ -16,7 +16,7 @@ Bypass var (CI-only scope, batch 3):
 
 from __future__ import annotations
 
-import os
+import os  # noqa: F401 (this line binds a name used by an embedded template)
 import sys
 from typing import TypedDict
 

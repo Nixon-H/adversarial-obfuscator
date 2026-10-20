@@ -40,8 +40,8 @@ from __future__ import annotations
 import enum
 import hashlib
 import time
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import List, Optional
 
 
 class ExposureEventType(enum.Enum):
@@ -100,9 +100,6 @@ class ExposureTracker:
         if isinstance(data, str):
             return data.encode("utf-8")
         return data
-
-    def record_appearance(self, component: str, function: str, data: bytes | str) -> None:
-        return hashlib.sha256(data).hexdigest()
 
     def _ensure_bytes(self, data: bytes | str) -> bytes:
         if isinstance(data, str):

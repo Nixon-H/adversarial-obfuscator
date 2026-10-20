@@ -5,7 +5,6 @@ Benchmarks for Build Artifact Management.
 
 Measures diagram, table, report generation, and bundling performance.
 """
-import json
 import os
 import shutil
 import sys
@@ -13,23 +12,8 @@ import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from scripts.artifacts.diagram_generator import (
-    generate_architecture_diagram,
-    generate_protection_flowchart,
-    generate_attack_surface_diagram,
-    generate_comparison_chart,
-)
-from scripts.artifacts.table_generator import (
-    generate_benchmark_table,
-    generate_comparison_table,
-    generate_threat_model_table,
-    generate_coverage_table,
-)
-from scripts.artifacts.report_generator import (
-    generate_verification_report,
-    generate_regression_report,
-    generate_security_summary,
-)
+from scripts.artifacts.diagram_generator import generate_architecture_diagram
+from scripts.artifacts.table_generator import generate_benchmark_table
 from scripts.artifacts.bundler import ReproducibilityBundle
 from scripts.artifacts.builder import ArtifactBuilder
 

@@ -31,11 +31,8 @@ Audit check summary:
 from __future__ import annotations
 
 import hashlib
-import json
+import json  # noqa: F401 (this line binds a name used by an embedded template)
 import os
-import sys
-from datetime import datetime
-from typing import Any
 
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

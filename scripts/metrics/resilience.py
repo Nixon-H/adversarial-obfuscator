@@ -31,7 +31,7 @@ import logging
 import sys
 import tempfile
 import time
-from collections import defaultdict, Counter
+from collections import Counter
 
 import z3
 
@@ -508,10 +508,10 @@ def _z3_solver_time(tree, timeout_ms=5000):
     - dict: solver_time_ms, solver_result, constraint_count, num_vars
     """
     try:
-        from scripts.validation.ast_to_smt import ASTToSMT, ast_to_smt_formula
+        from scripts.validation.ast_to_smt import ast_to_smt_formula
         source = ast.unparse(tree)
         formula, translator = ast_to_smt_formula(source)
-        output = translator.get_output_var()
+        translator.get_output_var()
 
         solver = z3.Solver()
         solver.set("timeout", timeout_ms)
@@ -821,34 +821,34 @@ class ResilienceMetrics:
         print("=" * 60)
 
         ce = m["cfg_entropy"]
-        print(f"  CFG Entropy:")
+        print("  CFG Entropy:")
         print(f"    Original:    {ce['original_entropy']}")
         print(f"    Protected:   {ce['protected_entropy']}")
         print(f"    Ratio:       {ce['entropy_ratio']}")
 
         cc = m["cyclomatic_complexity"]
-        print(f"  Cyclomatic Complexity:")
+        print("  Cyclomatic Complexity:")
         print(f"    Original:    {cc['original_complexity']}")
         print(f"    Protected:   {cc['protected_complexity']}")
         print(f"    Ratio:       {cc['complexity_ratio']}")
 
         idv = m["instruction_diversity"]
-        print(f"  Instruction Diversity:")
+        print("  Instruction Diversity:")
         print(f"    Original:    {idv['original_diversity']}")
         print(f"    Protected:   {idv['protected_diversity']}")
         print(f"    Ratio:       {idv['diversity_ratio']}")
 
         dc = m["dead_code"]
-        print(f"  Dead Code:")
+        print("  Dead Code:")
         print(f"    Dead Code %: {dc['protected_dead_code_pct']}%")
         print(f"    Honey Funcs: {dc['protected_honey_function_count']}")
 
         sr = m["symbolic_resistance"]
-        print(f"  Symbolic Resistance:")
+        print("  Symbolic Resistance:")
         print(f"    Score:       {sr['resistance_score']}")
 
         sc = m["static_confusion"]
-        print(f"  Static Confusion:")
+        print("  Static Confusion:")
         print(f"    Warnings:    {sc['warnings']}")
         print(f"    Score:       {sc['analysis_confusion_score']}")
 

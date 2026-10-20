@@ -3,7 +3,6 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import os
-import struct
 
 try:
     import ctypes  # noqa: F811
@@ -147,7 +146,6 @@ def _check_mlock() -> bool:
     if not LIBC:
         return False
     try:
-        fn = LIBC.mlockall
         return True
     except AttributeError:
         return False

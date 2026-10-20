@@ -26,9 +26,9 @@ import ast
 import hashlib
 import json
 import os
-import sys
+import sys  # noqa: F401 (this line binds a name used by an embedded template)
 
-from ..common import log, atomic_write, BUILD_DIR, ROOT, DEFAULT_CONFIG
+from ..common import log, atomic_write, BUILD_DIR, ROOT
 
 
 def phase_classify(payload, config):
@@ -132,11 +132,7 @@ def phase_provenance_removal(source, config, replace_mode=False):
     """
     log("PROVENANCE", "Removing code provenance indicators")
     try:
-        from obfuscator.provenance import (
-            replace_error_messages, encode_sensitive_strings,
-            obfuscate_algorithmic_constants, scan_protocol_strings,
-            scan_algorithmic_constants,
-        )
+        from obfuscator.provenance import replace_error_messages, encode_sensitive_strings, obfuscate_algorithmic_constants
         with open(source) as f:
             src = f.read()
         tree = ast.parse(src)
@@ -150,7 +146,7 @@ def phase_provenance_removal(source, config, replace_mode=False):
             output = ast.unparse(tree)
             with open(source, "w") as f:
                 f.write(output)
-            log("PROVENANCE", f"Applied automated replacements: error codes + string encoding + constant obfuscation")
+            log("PROVENANCE", "Applied automated replacements: error codes + string encoding + constant obfuscation")
         else:
             log("PROVENANCE", f"Provenance removal loaded for {len(src)} bytes (diagnostic only)")
     except (ImportError, Exception) as e:
@@ -195,7 +191,7 @@ def phase_watermark_embedding(ir_module, config):
         from irgen.watermark import generate_watermark
         from llvmgen.lower import NixonIRParser
         parser = NixonIRParser()
-        ir_mod = parser.parse_file(ir_module)
+        parser.parse_file(ir_module)
         wm, meta = generate_watermark(
             customer_id=b"default",
             build_id=config.get("build_seed", b"default").encode()[:16],
@@ -302,7 +298,6 @@ def phase_adaptive_classifier_loop(payload, opts):
                 passes = selector.select(category)
                 log("ADAPTIVE_LOOP", f"  {fn}: {category} → {passes}")
 
-            import ast as _ast_mod
             import os as _os_mod
             protected_path = payload.replace(".py", "_protected.py")
             from obfuscator.core.pipeline import build_pipeline

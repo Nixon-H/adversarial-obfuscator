@@ -134,7 +134,7 @@ def _vm_bytecode_to_z3(bytecode: bytes, num_regs: int = 8) -> tuple[z3.BoolRef, 
     """Encode VM bytecode execution as Z3 formulas for equivalence checking.
     Simulates a simple VM with registers and basic ALU ops."""
     regs = [z3.BitVec(f"vm_r{i}", BITWIDTH) for i in range(num_regs)]
-    pc = z3.BitVec("vm_pc", BITWIDTH)
+    z3.BitVec('vm_pc', BITWIDTH)
     constraints = []
     output_var = None
 

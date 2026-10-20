@@ -5,9 +5,9 @@ tamper rejection, allowlist (exact + regex), stub/module equivalence,
 sources-level end-to-end, per-build uniqueness, legacy default preserved.
 """
 import ast
-import os
 import sys
 
+import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
@@ -320,7 +320,6 @@ def test_stub_has_no_64hex_key_signature():
     assert ns["R"] == "roundtrip"
 def test_kek_env_roundtrip_with_shard(monkeypatch):
     # Hardening A1c: seals bound to env shard decrypt with shard present.
-    import os
     monkeypatch.setenv("NXK_TEST_KEK_A1C", "cd" * 32)
     from obfuscator.core.sources import apply_ast_mutation
     src = 'MSG = "env bound secret"\nVAL = MSG.upper()\n'
@@ -335,7 +334,6 @@ def test_kek_env_roundtrip_with_shard(monkeypatch):
 
 
 def test_kek_env_fail_closed_without_shard(monkeypatch):
-    import os
     monkeypatch.setenv("NXK_TEST_KEK_A1C", "cd" * 32)
     from obfuscator.core.sources import apply_ast_mutation
     src = 'MSG = "env bound secret"\nVAL = MSG.upper()\n'
@@ -349,7 +347,6 @@ def test_kek_env_fail_closed_without_shard(monkeypatch):
 
 
 def test_kek_env_build_fails_loud_without_shard(monkeypatch):
-    import os
     monkeypatch.delenv("NXK_TEST_KEK_A1C", raising=False)
     from obfuscator.core.sources import apply_ast_mutation
     import pytest

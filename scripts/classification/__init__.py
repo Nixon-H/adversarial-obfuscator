@@ -18,3 +18,11 @@ apply heavy protections to trivial functions, wasting overhead budget.
 
 from .function_classifier import FunctionClassifier
 from .strategy_selector import StrategySelector, STRATEGY_MAP
+
+# Re-exported names: listed explicitly so the intent is
+# unambiguous and the unused-import check does not flag them.
+__all__ = [
+    "FunctionClassifier",
+    "STRATEGY_MAP",
+    "StrategySelector",
+]

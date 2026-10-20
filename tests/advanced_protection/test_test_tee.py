@@ -1,12 +1,15 @@
-import pytest
 import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+from irgen.tee_partition import (generate_enclave_entry_stubs,
+                                 generate_tee_config,
+                                 identify_critical_functions,
+                                 partition_program)
 
 class TestTEE:
 
     def test_tee_partition_creates_correctly(self):
-        from irgen.tee_partition import identify_critical_functions, partition_program, generate_tee_config
+        from irgen.tee_partition import identify_critical_functions, partition_program
         from irgen.compile import IrModule, IrFunction, IrType
 
         mod = IrModule("test_tee")
@@ -45,7 +48,6 @@ class TestTEE:
         assert result.returncode == 0, f"Seal/unseal test failed:\n{result.stderr}"
 
     def test_enclave_function_identification(self):
-        from irgen.tee_partition import identify_critical_functions
         from irgen.compile import IrModule, IrFunction, IrType
 
         mod = IrModule("test")
@@ -65,7 +67,6 @@ class TestTEE:
         assert "log_message" not in critical
 
     def test_program_partitioning_splits_correctly(self):
-        from irgen.tee_partition import identify_critical_functions, partition_program
         from irgen.compile import IrModule, IrFunction, IrType
 
         mod = IrModule("split_test")
@@ -84,7 +85,6 @@ class TestTEE:
             assert any(f.name == n for f in host_mod.functions)
 
     def test_entry_stub_generation(self):
-        from irgen.tee_partition import generate_enclave_entry_stubs
         stubs = generate_enclave_entry_stubs(["derive_key", "attest"])
         assert "tee_enclave_derive_key" in stubs
         assert "tee_enclave_attest" in stubs
@@ -92,7 +92,6 @@ class TestTEE:
         assert "malloc" in stubs
 
     def test_config_generation(self):
-        from irgen.tee_partition import generate_tee_config
         config = generate_tee_config(["derive_key", "attest"], tee_type="sgx")
         assert config["enabled"] is True
         assert config["tee_type"] == "sgx"
@@ -102,7 +101,6 @@ class TestTEE:
         assert config["entry_stubs"]["derive_key"] == "tee_enclave_derive_key"
 
     def test_config_generation_disabled(self):
-        from irgen.tee_partition import generate_tee_config
         config = generate_tee_config([], tee_type="sev")
         assert config["enabled"] is False
         assert config["tee_type"] == "sev"

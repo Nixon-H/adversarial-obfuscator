@@ -21,7 +21,6 @@ Coverage:
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from scripts.io_research import (
     MatrixBranchingProgram,

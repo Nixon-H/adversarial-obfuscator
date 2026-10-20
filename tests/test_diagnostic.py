@@ -1,15 +1,7 @@
 """Tests for scripts/diagnostic.py — diagnostic build mode helpers."""
 import time
 
-from scripts.diagnostic import (
-    DIAG_MARKER,
-    STAGES,
-    DiagClock,
-    banner,
-    key_freshness,
-    mark_diagnostic,
-    summarize_transforms,
-)
+from scripts.diagnostic import DIAG_MARKER, DiagClock, banner, key_freshness, mark_diagnostic, summarize_transforms
 
 
 def test_clock_reports_expected_keys():

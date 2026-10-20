@@ -30,8 +30,6 @@ Dependencies: None (standard library only: json, os, subprocess, struct, sys).
 import json
 import os
 import subprocess
-import struct
-import sys
 
 ROP_EMULATION_REGS = {
     "rdi": 7,
@@ -396,7 +394,6 @@ class RopFunctionCompiler:
     def _compile_load(self, instr: dict):
         """Compile a load instruction (stub)."""
         result = instr.get("result")
-        ptr = instr.get("ptr", "")
         if result:
             self.var_map[result] = 0
 
@@ -506,7 +503,6 @@ class RopFunctionCompiler:
         result = instr.get("result")
         cond = instr.get("condition", "0")
         true_val = instr.get("true_value", "0")
-        false_val = instr.get("false_value", "0")
         cond_int = self._variable_to_value(cond)
         true_int = self._variable_to_value(true_val)
         rax_gadget = self._find_gadget("pop rax; ret")
@@ -616,11 +612,7 @@ def generate_gadget_database(binary_path: str) -> dict:
         except ImportError:
             pass
 
-    result = subprocess.run(
-        ["cargo", "build", "--release", "-p", "nixon-runtime"],
-        capture_output=True, text=True,
-        timeout=120,
-    )
+    subprocess.run(['cargo', 'build', '--release', '-p', 'nixon-runtime'], capture_output=True, text=True, timeout=120)
 
     test_binary = binary_path
     if not test_binary.endswith(".o") and not test_binary.endswith(".so") and not test_binary.endswith(".exe"):
@@ -644,7 +636,6 @@ def generate_gadget_database(binary_path: str) -> dict:
     with open(test_binary, "rb") as f:
         binary_data = f.read()
 
-    import hashlib
     base_addr = 0x400000
 
     gadgets = scan_native_gadgets(binary_data, base_addr)

@@ -57,7 +57,7 @@ def phase_adversarial_bench(args: Any) -> Optional[dict]:
     suite.load_tests(generator, count=count)
 
     log("ADV_BENCH", f"Running {len(suite.tests)} adversarial tests...")
-    result_suite = suite.run_all(pipeline=None)
+    suite.run_all(pipeline=None)
 
     report = suite.generate_report()
 

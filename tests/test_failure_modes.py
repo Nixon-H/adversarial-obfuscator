@@ -4,7 +4,6 @@ Each test forces the failure and asserts the documented behavior.
 Python 3.10 compatible: no match statements, no X | Y annotations.
 """
 import argparse
-import base64
 import os
 import sys
 

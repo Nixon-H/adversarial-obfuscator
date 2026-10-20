@@ -17,7 +17,6 @@ import tempfile
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
-import pytest
 
 from scripts.feature_retirement.analyzer import (
     RetirementAnalyzer,

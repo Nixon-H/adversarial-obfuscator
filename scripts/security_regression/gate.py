@@ -37,8 +37,7 @@ Maintenance Notes:
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass, field
-from typing import Callable, Optional
+from dataclasses import dataclass
 
 
 class GateSeverity(enum.Enum):

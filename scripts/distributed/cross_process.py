@@ -3,7 +3,7 @@ import hmac
 import multiprocessing
 import os
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from multiprocessing.shared_memory import SharedMemory
 from typing import List, Optional, Tuple
 

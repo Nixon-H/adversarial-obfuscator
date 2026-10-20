@@ -21,9 +21,8 @@ from __future__ import annotations
 
 import ast
 import os
-import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -110,7 +109,6 @@ class ProtectionROIEngine:
             avg_runtime = sum(r.runtime_cost for r in results) / len(results)
             avg_complexity = sum(r.complexity_cost for r in results) / len(results)
             avg_maintenance = sum(r.maintenance_cost for r in results) / len(results)
-            avg_roi = sum(r.roi for r in results) / len(results)
             total_cost = avg_runtime + avg_complexity + avg_maintenance
             overall_roi = round(
                 (avg_security / max(total_cost, 1)) * 100, 2

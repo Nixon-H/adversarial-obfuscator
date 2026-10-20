@@ -32,7 +32,6 @@ import ast
 import hashlib
 import json
 import os
-import random
 import sys
 import copy
 from typing import Optional
@@ -376,7 +375,6 @@ def _scramble_variable_names(source: str, seed: bytes) -> str:
     """
     tree = ast.parse(source)
     var_map: dict[str, str] = {}
-    counter = 0
 
     class VarRenamer(ast.NodeTransformer):
         def visit_Name(self, node: ast.Name) -> ast.Name:
@@ -598,7 +596,7 @@ def _cli_select(args: list[str]):
 def main():
     """CLI entry point for variant pool."""
     if not _phase2_enabled():
-        cfg = _load_config()
+        _load_config()
         print("Advanced Protection disabled. Set advanced_protection.enabled = true in config/default.json")
         sys.exit(0)
 

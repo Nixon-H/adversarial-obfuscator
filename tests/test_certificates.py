@@ -5,7 +5,7 @@ import hashlib
 
 from scripts.certificates.certificate import Certificate, CertificateChain, emit_certificate
 from scripts.certificates.collector import CertificateCollector
-from scripts.certificates.integrity import hash_ast, hash_ir, hash_bytes, hash_source
+from scripts.certificates.integrity import hash_bytes, hash_source
 
 
 def test_certificate_serialization():

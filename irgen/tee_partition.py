@@ -32,11 +32,9 @@ resulting in no TEE partitioning.
 """
 
 from __future__ import annotations
-import ast
-import hashlib
 from typing import List, Tuple, Optional
 
-from irgen.compile import IrModule, IrFunction, IrValue, IrType
+from irgen.compile import IrModule
 
 TEE_KEYWORDS: List[str] = [
     "key_deriv", "derive_key", "kdf", "pbkdf",
@@ -150,36 +148,36 @@ def generate_enclave_entry_stubs(critical_funcs: List[str]) -> str:
         stub_name = f"tee_enclave_{func_name}"
         lines.append(f"int {stub_name}(int argc, void* argv[]) {{")
         lines.append(f"    uint32_t fn_id = {hash(func_name) & 0xFFFFFFFF}u;")
-        lines.append(f"    size_t input_len = 0;")
-        lines.append(f"    for (int i = 0; i < argc; i++) {{")
-        lines.append(f"        if (argv[i]) {{")
-        lines.append(f"            input_len += sizeof(void*);")
-        lines.append(f"        }}")
-        lines.append(f"    }}")
-        lines.append(f"")
-        lines.append(f"    uint8_t* input_buffer = (uint8_t*)malloc(input_len + 4);")
-        lines.append(f"    if (!input_buffer) return -1;")
-        lines.append(f"    input_buffer[0] = (fn_id >> 0) & 0xFF;")
-        lines.append(f"    input_buffer[1] = (fn_id >> 8) & 0xFF;")
-        lines.append(f"    input_buffer[2] = (fn_id >> 16) & 0xFF;")
-        lines.append(f"    input_buffer[3] = (fn_id >> 24) & 0xFF;")
-        lines.append(f"")
-        lines.append(f"    size_t output_len = 0;")
-        lines.append(f"    uint8_t* output_buffer = tee_enclave_call(")
-        lines.append(f"        input_buffer, input_len + 4, &output_len")
-        lines.append(f"    );")
-        lines.append(f"    free(input_buffer);")
-        lines.append(f"")
-        lines.append(f"    if (!output_buffer) return -1;")
-        lines.append(f"")
-        lines.append(f"    int result = 0;")
-        lines.append(f"    if (output_len >= sizeof(int)) {{")
-        lines.append(f"        result = (int)output_buffer[0];")
-        lines.append(f"    }}")
-        lines.append(f"    free(output_buffer);")
-        lines.append(f"    return result;")
-        lines.append(f"}}")
-        lines.append(f"")
+        lines.append("    size_t input_len = 0;")
+        lines.append("    for (int i = 0; i < argc; i++) {")
+        lines.append("        if (argv[i]) {")
+        lines.append("            input_len += sizeof(void*);")
+        lines.append("        }")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    uint8_t* input_buffer = (uint8_t*)malloc(input_len + 4);")
+        lines.append("    if (!input_buffer) return -1;")
+        lines.append("    input_buffer[0] = (fn_id >> 0) & 0xFF;")
+        lines.append("    input_buffer[1] = (fn_id >> 8) & 0xFF;")
+        lines.append("    input_buffer[2] = (fn_id >> 16) & 0xFF;")
+        lines.append("    input_buffer[3] = (fn_id >> 24) & 0xFF;")
+        lines.append("")
+        lines.append("    size_t output_len = 0;")
+        lines.append("    uint8_t* output_buffer = tee_enclave_call(")
+        lines.append("        input_buffer, input_len + 4, &output_len")
+        lines.append("    );")
+        lines.append("    free(input_buffer);")
+        lines.append("")
+        lines.append("    if (!output_buffer) return -1;")
+        lines.append("")
+        lines.append("    int result = 0;")
+        lines.append("    if (output_len >= sizeof(int)) {")
+        lines.append("        result = (int)output_buffer[0];")
+        lines.append("    }")
+        lines.append("    free(output_buffer);")
+        lines.append("    return result;")
+        lines.append("}")
+        lines.append("")
 
     lines.append("// Forward declaration of the runtime enclave call interface")
     lines.append("uint8_t* tee_enclave_call(")

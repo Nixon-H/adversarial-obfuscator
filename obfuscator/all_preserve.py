@@ -30,7 +30,6 @@ Python 3.10 compatible: no match statements, no X|Y annotations.
 """
 
 import ast
-from typing import List, Tuple
 
 
 def _static_string_list(node):

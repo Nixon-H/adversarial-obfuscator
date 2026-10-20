@@ -16,7 +16,6 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from obfuscator import clock_bias as cb
 from obfuscator.clock_bias import (
     CLOCK_BIAS_SAMPLES,
     CLOCK_BIAS_TAIL_FRAC_THRESHOLD,

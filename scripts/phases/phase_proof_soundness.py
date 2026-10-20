@@ -31,12 +31,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 sys.path.insert(0, _ROOT)
 
 from scripts.common import BUILD_DIR, atomic_write, log
-from scripts.proof_soundness.harness import (
-    ProofSoundnessHarness,
-    SoundnessReport,
-    generate_soundness_tests,
-    run_soundness_harness,
-)
+from scripts.proof_soundness.harness import ProofSoundnessHarness, SoundnessReport
 
 
 def phase_proof_soundness(args: Any) -> Optional[SoundnessReport]:

@@ -13,7 +13,6 @@ import os
 import sys
 import tempfile
 
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -377,7 +376,6 @@ class TestSelfAuditorDebt:
             for i in range(10):
                 with open(os.path.join(scripts_dir, f"stub_{i}.py"), "w") as f:
                     f.write(f"def stub_{i}():\n    pass\n")
-            old_root = None
             import scripts.self_audit.auditor as aud_mod
             old_root_val = getattr(aud_mod, "_ROOT", None)
             try:

@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import datetime
 import time
-import traceback
 from datetime import timezone
 from typing import Any, Callable, Dict, List, Optional
 

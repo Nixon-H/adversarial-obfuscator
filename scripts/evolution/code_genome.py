@@ -1,12 +1,11 @@
 import ast
 import hashlib
-import time
 import z3
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import List, Tuple
 
 from scripts.validation.ast_to_smt import ASTToSMT
-from scripts.evolution.ir_genome import IrGenome, IrInstruction, IR_INSTRUCTIONS, OPCODE_TO_NAME
+from scripts.evolution.ir_genome import IrGenome, IrInstruction, IR_INSTRUCTIONS
 
 
 @dataclass

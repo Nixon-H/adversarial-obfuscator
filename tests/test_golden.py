@@ -1,6 +1,5 @@
 """Golden-file tests: deterministic output with fixed seed."""
 import hashlib
-import pytest
 from obfuscator.core import ObfuscationTransformer
 
 GOLDEN_SEED = 12345

@@ -7,7 +7,6 @@ Test coverage:
 - Positive tests verify artifact collection, hashing, storage, retrieval
 - Negative tests verify missing artifacts, corrupt data, edge cases
 """
-import hashlib
 import json
 import os
 import shutil
@@ -430,7 +429,7 @@ def test_artifact_builder_generate():
         assert "build_dir" in collected
         assert "output_dir" in collected
 
-        summary_path = builder.build_complete(output_dir)
+        builder.build_complete(output_dir)
         assert os.path.isdir(output_dir)
     finally:
         shutil.rmtree(tmpdir)
@@ -503,7 +502,6 @@ def test_bundle_integrity_fail():
                 with open(manifest_path, "w") as f:
                     json.dump(manifest, f)
 
-            import subprocess
             old_dir = os.getcwd()
             os.chdir(extracted_dir)
             try:

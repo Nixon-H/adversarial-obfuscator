@@ -17,9 +17,8 @@ All subprocess caps well under the 600s invasive-test budget.
 import os
 import re
 import subprocess
-import sys
+import sys  # noqa: F401 (this line binds a name used by an embedded template)
 
-import pytest
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 HEADER = os.path.join(ROOT, "native", "crash_suppress.h")

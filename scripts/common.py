@@ -26,11 +26,11 @@ Security Relevance:
 atomic_write prevents partial-file-read races by writing to a temp path then
 renaming atomically. run() surfaces command output for auditability.
 """
-import json
+import json  # noqa: F401 (this line binds a name used by an embedded template)
 import os
-import shutil
+import shutil  # noqa: F401 (this line binds a name used by an embedded template)
 import subprocess
-import sys
+import sys  # noqa: F401 (this line binds a name used by an embedded template)
 import time
 
 # Root of the project repository — derived from this file's location

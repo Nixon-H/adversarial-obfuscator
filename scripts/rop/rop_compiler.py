@@ -12,8 +12,6 @@ import json
 import logging
 import os
 import random
-import struct
-import sys
 
 logger = logging.getLogger(__name__)
 
@@ -713,7 +711,6 @@ class RopCompiler:
             self._var_map[result] = out
 
     def _compile_ir_call(self, instr: dict):
-        callee = instr.get("callee", "@__unknown")
         args = instr.get("args", [])
         arg_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
         for i, a in enumerate(args[:6]):
@@ -916,8 +913,8 @@ class PayloadDisperser:
     def generate_runtime_source(self, chain: RopChain, key: bytes) -> str:
         """Generate C source that uses native/rop_exec.h to execute the chain at runtime."""
         encrypted, _ = self.encrypt_chain(chain, key)
-        hex_enc = encrypted.hex()
-        hex_key = key.hex()
+        encrypted.hex()
+        key.hex()
         return f'''/* Auto-generated ROP chain runtime - uses native/rop_exec.h */
 #include <stdint.h>
 #include <stddef.h>

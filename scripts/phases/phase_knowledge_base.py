@@ -54,7 +54,7 @@ def phase_knowledge_base(args: Any) -> dict:
     print("  SECURITY KNOWLEDGE BASE")
     print("=" * 60)
     print(f"  Total entries: {result['total_entries']}")
-    print(f"  By category:")
+    print("  By category:")
     for cat, count in sorted(result["by_category"].items()):
         print(f"    {cat:30s} {count}")
     kc = result["knowledge_coverage"]

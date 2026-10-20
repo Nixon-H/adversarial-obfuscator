@@ -5,7 +5,6 @@ effect to the G2 seed_only control (same pass set, vm name retained as a
 documented no-op). New families (rep, vm_dispatch) are isolated: all
 other transforms explicitly OFF so effects attribute cleanly.
 """
-from scripts.transfer import protocol
 
 # Base: everything the generator + pipeline would otherwise enable,
 # forced OFF for isolation. (generate_variant hardcodes strip_meta,

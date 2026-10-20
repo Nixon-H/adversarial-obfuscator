@@ -26,11 +26,11 @@ import csv
 import json
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from ..common import log, BUILD_DIR
 from ..exposure.tracker import ExposureTracker
-from ..exposure.metric import PlaintextExposureMetric, ExposureReport
+from ..exposure.metric import PlaintextExposureMetric, ExposureReport  # noqa: F401 (this line binds a name used by an embedded template)
 from ..exposure.instrumentors import (
     MicroJITExposureInstrumentor,
     FragmentationExposureInstrumentor,
@@ -153,10 +153,10 @@ def phase_exposure(
     print(f"  Total Exposure Time:        {report.total_exposure_ns} ns")
     print(f"  Total Execution Time:       {report.total_execution_ns} ns")
     print(f"  Event Count:                {report.event_count}")
-    print(f"  Component Scores:")
+    print("  Component Scores:")
     for comp, score in sorted(report.component_scores.items()):
         print(f"    {comp:30s}: {score:.2f}")
-    print(f"  Recommendations:")
+    print("  Recommendations:")
     for rec in report.recommendations:
         print(f"    - {rec}")
     print("  " + "=" * 58)

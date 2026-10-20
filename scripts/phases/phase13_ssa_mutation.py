@@ -37,7 +37,7 @@ def phase_ssa_mutation(ir_path=None, num_variants=4):
     """
     log("SSA_MUTATION", f"Generating {num_variants} SSA variants per function")
     try:
-        from irgen.ssa_mutation import generate_ssa_mutation_config, generate_ssa_variants
+        from irgen.ssa_mutation import generate_ssa_mutation_config
     except ImportError:
         log("SKIP", "irgen.ssa_mutation not importable")
         return

@@ -1,11 +1,9 @@
-import json
 import os
 import tempfile
-import hashlib
 
 from scripts.certificates.certificate import Certificate, CertificateChain
 from scripts.verifier.binary_reader import BinaryReader
-from scripts.verifier.standalone_verifier import StandaloneVerifier, VerificationResult
+from scripts.verifier.standalone_verifier import StandaloneVerifier
 
 
 def _make_chain_data() -> bytes:

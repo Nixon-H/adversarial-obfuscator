@@ -16,11 +16,10 @@ Security Relevance:
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any
 
-from .ledger import EvidenceLedger, _compute_file_hash, _now_iso
+from .ledger import EvidenceLedger
 
 
 class EvidenceCollector:

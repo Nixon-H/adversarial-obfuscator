@@ -2,10 +2,7 @@
 import ast
 import json
 import os
-import shutil
-import subprocess
 import sys
-import tempfile
 
 import pytest
 
@@ -53,7 +50,7 @@ class TestGuidedDiversity:
         src = _write_source(tmpdir)
         out = os.path.join(tmpdir, "evolved2")
         gen = GuidedDiversityGenerator(population_size=3, generations=1)
-        paths = gen.evolve(src, out)
+        gen.evolve(src, out)
         history = gen.get_history()
         assert len(history) >= 1
         assert "mean_score" in history[0]
@@ -71,7 +68,7 @@ class TestGuidedDiversity:
         src = _write_source(tmpdir)
         out = os.path.join(tmpdir, "evolved4")
         gen = GuidedDiversityGenerator(population_size=5, generations=2)
-        paths = gen.evolve(src, out)
+        gen.evolve(src, out)
         history = gen.get_history()
         assert len(history) >= 2
         generations_seen = {h["generation"] for h in history}
@@ -85,9 +82,12 @@ class TestGuidedDiversity:
         gen.evolve(src, out)
         history = gen.get_history()
         if len(history) >= 2:
+            # Later generation should generally have competitive scores.
+            # The two means were computed but never compared, so this
+            # test asserted nothing about the scores at all.
             gen0_mean = history[0].get("mean_score", 0)
             gen1_mean = history[1].get("mean_score", 0)
-            # Later generation should generally have competitive scores
+            assert gen1_mean >= gen0_mean * 0.5, (gen0_mean, gen1_mean)
 
     def test_each_variant_valid_python(self, tmpdir):
         src = _write_source(tmpdir)

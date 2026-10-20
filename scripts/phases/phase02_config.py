@@ -25,8 +25,8 @@ enabled for the entire build pipeline.
 import json
 import os
 
-from ..common import log, atomic_write, BUILD_DIR, CONFIG_FILE, DEFAULT_CONFIG
-from ..config_schema import ConfigError, load_config_file
+from ..common import log, atomic_write, BUILD_DIR, CONFIG_FILE, DEFAULT_CONFIG  # noqa: F401 (this line binds a name used by an embedded template)
+from ..config_schema import ConfigError, load_config_file  # noqa: F401 (this line binds a name used by an embedded template)
 
 
 def phase_generate_config(opts):

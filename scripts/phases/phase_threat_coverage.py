@@ -61,7 +61,7 @@ def phase_threat_coverage(args: Any) -> dict:
         print(f"    ⚠ {ut['threat']}: missing {', '.join(ut['missing'])}")
 
     print(f"  {'─' * 40}")
-    print(f"  Per-threat breakdown:")
+    print("  Per-threat breakdown:")
     for entry in result["threat_map"]:
         status = "COVERED" if (
             entry["features"] and entry["metrics"] and entry["verifications"]

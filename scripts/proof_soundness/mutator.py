@@ -20,8 +20,7 @@ from __future__ import annotations
 
 import ast
 import random
-import copy
-from typing import Dict, List, Optional, Tuple, Any
+from typing import List, Optional
 
 
 class ProofMutationEngine:

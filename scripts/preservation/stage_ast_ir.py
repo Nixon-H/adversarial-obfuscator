@@ -3,9 +3,8 @@ from __future__ import annotations
 import ast
 import hashlib
 import time
-from typing import Optional
 
-from scripts.validation.ast_to_smt import ASTToSMT, ast_to_smt_formula
+from scripts.validation.ast_to_smt import ASTToSMT
 from scripts.validation.equivalence import EquivalenceChecker
 from scripts.preservation.report import StageResult
 
@@ -15,7 +14,7 @@ def check_ast_ir(
     ir_module,
     timeout_ms: int = 30000,
 ) -> StageResult:
-    from scripts.validation.ir_to_smt import IRToSMT, ir_to_smt_formula
+    from scripts.validation.ir_to_smt import IRToSMT
 
     start = time.time()
     input_hash = hashlib.sha256(ast.dump(ast_tree).encode()).hexdigest()

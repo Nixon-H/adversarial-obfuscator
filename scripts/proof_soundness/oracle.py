@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import ast
 import random
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 
 class TransformationOracle:

@@ -2,9 +2,9 @@ import hashlib
 import multiprocessing as mp
 import os
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 class Platform(IntEnum):
@@ -165,7 +165,6 @@ class FragmentMigrator:
 
         src_process.join(timeout=2)
         dst_process.join(timeout=2)
-
         if success:
             return MigratingFragment(
                 fragment_id=fragment.fragment_id,
@@ -200,9 +199,9 @@ class FragmentMigrator:
         dst.start()
 
         result = resp_queue.get(timeout=10)
+
         src.join(timeout=2)
         dst.join(timeout=2)
-
         if result.get("success", False):
             restored = result.get("restored")
             if restored:
@@ -231,6 +230,64 @@ class FragmentMigrator:
 
 def _src_migrate(fragment_id: int, from_platform: int, encrypted_state: bytes, mac: bytes, out_queue):
     out_queue.put((encrypted_state, mac))
+
+
+def _platform_src_migrate(fragment_id: int, from_platform: int, to_platform: int,
+                           encrypted_state: bytes, mac: bytes,
+                           migration_secret: bytes, out_queue):
+    """Source side of the multi-process migration.
+
+    The state is already sealed by
+    :meth:`FragmentMigrator.serialize_state_for_migration`; this worker
+    only carries the sealed blob, its MAC and the source platform to the
+    destination process.
+    """
+    out_queue.put((encrypted_state, mac, int(from_platform)))
+
+
+def _platform_dst_migrate(fragment_id: int, to_platform: int,
+                          migration_secret: bytes, in_queue, out_queue):
+    """Destination side: verify the sealed state and report the result.
+
+    The MAC is recomputed with the same derivation as
+    :meth:`FragmentMigrator.serialize_state_for_migration`, so a tampered
+    or mis-routed blob fails closed.  On success the restored fragment
+    is returned; the caller attaches the variants it already holds.
+    """
+    import hashlib
+    import struct
+    try:
+        msg = in_queue.get(timeout=10)
+    except Exception:
+        msg = None
+    if msg is None:
+        out_queue.put({"success": False, "restored": None})
+        return
+    try:
+        encrypted_state, mac, from_platform = msg
+        key = hashlib.sha256(
+            migration_secret
+            + struct.pack(">III", fragment_id, int(from_platform), int(to_platform))
+        ).digest()
+        expected_mac = hashlib.sha256(
+            key + encrypted_state
+            + struct.pack(">II", int(from_platform), int(to_platform))
+        ).digest()
+        if mac != expected_mac:
+            out_queue.put({"success": False, "restored": None})
+            return
+        stream = hashlib.sha256(key).digest()
+        stream = hashlib.sha256(stream + struct.pack(">I", fragment_id)).digest()
+        decrypted = bytes(
+            a ^ b for a, b in zip(
+                encrypted_state,
+                stream * (len(encrypted_state) // len(stream) + 1))
+        )[:len(encrypted_state)]
+        restored = MigratingFragment.deserialize_state(decrypted, fragment_id)
+    except Exception:
+        out_queue.put({"success": False, "restored": None})
+        return
+    out_queue.put({"success": True, "restored": restored})
 
 
 def _dst_migrate(fragment_id: int, to_platform: int, migration_secret: bytes, in_queue, out_queue):

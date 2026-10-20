@@ -3,7 +3,6 @@ import os
 import subprocess
 import sys
 
-import pytest
 
 from scripts.artifact_sign import sign_file, verify_file
 

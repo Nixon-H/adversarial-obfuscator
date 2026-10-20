@@ -20,7 +20,6 @@ means a guarantee is broken, potentially creating an exploitable weakness.
 from __future__ import annotations
 
 import ast
-import json
 import os
 import re
 import sys
@@ -438,10 +437,8 @@ class SecurityInvariantEngine:
             for node in ast.walk(tree):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                     func_name = node.name
-                    first_stmt = None
                     for stmt in node.body:
                         if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
-                            first_stmt = stmt
                             break
                         if isinstance(stmt, ast.FunctionDef) or isinstance(stmt, ast.AsyncFunctionDef):
                             continue
@@ -507,9 +504,6 @@ class SecurityInvariantEngine:
         )
         self.report.violations_found = total_violations
 
-        total_checks = sum(
-            r.checks_performed for r in self.report.invariant_results.values()
-        )
         if total_violations == 0:
             self.report.invariant_score = 100.0
         else:

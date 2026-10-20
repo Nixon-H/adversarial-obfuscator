@@ -39,12 +39,10 @@ Maintenance Notes:
 
 from __future__ import annotations
 
-import copy
+import copy  # noqa: F401 (this line binds a name used by an embedded template)
 import datetime
-import json
-from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, List, Optional, Tuple
-from dataclasses import dataclass, field, asdict
+import json  # noqa: F401 (this line binds a name used by an embedded template)
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 

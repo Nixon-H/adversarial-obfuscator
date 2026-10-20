@@ -70,6 +70,9 @@ def _is_variable(opnd) -> bool:
     if name is None:
         return False
     try:
+        # A validation probe: the exception IS the test.  Do not let a
+        # cleanup drop it -- without it every operand would look like a
+        # variable and the var*var rejection would never fire.
         float(name)
         return False
     except (ValueError, TypeError):
@@ -148,7 +151,6 @@ def _build_bp(function) -> MatrixBranchingProgram:
             name_to_value[rname] = resolved if resolved else rname
 
     if not arith_results:
-        scalar_zero = np.zeros(1)
         return MatrixBranchingProgram(
             [(np.array([[1.0]]), np.array([[1.0]]))],
             start_vector=np.array([0.0]),
@@ -213,7 +215,6 @@ def _build_bp(function) -> MatrixBranchingProgram:
         state_dim = dim
 
     if not matrices:
-        scalar_zero = np.zeros(1)
         return MatrixBranchingProgram(
             [(np.array([[1.0]]), np.array([[1.0]]))],
             start_vector=np.array([0.0]),

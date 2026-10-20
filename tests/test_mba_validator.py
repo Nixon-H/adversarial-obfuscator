@@ -1,5 +1,4 @@
 import ast
-import pytest
 
 from scripts.validation.mba_validator import MBAValidator
 

@@ -40,10 +40,10 @@ Maintenance Notes:
 
 from __future__ import annotations
 
-import copy
-import math
+import copy  # noqa: F401 (this line binds a name used by an embedded template)
+import math  # noqa: F401 (this line binds a name used by an embedded template)
 import random
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from scripts.synthesis.engine import ProtectionPlan, ProtectionCost
 
@@ -72,7 +72,6 @@ class ProtectionOptimizer:
         return True
 
     def _score(self, plan: ProtectionPlan, targets: Dict[str, float]) -> float:
-        target_security = targets.get("target_security", 70.0)
         max_overhead = targets.get("max_overhead", 50.0)
         max_size = targets.get("max_size", 3.0)
 

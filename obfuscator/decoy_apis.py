@@ -8,7 +8,6 @@ import ast
 import random
 import secrets
 
-from .algo_templates import _REAL_ALGO_SOURCES
 
 _DECOY_API_POOL = [
     "validate_license",
@@ -195,11 +194,14 @@ class SemanticDecoyApiInjector(ast.NodeTransformer):
             self._existing_names.add(candidate)
             return candidate
         for i in range(100):
-            candidate = f"_nx_decoy_{base}_{(f"{self._rng.getrandbits(16):04x}")}"
+            # Single quotes inside the f-string expression: reusing the
+            # outer quote character is Python 3.12+ only (PEP 701) and
+            # this module must import on 3.10.
+            candidate = f"_nx_decoy_{base}_{(f'{self._rng.getrandbits(16):04x}')}"
             if candidate not in self._existing_names:
                 self._existing_names.add(candidate)
                 return candidate
-        return f"_nx_decoy_{base}_{(f"{self._rng.getrandbits(32):08x}")}"
+        return f"_nx_decoy_{base}_{(f'{self._rng.getrandbits(32):08x}')}"
 
     def visit(self, node: ast.AST) -> ast.AST:
         return self.generic_visit(node)

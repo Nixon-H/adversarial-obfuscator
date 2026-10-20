@@ -39,7 +39,6 @@ def test_avoids_unproven_when_possible():
     proofs["ast_rename"] = True
     assignment = optimizer.optimize_with_proofs(functions, proofs)
     assigned = assignment.get("small_fn", [])
-    unproven = [p for p in assigned if not proofs.get(p, False)]
     assert "ast_rename" in assigned, "ast_rename should always be assigned"
 
 

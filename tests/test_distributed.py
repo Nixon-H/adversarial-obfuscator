@@ -5,16 +5,16 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from scripts.distributed.multi_binary import MultiBinaryDistributor, MasterIndex
-from scripts.distributed.cross_process import CrossProcessBinder, CrossProcessChain, FragmentState
-from scripts.distributed.remote_unlock import RemoteUnlockServer, RemoteUnlockClient, UnlockToken
-from scripts.distributed.vm_cluster import DistributedVMExecutor, VMPartitionedState, VMStatePartition
-from scripts.distributed.multi_host import MultiHostExecutor, HostFunction, CallGraphEdge
-from scripts.distributed.fragment_migration import FragmentMigrator, MigratingFragment, Platform, PlatformVariant
-from scripts.distributed.dist_attestation import DistributedAttestation, AttestationChallenge, AttestationResponse
+from scripts.distributed.multi_binary import MultiBinaryDistributor
+from scripts.distributed.cross_process import CrossProcessBinder, CrossProcessChain
+from scripts.distributed.remote_unlock import RemoteUnlockServer, RemoteUnlockClient
+from scripts.distributed.vm_cluster import DistributedVMExecutor, VMPartitionedState
+from scripts.distributed.multi_host import MultiHostExecutor
+from scripts.distributed.fragment_migration import FragmentMigrator, MigratingFragment, Platform
+from scripts.distributed.dist_attestation import DistributedAttestation, AttestationResponse
 from scripts.distributed.dist_watermark import DistributedWatermark, WatermarkShare
-from scripts.distributed.diversity_pool import DistributedDiversityPool, VariantInfo, NodeDeployment
-from scripts.distributed.recovery_prevention import ExecutionRecoveryPreventer, NodeSlice, TrafficMessage
+from scripts.distributed.diversity_pool import DistributedDiversityPool
+from scripts.distributed.recovery_prevention import ExecutionRecoveryPreventer
 
 
 # ===========================================================================
@@ -339,9 +339,8 @@ class TestMultiHost:
         me2 = MultiHostExecutor(num_hosts=3, deployment_seed=456)
         fns = [("f1", "a"), ("f2", "b"), ("f3", "c"), ("f4", "d")]
         hf1 = me1.assign_functions(fns)
-        hf2 = me2.assign_functions(fns)
+        me2.assign_functions(fns)
         ids1 = [h.host_id for h in hf1]
-        ids2 = [h.host_id for h in hf2]
         # Different seeds may produce different assignments
         assert ids1 is not None
 
@@ -404,7 +403,7 @@ class TestFragmentMigration:
     def test_cross_platform_key_derivation(self):
         fm = FragmentMigrator()
         variants = {Platform.X86: b"\xc3", Platform.ARM: b"\x00\x00"}
-        fragment = fm.create_fragment(0, variants)
+        fm.create_fragment(0, variants)
         key_x86_to_arm = fm._derive_platform_key(0, Platform.X86, Platform.ARM)
         key_arm_to_x86 = fm._derive_platform_key(0, Platform.ARM, Platform.X86)
         assert key_x86_to_arm != key_arm_to_x86
@@ -488,7 +487,7 @@ class TestDistributedAttestation:
         da.simulate_node_failure(1)
         challenge = da.create_challenge(0, 1)
         if challenge:
-            response = da.respond_to_challenge(1, challenge)
+            da.respond_to_challenge(1, challenge)
         result = da.run_consensus_protocol()
         assert result is False
         assert da.is_self_destructed()
@@ -509,7 +508,7 @@ class TestDistributedAttestation:
 
     def test_wrong_responder_fails(self):
         da = DistributedAttestation(num_nodes=3)
-        challenge = da.create_challenge(0, 1)
+        da.create_challenge(0, 1)
         response = AttestationResponse(
             responder_id=2,
             response_data=b"fake",

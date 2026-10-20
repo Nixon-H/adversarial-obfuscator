@@ -33,7 +33,6 @@ sys.path.insert(0, _ROOT)
 from scripts.common import BUILD_DIR, atomic_write, log
 from scripts.attack_replay.capture import AttackCaptureStore, capture_attack
 from scripts.attack_replay.replay import AttackReplay, ReplayResult
-from scripts.attack_replay.comparator import compare_results, compare_reports
 from scripts.attack_replay.history import AttackHistory
 
 

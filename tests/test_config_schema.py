@@ -6,7 +6,6 @@ scripts/phases/phase02_config.py::load_advanced_protection_config.
 Python 3.10 compatible: no match statements, no X | Y annotations.
 """
 import argparse
-import copy
 import json
 import os
 import sys

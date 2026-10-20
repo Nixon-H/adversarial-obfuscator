@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict
 
 from scripts.common import atomic_write, log
 from scripts.self_audit import AuditReport

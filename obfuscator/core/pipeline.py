@@ -1,4 +1,4 @@
-import sys,os,zipfile,base64,io,tokenize,py_compile,shutil,tempfile,random,hashlib,lzma,struct,time,json,argparse,uuid,re,inspect,platform,subprocess,marshal,hmac,secrets,ctypes,importlib.util,atexit,warnings,zlib,codecs,string,builtins,math,dis,multiprocessing,types,traceback,gc,ast,socket,threading,concurrent.futures,logging;from io import StringIO;from datetime import datetime; _nixon_ハッシュ해시 = hashlib
+import sys, os, zipfile, base64, io, tokenize, py_compile, shutil, tempfile, random, hashlib, lzma, struct, time, json, argparse, uuid, re, platform, subprocess, marshal, hmac, secrets, ctypes, importlib.util, zlib, string, traceback, ast, concurrent.futures, logging  # noqa: F401 (this line binds a name used by an embedded template)
 from .utils import *
 from .transforms import *
 from .sources import *
@@ -167,7 +167,7 @@ def register_string(s):
     STRING_CACHE[s] = global_id
     return global_id
 def Nixon_Enc_strings(code):
-    EXCLUDED = ["__main__", "__init__", "utf-8", "latin1", "ascii", "ignore", 
+    EXCLUDED = ["__main__", "__init__", "utf-8", "latin1", "ascii", "ignore",
                 "__NATIVE_BLOBS_PLACEHOLDER__", "__FALLBACK_BLOB_PLACEHOLDER__",
                 "__NX_STR_TABLE_SENTINEL__", "__NX_STR_KEY_A__", "__NX_STR_KEY_B__",
                 "little", "big", "rb", "wb", "r", "w", "ab", "a", "HOOK_SECTION", "PY_LOGGER", "debugger", "HOOK_", "SECTION", "PY_", "LOGGER",
@@ -176,10 +176,24 @@ def Nixon_Enc_strings(code):
     lines = code.split('\n')
     out_lines = []
     pattern = re.compile(r'(?<![bfruBFRU])(?<!["\'])("[\w\d\s_\./:-]+?"|\'[\w\d\s_\./:-]+?\')(?!["\'])')
+    # The loader preamble (module aliases, the getattr hook, the string
+    # table bootstrap) is rendered BEFORE the string decoder is defined.
+    # Rewriting a literal up there into a decoder call made the artifact
+    # raise NameError at import -- the decoder did not exist yet.  So the
+    # preamble is left plaintext until the decoder definition is seen;
+    # everything after it is encrypted as before.  The preamble's literals
+    # are structural ("get", "a", "_nx_r"), not secrets.
+    _dec_marker = "def %s(" % (VARS['FUNC_STR_DEC'],)
+    _decoder_seen = False
     for line in lines:
+        if not _decoder_seen and _dec_marker in line:
+            _decoder_seen = True
+        if not _decoder_seen:
+            out_lines.append(line)
+            continue
         if len(line) > 5000:
             out_lines.append(line)
-            continue        
+            continue
         if any(marker in line for marker in SKIP_MARKERS):
             out_lines.append(line)
             continue
@@ -349,7 +363,7 @@ setup(
         cmd = [sys.executable, 'setup.py', 'build_ext', '--inplace']
         result = subprocess.run(cmd, cwd=cython_dir, capture_output=True, text=True)
         if result.returncode != 0:
-            print(f"[ERROR] Cython compilation failed:")
+            print("[ERROR] Cython compilation failed:")
             print(result.stdout)
             print(result.stderr)
             return None
@@ -408,6 +422,7 @@ def process_file_safe(args):
         shutil.copy2(src, dest)
         return ('copied', src)
 def generate_report(base_name, build_info, all_outputs):
+    from datetime import datetime
     report = {'build_info': {'timestamp': datetime.now().isoformat()}, 'protection_features': build_info['features'], 'metrics': build_info['metrics'], 'outputs': all_outputs}
     try:
         with open(base_name.replace('.py', '.report.json'), 'w') as f: json.dump(report, f, indent=2)
@@ -424,11 +439,15 @@ def _check_aes_ctr():
     global _AES_CTR_AVAILABLE
     if _AES_CTR_AVAILABLE is None:
         try:
-            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+            # An availability probe: the names are not used here, the
+            # import is the test.  Do not let a cleanup drop it -- without
+            # it this function always reports True and the loader claims
+            # AES-CTR support it does not have.
+            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes  # noqa: F401
             _AES_CTR_AVAILABLE = True
         except ImportError:
             try:
-                from Crypto.Cipher import AES
+                from Crypto.Cipher import AES  # noqa: F401
                 _AES_CTR_AVAILABLE = True
             except ImportError:
                 _AES_CTR_AVAILABLE = False
@@ -436,10 +455,10 @@ def _check_aes_ctr():
 
 def Nixon_Enc_AES_CTR(data, key, nonce):
     try:
-        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
         derived = hashlib.sha256(key + nonce).digest()
         aes_key = derived[:32]
         iv = hashlib.sha256(nonce + key).digest()[:16]
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
         cipher = Cipher(algorithms.AES(aes_key), modes.CTR(iv))
         encryptor = cipher.encryptor()
         return encryptor.update(bytes(data)) + encryptor.finalize()
@@ -552,11 +571,11 @@ def test_protected_file(filepath, original_source):
             try:
                 with open(original_source, 'r', errors='ignore') as f: orig_content = f.read()
                 if "__NATIVE_BLOBS_PLACEHOLDER__" in orig_content:
-                    print(f"    [!] Hybrid Template detected. Output mismatch expected/ignored.")
+                    print("    [!] Hybrid Template detected. Output mismatch expected/ignored.")
                     results['comparison'] = {'outputs_match': True, 'return_codes_match': results['original']['returncode'] == results['obfuscated']['returncode'], 'cipher_engine': cipher_engine}
                     return results
             except Exception: pass
-            print(f"    [!] Diff Mismatch (First 3 lines):")
+            print("    [!] Diff Mismatch (First 3 lines):")
             import difflib
             for line in list(difflib.unified_diff(orig_lines, obf_filtered, fromfile='Original', tofile='Obfuscated', lineterm=''))[:10]:
                  print(f"      {line}")
@@ -599,7 +618,7 @@ def test_command(args, skip_header=False):
         UI._out(f"    Status: {obf.get('status')}")
         UI._out(f"    Return Code: {obf.get('returncode')}")
         UI._out(f"    Integrity Match: {comp.get('outputs_match')}")
-        UI._out(f"    STDOUT (Last 20 lines):")
+        UI._out("    STDOUT (Last 20 lines):")
         out_lines = obf.get('stdout', '').splitlines()
         for l in out_lines[-20:]: UI._out(f"      {l}")
     if all_pass:
@@ -723,7 +742,7 @@ def verify_on_blockscout(explorer_url, contract_address, source_code, compiler_v
             if not isinstance(result, dict): return False
         except Exception: return False
         if result.get('status') == '1' or result.get('message') == 'OK':
-            print(f"    [+] Contract verified on explorer")
+            print("    [+] Contract verified on explorer")
             return True
         else:
             print(f"    [!] Verification response: {result}")
@@ -753,7 +772,7 @@ def auto_deploy_contract(rpc_url, explorer_url=None, private_key=None):
         verify_on_blockscout(explorer_url, contract_address, LICENSE_CONTRACT_SOLIDITY, compiled['compiler_version'])
     else:
         print("    [3/3] Skipping verification (no explorer URL)")
-    print(f"\n[AUTO-DEPLOY] SUCCESS!")
+    print("\n[AUTO-DEPLOY] SUCCESS!")
     print(f"    Contract: {contract_address}")
     print(f"    RPC: {rpc_url}")
     return contract_address, rpc_url
@@ -867,7 +886,7 @@ class CloudflareDeployer:
                         res = json.loads(r.read())
                         return res if isinstance(res, dict) else None
                     except Exception: return None
-            except Exception as e:
+            except Exception:
                 time.sleep(2)
         return None
     def get_subdomain(self):
@@ -1051,8 +1070,8 @@ def build_local_cython(source_content, target_python=None):
     import subprocess
     import sys
     import shutil
-    from setuptools import setup, Extension
-    from Cython.Build import cythonize
+    from setuptools import setup, Extension  # noqa: F401 (this line binds a name used by an embedded template)
+    from Cython.Build import cythonize  # noqa: F401 (this line binds a name used by an embedded template)
     build_dir = tempfile.mkdtemp(prefix="nixon_local_build_")
     try:
         src_path = os.path.join(build_dir, "payload.py")
@@ -1103,7 +1122,8 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
                                    build_id=None, watermark=None,
                                    watermark_key=None, driver_check=False,
                                    split_bootstrap=False, snapshot_off=False,
-                                   stdlib_audit_off=False):
+                                   stdlib_audit_off=False,
+                                   section_split=False, section_count=4):
     # Phase-4 wiring: all new kwargs default to current behavior (no change
     # when absent). vm/secure-temp snippets are always appended (report-only,
     # safe); hostguard only when requested (changes exec semantics).
@@ -1666,8 +1686,26 @@ def _exec_fallback():
         # zero the LIVE buffers via ctypes.memset after exec. (bytes are
         # immutable: wiping a bytes object would only zero a throwaway
         # copy, so we never hold the plaintext as bytes here.)
-        encrypted = bytearray(base64.b85decode(FALLBACK_BLOB))
-        compressed = bytearray(_xor_decrypt(bytes(encrypted), BLOB_KEY))
+        encrypted = bytearray()
+        compressed = bytearray()
+        if _NX_SECTION_PACK:
+            # Section split: the payload arrives as independently sealed
+            # sections and is joined here, so the whole encrypted payload
+            # is never resident in a single buffer.  A tampered, truncated
+            # or mis-keyed pack fails closed (the join returns None).
+            _joined = _nx_section_join(_NX_SECTION_PACK, BLOB_KEY)
+            if not _joined:
+                # Fail closed through the kill ladder (silent, exit 137),
+                # like every other tamper path in the loader.
+                try:
+                    _nx_kill("section-join-failed")
+                except Exception:
+                    pass
+                raise ValueError("section join failed")
+            compressed = bytearray(_joined)
+        else:
+            encrypted = bytearray(base64.b85decode(FALLBACK_BLOB))
+            compressed = bytearray(_xor_decrypt(bytes(encrypted), BLOB_KEY))
         # Batch-2 compress contest: backend-ID envelope (0x00=zlib,
         # 0x01=bz2, 0x02=lzma, 0x03=zstd) with backward compat for legacy
         # prefix-less zlib blobs. stdlib-only on the loader path.
@@ -1847,6 +1885,7 @@ if __name__ == "__main__":
     # Re-encrypt the caller-supplied fallback blob under the effective key
     # so the loader's derived key actually decrypts it. byte-for-byte, the
     # transform is: decrypt(raw_key) -> plaintext -> encrypt(eff_key).
+    _plain = None
     if bytecode_fallback and not native_only:
         try:
             _plain = _ke_xor(bytes(bytecode_fallback), _raw_key)
@@ -1858,6 +1897,46 @@ if __name__ == "__main__":
     # the second return value stays the same b85 string for callers/tests.
     fallback_compressed = base64.b85encode(bytecode_fallback).decode('ascii') if bytecode_fallback and not native_only else ""
     fallback_blob_val = fallback_compressed if (bytecode_fallback and not native_only) else ("DISABLED" if native_only else "__FALLBACK_BLOB_PLACEHOLDER__")
+    # Section split (opt-in): the payload travels as N independently sealed
+    # sections instead of one blob, so no single buffer holds the whole
+    # encrypted payload and a partial dump yields no complete code object.
+    # The sections are sealed with the SAME effective key the loader
+    # already derives at runtime, so no second key is introduced.  The
+    # single blob is disabled in this mode: the sections ARE the payload.
+    _section_pack_val = ""
+    _section_snippet = ""
+    _section_armed = False
+    if section_split and _plain and not native_only:
+        try:
+            from obfuscator.section_split import (
+                emit_loader_snippet as _ss_emit,
+                pack_json as _ss_pack,
+            )
+            _ss_json, _ss_key = _ss_pack(bytes(_plain),
+                                         sections=int(section_count or 4),
+                                         key=_eff_key)
+            assert _ss_key == _eff_key, "section key must be the loader key"
+            _section_pack_val = base64.b85encode(_ss_json).decode('ascii')
+            _section_snippet = _ss_emit()
+            _section_armed = True
+            fallback_blob_val = "SECTIONED"
+        except Exception as _ss_exc:
+            try:
+                UI.warn("Section split failed (%s); using the single blob" % (_ss_exc,))
+            except Exception:
+                pass
+            _section_armed = False
+            _section_pack_val = ""
+            _section_snippet = ""
+    # The section pack and its join helper are emitted in the suffix, not
+    # in the template: the template is also consumed directly by tests
+    # that exec fragments of it, and it must stay free of build-time
+    # placeholders.  _exec_fallback reads both at call time.
+    try:
+        _phase4_suffix += "_NX_SECTION_PACK = %r\n" % (_section_pack_val,)
+        _phase4_suffix += _section_snippet
+    except Exception:
+        pass
     loader_src = (
         loader_template
         .replace("{build_id}", build_id)
@@ -1993,6 +2072,31 @@ def polymorph_cpp_stub():
         UI.item("Polymorphism", f"{target} mutated", "INJECTED")
     except Exception as e:
         UI.warn(f"Failed to polymorph C++ stub: {e}")
+
+def load_tls_ca_bundle(path):
+    """Return the embedded CA-bundle literal for the emitted TLS context.
+
+    The emitted loader verifies the certificate chain and the hostname
+    against the system trust store; this bundle ADDS an operator-owned CA
+    on top (it never disables verification).  The PEM is embedded base64
+    encoded so the artifact stays self-contained and portable.
+
+    Returns a Python string literal (``"''"`` when there is no bundle).
+    Raises on an unreadable or empty bundle — the caller must fail the
+    build rather than silently ship an artifact that cannot reach its
+    endpoint.
+    """
+    path = str(path or "").strip()
+    if not path:
+        return "''"
+    try:
+        with open(path, "rb") as fh:
+            pem = fh.read()
+    except OSError as exc:
+        raise ValueError("cannot read CA bundle %r: %s" % (path, exc))
+    if not pem.strip():
+        raise ValueError("CA bundle %r is empty" % (path,))
+    return repr(base64.b64encode(pem).decode("ascii"))
 
 def build_project(args):
     source = args.source
@@ -2137,6 +2241,8 @@ def build_project(args):
                 split_bootstrap=_w_split_bootstrap,
                 snapshot_off=_w_snapshot_off,
                 stdlib_audit_off=_w_stdlib_audit_off,
+                section_split=bool(getattr(args, 'section_split', False)),
+                section_count=int(getattr(args, 'section_count', 4) or 4),
             )
             args._real_native_blobs = real_blobs_dict
             args._real_fallback_blob = real_fallback_str
@@ -2241,6 +2347,16 @@ def _VERIFY_INTEGRITY():
     if not args.net_url:
         args.net_url = deployed_rpc
     net_url_Nixon_Enc = str(register_string(args.net_url)) if args.net_url else ""
+    # TLS trust bundle for the emitted key fetch.  The emitted loader
+    # verifies the certificate chain and the hostname against the system
+    # trust store; --tls-ca-bundle ADDS an operator-owned CA on top (it
+    # never disables verification).  The PEM is embedded so the artifact
+    # stays self-contained and portable.
+    try:
+        tls_ca_b64 = load_tls_ca_bundle(getattr(args, "tls_ca_bundle", None))
+    except ValueError as _ca_exc:
+        UI.fatal("Cannot use --tls-ca-bundle: %s" % (_ca_exc,))
+        return
     native_blobs = find_native_blobs(args.source)
     if not native_blobs: native_blobs = {'windows': '', 'linux': '', 'darwin': ''}
     # Phase-4 wiring: parse trial once (invalid -> warn + None), defaults match build.py.
@@ -2304,7 +2420,7 @@ def _VERIFY_INTEGRITY():
     generated_outputs = []
     generated_files_map = {}
     var_oneshot = get_random_var_name("ONESHOT")
-    var_memfd_cls = get_random_var_name("MEMFD")
+    get_random_var_name('MEMFD')
     var_canary_url = get_random_var_name("WEBHOOK")
     var_func_canary = get_random_var_name("TRIG")
     i_salt = secrets.token_bytes(32)
@@ -2367,7 +2483,7 @@ def _VERIFY_INTEGRITY():
                     except Exception:
                         pass
                     if 'NIXON_PROTECTED' in decoded_source or '_load_native' in decoded_source:
-                        print(f"    [*] Hybrid loader detected - applying protection...")                        
+                        print("    [*] Hybrid loader detected - applying protection...")                        
                         decoded_source = decoded_source.replace(
                             'def _load_native():',
                             'def _load_native():\n    """NIXON_PROTECTED"""'
@@ -2441,6 +2557,7 @@ def _VERIFY_INTEGRITY():
             s0_key = os.urandom(32)
             stage0_safe = base64.b64encode(bytes([ord(c) ^ s0_key[i % len(s0_key)] for i, c in enumerate(payload_str)])).decode('ascii')
             chunks = [stage0_safe[i:i+1000] for i in range(0, len(stage0_safe), 1000)]
+            from io import StringIO
             parts_buffer = StringIO()
             for i, c in enumerate(chunks): parts_buffer.write(f'_NX_PART_{i} = "{c}"\n')
             parts_code = parts_buffer.getvalue()
@@ -2485,7 +2602,7 @@ def _VERIFY_INTEGRITY():
             var_nano_marker = get_random_var_name("NANO_MARKER")
             var_hw_bp = get_random_var_name("HW_BP")
             var_tor_cls = get_random_var_name("TOR_CLIENT")
-            var_tor_inst = get_random_var_name("TOR_INST")
+            get_random_var_name('TOR_INST')
             VARS["FUNC_NANOMITE_MAIN"] = var_nano_main
             VARS["VAR_NANO_MARKER"] = var_nano_marker
             VARS["METHOD_CHECK_HW_BPS"] = var_hw_bp
@@ -2495,7 +2612,6 @@ def _VERIFY_INTEGRITY():
             build_context = {
                 'NTRU_PUB_KEY': getattr(args, '_ntru_pub', '[]'),
                 'SESSION_TOKEN': session_token_bytes.hex(),
-                'VAR_CIPHER_CLS': VARS.get("CIPHER_CLS", "NixonCipher"),
                 'hmac_key_hex': hmac_key_hex,
                 'VAR_STR_TABLE': VARS["STR_TABLE"],
                 'VAR_ENC_BLOB': VARS.get("ENC_BLOB", "_nx_eblob"),
@@ -2503,7 +2619,6 @@ def _VERIFY_INTEGRITY():
                 'VAR_EK_B': VARS.get("EK_B", "_nx_ekb"),
                 'FUNC_TBL_INIT': VARS.get("FUNC_TBL_INIT", "_nx_tinit"),
                 'FUNC_EXTRACT_WIPE': VARS.get("FUNC_EXTRACT_WIPE", "_nx_exwp"),
-                'i_salt_val': int.from_bytes(i_salt[:4], 'little'),
                 'VAR_CHECKSUM': VARS["CHECKSUM"],
                 'dummy_checksum': dummy_checksum,
                 'VAR_HMAC_SIG': VARS["HMAC_SIG"],
@@ -2568,7 +2683,6 @@ def _VERIFY_INTEGRITY():
                 'timing_key_source': TIMING_KEY_SOURCE,
                 'VAR_ISR_ENCODER_CLS': VARS["ISR_ENCODER_CLS"],
                 'VAR_STACK_CFI_CLS': VARS["STACK_CFI_CLS"],
-                'VAR_EXEC_TRACE_CLS': VARS["EXEC_TRACE_CLS"],
                 'VAR_MEM_RANDOMIZER_CLS': VARS["MEM_RANDOMIZER_CLS"],
                 'VAR_POLY_CONST_CLS': VARS["POLY_CONST_CLS"],
                 'VAR_TIMING_KEY_CLS': VARS["TIMING_KEY_CLS"],
@@ -2699,6 +2813,8 @@ def _VERIFY_INTEGRITY():
                 'FUNC_RDTSC': VARS["FUNC_RDTSC"],
                 'doh_source': DOH_SOURCE,
                 'FUNC_DOH': VARS["FUNC_DOH"],
+                'tls_ca_source': TLS_CTX_SOURCE,
+                'tls_ca_b64': tls_ca_b64,
                 'api_hash_source': API_HASH_SOURCE,
                 'FUNC_API_HASH': VARS["FUNC_API_HASH"],
                 'stack_str_source': STACK_STR_SOURCE,
@@ -2825,17 +2941,17 @@ def _VERIFY_INTEGRITY():
                 Nixon_Enc_script = Nixon_Enc_script.replace('__FALLBACK_BLOB_PLACEHOLDER__', args._real_fallback_blob)
             is_valid, validation_issues = validate_obfuscated_code(Nixon_Enc_script)
             if not is_valid:
-                print(f"    [!] Validation Issues Detected:")
+                print("    [!] Validation Issues Detected:")
                 for issue in validation_issues:
                     print(f"        - {issue}")
-                print(f"    [*] Attempting auto-fix...")
+                print("    [*] Attempting auto-fix...")
                 try:
                     fixed_tree = ast.parse(Nixon_Enc_script)
                     ast.fix_missing_locations(fixed_tree)
                     fixed_code = ast.unparse(fixed_tree)
                     compile(fixed_code, '<autofix>', 'exec')
                     Nixon_Enc_script = fixed_code
-                    print(f"    [+] Auto-fix successful (AST round-trip)")
+                    print("    [+] Auto-fix successful (AST round-trip)")
                 except Exception as fix_err:
                     print(f"    [!] Auto-fix failed: {fix_err}")
             enc_blob, enc_key_a, enc_key_b = get_Nixon_Enc_table()
@@ -2891,11 +3007,11 @@ def _VERIFY_INTEGRITY():
             generated_outputs.append({'filename': out_name, 'mode': suffix, 'sha256': hashlib.sha256(final_bytes).hexdigest()})
             if os.path.getsize(out_name) > 100 * 1024 * 1024:
                 print(f"    [!] Large output detected: {os.path.getsize(out_name) / (1024*1024):.1f}MB")
-                print(f"    [*] Consider: --skip-debug for Silent build only")
+                print("    [*] Consider: --skip-debug for Silent build only")
         finally: 
             shutil.rmtree(build_dir)
             t.__exit__(None, None, None)
-    print(f"[*] SUCCESS: Dual Output Generated")
+    print("[*] SUCCESS: Dual Output Generated")
     build_info = {'features': {'hw_locked': hw_enable, 'expiration': args.expire if args.expire else "None", 'network_auth': bool(args.net_url), 'vm_inception': True, 'native_vm': bool(native_blob), 'memory_encryption': True, 'integrity_hmac': True}, 'metrics': {'build_time_sec': round(time.time() - start_time, 4), 'Nixon_Enc_strings': get_legacy_count()}}
     generate_report(base_out_name, build_info, generated_outputs)
     try:
@@ -2913,6 +3029,10 @@ VERSION = "3.0.0"
 
 if __name__ == "__main__":
     def main():
+        # Explicit log setup: the redirect used to happen as a side effect
+        # of importing obfuscator.core.utils, which created and truncated
+        # ./build.log in whatever directory the tool happened to run in.
+        enable_log_redirect()
         is_help = '-h' in sys.argv or '--help' in sys.argv
         if not is_help:
             check_dependencies()
@@ -2945,6 +3065,9 @@ if __name__ == "__main__":
             build.add_argument('--watermark', help='Lock to HWID')
             build.add_argument('--one-shot', action='store_true', help='Self-destruct')
             build.add_argument('--net-url', help='Auth URL (if not using auto=cf)')
+            build.add_argument('--tls-ca-bundle', help='PEM CA bundle for the emitted key fetch. The artifact verifies the certificate chain AND the hostname against the system trust store plus this CA (it never disables verification)')
+            build.add_argument('--section-split', action='store_true', help='Ship the payload as N independently sealed sections instead of one blob, so the whole encrypted payload is never resident in a single buffer (default off)')
+            build.add_argument('--section-count', type=int, default=4, help='Number of sealed sections when --section-split is used (default 4)')
             build.add_argument('--bind', help='Bind files inside payload')
             build.add_argument('--expire', help='Expiration Date (YYYY-MM-DD)')
             build.add_argument('--webhook', help='Alert Webhook URL')
@@ -3078,7 +3201,6 @@ if __name__ == "__main__":
                     deployed_url = deployer.deploy_master(hmac_key, ntru_priv=ntru_priv_key)
                     if deployed_url: print(f" [+] Worker Active: {deployed_url}")
                     else: print(" [!] Cloudflare Deployment Failed."); sys.exit(1)
-                is_native_build = False
                 print("\n[*] [Phase 3] Generating Universal Loader (Standard Pipeline)...")
                 build_args = argparse.Namespace(
                     source=args.source, native=args.native, cf_token=cf_token, cf_account=cf_account,
@@ -3092,7 +3214,10 @@ if __name__ == "__main__":
                     public=getattr(args, 'public', False), platform=getattr(args, 'platform', 'auto'),
                     layers=getattr(args, 'layers', None), zips=getattr(args, 'zips', None),
                     python=getattr(args, 'python', '3.11'), native_only=getattr(args, 'native_only', False),
-                    _ntru_pub=ntru_pub_key, gh_token=gh_token
+                    _ntru_pub=ntru_pub_key, gh_token=gh_token,
+                    tls_ca_bundle=getattr(args, 'tls_ca_bundle', None),
+                    section_split=getattr(args, 'section_split', False),
+                    section_count=getattr(args, 'section_count', 4)
                 )
                 generated_files_map = build_project(build_args)
                 if not generated_files_map:
@@ -3167,7 +3292,7 @@ if __name__ == "__main__":
                             packed_path = t
                         if getattr(args, 'compile', False) or (getattr(args, 'auto', False) and 'nk' in getattr(args, 'auto', '')):
                             if not getattr(args, 'native', False): 
-                                UI.section(f"PHASE 4: CLOUD COMPILATION")
+                                UI.section("PHASE 4: CLOUD COMPILATION")
                             target_payload = packed_path
                             if target_payload and os.path.exists(target_payload):
                                 if not gh_token:
@@ -3303,15 +3428,15 @@ if __name__ == "__main__":
                 UI.section("FINAL: DEPLOYMENT ASSETS")
                 UI._out("")
                 UI._out(f" ├── Directory         : {dist_dir}")
-                UI._out(f" ├── Components        :")
+                UI._out(" ├── Components        :")
                 for row in final_rows:
                     comp, prof, fname = row
                     if "Windows" in comp: tag = "[ Windows ]   "
                     elif "macOS" in comp: tag = "[ macOS ]     "
                     else: tag = "[ Universal ] "
                     UI._out(f" │   ├─ {tag} {fname}")
-                UI._out(f" │")
-                UI._out(f" └── Launchers         : Smart-Trust & Defender Whitelisting [READY]")
+                UI._out(" │")
+                UI._out(" └── Launchers         : Smart-Trust & Defender Whitelisting [READY]")
                 UI._out("")
                 UI._out(f" {UI.CYAN}ℹ Artifacts moved to: {dist_dir}{UI.RESET}")
                 UI._out(f" {UI.GREEN}[✓] ALL OPERATIONS COMPLETE.{UI.RESET}")

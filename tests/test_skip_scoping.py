@@ -13,7 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from obfuscator import py_matrix
+from obfuscator import py_matrix  # noqa: F401 (this line binds a name used by an embedded template)
 from obfuscator.py_matrix import CURRENT, emit_version_gate
 
 _WRONG = (2, 7) if CURRENT != (2, 7) else (1, 0)

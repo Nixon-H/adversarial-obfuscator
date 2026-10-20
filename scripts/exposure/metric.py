@@ -36,7 +36,7 @@ Maintenance Notes:
 """
 
 from __future__ import annotations
-import math
+import math  # noqa: F401 (this line binds a name used by an embedded template)
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 

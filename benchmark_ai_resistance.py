@@ -6,10 +6,9 @@ Takes the build artifact (payload_obfuscated.py), sends it to all 4 free AI mode
 scores deobfuscation difficulty, and generates HTML + PDF reports.
 """
 
-import ast, json, logging, os, re, secrets, sys, time, uuid, base64
+import ast, json, logging, re, secrets, sys, time, uuid, base64  # noqa: F401 (this line binds a name used by an embedded template)
 from pathlib import Path
 from typing import Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 import httpx

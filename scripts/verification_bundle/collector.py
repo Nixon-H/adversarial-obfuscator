@@ -17,11 +17,11 @@ Security Relevance:
 
 from __future__ import annotations
 
-import json
+import json  # noqa: F401 (this line binds a name used by an embedded template)
 import os
 from typing import Any
 
-from .hasher import file_sha256, build_manifest_entry
+from .hasher import build_manifest_entry
 
 # File extensions and glob patterns for artefact discovery.
 SOURCE_EXTS = {".py", ".c", ".h", ".rs", ".toml", ".json", ".yaml", ".yml", ".cfg", ".ir", ".ll", ".s", ".S"}
@@ -112,7 +112,6 @@ class ArtifactCollector:
     def _collect_benchmarks(self) -> None:
         """Collect benchmark report files matching BENCHMARK_GLOBS patterns."""
         for fpath in self._walk_and_match(BENCHMARK_GLOBS):
-            rel = os.path.relpath(fpath, self.build_dir)
             entry = build_manifest_entry(fpath, f"benchmarks/{os.path.basename(fpath)}")
             entry["archive_rel"] = f"benchmarks/{os.path.basename(fpath)}"
             entry["category"] = "benchmark"
@@ -122,7 +121,6 @@ class ArtifactCollector:
     def _collect_traces(self) -> None:
         """Collect trace/profile files matching TRACE_GLOBS patterns."""
         for fpath in self._walk_and_match(TRACE_GLOBS):
-            rel = os.path.relpath(fpath, self.build_dir)
             entry = build_manifest_entry(fpath, f"traces/{os.path.basename(fpath)}")
             entry["archive_rel"] = f"traces/{os.path.basename(fpath)}"
             entry["category"] = "trace"
@@ -132,7 +130,6 @@ class ArtifactCollector:
     def _collect_proofs(self) -> None:
         """Collect proof and certificate files matching PROOF_GLOBS patterns."""
         for fpath in self._walk_and_match(PROOF_GLOBS):
-            rel = os.path.relpath(fpath, self.build_dir)
             entry = build_manifest_entry(fpath, f"proofs/{os.path.basename(fpath)}")
             entry["archive_rel"] = f"proofs/{os.path.basename(fpath)}"
             entry["category"] = "proof"
@@ -142,7 +139,6 @@ class ArtifactCollector:
     def _collect_attacks(self) -> None:
         """Collect attack/red-team result files matching ATTACK_GLOBS patterns."""
         for fpath in self._walk_and_match(ATTACK_GLOBS):
-            rel = os.path.relpath(fpath, self.build_dir)
             entry = build_manifest_entry(fpath, f"attacks/{os.path.basename(fpath)}")
             entry["archive_rel"] = f"attacks/{os.path.basename(fpath)}"
             entry["category"] = "attack"

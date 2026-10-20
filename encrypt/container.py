@@ -86,7 +86,7 @@ def _unpack(container: bytes, key: bytes) -> bytes:
     encrypted = container[sha_offset + 32:sha_offset + 32 + enc_size]
 
     if len(encrypted) != enc_size:
-        raise ValueError(f"Container encrypted data size mismatch")
+        raise ValueError("Container encrypted data size mismatch")
 
     nonce = stored_sha256[:8]
     plaintext = aes.aes256_ctr_decrypt(encrypted, key, nonce)

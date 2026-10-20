@@ -203,7 +203,7 @@ class MemoryGuard:
             UFFDIO_API = 0xC018AA3F
             uffd = os.open("/dev/userfaultfd", os.O_RDWR | os.O_CLOEXEC)
             api_struct = struct.pack("=QII", 0xAA, 0, 0)
-            result = fcntl.ioctl(uffd, UFFDIO_API, bytearray(api_struct))
+            fcntl.ioctl(uffd, UFFDIO_API, bytearray(api_struct))
             self._uffd_fd = uffd
             UFFDIO_REGISTER = 0xC018AA01
             UFFDIO_REGISTER_MODE_MISSING = 1

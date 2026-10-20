@@ -27,7 +27,6 @@ def _split_functions(llvm_ir: str) -> tuple[list[str], list[tuple[str, str, list
             brace_depth = 1
             i += 1
             while i < len(lines) and brace_depth > 0:
-                stripped_inner = lines[i].strip()
                 body_lines.append(lines[i])
                 for ch in lines[i]:
                     if ch == "{":
@@ -411,8 +410,8 @@ def apply_replay_poison(llvm_ir: str, num_dead_cases: int = 4) -> str:
 
             for j in range(num_dead_cases):
                 dead_label = _get_new_label("rddead")
-                rand_var = _get_new_var("re")
-                cond_var = _get_new_var("rc")
+                _get_new_var('re')
+                _get_new_var('rc')
 
                 insert_line = f"    i32 {j + 1000 + hash(func_name) % 1000}, label %{dead_label}"
                 lines.insert(-1, insert_line)

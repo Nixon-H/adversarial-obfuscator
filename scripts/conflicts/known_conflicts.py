@@ -35,7 +35,6 @@ Maintenance Notes:
 
 from scripts.conflicts.detector import Conflict, ConflictType, Severity
 
-from scripts.conflicts.detector import Conflict, ConflictType, Severity
 
 KNOWN_CONFLICTS = [
     # --skip-obfuscate vs obfuscation features
