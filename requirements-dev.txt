@@ -1,0 +1,11 @@
+# Development / CI tooling.
+#
+# Pinned exactly: the lint gate must be reproducible.  An unpinned
+# `pip install ruff` means CI can start failing on a rule whose
+# behaviour changed upstream, on a tree that is clean locally.
+#
+#   ruff==0.16.1
+#
+# The pin is also recorded in .github/workflows/build.yml; keep the two
+# in step.
+ruff==0.16.1

@@ -22,9 +22,13 @@ jobs:
       - name: Install Python deps
         run: |
           pip install -r requirements.txt
+          pip install -r requirements-dev.txt
           pip install pytest
       - name: Lint Python
-        run: pip install ruff && make lint
+        # The gate must be reproducible: requirements-dev.txt pins ruff
+        # exactly, so a rule change upstream cannot turn a clean tree
+        # red without a deliberate bump of the pin.
+        run: make lint
       - name: Run Python tests
         run: python3 -m pytest tests/ -v
       - name: Obfuscate test payload

@@ -254,6 +254,20 @@ install-deps:
 
 lint:
 	ruff check --no-cache .
+	python3 scripts/lint/check_undefined_globals.py
+
+# End-to-end: every build must produce an artifact that RUNS.
+# A build that produces a file which dies at import is a failure --
+# that is the failure mode the seal-corruption bug had.
+e2e:
+	python3 scripts/lint/e2e_build_check.py 5
+	python3 scripts/lint/e2e_build_check.py 3 --section-split
+
+# Audit what a commit removed: the statements it deleted, and the ones
+# among them that dropped a call (those are the ones that can change
+# behaviour).
+audit-commit:
+	@python3 scripts/lint/audit_commit_removals.py --calls-only HEAD
 
 # Re-run the deterministic lint cleanups (unused imports / unused locals).
 # These are idempotent and only remove code the linter proves unused.

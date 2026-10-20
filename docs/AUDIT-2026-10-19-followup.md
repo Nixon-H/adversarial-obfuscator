@@ -46,9 +46,28 @@ audit had been looking at *modules*, and the defects that mattered were in
 | D11 | `make lint` could never fail (`\|\| true`), so the CI lint step was a no-op | MEDIUM | Fixed |
 | D12 | `tests/test_rust_relay.py` failed rather than skipped when the relay binary had not been built | LOW | Fixed |
 
-**Verification:** 4215 tests passed, 23 skipped, 0 failed (main suite 3779 +
-advanced-protection 284 + bench group 152); `ruff check --no-cache .` clean;
-25/25 consecutive default builds produce an artifact that runs.
+### 1.1 The residuals round
+
+A second round closed the four residual risks the first round recorded
+(§6). It found two more real defects, both of them `NameError`s that
+the test suite could not see because no test exercised the path:
+
+| # | Finding | Severity | Status |
+|---|---|---|---|
+| R1 | `build_project` called `datetime.strptime` for `--expire`, but the cleanup had removed the module-level `from datetime import datetime`. The `except Exception` around it swallowed the `NameError` and reported **"Bad --expire date"** for *every* date, so `--expire` aborted every build and the expiry was never applied | **HIGH** | Fixed |
+| R2 | The CLI's `print_usage` passed `file=_console`, but a star import never brings underscore names across — every argparse error produced a `NameError` instead of a usage message | MEDIUM | Fixed |
+| R3 | The lint gate was **unpinned** (`pip install ruff`), so a ruff release could turn a green tree red with no change to the code | MEDIUM | Fixed |
+| R4 | The chaff-circuit cleanup changed the **order** in which IR instructions were emitted, so the generated artifact differed from the pre-cleanup one | MEDIUM | Fixed |
+
+The four residuals themselves — undefined names hiding behind star
+imports, the cleanup scripts not being safe by construction, the
+pipeline CLI writing into the caller's directory, and the section-split
+flag path being untested end to end — are closed in §6.4 through §6.7.
+
+**Verification (this round):** 4225 tests passed, 23 skipped, 0 failed;
+`make lint` clean (ruff plus a runtime undefined-global check over the
+whole live tree); 10/10 default and 8/8 section-split builds produce an
+artifact that runs.
 
 ---
 
@@ -301,60 +320,290 @@ defect is reintroduced.
 
 ---
 
-## 6. Tests executed
+## 6. The residuals round — closing what §8 left open
+
+The four-phase round above left four residual risks recorded rather than
+fixed. This round closes them, and it found three real defects on the
+way — two of them introduced by the four-phase round itself.
+
+### 6.1 "Fails why?" — the lint step was unpinned
+
+The first CI run after the push *was* the first to enforce lint. The
+gate itself was not failing: `ruff check --no-cache .` was clean on this
+tree, and it is still clean. The risk was different and worth stating
+plainly — **the gate was not reproducible**. The CI step ran
+`pip install ruff`, which installs whatever ruff is current that day.
+A ruff release that changes the behaviour of an enforced rule (F811
+detection, F401 in a package `__init__`) would turn a green tree red
+with no change to the code, and the failure would look like a code
+problem rather than a tooling change.
+
+Fixed: ruff is pinned to `0.16.1` in `requirements-dev.txt`, and CI
+installs from that file instead of resolving the latest release. The
+pin is a deliberate one-way door — bumping it is a visible act.
+
+### 6.2 Auditing the earlier commits, mechanically
+
+The four-phase round's cleanup removed 280 statements across the tree,
+and the only evidence it had not broken anything was the test suite.
+That is not enough, because the suite does not cover every path: the
+"load-bearing removal" class (a statement whose *call* was the point)
+is invisible to a test that never exercises that path.
+
+So the audit was made mechanical.
+`scripts/lint/audit_commit_removals.py` compares a commit against its
+parent structurally (AST, not text), lists the statements that
+disappeared, and — the part that matters — isolates the removals that
+**dropped a call**, because a dropped call is the only kind of removal
+that can change behaviour. f-strings are folded before comparison, so
+the F541 prefix cleanup does not read as a removal.
+
+Result over the two commits:
+
+| Commit | Statements removed | Dropped a call | Unexplained |
+|---|---|---|---|
+| `181b151` (the first audit round) | 20 | 7 | 0 |
+| `1a8c9df` (the four-phase round) | 280 | 65 | 0 |
+
+Every one of the 72 dropped calls was classified by hand. The
+overwhelming majority are pure reads (`dict.get`, `sorted`, `len`,
+`set`, `ast.unparse`) whose result was unused. The rest are the
+deliberate changes of those rounds: a moved `open('build.log')`, a
+changed `generate_hybrid_loader_script` signature, an extended
+`argparse.Namespace`, a repaired `py_compile.compile` call, and the
+extended `_rewrite_if`/`_rewrite_stmt` signatures.
+
+**One was not deliberate and has been repaired**: in
+`irgen/chaff_circuits.py`, the cleanup had turned
+
+```python
+min_val = block.and_(t, block.xor(t, a, b).result, lt).result
+```
+
+into a bare `block.and_(...)`, which kept the *call* but changed the
+**order** in which IR instructions were emitted (the `and_` now
+followed the `xor` instead of preceding it). The generated IR is
+different, which means the generated artifact is different. The
+original order has been restored and the output is now verified
+byte-for-byte identical to the pre-cleanup tree.
+
+### 6.3 Two real defects, found by the audit and the runtime checker
+
+**A `NameError` in the `--expire` path.** The cleanup removed the
+`from datetime import datetime` tail from the mega-import line at the
+top of `obfuscator/core/pipeline.py` — the line also carried
+`from io import StringIO`, and both looked unused to a linter that
+could not see the uses. `build_project` then called
+`datetime.strptime(args.expire, ...)` at module scope, where `datetime`
+was no longer bound.
+
+The failure was worse than a crash. The call sits inside
+
+```python
+try: exp_ts = datetime.strptime(args.expire, "%Y-%m-%d").timestamp()
+except Exception: UI.fatal(f"Bad --expire date {args.expire!r}: expected YYYY-MM-DD")
+```
+
+so the `NameError` was swallowed and reported as a **bad date** —
+for *every* date, including a perfectly valid one. `--expire` aborted
+every build with a misleading message, and the expiry it was supposed
+to apply was never applied. The test suite did not catch it because no
+test passed `--expire`.
+
+Verified both ways: with the import removed, a build with
+`--expire 2030-01-01` aborts with "Bad --expire date '2030-01-01'";
+with it restored, the build completes and the report records
+`"expiration": "2030-01-01"`.
+
+**A `NameError` in the CLI's usage message.** `pipeline.py` defines a
+`ConsoleArgumentParser` whose `print_usage` passed `file=_console`.
+`_console` lives in `obfuscator/core/utils.py`, and **a star import
+never brings underscore-prefixed names across** — so `_console` was
+never bound in `pipeline.py`, and every argparse error (an unknown
+flag, a missing argument) produced a confusing `NameError` instead of a
+usage message. This one predates the four-phase round: it has been
+broken since the star import was introduced. The fix looks the name up
+on the module (`_nixon_utils._console`), which is also more correct:
+it reaches the *current* console handle rather than a stale copy.
+
+Both were found by the runtime checker described next, not by reading
+the diff. The first was found because the checker resolves every global
+read in the live tree; the second was found because the checker was
+extended to nested classes after the first fix, and the `print_usage`
+override is a class defined inside a function.
+
+### 6.4 Closing residual 1 — undefined names are now detectable
+
+The residual was: *star imports hide undefined names; F403/F405 are
+ignored, so a name arriving through `from .mod import *` is never
+checked for existence.*
+
+The consequence is now closed, though the import style is unchanged.
+`scripts/lint/check_undefined_globals.py` resolves the problem at
+runtime instead of statically, which is a stronger check than F405's
+approximation: for every module in the live tree, every name its code
+objects load from the global scope must resolve — to a binding in the
+module's own namespace, to a builtin, to a name the module declares
+`global` and assigns, or to an optional dependency imported inside a
+`try: ... except ImportError` (where the guard is what makes it safe).
+
+It runs as part of `make lint`, so it is enforced in CI alongside ruff.
+The first run of it against the tree found the `datetime` defect above.
+
+Getting the checker to zero false positives took four refinements, each
+of which was a real blind spot rather than a fudge:
+
+* a function's globals belong to the module that **defined** it, not
+  the one that imported it — resolving them in the importing module
+  produced 2452 false positives;
+* a name bound by an import inside `try/except ImportError` is
+  *conditional*, not undefined;
+* code from another module (e.g. `dataclasses.dataclass`, whose
+  internals reference `_process_class`) is not ours to judge;
+* a class defined **inside a function** is not in `vars(module)` — its
+  methods are still ours, and that is where the `_console` defect hid.
+
+### 6.5 Closing residual 2 — the cleanup scripts are safe by construction
+
+The residual was: *the cleanup touched ~440 files, so the suite is the
+safety net, not the scripts.* The suite is a net; it is not a
+guarantee, and it demonstrably has holes (the `--expire` path had no
+test at all).
+
+The scripts are now constrained so the two damage classes cannot recur:
+
+* **A call inside a `try` whose handler catches an exception is never
+  removed.** The exception it raises may *be* the test:
+  `float(name)` in a `try/except ValueError` answers "is this a
+  number?", and deleting it makes the check answer "always yes". This
+  was the first near-miss, and it broke detection logic in
+  `irgen/compile.py` and `irgen/optimize.py`.
+* **An import that is the only statement in a `try/except ImportError`
+  is never removed.** That import is an availability probe; deleting it
+  leaves the `except` branch unreachable and turns the probe into a
+  lie. This is what broke `_check_aes_ctr` earlier.
+* **A method call on an unknown receiver is never removed.** A method
+  *name* is not evidence of purity: `str.partition` is pure,
+  `hp.partition` is not. This was the second near-miss, and it
+  silently dropped `hp.partition(ops)` and `p.join(timeout=1)`.
+
+`tests/test_lint_cleanup_safety.py` pins all three, and the test is
+verified to fail when the guard is removed: with the guard removed,
+`_is_numeric("abc")` returns `True` — exactly the bug the class
+produced.
+
+### 6.6 Closing residual 3 — the pipeline CLI no longer writes into the CWD
+
+The residual was: *the pipeline CLI still writes intermediates into the
+working directory.* The intermediates — the packed variants and the
+`.report.json` — are now written next to the source file. A build run
+from a random directory now leaves that directory completely untouched;
+`tests/test_pipeline_cwd_clean.py` asserts exactly that (no leftover
+files at all) and that the outputs land next to the source.
+
+Two robustness details came with it: `generate_report` now uses
+`os.path.splitext` instead of `str.replace('.py', ...)`, because the
+output path is now absolute and a directory whose name contains `.py`
+would otherwise be mangled; and the CLI's usage message no longer
+raises `NameError` (§6.3).
+
+### 6.7 Closing residual 4 — the section-split flag is covered end to end
+
+The residual was: *`section_split` is off by default.* The off-by-
+default part is a deliberate design decision, not a defect: the pack is
+larger, and turning it on for everyone is a product decision, not a
+cleanup. What *was* a gap is the flag path: the loader-level tests
+drove `generate_hybrid_loader_script` directly, so a break between the
+CLI flag and the loader would have left the feature silently inert —
+which is precisely the state the module was in before it was wired up.
+
+`tests/test_section_split_cli.py` now drives the real command line: a
+build with `--section-split` must produce a running artifact, and the
+artifact must differ from the default build (the pack is a sealed
+literal by then, so it cannot be grepped — the evidence is
+behavioural). The default path is separately asserted to be unchanged.
+
+### 6.8 "Never repeat them"
+
+**The PEP 701 gap.** The repo's own 3.10 check cannot catch PEP 701,
+because `ast.parse(feature_version=(3, 10))` runs the *current*
+tokenizer, which already accepts it. The guard that does catch it is
+the ruff `target-version = "py310"` gate (ruff parses with a 3.10
+grammar), and the CI version matrix, whose 3.10 and 3.11 jobs import
+the modules and would fail on the import error. `tests/test_python310_compat.py`
+keeps the three-way check. The gate is now pinned, so it cannot
+silently change behaviour under it.
+
+**The cleanup near-misses.** Both are now impossible by construction
+(§6.5) and pinned by tests that are verified to fail without the fix.
+The audit tool remains available for any future bulk change:
+`make audit-commit` prints what the last commit removed and which of
+those removals dropped a call.
+
+---
+
+## 7. Tests executed
 
 | Suite | Command | Result |
 |---|---|---|
-| Main suite, chunk 1 | `pytest tests/test_*.py` (first 60 files) | 1167 passed, 4 skipped |
-| Main suite, chunk 2 | next 60 files | 1100 passed, 9 skipped |
-| Main suite, chunk 3 | next 60 files | 729 passed, 8 skipped |
-| Main suite, chunk 4 | remaining files | 783 passed, 2 skipped |
-| Advanced protection | `pytest tests/advanced_protection/` | 284 passed |
-| Bench group | `pytest tests/bench_*.py` | 152 passed |
-| **Total** | | **4215 passed, 23 skipped, 0 failed** |
-| Lint gate | `ruff check --no-cache .` | All checks passed |
-| End-to-end build | 25 × `scripts/build.py` + run the artifact | 25/25 produced a running artifact |
-| Python 3.10/3.11 | `python3.11 -c "ast.parse(...)"` on the four D6 files | parse OK (all four failed before the fix) |
+| Main suite, chunk 1 | 38 files | 772 passed, 1 skipped |
+| Main suite, chunk 2 | 39 files | 833 passed, 12 skipped |
+| Main suite, chunk 3 | 39 files | 614 passed |
+| Main suite, chunk 4 | 40 files | 412 passed, 4 skipped |
+| Main suite, chunk 5 | 39 files | 619 passed, 4 skipped |
+| Main suite, chunk 6 | 39 files | 539 passed, 2 skipped |
+| Advanced protection + bench group | `pytest tests/advanced_protection/ tests/bench_*.py` | 436 passed |
+| **Total** | | **4225 passed, 23 skipped, 0 failed** |
+| Lint gate | `make lint` (ruff + runtime undefined-globals) | All checks passed; 0 undefined globals |
+| End-to-end build, default | `scripts/lint/e2e_build_check.py 10` | 10/10 produced a running artifact |
+| End-to-end build, section-split | `scripts/lint/e2e_build_check.py 8 --section-split` | 8/8 produced a running artifact |
+| Commit removal audit | `scripts/lint/audit_commit_removals.py --calls-only` | 0 unexplained dropped calls |
 
-New test files added in this round:
+The suite was run in six chunks plus the bench group because the host
+was under memory pressure (about 1 GB available of 7.6 GB); a single
+run was killed by the harness before this. The numbers above are the
+sum of the chunks and account for every one of the 4248 collected
+tests.
+
+New test files added in the four-phase round:
 `tests/test_tls_context.py`, `tests/test_emitted_sources_parse.py`,
 `tests/test_pipeline_loader_e2e.py`, `tests/test_import_side_effects.py`,
 `tests/test_section_split_wiring.py`, `tests/test_python310_compat.py`.
 
+New test files added in this round:
+`tests/test_undefined_globals.py`, `tests/test_lint_cleanup_safety.py`,
+`tests/test_pipeline_cwd_clean.py`, `tests/test_section_split_cli.py`.
+
 ---
 
-## 7. Explicitly accepted residual risks
+## 8. Residual risks
 
-1. **Star imports hide undefined names.** F403/F405 are ignored, so a name
-   that arrives through `from .mod import *` is not checked for existence
-   in the module that uses it. Converting the package's import style is an
-   architectural change with a large blast radius; it is recorded here
-   rather than done silently. Modules without star imports are fully
-   checked.
-2. **The lint gate covers a narrow rule set on purpose.** It catches
+The four residuals of the previous round are closed (§6.4 – §6.7). What
+remains:
+
+1. **The lint gate covers a narrow rule set on purpose.** It catches
    undefined names, unused imports and locals, repeated dictionary keys,
-   redefinitions and f-strings without placeholders. It does not cover
-   style, complexity, or type errors.
-3. **The pipeline CLI still writes intermediates into the working
-   directory** (`<name>_Nixon-Enc*.py`, `.report.json`). The final
-   artifacts are moved next to the source, but the intermediates are left
-   behind. This is pre-existing and was left alone: fixing it means
-   re-plumbing the output paths of a build that has several output
-   modes.
-4. **The cleanup touched ~440 files.** The safety net is the test suite
-   (4215 tests) plus the end-to-end build check; a reviewer should read
-   the diff for the modules they care about rather than trusting the
-   scripts blindly.
-5. **Python 3.10/3.11 CI jobs still may not import every module.** The
-   ruff `target-version = "py310"` gate is the guard that now covers
-   this; the CI matrix itself is unchanged.
-6. **`section_split` is off by default.** The feature exists and is
-   tested, but a default build still ships the single blob. Enabling it by
-   default is a separate decision with a size cost (the pack is larger).
+   redefinitions and f-strings without placeholders, plus — now — every
+   global read in the live tree. It does not cover style, complexity, or
+   type errors.
+2. **The import style is unchanged.** The package still uses
+   `from .mod import *`, which is why F403/F405 stay ignored. The
+   *consequence* of that (undefined names hiding behind star imports)
+   is closed by the runtime checker; the style itself is an
+   architectural change with a large blast radius and is still not done.
+3. **`section_split` is still off by default.** Deliberate, and now
+   covered by an end-to-end test in both directions. Turning it on for
+   every build is a product decision with a size cost.
+4. **The ruff pin can go stale.** A pinned linter is reproducible but
+   not current: new rules stay off until someone bumps the pin. That
+   is the intended trade — a bump is a visible act.
+5. **Host-dependent test numbers.** The suite was run in chunks under
+   memory pressure; the totals are the sum of the chunks, not a single
+   run, and the host's memory state is not a property of the code.
 
 ---
 
-## 8. Files changed
+## 9. Files changed
 
 28 files changed, +1221 / −63 (the bulk is the import cleanup across the
 tree), plus 7 new test files and 4 new tooling files:
@@ -383,3 +632,29 @@ tree), plus 7 new test files and 4 new tooling files:
   `irgen/microjit.py`, `irgen/watermark.py`,
   `scripts/io_research/ir_adapter.py`, `scripts/fhe_vm/ir_adapter.py` —
   the restored validation probes and the honest chaff docstring.
+
+### 9.1 Files changed in the residuals round
+
+* `requirements-dev.txt` — **new**: the ruff pin.
+* `.github/workflows/build.yml` — installs from `requirements-dev.txt`
+  instead of resolving the latest ruff.
+* `ruff.toml` — the F403/F405 rationale now records that the
+  consequence is closed by the runtime checker.
+* `Makefile` — `lint` runs the runtime checker too; new `e2e` and
+  `audit-commit` targets.
+* `scripts/lint/check_undefined_globals.py` — **new**: the runtime
+  undefined-global checker.
+* `scripts/lint/audit_commit_removals.py` — **new**: the structural
+  commit-removal auditor.
+* `scripts/lint/e2e_build_check.py` — **new**: the build-must-run check.
+* `scripts/lint/remove_pure_dead_statements.py` — never removes a call
+  inside a `try` whose handler catches an exception.
+* `scripts/lint/clean_unused_imports.py` — never removes an import that
+  is an availability probe.
+* `obfuscator/core/pipeline.py` — the `datetime` import restored; the
+  CLI's `_console` lookup fixed; the outputs now land next to the
+  source; `generate_report` uses `splitext`.
+* `irgen/chaff_circuits.py` — the IR emission order restored.
+* `tests/test_undefined_globals.py`, `tests/test_lint_cleanup_safety.py`,
+  `tests/test_pipeline_cwd_clean.py`, `tests/test_section_split_cli.py`
+  — **new**.

@@ -1,4 +1,6 @@
 import sys, os, zipfile, base64, io, tokenize, py_compile, shutil, tempfile, random, hashlib, lzma, struct, time, json, argparse, uuid, re, platform, subprocess, marshal, hmac, secrets, ctypes, importlib.util, zlib, string, traceback, ast, concurrent.futures, logging  # noqa: F401 (this line binds a name used by an embedded template)
+from datetime import datetime
+from . import utils as _nixon_utils
 from .utils import *
 from .transforms import *
 from .sources import *
@@ -425,7 +427,10 @@ def generate_report(base_name, build_info, all_outputs):
     from datetime import datetime
     report = {'build_info': {'timestamp': datetime.now().isoformat()}, 'protection_features': build_info['features'], 'metrics': build_info['metrics'], 'outputs': all_outputs}
     try:
-        with open(base_name.replace('.py', '.report.json'), 'w') as f: json.dump(report, f, indent=2)
+        # splitext, not str.replace: a directory whose name contains
+        # ".py" would otherwise be mangled.
+        report_path = os.path.splitext(base_name)[0] + '.report.json'
+        with open(report_path, 'w') as f: json.dump(report, f, indent=2)
     except Exception: pass
 def encrypt_payload(data, key, nonce, use_aes_ctr=True):
     if use_aes_ctr is None:
@@ -2263,6 +2268,10 @@ def build_project(args):
         source = loader_path 
     start_time = time.time()
     base_out_name = f"{os.path.basename(source).split('.')[0]}_Nixon-Enc.py"
+    # Intermediates (the packed variants, the report) belong next to the
+    # source, not in whatever directory the CLI happened to be run from.
+    out_dir = os.path.dirname(os.path.abspath(source))
+    base_out_path = os.path.join(out_dir, base_out_name)
     if not getattr(args, 'native', False): 
          UI.section("PHASE 2: COMPILATION & OBFUSCATION")
     hw_enable = bool(args.bind_mac)
@@ -2455,7 +2464,7 @@ def _VERIFY_INTEGRITY():
     variants = [("Debug", True), ("Silent", False)]
     for i, (suffix, is_debug) in enumerate(variants):
         prefix = "│   └─" if i == len(variants) - 1 else "│   ├─"
-        out_name = base_out_name.replace(".py", f"_{suffix}.py")
+        out_name = os.path.splitext(base_out_path)[0] + f"_{suffix}.py"
         t = UI.Task(f"[ {suffix.upper()} ]", f"Generating {suffix} Version...", prefix=prefix)
         t.__enter__()
         generated_files_map[suffix] = out_name
@@ -3013,7 +3022,7 @@ def _VERIFY_INTEGRITY():
             t.__exit__(None, None, None)
     print("[*] SUCCESS: Dual Output Generated")
     build_info = {'features': {'hw_locked': hw_enable, 'expiration': args.expire if args.expire else "None", 'network_auth': bool(args.net_url), 'vm_inception': True, 'native_vm': bool(native_blob), 'memory_encryption': True, 'integrity_hmac': True}, 'metrics': {'build_time_sec': round(time.time() - start_time, 4), 'Nixon_Enc_strings': get_legacy_count()}}
-    generate_report(base_out_name, build_info, generated_outputs)
+    generate_report(base_out_path, build_info, generated_outputs)
     try:
         _tmp_loader = getattr(args, '_tmp_hybrid_loader', None)
         if _tmp_loader and os.path.exists(_tmp_loader):
@@ -3044,9 +3053,13 @@ if __name__ == "__main__":
                 sys.exit(0)
             class ConsoleArgumentParser(argparse.ArgumentParser):
                 def print_help(self, file=None):
-                    super().print_help(file=_console)
+                    # ``_console`` lives in utils and a star import does
+                    # NOT bring underscore names across, so it is looked
+                    # up on the module: that is the real terminal, even
+                    # when stdout is redirected into the build log.
+                    super().print_help(file=file or _nixon_utils._console)
                 def print_usage(self, file=None):
-                    super().print_usage(file=_console)
+                    super().print_usage(file=file or _nixon_utils._console)
             custom_fmt = lambda prog: argparse.RawTextHelpFormatter(prog, max_help_position=55)
             parser = ConsoleArgumentParser(formatter_class=custom_fmt, description="Advanced Python Obfuscation & Deployment System", add_help=False)
             parser.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help=argparse.SUPPRESS)

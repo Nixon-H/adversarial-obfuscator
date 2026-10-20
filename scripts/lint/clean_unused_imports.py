@@ -112,6 +112,35 @@ def alias_key(alias):
     return (alias.lineno, alias.col_offset + 1)
 
 
+def _only_statement_in_guarded_try(node, parent_map):
+    """True when *node* is the only statement in a try/except ImportError.
+
+    Such an import IS the test: removing it leaves the ``except``
+    branch unreachable and turns an availability probe into a lie.  It
+    happened once (``_check_aes_ctr``) -- the probe then always reported
+    AES-CTR as available.
+    """
+    parent = parent_map.get(id(node))
+    if not isinstance(parent, ast.Try):
+        return False
+    body = getattr(parent, "body", None)
+    if not isinstance(body, list) or len(body) != 1 or body[0] is not node:
+        return False
+    for handler in parent.handlers:
+        exc = handler.type
+        if exc is None:
+            return True
+        names = []
+        if isinstance(exc, ast.Name):
+            names = [exc.id]
+        elif isinstance(exc, ast.Tuple):
+            names = [e.id for e in exc.elts
+                     if isinstance(e, ast.Name)]
+        if "ImportError" in names:
+            return True
+    return False
+
+
 def plan_node(node, unused, in_strings):
     """Return (new_text, marked) for one import node.
 
@@ -164,6 +193,10 @@ def main():
             print("SKIP (syntax):", path)
             continue
         in_strings = string_identifiers(tree)
+        parent_map = {}
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(node):
+                parent_map[id(child)] = node
         unused = findings[path]
         lines = src.split("\n")
         edits = []
@@ -171,6 +204,9 @@ def main():
             if not isinstance(node, (ast.Import, ast.ImportFrom)):
                 continue
             if not any(alias_key(a) in unused for a in node.names):
+                continue
+            if _only_statement_in_guarded_try(node, parent_map):
+                # The import is an availability probe: keep it.
                 continue
             text, marked = plan_node(node, unused, in_strings)
             if text is None:

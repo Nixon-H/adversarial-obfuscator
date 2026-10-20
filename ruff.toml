@@ -19,9 +19,15 @@
 #         other that way and re-export through obfuscator/core/__init__.py.
 #         Replacing it is an architectural change, not a lint cleanup.
 #   F405  "may be undefined, or defined from star imports" -- the
-#         consequence of the above: a name that comes from a star import
-#         is not checked for existence in the module that uses it.  The
-#         modules that do NOT use star imports are fully checked.
+#         consequence of the above: ruff does not check that a name
+#         arriving through a star import actually exists.  That gap is
+#         closed at runtime instead: scripts/lint/check_undefined_globals.py
+#         resolves every LOAD_GLOBAL in the live tree (it runs as part
+#         of `make lint`), and it catches what F405 cannot -- the
+#         `datetime` NameError in build_project and the `_console`
+#         NameError in the CLI's print_usage were both found this way.
+#         The modules that do NOT use star imports are fully checked by
+#         F405 itself.
 
 line-length = 120
 target-version = "py310"

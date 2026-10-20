@@ -353,14 +353,15 @@ class ChaffCircuitGenerator:
         """
         Min-max chaff.
 
-        Emits a comparison between the operands (IR noise) and returns
-        a * xor(a, b) as the chaff expression.  The comparison RESULT is
-        not consumed: the IR builder has no select primitive, so the
-        "min(a, b)" of the original design is not produced.  The
-        comparison is still emitted, because it is the point of the
-        chaff.
+        Emits a comparison and an AND over the operands (IR noise) and
+        returns a * xor(a, b) as the chaff expression.  The comparison
+        RESULT is not consumed: the IR builder has no select primitive,
+        so the "min(a, b)" of the original design is not produced.  The
+        instructions are still emitted, because they are the point of
+        the chaff.
         """
-        block.lt(t, a, b)
+        lt = block.lt(t, a, b).result
+        block.and_(t, block.xor(t, a, b).result, lt)
         sel = block.xor(t, a, b).result
         return block.mul(t, a, sel).result
 

@@ -82,6 +82,34 @@ def _expand(paths):
     return out
 
 
+def _catches_exception(handler):
+    """True when the handler catches an exception (not just a sentinel)."""
+    node = handler.type
+    if node is None:
+        return True                      # bare except
+    if isinstance(node, ast.Name):
+        return node.id.endswith("Error") or node.id == "Exception"
+    if isinstance(node, ast.Tuple):
+        return any(isinstance(e, ast.Name)
+                   and (e.id.endswith("Error") or e.id == "Exception")
+                   for e in node.elts)
+    return False
+
+
+def _in_guarded_try(node, parent_map):
+    """True when *node* sits in a try block whose exception is the test.
+
+    A call inside such a block may be there precisely BECAUSE it
+    raises: ``float(name)`` in a ``try/except ValueError`` is a
+    validation probe, and removing it makes the check answer "always
+    valid".  Such statements are never removed.
+    """
+    parent = parent_map.get(id(node))
+    if not isinstance(parent, ast.Try):
+        return False
+    return any(_catches_exception(h) for h in parent.handlers)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("paths", nargs="+")
@@ -107,6 +135,9 @@ def main():
             if not isinstance(node, ast.Expr):
                 continue
             if not _is_pure_call(node.value):
+                continue
+            if _in_guarded_try(node, parents):
+                # The exception this call raises may BE the test.
                 continue
             parent = parents.get(id(node))
             body = getattr(parent, "body", None)

@@ -12,9 +12,42 @@
 
 ```bash
 pip install -r requirements.txt
+pip install -r requirements-dev.txt   # ruff, pinned (the lint gate)
 make all
 make test
 ```
+
+## Lint
+
+```bash
+make lint
+```
+
+Two gates, both of which must pass:
+
+* `ruff check --no-cache .` — the enforced rule set is in `ruff.toml`.
+  The `target-version = "py310"` there is what catches Python 3.12+
+  f-string syntax (PEP 701), which the repo's own
+  `ast.parse(feature_version=(3, 10))` check cannot see.
+* `python3 scripts/lint/check_undefined_globals.py` — resolves every
+  global read in the live tree at runtime. This exists because the
+  package uses `from .mod import *`, which hides undefined names from
+  the linter (F403/F405 are ignored for that reason).
+
+ruff is pinned in `requirements-dev.txt` on purpose: an unpinned linter
+can turn a green tree red with no change to the code.
+
+## End-to-end checks
+
+```bash
+make e2e          # every build must produce an artifact that RUNS
+make audit-commit # what the last commit removed, and which removals dropped a call
+```
+
+`make e2e` is the check that keeps finding the defects that module-by-
+module review misses: it builds a payload and executes the artifact.
+`make audit-commit` is for bulk changes — it lists the statements a
+commit deleted and isolates the ones whose *call* was the point.
 
 ## Project Structure
 
