@@ -63,18 +63,22 @@ def phase_obfuscate(payload, output, opts):
         from obfuscator.core.pipeline import build_pipeline
     except ImportError:
         log("ERROR", "Cannot import obfuscator pipeline — falling back to subprocess")
-        cmd = [sys.executable, OBFUSCATOR, "obfuscate", payload, "-o", output]
-        if opts.cfg_flatten: cmd.append("--cfg-flatten")
-        if opts.opaque_predicates: cmd.append("--opaque-predicates")
-        if opts.bogus_exceptions: cmd.append("--bogus-exceptions")
-        if opts.mba_subs: cmd.append("--mba-subs")
-        if opts.fragment_strings: cmd.append("--fragment-strings")
-        if opts.unicode_ids: cmd.append("--unicode-ids")
-        if getattr(opts, 'attention_poison', 0) > 0:
-            cmd.append(f"--attention-poison={opts.attention_poison}")
-        if getattr(opts, 'decoy_apis', False):
-            cmd.append("--decoy-apis")
-            cmd.append(f"--decoy-api-count={getattr(opts, 'decoy_api_count', 5)}")
+        cmd = [sys.executable] + list(OBFUSCATOR) + ["obfuscate", payload, "-o", output]
+        # Only the flags the `obfuscate` subcommand actually accepts.
+        # Passing anything else makes the fallback fail with
+        # "unrecognized arguments" -- which is worse than the import
+        # error it was supposed to route around.
+        for _flag, _opt in (
+            ("cfg_flatten", "--cfg-flatten"),
+            ("opaque_predicates", "--opaque-predicates"),
+            ("bogus_exceptions", "--bogus-exceptions"),
+            ("mba_subs", "--mba-subs"),
+            ("fragment_strings", "--fragment-strings"),
+            ("unicode_ids", "--unicode-ids"),
+            ("rename_internal", "--rename-internal"),
+        ):
+            if getattr(opts, _flag, False):
+                cmd.append(_opt)
         result = run(cmd)
     else:
         with open(payload, encoding="utf-8") as f:

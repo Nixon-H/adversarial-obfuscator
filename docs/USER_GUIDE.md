@@ -5,6 +5,17 @@ Every command below was run on 2026-09-23 (CPython 3.13.5); outputs are
 pasted verbatim. For the flag table and test-evidence matrix see
 `README.md`.
 
+## Two CLIs
+
+| CLI | Produces | Use it for |
+|---|---|---|
+| `python3 scripts/build.py --payload P` | a **native** binary (obfuscate → IR → LLVM → encrypt → Rust relay) | shipping a compiled artifact |
+| `python3 -m obfuscator.core.pipeline build P` | the **hybrid Python loader** | the loader-level gates (trial, HWID lock, KOD, driver check, split-bootstrap) |
+
+The loader gates only exist in the loader: `scripts/build.py` accepts
+those flags for backward compatibility and now says plainly that it
+ignored them. Sections 3, 4 and 8 below therefore use the loader CLI.
+
 ## 1. Minimal build (verified)
 
 `-o/--output` is a staging path; the final artifact is packaged as
@@ -75,20 +86,24 @@ Vendor-native 0.19x–1.56x figures are not reproduced in-repo.
 ## 3. Trial gate (`--trial`)
 
 ```bash
-NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
-  --payload /tmp/hello.py -o /tmp/stage_hw.py --force-output \
-  --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras \
-  --trial 7d
-# [         OPT] Trial spec requested: 7d
+NIXON_LOG_REDIRECT=0 timeout 300 python3 -m obfuscator.core.pipeline build \
+  /tmp/hello.py --trial 7d
 ```
 
 Spec format (`obfuscator/macros.py: parse_trial`): number+unit pairs such
 as `90s`, `1w2d`, `1mo1hr`. Units: `s m h d w mo` — **`m` = minute,
 `mo` = month**. Empty string = disabled. Garbage raises `ValueError`
 (`tests/test_macros.py`, `tests/test_trial_bind.py`).
-`--trial 7d` on a `--skip-irgen` build emits only the OPT line (the gate
-needs the pipeline's later stages); the full gate is emitting when IR
-stages run.
+
+This is a LOADER gate. `scripts/build.py --trial 7d` is accepted but
+ignored by that pipeline, and it now says so:
+
+```text
+[        WARN] These flags configure the HYBRID LOADER and are ignored by
+                this native pipeline: trial period
+[        WARN] Use `python3 -m obfuscator.core.pipeline build` for the loader
+                build path.
+```
 
 ## 4. HWID binding (`--hwid` + `--hwid-lock`)
 
@@ -100,14 +115,14 @@ Two modes (`obfuscator/hwid_lock.py`):
   (case-insensitive, lowercased) binding the artifact to a known value.
 
 ```bash
-NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
-  --payload /tmp/hello.py -o /tmp/stage_hw.py --force-output \
-  --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras \
+NIXON_LOG_REDIRECT=0 timeout 300 python3 -m obfuscator.core.pipeline build \
+  /tmp/hello.py \
   --hwid HWID:9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c \
   --hwid-lock
-# [         OPT] HWID binding requested
-# [         OPT] HWID-lock requested for fallback blob
 ```
+
+These are LOADER gates: the native pipeline ignores them and reports
+that it did (see the warning in section 3).
 
 Malformed `HWID:`-prefixed values raise `ValueError`
 (`tests/test_hwid_static.py`, `tests/test_hwid_lock.py`).
@@ -167,11 +182,21 @@ extension via Cython (default output: alongside `-o` as
 
 ## 8. Opt-in hardening: `--name-gate`, `--rename-internal`, `--driver-check`, `--split-bootstrap`
 
+`--name-gate` and `--rename-internal` are transform-level and work on
+BOTH CLIs:
+
 ```bash
 # Per-build token map for privileged call sites (default off; tests/test_name_gate.py)
 --name-gate
 # Rename proven-internal public methods/attributes only (default off; tests/test_internal_rename.py)
 --rename-internal
+```
+
+`--driver-check` and `--split-bootstrap` are LOADER gates: they take
+effect in `python3 -m obfuscator.core.pipeline build`, and the native
+pipeline reports them as ignored.
+
+```bash
 # Bake the read-only BYOVD driver gate into the loader (default off; tests/test_driver_blocklist.py)
 --driver-check
 # Shamir (n=3,k=2) threshold key + fragmented decoder in the loader
@@ -179,7 +204,7 @@ extension via Cython (default output: alongside `-o` as
 --split-bootstrap
 ```
 
-`--driver-check` on a skip-heavy build logs:
+`--driver-check` on the loader build logs:
 
 ```text
 [OPT] Kernel-driver gate baked into loader (--driver-check; also armable via NIXON_DRIVER_CHECK=1)

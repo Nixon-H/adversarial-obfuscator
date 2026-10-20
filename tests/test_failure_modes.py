@@ -14,30 +14,64 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 
-# --- D3: z3 absence breaks the build import closure -------------------------
+# --- D3: z3 absence must NOT break the build import closure -----------------
 
-def test_z3_absence_breaks_build_import_closure():
-    """Without z3, scripts.validation.smt_validator must fail to import.
+def test_z3_absence_does_not_break_the_build_import_closure():
+    """Without z3, the build CLI must still import.
 
-    Documents CRASH: the optional proof dep is load-bearing for build.py.
+    z3 is a proof-only dependency.  It used to be a hard module-level
+    import in scripts/validation/*, which made the WHOLE build CLI
+    unimportable without it -- a proof-only dependency load-bearing for
+    every build.  The import is now guarded and the proof entry points
+    raise a clear error when they are actually reached.
     """
     import importlib
-    blocked = {}
     purged = {}
     for name in list(sys.modules):
-        if name == "z3" or name.startswith("scripts.validation"):
+        # scripts.z3_optional caches the real z3 the first time it is
+        # imported, so it has to be purged too -- otherwise the result
+        # depends on what ran before this test.
+        if (name == "z3" or name.startswith("scripts.validation")
+                or name == "scripts.z3_optional"):
             purged[name] = sys.modules.pop(name)
     sys.modules["z3"] = None  # 'import z3' now raises ImportError
     try:
-        with pytest.raises(ImportError):
-            importlib.import_module("scripts.validation.smt_validator")
+        smt = importlib.import_module("scripts.validation.smt_validator")
+        assert smt is not None
+        build = importlib.import_module("scripts.build")
+        assert build is not None
     finally:
         sys.modules.pop("z3", None)
         for name, mod in purged.items():
             if name != "z3":
                 sys.modules[name] = mod
-        for name in blocked:
-            sys.modules.pop(name, None)
+
+
+def test_z3_absence_raises_a_clear_error_at_the_proof_entry_point():
+    """The proof path must fail with a message, not an AttributeError."""
+    import importlib
+    purged = {}
+    for name in list(sys.modules):
+        # scripts.z3_optional caches the real z3 the first time it is
+        # imported, so it has to be purged too -- otherwise the result
+        # depends on what ran before this test.
+        if (name == "z3" or name.startswith("scripts.validation")
+                or name == "scripts.z3_optional"):
+            purged[name] = sys.modules.pop(name)
+    sys.modules["z3"] = None
+    try:
+        ir_to_smt = importlib.import_module("scripts.validation.ir_to_smt")
+        # The stand-in raises when z3 is actually used, not when the
+        # module is imported: importing must stay cheap, using must
+        # fail with a message.
+        with pytest.raises(RuntimeError) as exc:
+            ir_to_smt.IRToSMT()._bv("x")
+        assert "z3" in str(exc.value).lower()
+    finally:
+        sys.modules.pop("z3", None)
+        for name, mod in purged.items():
+            if name != "z3":
+                sys.modules[name] = mod
 
 
 # --- D7: corrupted config fails closed ---------------------------------------

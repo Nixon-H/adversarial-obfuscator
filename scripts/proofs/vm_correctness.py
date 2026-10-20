@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional  # noqa: F401 (this line binds a name used by an embedded template)
 
-import z3
+from scripts.z3_optional import z3
 
 BITWIDTH = 64
 NUM_REGS = 16

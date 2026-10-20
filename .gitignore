@@ -90,5 +90,21 @@ runtime/__pycache__/
 seeds/
 builds/
 
-# Build configuration (contains secrets)
-config/
+# Build configuration.
+#
+# The directory is ignored because it can hold machine-local settings
+# (config/relay.json and anything a local run drops there), but the two
+# files the BUILD ITSELF depends on are tracked:
+#
+#   config/default.json        the feature configuration (97 keys); every
+#                               Phase 2 protection is gated on it, so a
+#                               clone without it silently builds a
+#                               different, weaker artifact
+#   config/baseline_report.json  the security-gate baseline the
+#                               regression checker compares against
+#
+# Neither contains a secret.  The tokens live in the OS keychain / the
+# setup wizard, not here.
+config/*
+!config/default.json
+!config/baseline_report.json

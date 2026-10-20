@@ -15,7 +15,7 @@ logger = logging.getLogger("adversarial")
 
 ROOT = Path(__file__).resolve().parent
 BUILD_DIR = ROOT / "build"
-BENCHMARK_SCRIPT = ROOT / "benchmark_ai_resistance.py"
+BENCHMARK_SCRIPT = ROOT / "scripts" / "evaluation" / "ai_resistance.py"
 SOURCE_PAYLOAD = ROOT / "tests" / "test_data" / "test_multi_func.py"
 PAYLOAD = BUILD_DIR / f"{SOURCE_PAYLOAD.stem}_obfuscated.py"
 BUILD_SCRIPT = ROOT / "scripts" / "build.py"

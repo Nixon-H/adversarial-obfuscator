@@ -54,6 +54,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
 from scripts.common import ROOT, BUILD_DIR, DEFAULT_CONFIG
+from obfuscator.version import version_string
 from scripts.common import atomic_write, log, run  # noqa: F401 (this line binds a name used by an embedded template)
 from scripts.config_schema import ConfigError
 
@@ -358,12 +359,17 @@ Examples:
   python3 build.py --payload myscript.py --adversarial-loop --deobfuscation-threshold 0.8
   python3 build.py --payload myscript.py --phase2 --phase2-extras --adversarial-injection --microjit
   python3 build.py --payload myscript.py --oram --phase2-extras
-  python3 build.py --payload myscript.py --rop --llvmgen.rop.target_functions keygen,license
+  python3 build.py --payload myscript.py --rop
+
+The ROP target functions are a config key, not a flag: set
+  shadow_compiler.llvmgen.rop.target_functions
+in config/default.json.
         """,
     )
-    parser.add_argument("--version", action="version", version="shadow-compiler 2.0.0")
+    parser.add_argument("--version", action="version", version=version_string())
     parser.add_argument("--payload", required=True, help="Python script to obfuscate")
-    parser.add_argument("-o", "--output", help="Output path for obfuscated script")
+    parser.add_argument("-o", "--output", help="Staging path for the obfuscated script "
+                                                "(the final artifact is written to build/)")
     parser.add_argument("--force-output", action="store_true", default=False,
                         help="Allow -o/--output outside the repo build dir "
                              "(default: refuse absolute/escaping paths)")
@@ -383,17 +389,23 @@ Examples:
     parser.add_argument("--skip-extras", action="store_true", help="Skip optional extras (antidbg, packing, timing checks)")
     parser.add_argument("--include-original", action="store_true", help="Include original payload in build/")
     parser.add_argument("--cfg-flatten", action="store_true", default=True, help=argparse.SUPPRESS)
-    parser.add_argument("--no-cfg-flatten", action="store_false", dest="cfg_flatten")
+    parser.add_argument("--no-cfg-flatten", action="store_false", dest="cfg_flatten",
+                        help="Disable control-flow flattening (default: on)")
     parser.add_argument("--opaque-predicates", action="store_true", default=True, help=argparse.SUPPRESS)
-    parser.add_argument("--no-opaque-predicates", action="store_false", dest="opaque_predicates")
+    parser.add_argument("--no-opaque-predicates", action="store_false", dest="opaque_predicates",
+                        help="Disable opaque-predicate insertion (default: on)")
     parser.add_argument("--bogus-exceptions", action="store_true", default=True, help=argparse.SUPPRESS)
-    parser.add_argument("--no-bogus-exceptions", action="store_false", dest="bogus_exceptions")
+    parser.add_argument("--no-bogus-exceptions", action="store_false", dest="bogus_exceptions",
+                        help="Disable fake exception handlers (default: on)")
     parser.add_argument("--mba-subs", action="store_true", default=True, help=argparse.SUPPRESS)
-    parser.add_argument("--no-mba-subs", action="store_false", dest="mba_subs")
+    parser.add_argument("--no-mba-subs", action="store_false", dest="mba_subs",
+                        help="Disable MBA expression substitution (default: on)")
     parser.add_argument("--fragment-strings", action="store_true", default=True, help=argparse.SUPPRESS)
-    parser.add_argument("--no-fragment-strings", action="store_false", dest="fragment_strings")
+    parser.add_argument("--no-fragment-strings", action="store_false", dest="fragment_strings",
+                        help="Disable string fragmentation (default: on)")
     parser.add_argument("--unicode-ids", action="store_true", default=True, help=argparse.SUPPRESS)
-    parser.add_argument("--no-unicode-ids", action="store_false", dest="unicode_ids")
+    parser.add_argument("--no-unicode-ids", action="store_false", dest="unicode_ids",
+                        help="Disable Unicode symbol renaming (default: on)")
 
     # SMT Validation flags
     parser.add_argument("--validate", action="store_true", help="Run SMT-backed semantic validation after each obfuscation phase")
@@ -507,7 +519,7 @@ Examples:
     parser.add_argument("--poison-paths", action="store_true", dest="poison_paths", help="Enable believable dead paths")
     parser.add_argument("--poison-imports", action="store_true", dest="poison_imports", help="Enable misleading imports")
     parser.add_argument("--poison-all", action="store_true", help="Enable all poisoning techniques")
-    parser.add_argument("--poison-level", type=int, default=0, choices=range(0, 6), help="Provenance poisoning level (1-5, default: 0 = disabled)")
+    parser.add_argument("--poison-level", type=int, default=0, choices=range(0, 6), help="Provenance poisoning level (0-5, default: 0 = disabled)")
 
     # LLM-Resilient flags
     parser.add_argument("--llm-resilient", action="store_true", dest="llm_resilient", help="Enable LLM-resilient AST obfuscation (context collapse + guard vars + string encoding)")
@@ -722,7 +734,7 @@ Examples:
     # Security Regression Gates flags (Feature 146)
     parser.add_argument("--security-gates", action="store_true", help="Enable security regression gates (Feature 146)")
     parser.add_argument("--update-baseline", action="store_true", help="Save current metrics as new baseline for security gates")
-    parser.add_argument("--gate-threshold", type=float, default=None, help="Global gate threshold override (0.0-1.0)")
+    parser.add_argument("--gate-threshold", type=float, default=None, help="Global gate threshold override, as a ratio of the baseline metric (0.0-1.0; e.g. 0.9 = at least 90 percent of baseline)")
 
     # Autonomous Red Team Pipeline (Feature 145)
     parser.add_argument("--red-team", action="store_true", help="Enable autonomous red team pipeline — every build attacks itself")
@@ -842,27 +854,41 @@ Examples:
     parser.add_argument("--pyinstaller-spec", action="store_true",
                         help="Write a best-effort PyInstaller .spec alongside the output (never fails the build)")
 
-    # Phase-4 tested-but-unwired modules: additive opt-in flags (all default OFF / empty).
+    # Loader-emission features.  They are applied by the LOADER build
+    # path (python3 -m obfuscator.core.pipeline build), which emits the
+    # hybrid loader.  This pipeline compiles the payload to a native
+    # binary and emits no hybrid loader, so these flags have NO effect
+    # here: they are accepted for backward compatibility and are
+    # reported as ignored at run time rather than silently pretended to
+    # work.
     parser.add_argument("--hwid", type=str, default="",
-                        help="HWID string for GET_HWID() macro expansion and HWID-locked fallback. "
-                             "Dynamic (default): any opaque string; the loader collects "
+                        help="[LOADER ONLY -- ignored by this pipeline] HWID string for "
+                             "GET_HWID() macro expansion and HWID-locked fallback. Dynamic "
+                             "(default): any opaque string; the loader collects "
                              "format(uuid.getnode(), 'x') at runtime. Static (GAP #33): "
                              "canonical 'HWID:<64 hex chars>' fingerprint (case-insensitive, "
                              "lowercased) binding the artifact to a known value instead of "
                              "dynamic collection (documented in obfuscator/hwid_lock.py; "
                              "default: '')")
     parser.add_argument("--trial", type=str, default="",
-                        help="Trial period spec, e.g. '7d', '1w2d' (parsed via obfuscator.macros.parse_trial; default: '')")
+                        help="[LOADER ONLY -- ignored by this pipeline] Trial period spec, "
+                             "e.g. '7d', '1w2d' (parsed via obfuscator.macros.parse_trial; "
+                             "default: '')")
     parser.add_argument("--vm-threshold", type=float, default=50.0,
-                        help="VM-score verdict threshold embedded in loader snippet (default: 50.0)")
+                        help="[LOADER ONLY -- ignored by this pipeline] VM-score verdict "
+                             "threshold embedded in loader snippet (default: 50.0)")
     parser.add_argument("--kod", action="store_true", default=False,
-                        help="Arm loader kill-on-detect note: VM snippet reads NIXON_KOD env at runtime (default: report-only)")
+                        help="[LOADER ONLY -- ignored by this pipeline] Arm loader "
+                             "kill-on-detect: the VM snippet reads NIXON_KOD env at runtime "
+                             "(default: report-only)")
     parser.add_argument("--hostguard", action="store_true", default=False,
-                        help="Prepend hostguard snippet (bind_host/check_host/isolated_exec) to loader (default: off)")
+                        help="[LOADER ONLY -- ignored by this pipeline] Prepend hostguard "
+                             "snippet (bind_host/check_host/isolated_exec) to loader (default: off)")
     parser.add_argument("--hwid-lock", dest="hwid_lock", action="store_true", default=False,
-                        help="HWID-lock the bytecode fallback blob (requires --hwid; static "
-                             "'HWID:<64 hex>' fingerprints unlock via the embedded value, "
-                             "dynamic HWIDs via uuid.getnode(); default: off)")
+                        help="[LOADER ONLY -- ignored by this pipeline] HWID-lock the bytecode "
+                             "fallback blob (requires --hwid; static 'HWID:<64 hex>' fingerprints "
+                             "unlock via the embedded value, dynamic HWIDs via uuid.getnode(); "
+                             "default: off)")
     parser.add_argument("--sign-key-env", type=str, default="",
                         help="Env var name holding hex key for artifact signing sidecars (.sig.json; default: '' = disabled)")
     parser.add_argument("--name-gate", dest="name_gate", action="store_true", default=False,
@@ -875,23 +901,31 @@ Examples:
     parser.add_argument("--diagnostic", action="store_true", default=False,
                         help="Diagnostic build: per-stage timings + transform counts + NOT-FOR-RELEASE marker")
     parser.add_argument("--no-audit-hook-plant", dest="audit_hook_plant_off", action="store_true", default=False,
-                        help="Omit the site-packages audit-hook plant detector from the loader (default: detector ON)")
+                        help="[LOADER ONLY -- ignored by this pipeline] Omit the site-packages "
+                             "audit-hook plant detector from the loader (default: detector ON)")
     parser.add_argument("--driver-check", dest="driver_check", action="store_true", default=False,
-                        help="Bake the V10 kernel-driver gate into the loader (fail-closed on "
+                        help="[LOADER ONLY -- ignored by this pipeline] Bake the V10 "
+                             "kernel-driver gate into the loader (fail-closed on "
                              "known-vulnerable BYOVD drivers only when armed; default: off, "
                              "also armable at runtime via NIXON_DRIVER_CHECK=1)")
     parser.add_argument("--split-bootstrap", dest="split_bootstrap", action="store_true", default=False,
-                        help="V10 kernel split-bootstrap: Shamir (n=3,k=2) threshold key + "
-                             "fragmented decoder in the loader instead of the single embedded "
-                             "key path (opt-in until battle-tested; default: off)")
+                        help="[LOADER ONLY -- ignored by this pipeline] V10 kernel "
+                             "split-bootstrap: Shamir (n=3,k=2) threshold key + fragmented "
+                             "decoder in the loader instead of the single embedded key path "
+                             "(opt-in until battle-tested; default: off)")
     parser.add_argument("--no-snapshot", dest="snapshot_off", action="store_true", default=False,
-                        help="Omit the frozen-stdlib snapshot gate from the loader (default: gate ON; "
-                             "also disarmable at runtime via NIXON_SNAPSHOT_OFF=1)")
+                        help="[LOADER ONLY -- ignored by this pipeline] Omit the frozen-stdlib "
+                             "snapshot gate from the loader (default: gate ON; also disarmable "
+                             "at runtime via NIXON_SNAPSHOT_OFF=1)")
     parser.add_argument("--no-stdlib-audit", dest="stdlib_audit_off", action="store_true", default=False,
-                        help="Omit the stdlib function-audit gate from the loader (default: gate ON; "
-                             "also disarmable at runtime via NIXON_STDLIB_AUDIT_OFF=1)")
+                        help="[LOADER ONLY -- ignored by this pipeline] Omit the stdlib "
+                             "function-audit gate from the loader (default: gate ON; also "
+                             "disarmable at runtime via NIXON_STDLIB_AUDIT_OFF=1)")
     parser.add_argument("--build-id", dest="build_id", type=str, default="",
-                        help="stable build id (reproducible builds; default: random per build)")
+                        help="Stable build id: seeds the semantic-lowering kernel and is "
+                             "recorded in the signature sidecar, so two builds with the same "
+                             "--build-id lower identically. It does not by itself make the "
+                             "whole build reproducible (default: empty = random per build)")
 
     opts = parser.parse_args()
 
@@ -919,19 +953,36 @@ Examples:
     if getattr(opts, "pyinstaller_spec", False):
         log("OPT", "PyInstaller .spec generation requested (best-effort)")
 
-    # Phase-4 wiring flags: log only when set (no behavior change otherwise).
-    if getattr(opts, "hwid", ""):
-        log("OPT", "HWID binding requested")
-    if getattr(opts, "trial", ""):
-        log("OPT", f"Trial spec requested: {opts.trial}")
-    if getattr(opts, "vm_threshold", 50.0) != 50.0:
-        log("OPT", f"VM threshold: {opts.vm_threshold}")
-    if getattr(opts, "kod", False):
-        log("OPT", "KOD note set (loader reads NIXON_KOD env at runtime)")
-    if getattr(opts, "hostguard", False):
-        log("OPT", "Hostguard snippet requested")
-    if getattr(opts, "hwid_lock", False):
-        log("OPT", "HWID-lock requested for fallback blob")
+    # Loader-emission features.  This pipeline emits a native binary and
+    # no hybrid loader, so these flags cannot take effect here.  They are
+    # reported as ignored rather than logged as if they had been applied:
+    # a flag that silently does nothing is a lie in the help text.
+    _LOADER_ONLY = (
+        ("hwid", "hw-id string"),
+        ("trial", "trial period"),
+        ("vm_threshold", "VM-score threshold"),
+        ("kod", "kill-on-detect"),
+        ("hostguard", "hostguard snippet"),
+        ("hwid_lock", "HWID-locked fallback"),
+        ("audit_hook_plant_off", "audit-hook plant detector"),
+        ("driver_check", "kernel-driver gate"),
+        ("split_bootstrap", "split-bootstrap threshold key"),
+        ("snapshot_off", "frozen-stdlib snapshot gate"),
+        ("stdlib_audit_off", "stdlib function-audit gate"),
+    )
+    _ignored = []
+    for _dest, _label in _LOADER_ONLY:
+        _value = getattr(opts, _dest, None)
+        if _value in (None, "", False):
+            continue
+        if _dest == "vm_threshold" and _value == 50.0:
+            continue
+        _ignored.append(_label)
+    if _ignored:
+        log("WARN", "These flags configure the HYBRID LOADER and are ignored "
+                    "by this native pipeline: " + ", ".join(_ignored))
+        log("WARN", "Use `python3 -m obfuscator.core.pipeline build` for the "
+                    "loader build path.")
     if getattr(opts, "sign_key_env", ""):
         log("OPT", f"Artifact signing via env: {opts.sign_key_env}")
     if getattr(opts, "name_gate", False):

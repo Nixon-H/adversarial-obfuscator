@@ -17,8 +17,9 @@ Dependencies:
 - ast (Python standard library)
 - z3 (BitVec solver)
 """
+from __future__ import annotations
 import ast
-import z3
+from scripts.z3_optional import z3
 
 BITWIDTH = 64
 

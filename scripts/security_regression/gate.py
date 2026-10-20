@@ -20,14 +20,14 @@ Dependencies:
 - Standard library (enum, dataclasses, typing)
 
 Security Relevance:
-Each SecurityGate encodes a security requirement. The threshold_percent
+Each SecurityGate encodes a security requirement. The threshold_ratio
 (e.g., 0.9) means the current metric must be at least 90% of the
 baseline. A BLOCKER gate failure means the build must be rejected.
 
 Maintenance Notes:
-- GateResult.delta_percent is computed as (current/baseline) - 1.
+- GateResult.delta_ratio is computed as (current/baseline) - 1.
   A negative delta means regression (current < baseline).
-- The threshold_percent is compared as a ratio, not an absolute
+- The threshold_ratio is compared as a ratio, not an absolute
   difference. This scales naturally for metrics at different orders
   of magnitude.
 - The `enabled` flag on SecurityGate allows temporarily disabling
@@ -52,8 +52,8 @@ class GateResult:
     metric_name: str
     baseline_value: float
     current_value: float
-    delta_percent: float
-    threshold_percent: float
+    delta_ratio: float
+    threshold_ratio: float
     passed: bool
     severity: GateSeverity
     message: str = ""
@@ -62,16 +62,16 @@ class GateResult:
         # Explicit FAIL (passed=False) always wins: callers like
         # check_all_gates construct unevaluated-metric failures with
         # baseline 0.0, and __post_init__ must not flip them to pass.
-        if self.passed is False and self.delta_percent == 0.0 and self.current_value == 0.0:
+        if self.passed is False and self.delta_ratio == 0.0 and self.current_value == 0.0:
             return
         if self.baseline_value > 0:
-            self.delta_percent = (self.current_value / self.baseline_value) - 1.0
+            self.delta_ratio = (self.current_value / self.baseline_value) - 1.0
         else:
             # Zero baseline is uninformative (division undefined): fail OPEN
             # rather than bricking the pipeline on a missing reference.
-            self.delta_percent = 0.0
+            self.delta_ratio = 0.0
         if self.baseline_value > 0:
-            self.passed = (self.current_value / self.baseline_value) >= self.threshold_percent
+            self.passed = (self.current_value / self.baseline_value) >= self.threshold_ratio
         else:
             self.passed = True
 
@@ -80,7 +80,7 @@ class GateResult:
 class SecurityGate:
     name: str
     metric_name: str
-    threshold_percent: float
+    threshold_ratio: float
     severity: GateSeverity
     enabled: bool = True
 
@@ -92,27 +92,27 @@ class SecurityGate:
                 metric_name=self.metric_name,
                 baseline_value=current_value,
                 current_value=current_value,
-                delta_percent=0.0,
-                threshold_percent=self.threshold_percent,
+                delta_ratio=0.0,
+                threshold_ratio=self.threshold_ratio,
                 passed=True,
                 severity=self.severity,
                 message=f"PASS (zero baseline for '{self.metric_name}'; fail-open)",
             )
         ratio = current_value / baseline_value
         delta = ratio - 1.0
-        passed = ratio >= self.threshold_percent
+        passed = ratio >= self.threshold_ratio
         msg = (
-            f"PASS: {self.name} ({current_value:.4f} >= {self.threshold_percent * 100:.1f}% of {baseline_value:.4f})"
+            f"PASS: {self.name} ({current_value:.4f} >= {self.threshold_ratio * 100:.1f}% of {baseline_value:.4f})"
             if passed
-            else f"FAIL: {self.name} ({current_value:.4f} < {self.threshold_percent * 100:.1f}% of {baseline_value:.4f}, delta={delta * 100:+.2f}%)"
+            else f"FAIL: {self.name} ({current_value:.4f} < {self.threshold_ratio * 100:.1f}% of {baseline_value:.4f}, delta={delta * 100:+.2f}%)"
         )
         return GateResult(
             gate_name=self.name,
             metric_name=self.metric_name,
             baseline_value=baseline_value,
             current_value=current_value,
-            delta_percent=delta,
-            threshold_percent=self.threshold_percent,
+            delta_ratio=delta,
+            threshold_ratio=self.threshold_ratio,
             passed=passed,
             severity=self.severity,
             message=msg,

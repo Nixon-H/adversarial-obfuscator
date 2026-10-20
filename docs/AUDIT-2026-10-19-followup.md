@@ -69,6 +69,11 @@ flag path being untested end to end — are closed in §6.4 through §6.7.
 whole live tree); 10/10 default and 8/8 section-split builds produce an
 artifact that runs.
 
+> Superseded by [`docs/AUDIT-2026-10-20.md`](AUDIT-2026-10-20.md), the
+> CLI audit round: it found that the pipeline CLI was dropping 14 of its
+> own flags, that the build configuration was untracked, and that the
+> lint gate was unpinned.
+
 ---
 
 ## 2. Phase A — the emitted key fetch now verifies TLS

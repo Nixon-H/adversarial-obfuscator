@@ -106,25 +106,70 @@ Measured numbers (host-specific, reproducible in-repo):
 --diagnostic          Per-stage timings + transform counts + NOT-FOR-RELEASE marker
 --pytoc [--pytoc-out PATH]  Cython native-extension compile (best-effort, never fails build)
 --pyinstaller-spec    Write best-effort PyInstaller .spec (never fails build)
---hwid HWID           Dynamic string, or static 'HWID:<64 hex>' fingerprint
---hwid-lock           HWID-lock the fallback blob (requires --hwid; default off)
---trial TRIAL         e.g. '7d', '1w2d' (parsed via obfuscator.macros.parse_trial; default '')
 --watermark WATERMARK Embed semantic watermark string into IR
 --verify-watermark     Verify watermark after embedding
---vm-threshold FLOAT  VM-score verdict threshold in loader snippet (default 50.0)
---kod                 Arm loader kill-on-detect note (runtime reads NIXON_KOD; default report-only)
---hostguard           Prepend hostguard snippet (default off)
 --sign-key-env VAR    Env var holding hex key for .sig.json sidecars (default '' = disabled)
 --name-gate           Per-build token map for privileged calls (default off)
 --rename-internal     Rename proven-internal public methods/attributes (default off)
+--build-id BUILD_ID   Seeds the lowering kernel and is recorded in the
+                      signature sidecar. It does NOT by itself make the
+                      whole build reproducible (default: empty = random)
+--version             Prints e.g. 'shadow-compiler 2.0.0'
+```
+
+The flags below configure the **hybrid loader**. They are accepted by
+`scripts/build.py` for backward compatibility, but this pipeline emits a
+native binary and no hybrid loader, so they are **reported as ignored**
+at run time. The loader build path is
+`python3 -m obfuscator.core.pipeline build` (see below), where they
+apply:
+
+```text
+--hwid HWID           Dynamic string, or static 'HWID:<64 hex>' fingerprint
+--hwid-lock           HWID-lock the fallback blob (requires --hwid; default off)
+--trial TRIAL         e.g. '7d', '1w2d' (parsed via obfuscator.macros.parse_trial; default '')
+--vm-threshold FLOAT  VM-score verdict threshold in loader snippet (default 50.0)
+--kod                 Arm loader kill-on-detect (runtime reads NIXON_KOD; default report-only)
+--hostguard           Prepend hostguard snippet (default off)
 --driver-check        Bake V10 kernel-driver gate into loader (default off; also NIXON_DRIVER_CHECK=1)
 --split-bootstrap     Shamir (n=3,k=2) threshold key + fragmented decoder (default off)
 --no-snapshot         Omit frozen-stdlib snapshot gate (default: gate ON)
 --no-stdlib-audit     Omit stdlib function-audit gate (default: gate ON)
 --no-audit-hook-plant Omit site-packages audit-hook plant detector (default: detector ON)
---build-id BUILD_ID   Stable build id for reproducible builds (default: random per build)
---version             Prints e.g. 'shadow-compiler 2.0.0'
 ```
+
+### The loader CLI (`python3 -m obfuscator.core.pipeline`)
+
+A second, separate CLI. It emits the hybrid loader; `scripts/build.py`
+compiles the payload to a native binary. They share the transform
+implementation but not the flag set.
+
+```text
+build <script.py>          Obfuscate and compile a Python script
+  --native | --native-only Cloud-farm Cython compilation (hybrid / no fallback)
+  --auto [cf,nk]            Automation: cf=Cloudflare, nk=Nuitka (implies --native)
+  --lock-hwid HWID          Lock the build to a target HWID (alias: --watermark)
+  --compile                 Compile the final loader with Nuitka
+  --skip-cloud              Build locally even if --compile/--auto would use the farm
+  --platform {auto,github}  Build farm platform (GitHub is the only implemented farm)
+  --section-split           Ship the payload as N sealed sections (needs a fallback)
+  --section-count N         Number of sealed sections (default 4)
+  --tls-ca-bundle PEM       Extra CA for the emitted key fetch; verification is never disabled
+  --expire YYYY-MM-DD       Expiration date
+  --hwid / --trial / --vm-threshold / --kod / --hostguard / --hwid-lock
+  --driver-check / --split-bootstrap / --no-snapshot / --no-stdlib-audit
+  --name-gate / --lowering / --rename-internal / --no-audit-hook-plant
+auth --hwid HASH            Authorize a hardware ID (Cloudflare)
+clean                       Remove the Cloudflare deployment
+obfuscate <script.py>       Obfuscate a Python script (-o PATH, --opt-level 0-5)
+build-farm --payload PATH   Trigger the cloud build farm
+version                     Show the version
+```
+
+The two CLIs' `--watermark` means different things, which is why the
+loader CLI's flag was renamed: there it is `--lock-hwid` (the target
+machine the build is licensed to). `scripts/build.py --watermark` embeds
+a semantic watermark in the IR.
 
 Note: `--lowering`'s `--help` text lists the 9 node/call families
 (`io,scalar,string,container,service,protocol,function,import,fusion`)
@@ -145,13 +190,13 @@ Default-ON vs default-OFF matrix:
 | Audit-hook plant detector | `--no-audit-hook-plant` or `NIXON_AUDITHOOK_PLANT_OFF=1` |
 | `--opt-level 4` AST transforms | `--opt-level 0` / `--no-*` flags / `--skip-obfuscate` |
 | Lowering default families (15/20, incl `range`) once `--lowering` is passed | `--lowering none`, or `-fam` removals |
-| Watermark/trial/HWID gates | only when configured (`--watermark` / `--trial` / `--hwid`) |
+| Watermark/trial/HWID gates | only when configured (`--watermark` on the native pipeline; `--lock-hwid` / `--trial` / `--hwid` on the loader CLI) |
 
 | Default OFF (opt-in) | How to enable |
 |---|---|
-| `--driver-check` kernel-driver gate | flag, or `NIXON_DRIVER_CHECK=1` at runtime |
-| `--rename-internal` | flag |
-| `--split-bootstrap` | flag |
+| `--driver-check` kernel-driver gate | flag on the loader CLI, or `NIXON_DRIVER_CHECK=1` at runtime |
+| `--rename-internal` | flag (both CLIs) |
+| `--split-bootstrap` | flag on the loader CLI |
 | KOD kill-on-detect (VM + audit-hook timing) | `NIXON_KOD=1` at runtime (report-only otherwise) |
 | Audit timing enforcement | `NIXON_AUDIT_TIMING=<any non-"0" value>` arms at runtime |
 | `--lowering` itself | `--lowering <csv>` |
@@ -164,8 +209,20 @@ The most recent full repository audit is [`docs/AUDIT-2026-10-19.md`](docs/AUDIT
 vendor v1.1→V10 version matrix, and a completeness verdict. It also records
 the two highest-severity findings of the year: the adversarial injection
 corrupting the emitted ChaCha20 seal (~80% of default builds produced a dead
-artifact) and a process-wide `mlockall(MCL_FUTURE)` leak. Both are fixed,
-and the whole suite is green (4098 passed, 14 skipped, 0 failed).
+artifact) and a process-wide `mlockall(MCL_FUTURE)` leak. Both are fixed.
+
+The follow-up rounds are in
+[`docs/AUDIT-2026-10-19-followup.md`](docs/AUDIT-2026-10-19-followup.md)
+(verified TLS, no import-time log file, `section_split` wired, an
+enforceable lint gate) and
+[`docs/AUDIT-2026-10-20.md`](docs/AUDIT-2026-10-20.md) (the CLI audit:
+dropped flags, an unpinned lint gate, an untracked build config, a hard
+`z3` dependency, and the documentation refresh). The current suite is
+**4242 passed, 23 skipped, 0 failed**.
+
+The suite is green. The live count is a moving number -- read it from
+`python3 -m pytest tests/ -q` rather than from a doc; the dated
+snapshots live in the audit reports.
 
 ## Security model + honest limitations
 
@@ -207,24 +264,35 @@ examples/hello.py         Sample payload (print-based)
 ## Testing
 
 ```bash
-NIXON_LOG_REDIRECT=0 timeout 200 python3 -m pytest tests/test_lowering.py \
-  tests/test_opcount_truth.py tests/test_vm_subset.py tests/test_clock_bias.py -q
-# 60 passed in 0.83s (measured 2026-10-19)
+NIXON_LOG_REDIRECT=0 python3 -m pytest tests/ -q
 ```
 
-Full suite is large (220+ `tests/test_*.py` files); run
-`python3 -m pytest tests/ -q` per `docs/DEVELOPER.md` if you need the whole
-thing. A broader verified subset (lowering parity, diagnostic, trial, hwid,
+That is the whole suite. It is large (a few hundred test files), so the
+targeted subsets below are what to reach for while working:
+
+```bash
+NIXON_LOG_REDIRECT=0 python3 -m pytest tests/test_lowering.py \
+  tests/test_opcount_truth.py tests/test_vm_subset.py tests/test_clock_bias.py -q
+```
+
+A broader verified subset (lowering parity, diagnostic, trial, hwid,
 pytoc, spec, snapshot, stdlib, watermark, gates, split-bootstrap, driver):
 
 ```bash
-NIXON_LOG_REDIRECT=0 timeout 200 python3 -m pytest tests/test_lowering_parity_141.py \
+NIXON_LOG_REDIRECT=0 python3 -m pytest tests/test_lowering_parity_141.py \
   tests/test_diagnostic.py tests/test_trial_bind.py tests/test_hwid_static.py \
   tests/test_hwid_lock.py tests/test_pytoc.py tests/test_pyinstaller_spec.py \
   tests/test_stdlib_audit.py tests/test_frozen_snapshot.py tests/test_watermark_gate.py \
   tests/test_name_gate.py tests/test_internal_rename.py tests/test_split_bootstrap.py \
   tests/test_driver_blocklist.py -q
-# 340 passed in 7.72s (measured 2026-10-19)
+```
+
+Other gates:
+
+```bash
+make lint        # ruff + the runtime undefined-global check
+make e2e         # every build must produce an artifact that RUNS
+make audit-commit  # what the last commit removed, and which removals dropped a call
 ```
 
 `NIXON_LOG_REDIRECT=0` keeps pytest output on the console instead of

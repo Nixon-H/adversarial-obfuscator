@@ -42,8 +42,12 @@ BUILD_DIR = os.path.join(ROOT, "build")
 # Directory containing Rust relay source code
 RELAY_DIR = os.path.join(ROOT, "relay")
 
-# Path to the obfuscator entry point
-OBFUSCATOR = os.path.join(ROOT, "obfuscator", "core.py")
+# Path to the obfuscator entry point.  The pipeline is a package, not a
+# single module, so the fallback invocation is a module run:
+#   python3 -m obfuscator.core.pipeline obfuscate <src> -o <dst>
+# The old value (obfuscator/core.py) named a file that does not exist, so
+# the ImportError fallback it guarded would itself have crashed.
+OBFUSCATOR = ["-m", "obfuscator.core.pipeline"]
 
 # JSON configuration for the Rust relay build
 CONFIG_FILE = os.path.join(ROOT, "config", "relay.json")

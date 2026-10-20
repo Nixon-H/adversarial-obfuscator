@@ -60,8 +60,17 @@ commit deleted and isolates the ones whose *call* was the point.
 - `relay/` — Rust relay binary (payload execution)
 - `native/` — C/C++ native extensions
 - `scripts/` — Build pipeline scripts
+  - `scripts/phases/` — the ordered build stages
+  - `scripts/evaluation/` — measurement and red-team tools (the LLM
+    tools need `pip install -r requirements-ai.txt`)
+  - `scripts/lint/` — the lint gate and the deterministic cleanup
+    scripts (`make lint`, `make audit-commit`)
+  - `scripts/validation/`, `scripts/proofs/` — the SMT proof stack
+    (optional: `z3-solver`)
 - `tests/` — Test suites
-- `config/` — Build configuration (JSON)
+- `config/` — Build configuration (JSON). `config/default.json` and
+  `config/baseline_report.json` are tracked (the build depends on
+  them); everything else in that directory is machine-local.
 
 ## Adding a Feature
 

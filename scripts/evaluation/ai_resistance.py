@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-benchmark_ai_resistance.py
+scripts/evaluation/ai_resistance.py
 
 Takes the build artifact (payload_obfuscated.py), sends it to all 4 free AI models,
 scores deobfuscation difficulty, and generates HTML + PDF reports.
@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import Optional
 from datetime import datetime
 
-import httpx
+# httpx is an OPTIONAL dependency of the LLM evaluation tools.  It is
+# not needed to build or test the obfuscator; install it with
+#   pip install -r requirements-ai.txt
+try:
+    import httpx
+except ImportError:  # pragma: no cover - optional dependency
+    httpx = None
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("benchmark")
@@ -113,6 +119,10 @@ def call_model(model: str, code: str, timeout_s: int = 300, max_tokens: int = 81
     for attempt in range(4):
         proxy = _get_proxy()
         try:
+            if httpx is None:
+                raise RuntimeError(
+                    "httpx is required for the LLM evaluation tools; "
+                    "install it with: pip install -r requirements-ai.txt")
             with httpx.Client(proxy=proxy, timeout=timeout_s) as client:
                 payload = {"model": model, "messages": messages,
                            "temperature": 0.1, "max_tokens": max_tokens}

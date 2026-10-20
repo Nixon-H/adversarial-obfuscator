@@ -327,11 +327,11 @@ These techniques are available but **disabled by default**. They add complexity 
 - Phase 16: CI/CD pipeline, per-build seeds, build manifest, GitHub Actions
 - C++ native core (whitebox AES)
 - Anti-debug (12 checks)
-- Test suite (4108 tests across 224 `tests/test_*.py` files — `python3 -m pytest tests/ -q`; the per-phase counts below are from June 2026 and are kept as a design record)
+- Test suite (`python3 -m pytest tests/ -q`; the per-phase counts below are from June 2026 and are kept as a design record. The live suite size is a moving number -- read it from the run, not from a doc)
 
 ### Phase 2 Extensions (enabled by default via `config/default.json`; `--phase2` is a hidden compatibility flag)
 - Phase 2: Classification pass (heuristic scoring + `@protect()` decorators) — 13 tests
-- Phase 8: VM ISA + bytecode compiler + interpreter (36 opcodes, computed dispatch) — 9+6+11 tests
+- Phase 8: VM ISA + bytecode compiler + interpreter (35 opcodes, computed dispatch) — 9+6+11 tests
 - Phase 9: Mutating ISA (3 levels: opcode shuffle, handler permute, fusion/split) — 11 tests
 - Phase 10: JIT template generation + Rust runtime specializer (mmap + exec) — 6 tests
 - Phase 11: Variant pool (4 strategy generator, build-time + runtime selection) — 9 tests

@@ -34,7 +34,7 @@ Maintenance Notes:
 - The baseline path defaults to config/baseline_report.json relative
   to the project root. If missing, DEFAULT_BASELINE_METRICS are used.
 - Each gate compares the ratio current/baseline against the gate's
-  threshold_percent (e.g., 0.9 means the current value must be at
+  threshold_ratio (e.g., 0.9 means the current value must be at
   least 90% of the baseline).
 - WARNING gates are informational; BLOCKER gates cause build failure.
 """
@@ -136,8 +136,8 @@ class RegressionChecker:
                 metric_name=gate.metric_name,
                 baseline_value=current_value,
                 current_value=current_value,
-                delta_percent=0.0,
-                threshold_percent=gate.threshold_percent,
+                delta_ratio=0.0,
+                threshold_ratio=gate.threshold_ratio,
                 passed=True,
                 severity=gate.severity,
                 message=f"PASS (no baseline for '{gate.metric_name}'; fail-open)",
@@ -151,8 +151,8 @@ class RegressionChecker:
                 metric_name=gate.metric_name,
                 baseline_value=current_value,
                 current_value=current_value,
-                delta_percent=0.0,
-                threshold_percent=gate.threshold_percent,
+                delta_ratio=0.0,
+                threshold_ratio=gate.threshold_ratio,
                 passed=True,
                 severity=gate.severity,
                 message=f"PASS (zero baseline for '{gate.metric_name}'; fail-open)",
@@ -178,8 +178,8 @@ class RegressionChecker:
                     metric_name=gate.metric_name,
                     baseline_value=self.baseline.get(gate.metric_name, 0.0),
                     current_value=0.0,
-                    delta_percent=0.0,
-                    threshold_percent=gate.threshold_percent,
+                    delta_ratio=0.0,
+                    threshold_ratio=gate.threshold_ratio,
                     passed=False,
                     severity=gate.severity,
                     message=f"FAIL (metric '{gate.metric_name}' not measured)",

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
-import z3
+from scripts.z3_optional import z3
 
 BITWIDTH = 64
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 import time
-import z3
+from scripts.z3_optional import z3
 
 from scripts.validation.equivalence import EquivalenceChecker
 from scripts.validation.ir_to_smt import IRToSMT

@@ -17,7 +17,7 @@ continues as if protected.
 |---|----------|----------|----------|---------|--------------------|
 | 1 | `cryptography` unavailable (pipeline encrypt) | `DEGRADE` (silent downgrade) | `obfuscator/core/pipeline.py:422-456`: `_check_aes_ctr()` tries `cryptography` → `Crypto` → `False`; `Nixon_Enc_AES_CTR` falls through to XOR `Nixon_Enc_blob` with no log | `ACCEPTABLE` | Downgrade is logged nowhere; recommend one `print`/log line in the final `except ImportError` fallthrough. Too small to matter for the threat model (build-host dep), so accepted with note. |
 | 2 | `cryptography` unavailable (fragment bind/decrypt) | `FAIL-CLOSED` / `CRASH` | `scripts/binding/crypto_binding.py:361-388`: `encrypt_fragment` imports `AESGCM` unguarded → raises; `decrypt_fragment` catches all → `None` (reject) | `ACCEPTABLE` | Encrypt fails loudly, decrypt fails closed. Correct polarity. |
-| 3 | `z3` unavailable | `CRASH` (whole build CLI unimportable) | `scripts/build.py:62` imports `smt_validator` → `scripts/validation/smt_validator.py:27-29` → `ast_to_smt.py:21` / `ir_to_smt.py:19` / `equivalence.py:20` all do top-level `import z3`; proven by `tests/test_failure_modes.py::test_z3_absence_breaks_build_import_closure` | `NEEDS-FIX` | Optional proof-only dep is load-bearing for every build. Fix (deferred, >15-line blast radius): lazy-import `z3` inside proof paths or guard `smt_validator` imports so `--validate`-less builds work without z3. |
+| 3 | `z3` unavailable | `DEGRADE` (build works; the proof path fails with a clear message) | **fix applied**: every `import z3` in the tree now goes through `scripts/z3_optional.py`, which returns the real module or a stand-in that raises `RuntimeError("z3-solver is required for the SMT proof paths...")` the moment anything uses it. The build CLI imports without z3; proven by `tests/test_failure_modes.py::test_z3_absence_does_not_break_the_build_import_closure` and `::test_z3_absence_raises_a_clear_error_at_the_proof_entry_point` | `ACCEPTABLE` | A proof-only dependency is no longer load-bearing for every build. |
 | 4 | `Cython` unavailable | `DEGRADE` (audited skip) | `scripts/phases/phase_pytoc.py:36-45,86-99`: missing Cython/setuptools/compiler/cythonize-fail all return `(None, reason)`; `scripts/build.py:2411-2467` logs `PYTOC … (non-fatal)` and continues; in-pipeline `compile_payload_to_cython` returns `None` on non-zero exit (`obfuscator/core/pipeline.py:349-361`); proven by `test_pytoc_missing_cython_graceful_skip` | `ACCEPTABLE` | Best-effort native path degrades with a log line. Correct. |
 | 5 | `torch` unavailable | `SILENT` (no-op) | No `import torch` anywhere under `obfuscator/ scripts/ relay/ vm/ irgen/ llvmgen/ encrypt/ runtime/` (grep); `import torch` fails on this host yet nothing breaks; `torch` appears only as classifier string labels (`scripts/classification/function_classifier.py:280,310`) | `ACCEPTABLE` | Not a dependency at all. No action. |
 | 6 | `numpy` unavailable | `DEGRADE` | `obfuscator/core/utils.py:386-390`: `HAS_NUMPY` flag via guarded import; `scripts/phases/phase_assumptions.py:64` guards `import numpy`; `scripts/gpu/gpu_execution.py:8-10` guards `pyopencl` — pattern is degraded-pure-Python/fallback | `ACCEPTABLE` (`UNVERIFIED` for exact `HAS_NUMPY=False` downstream surface) | Guard pattern verified; full no-numpy build not exercised here. |
@@ -92,8 +92,9 @@ continues as if protected.
 - **D24/D25 — farm network robustness**: overall deadline for
   `trigger_and_wait`, honor `Retry-After`/`X-RateLimit-Reset` with capped
   backoff, make DoH→direct fallback explicit/logged (it drops Tor posture).
-- **D3 — z3 hard dependency**: lazy-import z3 in `scripts/validation/*` so
-  plain builds work without the proof stack.
+- **D3 — z3 hard dependency**: RESOLVED. Every `import z3` now goes
+  through `scripts/z3_optional.py`; a build without z3 works and the
+  proof path fails with a message that says what to install.
 - **D13 — build-input symlinks**: `O_NOFOLLOW`/islink refusal for
   `generate_payload_h` inputs (or an explicit build-host-trust statement).
 - **D29 — `atomic_write` temp-name collision**: unique tmp suffix
@@ -102,13 +103,15 @@ continues as if protected.
 ## Behavior / verdict counts
 
 - By behavior (31 scenarios): `FAIL-CLOSED` 7 (#2,7,9,12,16-snippet,17,19);
-  `DEGRADE` 8 (#1,4,6,14,20,26,27,18); `CRASH` 4 (#3,15,21-artifacts,28);
+  `DEGRADE` 9 (#1,3,4,6,14,20,26,27,18); `CRASH` 3 (#15,21-artifacts,28);
   `FAIL-OPEN` 2 (#8,#14-also); `SILENT` 5 (#5,10-was,11,13,22-gates,25);
   `RETRY` 1 (#25-also); `AUDITED` 4 (#29-trial,30,31,23-also). Mixed rows
   counted under their primary label; see table for dual labels (#26 is
   `FAIL-CLOSED` when keyed, `DEGRADE`-warned otherwise — counted as
-  `DEGRADE`).
-- By verdict: `ACCEPTABLE` 25, `NEEDS-FIX` 6 (#3,#13,#24,#25,#29,D7-log
-  note folded into ACCEPTABLE). After the applied staleness-flag fix, #10
-  moved from `NEEDS-FIX` to `ACCEPTABLE`; #26 moved likewise per
-  ADR-0005 (enforced where configured, warned elsewhere).
+  `DEGRADE`). #3 moved from `CRASH` to `DEGRADE` when the z3 import was
+  made optional.
+- By verdict: `ACCEPTABLE` 26, `NEEDS-FIX` 5 (#13,#24,#25,#29, and the
+  D7-log note, folded into ACCEPTABLE). #10 moved from `NEEDS-FIX` to
+  `ACCEPTABLE` after the staleness-flag fix; #26 moved likewise per
+  ADR-0005 (enforced where configured, warned elsewhere); #3 moved when
+  the z3 dependency was made optional.

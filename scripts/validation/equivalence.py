@@ -17,7 +17,7 @@ Dependencies:
 """
 from __future__ import annotations
 
-import z3
+from scripts.z3_optional import z3
 from dataclasses import dataclass
 
 
@@ -82,7 +82,7 @@ class EquivalenceChecker:
     distinguish "proven non-equivalent" from "could not decide".
     """
     def __init__(self, timeout_ms: int = 30000):
-        self.timeout_ms = timeout_ms
+            self.timeout_ms = timeout_ms
 
     def check(
         self,

@@ -1,0 +1,19 @@
+# Optional dependencies for the LLM evaluation tools.
+#
+# NOT needed to build the obfuscator, to run the obfuscation pipeline, or
+# to run the test suite.  Only the LLM red-team / proof tools under
+# scripts/evaluation/ need these, plus the local-model path in
+# ai-obfuscator.py.
+#
+#   pip install -r requirements-ai.txt
+#
+# The LLM tools are not part of CI: they call a hosted model and cost
+# money, so they are opt-in by construction.
+
+# HTTP client used by scripts/evaluation/{ai_resistance,deobf_models,ai_proof}.py
+httpx==0.28.1
+
+# Local HuggingFace model path (ai-obfuscator.py).  Optional: the tool
+# works against a hosted API without them.
+# transformers>=4.44.0
+# torch>=2.2.0

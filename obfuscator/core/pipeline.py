@@ -2249,6 +2249,14 @@ def build_project(args):
                 section_split=bool(getattr(args, 'section_split', False)),
                 section_count=int(getattr(args, 'section_count', 4) or 4),
             )
+            if getattr(args, 'section_split', False):
+                # The split needs a fallback payload to split, and there
+                # is no fallback at all in --native-only mode.  Say so
+                # instead of silently shipping the single blob.
+                if "_NX_SECTION_PACK = ''" in hybrid_loader_src:
+                    UI.warn("Section split was requested but could not be "
+                            "armed (no fallback payload, or --native-only); "
+                            "the single blob is used instead.")
             args._real_native_blobs = real_blobs_dict
             args._real_fallback_blob = real_fallback_str
             # Secure temp (no predictable CWD artifact): system temp dir,
@@ -2276,7 +2284,8 @@ def build_project(args):
          UI.section("PHASE 2: COMPILATION & OBFUSCATION")
     hw_enable = bool(args.bind_mac)
     one_shot = bool(args.one_shot)
-    watermark_seed = args.watermark.encode() if args.watermark else None
+    _lock_hwid = str(getattr(args, 'lock_hwid', '') or '')
+    watermark_seed = _lock_hwid.encode() if _lock_hwid else None
     deployed_rpc = ""
     deployed_contract = ""
     bytecode_hex = None
@@ -2331,8 +2340,8 @@ def _VERIFY_INTEGRITY():
 """
             code_obj = compile(CRITICAL_PAYLOAD, '<network>', 'exec')
             bytecode_hex = "0x" + marshal.dumps(code_obj).hex()
-            if args.watermark:
-                hw_hash = hashlib.sha256(args.watermark.encode()).hexdigest()
+            if _lock_hwid:
+                hw_hash = hashlib.sha256(_lock_hwid.encode()).hexdigest()
                 UI.item("Verification", f"Target HWID: {hw_hash[:16]}...", "INFO")
                 deployer.add_license(hw_hash, bytecode_hex, f"Build-{base_out_name}")
             args.runtime_key = runtime_key
@@ -3034,489 +3043,553 @@ def _VERIFY_INTEGRITY():
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
 log = logging.getLogger(__name__)
 
-VERSION = "3.0.0"
+from obfuscator.version import VERSION, version_string  # noqa: F401
+
+def _make_farm(args, gh_token):
+    """Build the cloud-compile farm named by --platform.
+
+    GitHub is the only implemented farm.  The flag exists so the choice
+    is explicit and so a second backend can be added without changing
+    the call sites; an unknown platform is an error, not a silent
+    fallback.
+    """
+    platform = getattr(args, 'platform', 'auto') or 'auto'
+    if platform in ('auto', 'github'):
+        return GitHubNuitkaFarm(gh_token,
+                                is_public=getattr(args, 'public', False),
+                                use_tor=getattr(args, 'tor', False),
+                                tor_proxy=getattr(args, 'tor_proxy', None))
+    raise ValueError("unknown build farm platform %r (implemented: github)"
+                     % (platform,))
+
+
+def build_parser():
+    """Construct the pipeline CLI parser.
+
+    Kept at module level rather than inside main() so the flag
+    surface can be imported and inspected.  The flags are part of
+    the contract, and a contract that cannot be introspected cannot
+    be audited.
+    """
+    class ConsoleArgumentParser(argparse.ArgumentParser):
+        def print_help(self, file=None):
+            # ``_console`` lives in utils and a star import does
+            # NOT bring underscore names across, so it is looked
+            # up on the module: that is the real terminal, even
+            # when stdout is redirected into the build log.
+            super().print_help(file=file or _nixon_utils._console)
+        def print_usage(self, file=None):
+            super().print_usage(file=file or _nixon_utils._console)
+    custom_fmt = lambda prog: argparse.RawTextHelpFormatter(prog, max_help_position=55)
+    parser = ConsoleArgumentParser(formatter_class=custom_fmt, description="Advanced Python Obfuscation & Deployment System", add_help=False)
+    parser.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+    build = subparsers.add_parser('build', help='Obfuscate and Compile a Python script', formatter_class=custom_fmt, add_help=False)
+    build.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    build.add_argument('source', help='Python script path')
+    mode_group = build.add_mutually_exclusive_group()
+    mode_group.add_argument('--native', action='store_true', help='Native Mode: Cloud Farm Cython Compilation (Hybrid - With Fallback)')
+    mode_group.add_argument('--native-only', dest='native_only', action='store_true', help='Strict Native Mode: Cloud Farm Cython Compilation (No Fallback)')
+    build.add_argument('--auto', nargs='?', const='cf,nk', help='Automation: cf=Cloudflare, nk=Nuitka (Defaults to cf,nk if no value)')
+    build.add_argument('--stego', action='store_true', help='Steganography wrapping')
+    build.add_argument('--tor', action='store_true', help='Route build traffic through Tor (default 127.0.0.1:9050; override via --tor-proxy or NIXON_TOR_PROXY)')
+    build.add_argument('--tor-proxy', default=None, help='Tor SOCKS endpoint host:port (default 127.0.0.1:9050; env NIXON_TOR_PROXY)')
+    build.add_argument('--compile', action='store_true', help='Compile FINAL loader with Nuitka (Creates EXE/ELF)')
+    build.add_argument('--lock-hwid', '--watermark', dest='lock_hwid', default='',
+                       help='Lock the build to a target HWID: registers a license for it and '
+                            'seeds the build deterministically. "--watermark" is a deprecated alias.')
+    build.add_argument('--one-shot', action='store_true', help='Self-destruct')
+    build.add_argument('--net-url', help='Auth URL (if not using auto=cf)')
+    build.add_argument('--tls-ca-bundle', help='PEM CA bundle for the emitted key fetch. The artifact verifies the certificate chain AND the hostname against the system trust store plus this CA (it never disables verification)')
+    build.add_argument('--section-split', action='store_true', help='Ship the payload as N independently sealed sections instead of one blob, so the whole encrypted payload is never resident in a single buffer. Needs a fallback payload to split, so it is not available with --native-only (default off)')
+    build.add_argument('--section-count', type=int, default=4, help='Number of sealed sections when --section-split is used (default 4)')
+    build.add_argument('--bind', help='Bind files inside payload')
+    build.add_argument('--expire', help='Expiration Date (YYYY-MM-DD)')
+    build.add_argument('--webhook', help='Alert Webhook URL')
+    build.add_argument('--bind-mac', help='Bind to MAC address')
+    build.add_argument('--allow-countries', help='Allowed country codes')
+    build.add_argument('--block-countries', help='Blocked country codes')
+    build.add_argument('--allow-regions', help='Allowed regions')
+    build.add_argument('--block-regions', help='Blocked regions')
+    build.add_argument('--contract', help='Contract address')
+    build.add_argument('--rpc', help='RPC URL')
+    build.add_argument('--shards', help='Key shard URLs')
+    build.add_argument('--auto-deploy', action='store_true', help='Auto deploy contract')
+    build.add_argument('--deploy-rpc', help='RPC URL for deployment')
+    build.add_argument('--explorer', help='Blockscout URL')
+    build.add_argument('--private-key', help='Deployment key')
+    build.add_argument('--cf-token', help='Cloudflare API Token (overrides the stored config)')
+    build.add_argument('--cf-account', help='Cloudflare Account ID (overrides the stored config)')
+    build.add_argument('--skip-cloud', action='store_true', help='Skip the cloud build farm: build the artifact locally even if --compile/--auto would send it to the farm')
+    build.add_argument('--resume', help='Resume waiting for a specific GitHub Run ID (skip upload)')
+    build.add_argument('--exclude-android', action='store_true', help='Skip Android build in Nuitka cloud compilation')
+    build.add_argument('--public', action='store_true', help='Public Repo Mode (Flash Mode) - Nukes repo after build')
+    build.add_argument('--platform', choices=['auto', 'github'], default='auto', help='Build farm platform. "auto" selects the only implemented farm, GitHub')
+    build.add_argument('--layers', type=int, help='Recursive packaging layers (default 100)')
+    build.add_argument('--zips', type=int, help='Number of ZIP layers')
+    build.add_argument('--hwid', default='', help='HWID string for macro expansion / HWID-locked fallback')
+    build.add_argument('--trial', default='', help="Trial period spec, e.g. '7d' (parsed via obfuscator.macros.parse_trial)")
+    build.add_argument('--vm-threshold', dest='vm_threshold', type=float, default=50.0, help='VM-score verdict threshold (default: 50.0)')
+    build.add_argument('--kod', action='store_true', help='Arm the loader kill-on-detect response: the artifact terminates when a detection fires')
+    build.add_argument('--hostguard', action='store_true', help='Prepend hostguard snippet to loader')
+    build.add_argument('--hwid-lock', dest='hwid_lock', action='store_true', help='HWID-lock the bytecode fallback blob (requires --hwid)')
+    build.add_argument('--driver-check', dest='driver_check', action='store_true', help='Bake the kernel-driver gate into the loader')
+    build.add_argument('--split-bootstrap', dest='split_bootstrap', action='store_true', help='Shamir (n=3,k=2) threshold key + fragmented decoder')
+    build.add_argument('--no-snapshot', dest='snapshot_off', action='store_true', help='Omit the frozen-stdlib snapshot gate')
+    build.add_argument('--no-stdlib-audit', dest='stdlib_audit_off', action='store_true', help='Omit the stdlib function-audit gate')
+    build.add_argument('--name-gate', dest='name_gate', action='store_true', help='Rewrite privileged call sites through per-build token map')
+    build.add_argument('--lowering', default='', help='Semantic-lowering families CSV (default: disabled)')
+    build.add_argument('--rename-internal', dest='rename_internal', action='store_true', help='Rename proven-internal public methods/attributes')
+    build.add_argument('--no-audit-hook-plant', dest='audit_hook_plant_off', action='store_true', help='Omit the audit-hook plant detector')
+    build.add_argument('--python', default=f"{sys.version_info.major}.{sys.version_info.minor}", help='Python version for GitHub Actions (Defaults to local)')
+    auth_desc = "Registers a Target Machine Hardware ID (HWID) to the Cloudflare licensing system.\nUses the Cloudflare API Key configured in the setup wizard."
+    auth = subparsers.add_parser('auth', help='Authorize a hardware ID (Cloudflare)', description=auth_desc, formatter_class=custom_fmt, add_help=False)
+    auth.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    auth.add_argument('--hwid', required=True, help='The SHA256 Hardware ID of the target machine to authorize')
+    auth.add_argument('--token-file', help='Path to a .txt file containing the authorization token (if bypassing manual entry)')
+    
+    clean_desc = "Completely obliterates and wipes all traces of this project from your Cloudflare account.\nDeletes Workers, KV Namespaces, and revokes all active licenses."
+    clean = subparsers.add_parser('clean', help='Clean up Cloudflare deployment', description=clean_desc, formatter_class=custom_fmt, add_help=False)
+    clean.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+
+    obfuscate_desc = "Obfuscate a Python script (AST transformations only, no compilation)."
+    obfuscate = subparsers.add_parser('obfuscate', help='Obfuscate a Python script', description=obfuscate_desc, formatter_class=custom_fmt, add_help=False)
+    obfuscate.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    obfuscate.add_argument('source', help='Python script path')
+    obfuscate.add_argument('-o', '--output', help='Output file path (default: stdout)')
+    obfuscate.add_argument('--cfg-flatten', action='store_true', help='Control-flow flattening')
+    obfuscate.add_argument('--opaque-predicates', action='store_true', help='Insert opaque predicates')
+    obfuscate.add_argument('--bogus-exceptions', action='store_true', help='Inject fake exception handlers')
+    obfuscate.add_argument('--mba-subs', action='store_true', help='MBA expression substitution')
+    obfuscate.add_argument('--unicode-ids', action='store_true', help='Rename symbols to Unicode')
+    obfuscate.add_argument('--fragment-strings', action='store_true', help='Fragment string constants')
+    obfuscate.add_argument('--rename-internal', dest='rename_internal', action='store_true',
+                           help='Rename proven-internal public methods/attributes (opt-in, default: off)')
+    obfuscate.add_argument('--opt-level', dest='opt_level', type=int, default=None,
+                           help='Protection ladder 0-5: resolve the 17 canonical '
+                                'transform flags from the level. When given it '
+                                'decides those flags and the individual transform '
+                                'flags above are ignored (same rule as '
+                                'scripts/build.py --opt-level)')
+
+    bf_desc = "Trigger a build-farm workflow on GitHub Actions and wait for artifacts."
+    bf = subparsers.add_parser('build-farm', help='Trigger cloud build farm', description=bf_desc, formatter_class=custom_fmt, add_help=False)
+    bf.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    bf.add_argument('--payload', help='Path to payload script to upload')
+    bf.add_argument('--resume', help='Resume waiting for a specific GitHub Run ID')
+    bf.add_argument('--exclude-android', action='store_true', help='Skip Android build')
+    bf.add_argument('--python', default=f"{sys.version_info.major}.{sys.version_info.minor}", help='Python version for GitHub Actions')
+    bf.add_argument('--public', action='store_true', help='Public repo mode')
+    bf.add_argument('--tor', action='store_true', help='Route build-farm traffic through Tor (default 127.0.0.1:9050; override via --tor-proxy or NIXON_TOR_PROXY)')
+    bf.add_argument('--tor-proxy', default=None, help='Tor SOCKS endpoint host:port (default 127.0.0.1:9050; env NIXON_TOR_PROXY)')
+    bf.add_argument('--platform', choices=['auto', 'github'], default='auto', help='Build farm platform. "auto" selects the only implemented farm, GitHub')
+
+    version_desc = "Show version information and exit."
+    version = subparsers.add_parser('version', help='Show version', description=version_desc, formatter_class=custom_fmt, add_help=False)
+    version.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    return parser, subparsers
+
+
+def main():
+    # Explicit log setup: the redirect used to happen as a side effect
+    # of importing obfuscator.core.utils, which created and truncated
+    # ./build.log in whatever directory the tool happened to run in.
+    enable_log_redirect()
+    is_help = '-h' in sys.argv or '--help' in sys.argv
+    if not is_help:
+        check_dependencies()
+    try:
+        cm = ConfigManager()
+        if not is_help and len(sys.argv) < 2 and (not cm.get("github_token") or not cm.get("cf_token")):
+            cm.run_wizard()
+            print("Usage: python3 -m obfuscator.core.pipeline build <script.py> [options]")
+            sys.exit(0)
+        parser, subparsers = build_parser()
+
+        # The valid commands are read off the subparser registry,
+        # not kept in a second hand-maintained list: a new
+        # subcommand used to be unreachable until that list was
+        # updated too.  The help flags are commands too.
+        valid_cmds = sorted(subparsers.choices) + ["-h", "--help"]
+        if len(sys.argv) > 1 and sys.argv[1] not in valid_cmds:
+            UI._out(f"\n {UI.RED}[!] unknown command {sys.argv[1]!r}; "
+                    f"expected one of: {', '.join(valid_cmds)}{UI.RESET}\n")
+            parser.print_help(file=_nixon_utils._console)
+            sys.exit(1)
+        args = parser.parse_args()
+        if not getattr(args, 'command', None):
+            UI._out(f"\n {UI.RED}[!] no command given; expected one of: "
+                    f"{', '.join(valid_cmds)}{UI.RESET}\n")
+            parser.print_help(file=_nixon_utils._console)
+            sys.exit(1)
+        if args.command == 'build':
+            auto_cf = False
+            auto_nk = False
+            if args.auto:
+                modes = args.auto.split(',')
+                if 'cf' in modes: auto_cf = True
+                if 'nk' in modes: auto_nk = True
+                if 'nk' in modes: args.compile = True                
+            if auto_nk or args.auto: 
+                 if not args.native and not args.native_only: 
+                     print(" [+] Auto mode enabled: Implies --native (Hybrid)")
+                     args.native = True
+            if args.stego and auto_nk:
+                print(" [!] CONFLICT: --stego incompatible with cloud build")
+                sys.exit(1)
+            deployed_url = args.net_url
+            hmac_key = None
+            # The command line wins over the stored config: an
+            # explicit --cf-token/--cf-account must not be silently
+            # overridden by the saved settings.
+            cf_token = args.cf_token or cm.get("cf_token")
+            cf_account = args.cf_account or cm.get("cf_account")
+            gh_token = cm.get("github_token")
+            ntru_priv_key = None
+            ntru_pub_key = None
+            if True:
+                s_s = secrets.randbits(32)
+                rng = random.Random(s_s)
+                N=509; Q=2048
+                priv = [0]*N
+                for i in rng.sample(range(N), 15): priv[i] = 1
+                for i in rng.sample(range(N), 15): priv[i] = -1 if priv[i] == 0 else priv[i]
+                g_p = [0]*N
+                for i in rng.sample(range(N), 12): g_p[i] = 1
+                for i in rng.sample(range(N), 12): g_p[i] = -1 if g_p[i] == 0 else g_p[i]
+                pub = [0]*N
+                for i in range(N):
+                    for j in range(N): pub[(i+j)%N] = (pub[(i+j)%N] + g_p[i] * priv[j]) % Q
+                ntru_priv_key = priv
+                ntru_pub_key = repr(pub)
+            if auto_cf:
+                print("\n[*] [Phase 1] Cloudflare Infrastructure...")
+                if not cf_token: print(" [!] Missing Cloudflare Token"); sys.exit(1)
+                hmac_key = secrets.token_hex(32)
+                deployer = CloudflareDeployer(cf_token, cf_account)
+                deployed_url = deployer.deploy_master(hmac_key, ntru_priv=ntru_priv_key)
+                if deployed_url: print(f" [+] Worker Active: {deployed_url}")
+                else: print(" [!] Cloudflare Deployment Failed."); sys.exit(1)
+            print("\n[*] [Phase 3] Generating Universal Loader (Standard Pipeline)...")
+            # The parsed namespace IS the build namespace.  It used to
+            # be a hand-built argparse.Namespace, which silently
+            # dropped every field the copy forgot -- 14 of them
+            # (--hwid, --trial, --vm-threshold, --kod, --hostguard,
+            # --hwid-lock, --driver-check, --split-bootstrap,
+            # --no-snapshot, --no-stdlib-audit, --name-gate,
+            # --lowering, --rename-internal, --no-audit-hook-plant)
+            # and turned those flags into no-ops.  Overriding only
+            # the fields this function computes means a new flag
+            # cannot be forgotten.
+            args.cf_token = cf_token
+            args.cf_account = cf_account
+            args.net_url = deployed_url
+            args._cf_hmac_key = hmac_key
+            args._ntru_pub = ntru_pub_key
+            args.gh_token = gh_token
+            generated_files_map = build_project(args)
+            if not generated_files_map:
+                UI.fail("Build failed - no output generated")
+                sys.exit(1)
+            if not args.one_shot:
+                UI.section("PHASE 3: VERIFICATION SUITE")
+                ver_rows = []
+                engines = set()
+                all_ok = True
+                for suff in ["Debug", "Silent"]:
+                    if generated_files_map and suff in generated_files_map:
+                        res = test_command(argparse.Namespace(obfuscated=generated_files_map[suff], original=args.source, silent=True, variant=f"{suff} Version"), skip_header=True)
+                        if res:
+                            ver_rows.append([f"[◯] {res['variant']}", res['status'], res['integrity'], res['match']])
+                            engines.add(res['engine'])
+                            if res['status'] != 'PASS': all_ok = False
+                
+                UI.print_table(["PROFILE VARIANT", "STATUS", "INTEGRITY", "MATCH"], ver_rows)
+                UI._out(" │")
+                eng_str = " + ".join(list(engines)) if engines else "Unknown"
+                UI.item("Crypto Engine", eng_str, "ACTIVE")
+                if all_ok:
+                    UI.item("Validation Result", f"{UI.GREEN}[SUCCESS] All logic gates verified.{UI.RESET}", "")
+                else:
+                    UI.item("Validation Result", f"{UI.RED}[FAILURE] Logic verification failed.{UI.RESET}", "")
+            else:
+                print("\n[*] ONE-SHOT MODE DETECTED: Skipping automated verification to prevent self-destruct.")
+            if getattr(args, 'layers', None) is not None:
+                num_layers = args.layers
+            else:
+                if sys.stdin.isatty() and not getattr(args, 'auto', None):
+                    try:
+                        val = UI.prompt("Recursive layers (1-500, default 100): ")
+                        num_layers = int(val) if val else 100
+                    except ValueError: num_layers = 100
+                else:
+                    num_layers = 100
+            if not 0 <= num_layers <= 500:
+                print("  [!] Layers must be 0-500, using default 100")
+                num_layers = 100
+            bind_list = []
+            if args.bind:
+                raw_binds = args.bind.split(',')
+                for b in raw_binds:
+                     clean_b = b.strip()
+                     if clean_b: bind_list.append(clean_b)
+            if getattr(args, 'zips', None) is not None:
+                num_zips = args.zips
+            else:
+                default_zips = len(bind_list) if bind_list else 0
+                if bind_list:
+                     print(f"  [Tip] Suggesting {default_zips} ZIP layers for your {len(bind_list)} bind files.")
+                if sys.stdin.isatty() and not getattr(args, 'auto', None):
+                    try:
+                        val = UI.prompt(f"ZIP layers ({default_zips}): ")
+                        num_zips = int(val) if val else default_zips
+                    except ValueError: num_zips = default_zips
+                else:
+                    num_zips = default_zips
+            if num_zips < 0: num_zips = 0
+            if bind_list and num_zips < 1:
+                 print("  [!] Binding requires at least 1 ZIP layer. Setting to 1.")
+                 num_zips = 1
+            for suffix in ["Debug", "Silent"]:
+                t = generated_files_map.get(suffix)
+                if t and os.path.exists(t): 
+                    if num_layers > 0 or num_zips > 0:
+                        packed_path = t.replace(".py", "_Packed.py")
+                        recursive_package(t, packed_path, num_layers, num_zips, bind_paths_list=bind_list)
+                    else:
+                        packed_path = t
+                    if (getattr(args, 'compile', False) or (getattr(args, 'auto', False) and 'nk' in getattr(args, 'auto', ''))) and not getattr(args, 'skip_cloud', False):
+                        if not getattr(args, 'native', False): 
+                            UI.section("PHASE 4: CLOUD COMPILATION")
+                        target_payload = packed_path
+                        if target_payload and os.path.exists(target_payload):
+                            if not gh_token:
+                                UI.fail("GitHub token required for Nuitka cloud build.")
+                            else:
+                                nk_farm = _make_farm(args, gh_token)
+                                try:
+                                    resume_id = getattr(args, 'resume', None)
+                                    if resume_id:
+                                        with UI.Task("Resuming", f"Build ID {resume_id}") as t:
+                                            run_id = nk_farm.trigger_and_wait(resume_run_id=int(resume_id), exclude_android=getattr(args, 'exclude_android', False), header_suffix=suffix.upper())
+                                            if run_id: t.success()
+                                            else: t.fail()
+                                    elif nk_farm.create_disposable_repo():
+                                        scanner = DependencyScanner()
+                                        scanner.scan_file(args.source)
+                                        dyn_pip = scanner.get_pip_install_cmd()
+                                        dyn_flags = scanner.get_nuitka_args()
+                                        
+                                        if not nk_farm.upload_file(target_payload, "payload.py"):
+                                            UI.fatal("Critical: Failed to upload payload.py - Aborting build.")
+                                            sys.exit(1)
+                                            
+                                        nk_farm.create_workflow("payload.py", exclude_android=getattr(args, 'exclude_android', False), pip_command=dyn_pip, extra_nuitka_flags=dyn_flags, python_version=getattr(args, 'python', '3.11'))
+                                        run_id = nk_farm.trigger_and_wait(exclude_android=getattr(args, 'exclude_android', False), header_suffix=suffix.upper())
+                                    else:
+                                        run_id = None
+                                        UI.fail("Failed to create/access GitHub repo")
+                                    if run_id:
+                                        dist_dir = os.path.join(os.path.dirname(target_payload), "dist")
+                                        nk_farm.download_artifacts(run_id, dist_dir)
+                                        if getattr(args, 'public', False):
+                                            nk_farm.nuke()
+                                        else:
+                                            nk_farm.delete_file("payload.py")
+                                        print(f"\n[SUCCESS] Artifacts downloaded to: {dist_dir}")
+                                        universal_path = os.path.join(dist_dir, "Universal_Loader.py")
+                                        universal_packed = target_payload.replace(".py", "_Universal_Final.py")
+                                        if os.path.exists(universal_path):
+                                            UI.item("Universal Loader", "Detecting...", "FOUND")
+                                            shutil.move(universal_path, universal_packed)
+                                            UI.item("Final Payload", universal_packed, "GENERATED")
+                                            generated_files_map[suffix] = universal_packed
+                                            shutil.rmtree(dist_dir, ignore_errors=True)
+                                            continue 
+                                        UI.section("PHASE 5: OPTIMIZATION & PACKING")
+                                        tar_path = None
+                                        with UI.Task("Optimizing", "Strip + UPX") as ot:
+                                            tar_path = optimize_and_pack_binaries(dist_dir)
+                                            if tar_path: ot.success()
+                                            else: ot.fail()
+                                        if tar_path and os.path.exists(tar_path):
+                                            with UI.Task("Packaging", "Generating XZ Self-Extracting Loader...") as pt:
+                                                master_path = target_payload.replace("_Packed.py", "_Universal_Master.py")
+                                                generate_xz_loader_file(tar_path, master_path)
+                                                pt.success(f"{master_path} ({os.path.getsize(master_path)//1024}KB)")
+                                            final_master_packed = master_path.replace(".py", "_Packed.py")
+                                            with UI.Task("Final Deliverable", "Applying 4-Layer Recursive Pack") as ft:
+                                                recursive_package(master_path, final_master_packed, num_layers=4, num_zips=1)
+                                                ft.success(final_master_packed)
+                                        else:
+                                            UI.warn("Binary optimization failed, falling back to direct loader...")
+                                            master_binaries = {}
+                                            for fname in os.listdir(dist_dir):
+                                                fpath = os.path.join(dist_dir, fname)
+                                                if os.path.isfile(fpath) and not fname.endswith((".zip", ".tar")):
+                                                    with open(fpath, 'rb') as f:
+                                                        b_data = base64.b64encode(f.read()).decode('ascii')
+                                                    if "windows" in fname.lower(): master_binaries['windows'] = b_data
+                                                    elif "linux" in fname.lower(): master_binaries['linux'] = b_data
+                                                    elif "macos" in fname.lower(): master_binaries['darwin'] = b_data
+                                                    elif "android" in fname.lower(): master_binaries['android'] = b_data
+                                            if master_binaries:
+                                                try:
+                                                    from universal_helpers import generate_master_loader_script
+                                                    master_loader_code = generate_master_loader_script(master_binaries)
+                                                    master_path = target_payload.replace("_Packed.py", "_Universal_Master.py")
+                                                    with open(master_path, 'w', encoding='utf-8') as f:
+                                                        f.write(master_loader_code)
+                                                    UI.item("Master Loader", master_path, "GENERATED")
+                                                except ImportError:
+                                                    if tar_path:
+                                                        master_path = target_payload.replace("_Packed.py", "_Universal_Master.py")
+                                                        generate_xz_loader_file(tar_path, master_path)
+                                                        UI.item("XZ Loader", master_path, "GENERATED")
+                                            else:
+                                                UI.fail("No Nuitka binaries found to wrap.")
+                                except Exception as e:
+                                    if UI.current_task:
+                                        UI.current_task.fail(str(e))
+                                        UI.current_task = None
+                                    else:
+                                        print(f" [!] Nuitka Build Error: {e}")
+                    if getattr(args, 'stego', False):
+                         try:
+                             with open(packed_path, 'r', encoding='utf-8') as f: content = f.read()
+                             stego_path = packed_path.replace(".py", "_Stego.py")
+                             stego_wrap_output(content, stego_path)
+                             print(f" [+] Stego Output: {stego_path}")
+                         except Exception as e:
+                             print(f" [!] Stego Failed: {e}")
+                    if getattr(args, 'compile', False) and suffix == "Silent":
+                        UI.section("PHASE 6: FINAL COMPILATION")
+                        with UI.Task("Compiling", f"Native Binary ({packed_path})") as t:
+                            try:
+                                cmd = [sys.executable, "-m", "nuitka", "--onefile", "--remove-output", "--assume-yes-for-downloads", packed_path]
+                                subprocess.run(cmd, check=True, capture_output=True)
+                                t.success()
+                            except Exception as e:
+                                 t.fail(str(e))
+            final_rows = []
+            base_name = os.path.splitext(os.path.basename(args.source))[0]
+            dist_dir = os.path.join(os.path.dirname(os.path.abspath(args.source)), "dist")
+            os.makedirs(dist_dir, exist_ok=True)
+            for suffix, out_file in generated_files_map.items():
+                if out_file and os.path.exists(out_file):
+                    if suffix == "Debug":
+                        clean_py = f"{base_name}_protected_dbg.py"
+                        launcher_base = f"{base_name}_dbg"
+                    else:
+                        clean_py = f"{base_name}_protected.py"
+                        launcher_base = base_name
+                    target_path = os.path.join(dist_dir, clean_py)
+                    if os.path.exists(target_path): os.remove(target_path)
+                    shutil.move(out_file, target_path)
+                    launchers = generate_trust_launchers(target_path, output_name_base=launcher_base)
+                    final_rows.append(["Universal Payload", suffix, clean_py])
+                    if launchers:
+                        if os.path.exists(launchers[0]):
+                            final_rows.append(["Windows Launcher", suffix, os.path.basename(launchers[0])])
+                        if os.path.exists(launchers[1]):
+                            final_rows.append(["macOS Launcher", suffix, os.path.basename(launchers[1])])
+            UI.section("FINAL: DEPLOYMENT ASSETS")
+            UI._out("")
+            UI._out(f" ├── Directory         : {dist_dir}")
+            UI._out(" ├── Components        :")
+            for row in final_rows:
+                comp, prof, fname = row
+                if "Windows" in comp: tag = "[ Windows ]   "
+                elif "macOS" in comp: tag = "[ macOS ]     "
+                else: tag = "[ Universal ] "
+                UI._out(f" │   ├─ {tag} {fname}")
+            UI._out(" │")
+            UI._out(" └── Launchers         : Smart-Trust & Defender Whitelisting [READY]")
+            UI._out("")
+            UI._out(f" {UI.CYAN}ℹ Artifacts moved to: {dist_dir}{UI.RESET}")
+            UI._out(f" {UI.GREEN}[✓] ALL OPERATIONS COMPLETE.{UI.RESET}")
+        elif args.command == 'auth':
+            if not cm.get("cf_token"): print(" [!] Run setup first"); sys.exit(1)
+            mgr = CloudflareDeployer(cm.get("cf_token"), cm.get("cf_account"))
+            hw_hash = hashlib.sha256(args.hwid.encode()).hexdigest()
+            if args.token_file:
+                with open(args.token_file,'r')as f: c = f.read().strip()
+                mgr.add_license(hw_hash, c, "Auth-CLI")
+                print(" [+] Success")
+        elif args.command == 'clean':
+             if cm.get("cf_token"):
+                 CloudflareDeployer(cm.get("cf_token"), cm.get("cf_account")).cleanup()
+        elif args.command == 'version':
+            print(version_string())
+            print(f"Python: {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro} ({sys.platform})")
+            print(f"File: {os.path.abspath(__file__)}")
+        elif args.command == 'obfuscate':
+            with open(args.source, 'r', encoding='utf-8') as f:
+                source = f.read()
+            # The transform set.  With --opt-level the ladder decides the
+            # canonical flags (and the individual flags are ignored, the
+            # same rule scripts/build.py uses); without it the explicit
+            # flags apply, exactly as before.
+            opts = {
+                'strip_meta': True, 'split_vars': True, 'unfold_constants': True,
+                'symbol_rename': True, 'obf_calls': True, 'func_transform': True,
+                'rename_internal': bool(getattr(args, 'rename_internal', False)),
+            }
+            if getattr(args, 'opt_level', None) is not None:
+                opts['opt_level'] = args.opt_level
+            else:
+                opts.update({
+                    'cfg_flatten': args.cfg_flatten,
+                    'opaque_predicates': args.opaque_predicates,
+                    'bogus_exceptions': args.bogus_exceptions,
+                    'mba_subs': args.mba_subs,
+                    'unicode_ids': args.unicode_ids,
+                    'fragment_strings': args.fragment_strings,
+                })
+            # Route through build_pipeline so this CLI and
+            # scripts/build.py use ONE obfuscation implementation (the
+            # residue pass and the opt-level ladder included).
+            obfuscated = build_pipeline(source, extra_options=opts)
+            if args.output:
+                with open(args.output, 'w', encoding='utf-8') as f:
+                    f.write(obfuscated)
+                print(f"[+] Obfuscated output written to: {args.output}")
+            else:
+                sys.stdout.write(obfuscated)
+        elif args.command == 'build-farm':
+            gh_token = cm.get("github_token")
+            if not gh_token:
+                UI.fatal("GitHub token required for build farm. Run setup first.")
+                sys.exit(1)
+            farm = _make_farm(args, gh_token)
+            resume_id = getattr(args, 'resume', None)
+            if resume_id:
+                farm.trigger_and_wait(resume_run_id=int(resume_id), exclude_android=args.exclude_android)
+            else:
+                payload = getattr(args, 'payload', None)
+                if not payload:
+                    UI.fatal("--payload required for new build-farm jobs")
+                    sys.exit(1)
+                if farm.create_disposable_repo():
+                    scanner = DependencyScanner()
+                    scanner.scan_file(payload)
+                    dyn_pip = scanner.get_pip_install_cmd()
+                    dyn_flags = scanner.get_nuitka_args()
+                    farm.upload_file(payload, "payload.py")
+                    farm.create_workflow("payload.py", exclude_android=args.exclude_android, pip_command=dyn_pip, extra_nuitka_flags=dyn_flags, python_version=args.python)
+                    run_id = farm.trigger_and_wait(exclude_android=args.exclude_android)
+                    if run_id:
+                        dist_dir = os.path.join(os.path.dirname(os.path.abspath(payload)), "dist")
+                        farm.download_artifacts(run_id, dist_dir)
+                        print(f"\n[SUCCESS] Artifacts downloaded to: {dist_dir}")
+    except KeyboardInterrupt: print("\n[-] Cancelled."); sys.exit(0)
+    except Exception as e:
+        with open("build_error.log", "w") as f:
+            f.write(traceback.format_exc())
+        UI.fatal(f"Critical Build Error: {e}")
+        print(f"     [!] Details logged to: {os.path.abspath('build_error.log')}")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
-    def main():
-        # Explicit log setup: the redirect used to happen as a side effect
-        # of importing obfuscator.core.utils, which created and truncated
-        # ./build.log in whatever directory the tool happened to run in.
-        enable_log_redirect()
-        is_help = '-h' in sys.argv or '--help' in sys.argv
-        if not is_help:
-            check_dependencies()
-        try:
-            cm = ConfigManager()
-            if not is_help and len(sys.argv) < 2 and (not cm.get("github_token") or not cm.get("cf_token")):
-                cm.run_wizard()
-                print("Usage: python 15(14) copy.py build <script.py> [options]")
-                sys.exit(0)
-            class ConsoleArgumentParser(argparse.ArgumentParser):
-                def print_help(self, file=None):
-                    # ``_console`` lives in utils and a star import does
-                    # NOT bring underscore names across, so it is looked
-                    # up on the module: that is the real terminal, even
-                    # when stdout is redirected into the build log.
-                    super().print_help(file=file or _nixon_utils._console)
-                def print_usage(self, file=None):
-                    super().print_usage(file=file or _nixon_utils._console)
-            custom_fmt = lambda prog: argparse.RawTextHelpFormatter(prog, max_help_position=55)
-            parser = ConsoleArgumentParser(formatter_class=custom_fmt, description="Advanced Python Obfuscation & Deployment System", add_help=False)
-            parser.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
-            subparsers = parser.add_subparsers(dest='command', help='Available commands')
-            build = subparsers.add_parser('build', help='Obfuscate and Compile a Python script', formatter_class=custom_fmt, add_help=False)
-            build.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
-            build.add_argument('source', help='Python script path')
-            mode_group = build.add_mutually_exclusive_group()
-            mode_group.add_argument('--native', action='store_true', help='Native Mode: Cloud Farm Cython Compilation (Hybrid - With Fallback)')
-            mode_group.add_argument('--native-only', dest='native_only', action='store_true', help='Strict Native Mode: Cloud Farm Cython Compilation (No Fallback)')
-            build.add_argument('--auto', nargs='?', const='cf,nk', help='Automation: cf=Cloudflare, nk=Nuitka (Defaults to cf,nk if no value)')
-            build.add_argument('--stego', action='store_true', help='Steganography wrapping')
-            build.add_argument('--tor', action='store_true', help='Route build traffic through Tor (default 127.0.0.1:9050; override via --tor-proxy or NIXON_TOR_PROXY)')
-            build.add_argument('--tor-proxy', default=None, help='Tor SOCKS endpoint host:port (default 127.0.0.1:9050; env NIXON_TOR_PROXY)')
-            build.add_argument('--compile', action='store_true', help='Compile FINAL loader with Nuitka (Creates EXE/ELF)')
-            build.add_argument('--watermark', help='Lock to HWID')
-            build.add_argument('--one-shot', action='store_true', help='Self-destruct')
-            build.add_argument('--net-url', help='Auth URL (if not using auto=cf)')
-            build.add_argument('--tls-ca-bundle', help='PEM CA bundle for the emitted key fetch. The artifact verifies the certificate chain AND the hostname against the system trust store plus this CA (it never disables verification)')
-            build.add_argument('--section-split', action='store_true', help='Ship the payload as N independently sealed sections instead of one blob, so the whole encrypted payload is never resident in a single buffer (default off)')
-            build.add_argument('--section-count', type=int, default=4, help='Number of sealed sections when --section-split is used (default 4)')
-            build.add_argument('--bind', help='Bind files inside payload')
-            build.add_argument('--expire', help='Expiration Date (YYYY-MM-DD)')
-            build.add_argument('--webhook', help='Alert Webhook URL')
-            build.add_argument('--bind-mac', help='Bind to MAC address')
-            build.add_argument('--allow-countries', help='Allowed country codes')
-            build.add_argument('--block-countries', help='Blocked country codes')
-            build.add_argument('--allow-regions', help='Allowed regions')
-            build.add_argument('--block-regions', help='Blocked regions')
-            build.add_argument('--contract', help='Contract address')
-            build.add_argument('--rpc', help='RPC URL')
-            build.add_argument('--shards', help='Key shard URLs')
-            build.add_argument('--auto-deploy', action='store_true', help='Auto deploy contract')
-            build.add_argument('--deploy-rpc', help='RPC URL for deployment')
-            build.add_argument('--explorer', help='Blockscout URL')
-            build.add_argument('--private-key', help='Deployment key')
-            build.add_argument('--cf-token', help='Cloudflare API Token')
-            build.add_argument('--cf-account', help='Cloudflare Account ID')
-            build.add_argument('--skip-cloud', action='store_true', help='Skip cloud build farm')
-            build.add_argument('--resume', help='Resume waiting for a specific GitHub Run ID (skip upload)')
-            build.add_argument('--exclude-android', action='store_true', help='Skip Android build in Nuitka cloud compilation')
-            build.add_argument('--public', action='store_true', help='Public Repo Mode (Flash Mode) - Nukes repo after build')
-            build.add_argument('--platform', choices=['auto', 'github', 'gitlab'], default='auto', help='Select build farm platform')
-            build.add_argument('--layers', type=int, help='Recursive packaging layers')
-            build.add_argument('--zips', type=int, help='Number of ZIP layers')
-            build.add_argument('--hwid', default='', help='HWID string for macro expansion / HWID-locked fallback')
-            build.add_argument('--trial', default='', help="Trial period spec, e.g. '7d' (parsed via obfuscator.macros.parse_trial)")
-            build.add_argument('--vm-threshold', dest='vm_threshold', type=float, default=50.0, help='VM-score verdict threshold (default: 50.0)')
-            build.add_argument('--kod', action='store_true', help='Arm loader kill-on-detect note')
-            build.add_argument('--hostguard', action='store_true', help='Prepend hostguard snippet to loader')
-            build.add_argument('--hwid-lock', dest='hwid_lock', action='store_true', help='HWID-lock the bytecode fallback blob (requires --hwid)')
-            build.add_argument('--driver-check', dest='driver_check', action='store_true', help='Bake the kernel-driver gate into the loader')
-            build.add_argument('--split-bootstrap', dest='split_bootstrap', action='store_true', help='Shamir (n=3,k=2) threshold key + fragmented decoder')
-            build.add_argument('--no-snapshot', dest='snapshot_off', action='store_true', help='Omit the frozen-stdlib snapshot gate')
-            build.add_argument('--no-stdlib-audit', dest='stdlib_audit_off', action='store_true', help='Omit the stdlib function-audit gate')
-            build.add_argument('--name-gate', dest='name_gate', action='store_true', help='Rewrite privileged call sites through per-build token map')
-            build.add_argument('--lowering', default='', help='Semantic-lowering families CSV (default: disabled)')
-            build.add_argument('--rename-internal', dest='rename_internal', action='store_true', help='Rename proven-internal public methods/attributes')
-            build.add_argument('--no-audit-hook-plant', dest='audit_hook_plant_off', action='store_true', help='Omit the audit-hook plant detector')
-            build.add_argument('--python', default=f"{sys.version_info.major}.{sys.version_info.minor}", help='Python version for GitHub Actions (Defaults to local)')
-            auth_desc = "Registers a Target Machine Hardware ID (HWID) to the Cloudflare licensing system.\nUses the Cloudflare API Key configured in the setup wizard."
-            auth = subparsers.add_parser('auth', help='Authorize a hardware ID (Cloudflare)', description=auth_desc, formatter_class=custom_fmt, add_help=False)
-            auth.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
-            auth.add_argument('--hwid', required=True, help='The SHA256 Hardware ID of the target machine to authorize')
-            auth.add_argument('--token-file', help='Path to a .txt file containing the authorization token (if bypassing manual entry)')
-            
-            clean_desc = "Completely obliterates and wipes all traces of this project from your Cloudflare account.\nDeletes Workers, KV Namespaces, and revokes all active licenses."
-            clean = subparsers.add_parser('clean', help='Clean up Cloudflare deployment', description=clean_desc, formatter_class=custom_fmt, add_help=False)
-            clean.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
-
-            obfuscate_desc = "Obfuscate a Python script (AST transformations only, no compilation)."
-            obfuscate = subparsers.add_parser('obfuscate', help='Obfuscate a Python script', description=obfuscate_desc, formatter_class=custom_fmt, add_help=False)
-            obfuscate.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
-            obfuscate.add_argument('source', help='Python script path')
-            obfuscate.add_argument('-o', '--output', help='Output file path (default: stdout)')
-            obfuscate.add_argument('--cfg-flatten', action='store_true', help='Control-flow flattening')
-            obfuscate.add_argument('--opaque-predicates', action='store_true', help='Insert opaque predicates')
-            obfuscate.add_argument('--bogus-exceptions', action='store_true', help='Inject fake exception handlers')
-            obfuscate.add_argument('--mba-subs', action='store_true', help='MBA expression substitution')
-            obfuscate.add_argument('--unicode-ids', action='store_true', help='Rename symbols to Unicode')
-            obfuscate.add_argument('--fragment-strings', action='store_true', help='Fragment string constants')
-            obfuscate.add_argument('--rename-internal', dest='rename_internal', action='store_true',
-                                   help='Rename proven-internal public methods/attributes (opt-in, default: off)')
-
-            bf_desc = "Trigger a build-farm workflow on GitHub Actions and wait for artifacts."
-            bf = subparsers.add_parser('build-farm', help='Trigger cloud build farm', description=bf_desc, formatter_class=custom_fmt, add_help=False)
-            bf.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
-            bf.add_argument('--payload', help='Path to payload script to upload')
-            bf.add_argument('--resume', help='Resume waiting for a specific GitHub Run ID')
-            bf.add_argument('--exclude-android', action='store_true', help='Skip Android build')
-            bf.add_argument('--python', default=f"{sys.version_info.major}.{sys.version_info.minor}", help='Python version for GitHub Actions')
-            bf.add_argument('--public', action='store_true', help='Public repo mode')
-            bf.add_argument('--tor', action='store_true', help='Route build-farm traffic through Tor')
-            bf.add_argument('--tor-proxy', default=None, help='Tor SOCKS endpoint host:port (env NIXON_TOR_PROXY)')
-
-            version_desc = "Show version information and exit."
-            version = subparsers.add_parser('version', help='Show version', description=version_desc, formatter_class=custom_fmt, add_help=False)
-            version.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
-
-            valid_cmds = ['build', 'auth', 'clean', 'obfuscate', 'build-farm', 'version', '-h', '--help']
-            if len(sys.argv) > 1 and sys.argv[1] not in valid_cmds:
-                UI._out(f"\n {UI.RED}[!] not correct cmd dude; do better{UI.RESET}\n")
-                parser.print_help(file=_console)
-                sys.exit(1)
-            args = parser.parse_args()
-            if not getattr(args, 'command', None):
-                UI._out(f"\n {UI.RED}[!] not correct cmd dude; do better{UI.RESET}\n")
-                parser.print_help(file=_console)
-                sys.exit(1)
-            if args.command == 'build':
-                auto_cf = False
-                auto_nk = False
-                if args.auto:
-                    modes = args.auto.split(',')
-                    if 'cf' in modes: auto_cf = True
-                    if 'nk' in modes: auto_nk = True
-                    if 'nk' in modes: args.compile = True                
-                if auto_nk or args.auto: 
-                     if not args.native and not args.native_only: 
-                         print(" [+] Auto mode enabled: Implies --native (Hybrid)")
-                         args.native = True
-                if args.stego and auto_nk:
-                    print(" [!] CONFLICT: --stego incompatible with cloud build")
-                    sys.exit(1)
-                deployed_url = args.net_url
-                hmac_key = None
-                cf_token = cm.get("cf_token")
-                cf_account = cm.get("cf_account")
-                gh_token = cm.get("github_token")
-                ntru_priv_key = None
-                ntru_pub_key = None
-                if True:
-                    s_s = secrets.randbits(32)
-                    rng = random.Random(s_s)
-                    N=509; Q=2048
-                    priv = [0]*N
-                    for i in rng.sample(range(N), 15): priv[i] = 1
-                    for i in rng.sample(range(N), 15): priv[i] = -1 if priv[i] == 0 else priv[i]
-                    g_p = [0]*N
-                    for i in rng.sample(range(N), 12): g_p[i] = 1
-                    for i in rng.sample(range(N), 12): g_p[i] = -1 if g_p[i] == 0 else g_p[i]
-                    pub = [0]*N
-                    for i in range(N):
-                        for j in range(N): pub[(i+j)%N] = (pub[(i+j)%N] + g_p[i] * priv[j]) % Q
-                    ntru_priv_key = priv
-                    ntru_pub_key = repr(pub)
-                if auto_cf:
-                    print("\n[*] [Phase 1] Cloudflare Infrastructure...")
-                    if not cf_token: print(" [!] Missing Cloudflare Token"); sys.exit(1)
-                    hmac_key = secrets.token_hex(32)
-                    deployer = CloudflareDeployer(cf_token, cf_account)
-                    deployed_url = deployer.deploy_master(hmac_key, ntru_priv=ntru_priv_key)
-                    if deployed_url: print(f" [+] Worker Active: {deployed_url}")
-                    else: print(" [!] Cloudflare Deployment Failed."); sys.exit(1)
-                print("\n[*] [Phase 3] Generating Universal Loader (Standard Pipeline)...")
-                build_args = argparse.Namespace(
-                    source=args.source, native=args.native, cf_token=cf_token, cf_account=cf_account,
-                    net_url=deployed_url, _cf_hmac_key=hmac_key, watermark=args.watermark, one_shot=args.one_shot,
-                    stego=False, bind_mac=args.bind_mac, expire=args.expire, webhook=args.webhook,
-                    bind=args.bind, allow_countries=args.allow_countries, block_countries=args.block_countries,
-                    allow_regions=args.allow_regions, block_regions=args.block_regions, contract=args.contract,
-                    rpc=args.rpc, shards=args.shards, auto_deploy=args.auto_deploy, deploy_rpc=args.deploy_rpc,
-                    explorer=args.explorer, private_key=args.private_key,
-                    compile=args.compile, auto=args.auto, exclude_android=getattr(args, 'exclude_android', False),
-                    public=getattr(args, 'public', False), platform=getattr(args, 'platform', 'auto'),
-                    layers=getattr(args, 'layers', None), zips=getattr(args, 'zips', None),
-                    python=getattr(args, 'python', '3.11'), native_only=getattr(args, 'native_only', False),
-                    _ntru_pub=ntru_pub_key, gh_token=gh_token,
-                    tls_ca_bundle=getattr(args, 'tls_ca_bundle', None),
-                    section_split=getattr(args, 'section_split', False),
-                    section_count=getattr(args, 'section_count', 4)
-                )
-                generated_files_map = build_project(build_args)
-                if not generated_files_map:
-                    UI.fail("Build failed - no output generated")
-                    sys.exit(1)
-                if not args.one_shot:
-                    UI.section("PHASE 3: VERIFICATION SUITE")
-                    ver_rows = []
-                    engines = set()
-                    all_ok = True
-                    for suff in ["Debug", "Silent"]:
-                        if generated_files_map and suff in generated_files_map:
-                            res = test_command(argparse.Namespace(obfuscated=generated_files_map[suff], original=args.source, silent=True, variant=f"{suff} Version"), skip_header=True)
-                            if res:
-                                ver_rows.append([f"[◯] {res['variant']}", res['status'], res['integrity'], res['match']])
-                                engines.add(res['engine'])
-                                if res['status'] != 'PASS': all_ok = False
-                    
-                    UI.print_table(["PROFILE VARIANT", "STATUS", "INTEGRITY", "MATCH"], ver_rows)
-                    UI._out(" │")
-                    eng_str = " + ".join(list(engines)) if engines else "Unknown"
-                    UI.item("Crypto Engine", eng_str, "ACTIVE")
-                    if all_ok:
-                        UI.item("Validation Result", f"{UI.GREEN}[SUCCESS] All logic gates verified.{UI.RESET}", "")
-                    else:
-                        UI.item("Validation Result", f"{UI.RED}[FAILURE] Logic verification failed.{UI.RESET}", "")
-                else:
-                    print("\n[*] ONE-SHOT MODE DETECTED: Skipping automated verification to prevent self-destruct.")
-                if getattr(args, 'layers', None) is not None:
-                    num_layers = args.layers
-                else:
-                    if sys.stdin.isatty() and not getattr(args, 'auto', None):
-                        try:
-                            val = UI.prompt("Recursive layers (1-500, default 100): ")
-                            num_layers = int(val) if val else 100
-                        except ValueError: num_layers = 100
-                    else:
-                        num_layers = 100
-                if not 0 <= num_layers <= 500:
-                    print("  [!] Layers must be 0-500, using default 100")
-                    num_layers = 100
-                bind_list = []
-                if args.bind:
-                    raw_binds = args.bind.split(',')
-                    for b in raw_binds:
-                         clean_b = b.strip()
-                         if clean_b: bind_list.append(clean_b)
-                if getattr(args, 'zips', None) is not None:
-                    num_zips = args.zips
-                else:
-                    default_zips = len(bind_list) if bind_list else 0
-                    if bind_list:
-                         print(f"  [Tip] Suggesting {default_zips} ZIP layers for your {len(bind_list)} bind files.")
-                    if sys.stdin.isatty() and not getattr(args, 'auto', None):
-                        try:
-                            val = UI.prompt(f"ZIP layers ({default_zips}): ")
-                            num_zips = int(val) if val else default_zips
-                        except ValueError: num_zips = default_zips
-                    else:
-                        num_zips = default_zips
-                if num_zips < 0: num_zips = 0
-                if bind_list and num_zips < 1:
-                     print("  [!] Binding requires at least 1 ZIP layer. Setting to 1.")
-                     num_zips = 1
-                for suffix in ["Debug", "Silent"]:
-                    t = generated_files_map.get(suffix)
-                    if t and os.path.exists(t): 
-                        if num_layers > 0 or num_zips > 0:
-                            packed_path = t.replace(".py", "_Packed.py")
-                            recursive_package(t, packed_path, num_layers, num_zips, bind_paths_list=bind_list)
-                        else:
-                            packed_path = t
-                        if getattr(args, 'compile', False) or (getattr(args, 'auto', False) and 'nk' in getattr(args, 'auto', '')):
-                            if not getattr(args, 'native', False): 
-                                UI.section("PHASE 4: CLOUD COMPILATION")
-                            target_payload = packed_path
-                            if target_payload and os.path.exists(target_payload):
-                                if not gh_token:
-                                    UI.fail("GitHub token required for Nuitka cloud build.")
-                                else:
-                                    nk_farm = GitHubNuitkaFarm(gh_token, is_public=getattr(args, 'public', False), use_tor=getattr(args, 'tor', False), tor_proxy=getattr(args, 'tor_proxy', None))
-                                    try:
-                                        resume_id = getattr(args, 'resume', None)
-                                        if resume_id:
-                                            with UI.Task("Resuming", f"Build ID {resume_id}") as t:
-                                                run_id = nk_farm.trigger_and_wait(resume_run_id=int(resume_id), exclude_android=getattr(args, 'exclude_android', False), header_suffix=suffix.upper())
-                                                if run_id: t.success()
-                                                else: t.fail()
-                                        elif nk_farm.create_disposable_repo():
-                                            scanner = DependencyScanner()
-                                            scanner.scan_file(args.source)
-                                            dyn_pip = scanner.get_pip_install_cmd()
-                                            dyn_flags = scanner.get_nuitka_args()
-                                            
-                                            if not nk_farm.upload_file(target_payload, "payload.py"):
-                                                UI.fatal("Critical: Failed to upload payload.py - Aborting build.")
-                                                sys.exit(1)
-                                                
-                                            nk_farm.create_workflow("payload.py", exclude_android=getattr(args, 'exclude_android', False), pip_command=dyn_pip, extra_nuitka_flags=dyn_flags, python_version=getattr(args, 'python', '3.11'))
-                                            run_id = nk_farm.trigger_and_wait(exclude_android=getattr(args, 'exclude_android', False), header_suffix=suffix.upper())
-                                        else:
-                                            run_id = None
-                                            UI.fail("Failed to create/access GitHub repo")
-                                        if run_id:
-                                            dist_dir = os.path.join(os.path.dirname(target_payload), "dist")
-                                            nk_farm.download_artifacts(run_id, dist_dir)
-                                            if getattr(args, 'public', False):
-                                                nk_farm.nuke()
-                                            else:
-                                                nk_farm.delete_file("payload.py")
-                                            print(f"\n[SUCCESS] Artifacts downloaded to: {dist_dir}")
-                                            universal_path = os.path.join(dist_dir, "Universal_Loader.py")
-                                            universal_packed = target_payload.replace(".py", "_Universal_Final.py")
-                                            if os.path.exists(universal_path):
-                                                UI.item("Universal Loader", "Detecting...", "FOUND")
-                                                shutil.move(universal_path, universal_packed)
-                                                UI.item("Final Payload", universal_packed, "GENERATED")
-                                                generated_files_map[suffix] = universal_packed
-                                                shutil.rmtree(dist_dir, ignore_errors=True)
-                                                continue 
-                                            UI.section("PHASE 5: OPTIMIZATION & PACKING")
-                                            tar_path = None
-                                            with UI.Task("Optimizing", "Strip + UPX") as ot:
-                                                tar_path = optimize_and_pack_binaries(dist_dir)
-                                                if tar_path: ot.success()
-                                                else: ot.fail()
-                                            if tar_path and os.path.exists(tar_path):
-                                                with UI.Task("Packaging", "Generating XZ Self-Extracting Loader...") as pt:
-                                                    master_path = target_payload.replace("_Packed.py", "_Universal_Master.py")
-                                                    generate_xz_loader_file(tar_path, master_path)
-                                                    pt.success(f"{master_path} ({os.path.getsize(master_path)//1024}KB)")
-                                                final_master_packed = master_path.replace(".py", "_Packed.py")
-                                                with UI.Task("Final Deliverable", "Applying 4-Layer Recursive Pack") as ft:
-                                                    recursive_package(master_path, final_master_packed, num_layers=4, num_zips=1)
-                                                    ft.success(final_master_packed)
-                                            else:
-                                                UI.warn("Binary optimization failed, falling back to direct loader...")
-                                                master_binaries = {}
-                                                for fname in os.listdir(dist_dir):
-                                                    fpath = os.path.join(dist_dir, fname)
-                                                    if os.path.isfile(fpath) and not fname.endswith((".zip", ".tar")):
-                                                        with open(fpath, 'rb') as f:
-                                                            b_data = base64.b64encode(f.read()).decode('ascii')
-                                                        if "windows" in fname.lower(): master_binaries['windows'] = b_data
-                                                        elif "linux" in fname.lower(): master_binaries['linux'] = b_data
-                                                        elif "macos" in fname.lower(): master_binaries['darwin'] = b_data
-                                                        elif "android" in fname.lower(): master_binaries['android'] = b_data
-                                                if master_binaries:
-                                                    try:
-                                                        from universal_helpers import generate_master_loader_script
-                                                        master_loader_code = generate_master_loader_script(master_binaries)
-                                                        master_path = target_payload.replace("_Packed.py", "_Universal_Master.py")
-                                                        with open(master_path, 'w', encoding='utf-8') as f:
-                                                            f.write(master_loader_code)
-                                                        UI.item("Master Loader", master_path, "GENERATED")
-                                                    except ImportError:
-                                                        if tar_path:
-                                                            master_path = target_payload.replace("_Packed.py", "_Universal_Master.py")
-                                                            generate_xz_loader_file(tar_path, master_path)
-                                                            UI.item("XZ Loader", master_path, "GENERATED")
-                                                else:
-                                                    UI.fail("No Nuitka binaries found to wrap.")
-                                    except Exception as e:
-                                        if UI.current_task:
-                                            UI.current_task.fail(str(e))
-                                            UI.current_task = None
-                                        else:
-                                            print(f" [!] Nuitka Build Error: {e}")
-                        if getattr(args, 'stego', False):
-                             try:
-                                 with open(packed_path, 'r', encoding='utf-8') as f: content = f.read()
-                                 stego_path = packed_path.replace(".py", "_Stego.py")
-                                 stego_wrap_output(content, stego_path)
-                                 print(f" [+] Stego Output: {stego_path}")
-                             except Exception as e:
-                                 print(f" [!] Stego Failed: {e}")
-                        if getattr(args, 'compile', False) and suffix == "Silent":
-                            UI.section("PHASE 6: FINAL COMPILATION")
-                            with UI.Task("Compiling", f"Native Binary ({packed_path})") as t:
-                                try:
-                                    cmd = [sys.executable, "-m", "nuitka", "--onefile", "--remove-output", "--assume-yes-for-downloads", packed_path]
-                                    subprocess.run(cmd, check=True, capture_output=True)
-                                    t.success()
-                                except Exception as e:
-                                     t.fail(str(e))
-                final_rows = []
-                base_name = os.path.splitext(os.path.basename(args.source))[0]
-                dist_dir = os.path.join(os.path.dirname(os.path.abspath(args.source)), "dist")
-                os.makedirs(dist_dir, exist_ok=True)
-                for suffix, out_file in generated_files_map.items():
-                    if out_file and os.path.exists(out_file):
-                        if suffix == "Debug":
-                            clean_py = f"{base_name}_protected_dbg.py"
-                            launcher_base = f"{base_name}_dbg"
-                        else:
-                            clean_py = f"{base_name}_protected.py"
-                            launcher_base = base_name
-                        target_path = os.path.join(dist_dir, clean_py)
-                        if os.path.exists(target_path): os.remove(target_path)
-                        shutil.move(out_file, target_path)
-                        launchers = generate_trust_launchers(target_path, output_name_base=launcher_base)
-                        final_rows.append(["Universal Payload", suffix, clean_py])
-                        if launchers:
-                            if os.path.exists(launchers[0]):
-                                final_rows.append(["Windows Launcher", suffix, os.path.basename(launchers[0])])
-                            if os.path.exists(launchers[1]):
-                                final_rows.append(["macOS Launcher", suffix, os.path.basename(launchers[1])])
-                UI.section("FINAL: DEPLOYMENT ASSETS")
-                UI._out("")
-                UI._out(f" ├── Directory         : {dist_dir}")
-                UI._out(" ├── Components        :")
-                for row in final_rows:
-                    comp, prof, fname = row
-                    if "Windows" in comp: tag = "[ Windows ]   "
-                    elif "macOS" in comp: tag = "[ macOS ]     "
-                    else: tag = "[ Universal ] "
-                    UI._out(f" │   ├─ {tag} {fname}")
-                UI._out(" │")
-                UI._out(" └── Launchers         : Smart-Trust & Defender Whitelisting [READY]")
-                UI._out("")
-                UI._out(f" {UI.CYAN}ℹ Artifacts moved to: {dist_dir}{UI.RESET}")
-                UI._out(f" {UI.GREEN}[✓] ALL OPERATIONS COMPLETE.{UI.RESET}")
-            elif args.command == 'auth':
-                if not cm.get("cf_token"): print(" [!] Run setup first"); sys.exit(1)
-                mgr = CloudflareDeployer(cm.get("cf_token"), cm.get("cf_account"))
-                hw_hash = hashlib.sha256(args.hwid.encode()).hexdigest()
-                if args.token_file:
-                    with open(args.token_file,'r')as f: c = f.read().strip()
-                    mgr.add_license(hw_hash, c, "Auth-CLI")
-                    print(" [+] Success")
-            elif args.command == 'clean':
-                 if cm.get("cf_token"):
-                     CloudflareDeployer(cm.get("cf_token"), cm.get("cf_account")).cleanup()
-            elif args.command == 'version':
-                print(f"Nixon Obfuscator v{VERSION}")
-                print(f"Python: {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro} ({sys.platform})")
-                print(f"File: {os.path.abspath(__file__)}")
-            elif args.command == 'obfuscate':
-                with open(args.source, 'r', encoding='utf-8') as f:
-                    source = f.read()
-                opts = {
-                    'cfg_flatten': args.cfg_flatten, 'opaque_predicates': args.opaque_predicates,
-                    'bogus_exceptions': args.bogus_exceptions, 'mba_subs': args.mba_subs,
-                    'unicode_ids': args.unicode_ids, 'fragment_strings': args.fragment_strings,
-                    'strip_meta': True, 'split_vars': True, 'unfold_constants': True,
-                    'symbol_rename': True, 'obf_calls': True, 'func_transform': True,
-                    'rename_internal': bool(getattr(args, 'rename_internal', False)),
-                }
-                obfuscated, _ = apply_ast_mutation(source, opts)
-                if args.output:
-                    with open(args.output, 'w', encoding='utf-8') as f:
-                        f.write(obfuscated)
-                    print(f"[+] Obfuscated output written to: {args.output}")
-                else:
-                    sys.stdout.write(obfuscated)
-            elif args.command == 'build-farm':
-                gh_token = cm.get("github_token")
-                if not gh_token:
-                    UI.fatal("GitHub token required for build farm. Run setup first.")
-                    sys.exit(1)
-                farm = GitHubNuitkaFarm(gh_token, is_public=args.public, use_tor=getattr(args, 'tor', False), tor_proxy=getattr(args, 'tor_proxy', None))
-                resume_id = getattr(args, 'resume', None)
-                if resume_id:
-                    farm.trigger_and_wait(resume_run_id=int(resume_id), exclude_android=args.exclude_android)
-                else:
-                    payload = getattr(args, 'payload', None)
-                    if not payload:
-                        UI.fatal("--payload required for new build-farm jobs")
-                        sys.exit(1)
-                    if farm.create_disposable_repo():
-                        scanner = DependencyScanner()
-                        scanner.scan_file(payload)
-                        dyn_pip = scanner.get_pip_install_cmd()
-                        dyn_flags = scanner.get_nuitka_args()
-                        farm.upload_file(payload, "payload.py")
-                        farm.create_workflow("payload.py", exclude_android=args.exclude_android, pip_command=dyn_pip, extra_nuitka_flags=dyn_flags, python_version=args.python)
-                        run_id = farm.trigger_and_wait(exclude_android=args.exclude_android)
-                        if run_id:
-                            dist_dir = os.path.join(os.path.dirname(os.path.abspath(payload)), "dist")
-                            farm.download_artifacts(run_id, dist_dir)
-                            print(f"\n[SUCCESS] Artifacts downloaded to: {dist_dir}")
-        except KeyboardInterrupt: print("\n[-] Cancelled."); sys.exit(0)
-        except Exception as e:
-            with open("build_error.log", "w") as f:
-                f.write(traceback.format_exc())
-            UI.fatal(f"Critical Build Error: {e}")
-            print(f"     [!] Details logged to: {os.path.abspath('build_error.log')}")
-            sys.exit(1)
     main()

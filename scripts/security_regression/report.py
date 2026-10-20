@@ -31,7 +31,7 @@ Maintenance Notes:
   and returns the GateReport object.
 - format_report_text() produces a table-style output with per-gate
   status suitable for CI/CD pipeline logs.
-- GateResult.__post_init__ computes delta_percent and passed status
+- GateResult.__post_init__ computes delta_ratio and passed status
   automatically; these are not passed as constructor arguments.
 """
 
@@ -73,8 +73,8 @@ class GateReport:
                     "metric_name": g.metric_name,
                     "baseline_value": g.baseline_value,
                     "current_value": g.current_value,
-                    "delta_percent": round(g.delta_percent, 4),
-                    "threshold_percent": g.threshold_percent,
+                    "delta_ratio": round(g.delta_ratio, 4),
+                    "threshold_ratio": g.threshold_ratio,
                     "passed": g.passed,
                     "severity": g.severity.value,
                     "message": g.message,
@@ -125,7 +125,7 @@ def format_report_text(report: GateReport) -> str:
         sev = g.severity.value.upper()
         lines.append(f"  [{sev:7s}] [{status:4s}] {g.gate_name:25s} "
                      f"baseline={g.baseline_value:.4f} current={g.current_value:.4f} "
-                     f"delta={g.delta_percent * 100:+.2f}% threshold={g.threshold_percent * 100:.0f}%")
+                     f"delta={g.delta_ratio * 100:+.2f}% threshold={g.threshold_ratio * 100:.0f}%")
     lines.append("")
     if report.blockers:
         failed = [r for r in report.blockers if not r.passed]

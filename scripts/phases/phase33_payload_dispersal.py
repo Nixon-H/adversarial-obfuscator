@@ -44,7 +44,7 @@ def phase_payload_dispersal(payload_path: str, opts) -> dict:
         from scripts.dispersal.payload_dispersal import PayloadDispersal
         with open(payload_path, "rb") as f:
             payload = f.read()
-        num_shares = getattr(opts, "dispersal_slices", 5)
+        num_shares = getattr(opts, "dispersal_slices", 3)
         threshold = (num_shares // 2) + 1
         disperser = PayloadDispersal(seed=secrets.randbits(32))
         shares = disperser.disperse(payload, num_shares=num_shares, threshold=threshold)

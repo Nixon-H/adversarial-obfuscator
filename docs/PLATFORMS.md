@@ -24,7 +24,7 @@ Legend:
 - ❌ = Not supported
 
 ## Linux x86_64 (Primary Target)
-Full support. All 4108 tests pass (224 test files). CI/CD enabled.
+Full support. The full test suite passes (`python3 -m pytest tests/ -q`); CI runs it on Python 3.10-3.14.
 
 ## Linux ARM64
 Cross-compilation verified via `cargo check --target aarch64-unknown-linux-gnu`.

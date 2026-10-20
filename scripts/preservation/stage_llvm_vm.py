@@ -7,7 +7,7 @@ import re
 import time
 from typing import List, Optional, Tuple
 
-import z3
+from scripts.z3_optional import z3
 
 from scripts.preservation.report import StageResult
 

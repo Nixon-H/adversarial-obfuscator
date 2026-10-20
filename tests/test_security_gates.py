@@ -30,8 +30,8 @@ class TestGateAndResultDataclasses:
             metric_name="test_metric",
             baseline_value=1.0,
             current_value=0.95,
-            delta_percent=-0.05,
-            threshold_percent=0.9,
+            delta_ratio=-0.05,
+            threshold_ratio=0.9,
             passed=True,
             severity=GateSeverity.BLOCKER,
             message="test",
@@ -40,8 +40,8 @@ class TestGateAndResultDataclasses:
         assert r.metric_name == "test_metric"
         assert r.baseline_value == 1.0
         assert r.current_value == 0.95
-        assert r.delta_percent == pytest.approx(-0.05, abs=1e-3)
-        assert r.threshold_percent == 0.9
+        assert r.delta_ratio == pytest.approx(-0.05, abs=1e-3)
+        assert r.threshold_ratio == 0.9
         assert r.passed is True
         assert r.severity == GateSeverity.BLOCKER
 
@@ -50,10 +50,10 @@ class TestGateAndResultDataclasses:
         r = GateResult(
             gate_name="CFG", metric_name="cfg_entropy",
             baseline_value=1.0, current_value=0.5,
-            delta_percent=0.0, threshold_percent=0.9,
+            delta_ratio=0.0, threshold_ratio=0.9,
             passed=False, severity=GateSeverity.BLOCKER, message="",
         )
-        assert r.delta_percent == -0.5
+        assert r.delta_ratio == -0.5
         assert r.passed is False
 
     def test_security_gate_dataclass(self):
@@ -61,7 +61,7 @@ class TestGateAndResultDataclasses:
         g = SecurityGate("Test", "test_metric", 0.9, GateSeverity.BLOCKER)
         assert g.name == "Test"
         assert g.metric_name == "test_metric"
-        assert g.threshold_percent == 0.9
+        assert g.threshold_ratio == 0.9
         assert g.severity == GateSeverity.BLOCKER
         assert g.enabled is True
 
@@ -109,7 +109,7 @@ class TestDefaultGates:
         from scripts.security_regression.checker import DEFAULT_GATES
         from scripts.security_regression.gate import GateSeverity
         for g in DEFAULT_GATES:
-            assert 0.0 < g.threshold_percent <= 1.0
+            assert 0.0 < g.threshold_ratio <= 1.0
             assert g.severity in (GateSeverity.BLOCKER, GateSeverity.WARNING, GateSeverity.INFO)
             assert g.enabled is True
 

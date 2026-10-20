@@ -8,6 +8,16 @@
 > `ReflectiveLoader::LoadPEFromMemory`, `cd orbital-relay`) are stale and
 > are kept only as a record of the original design.  For the current
 > native surface see `docs/PLATFORMS.md` and `native/`.
+>
+> Names to substitute when reading the body:
+>
+> | Stale name in this document | Current name |
+> |---|---|
+> | `nixon_stub.cpp` | `native/stub_win.cpp` / `native/stub_linux.cpp` |
+> | `orbital-relay/` (directory) | `relay/` |
+> | `orbital-relay` (crate and binary) | unchanged — `relay/Cargo.toml` names the crate `orbital-relay`, and the Makefile builds `build/orbital-relay` |
+> | `obfuscator/core.py` | `obfuscator/core/pipeline.py` (the CLI) or `obfuscator/core/transforms.py` (the transforms) |
+> | `15(14).py` | `scripts/build.py` |
 
 ## 1. Current Architecture (Python Payload Loading)
 

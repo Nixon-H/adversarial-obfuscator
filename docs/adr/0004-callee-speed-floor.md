@@ -49,8 +49,8 @@ only explicit operator arming lets it kill.
 
 ## Evidence
 
-- Scoring weights: `obfuscator/vm_score.py:20` (`SIGNALS`, timing 10 /
-  total 195); KOD default-off `obfuscator/vm_score.py:417`; timing arm
+- Scoring weights: `obfuscator/vm_score.py:20` (`SIGNALS`, 14 signals,
+  timing 10 / total 235); KOD default-off `obfuscator/vm_score.py:417`; timing arm
   default-off `obfuscator/audit_hook.py:116`, `obfuscator/audit_hook.py:361`.
 - Kill ladder choke point `obfuscator/kill_ladder.py:44` (`KILL_CODE =
   137`); silent-kill parity `native/crash_suppress.h:46`.

@@ -65,7 +65,7 @@ def phase_security_gates(args: Any) -> bool:
     gate_threshold = getattr(args, "gate_threshold", None)
     if gate_threshold is not None:
         for gate in checker.gates:
-            gate.threshold_percent = max(0.0, min(1.0, gate_threshold))
+            gate.threshold_ratio = max(0.0, min(1.0, gate_threshold))
 
     results = checker.check_all_gates(current_metrics)
     report = generate_gate_report(results, BUILD_DIR)

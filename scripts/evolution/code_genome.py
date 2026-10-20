@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import ast
 import hashlib
-import z3
+from scripts.z3_optional import z3
 from dataclasses import dataclass
 from typing import List, Tuple
 
@@ -270,6 +272,7 @@ class IrCodeGenomeEvolver:
     RNG/mutate/select skeleton but operate on different representations
     — keep them separate; merging would entangle AST and IR fitness.
     """
+
     def __init__(self, seed: int = 42):
         self.rng_state = seed
 

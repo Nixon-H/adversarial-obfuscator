@@ -1,0 +1,145 @@
+{
+  "shadow_compiler": {
+    "version": "2.0.0",
+    "seed": null,
+    "stages": {
+      "obfuscate": true,
+      "irgen": true,
+      "llvmgen": true,
+      "encrypt": true,
+      "relay": true,
+      "runtime": true
+    },
+    "obfuscator": {
+      "cfg_flatten": true,
+      "opaque_predicates": true,
+      "bogus_exceptions": true,
+      "mba_subs": true,
+      "fragment_strings": true,
+      "unicode_ids": true,
+      "provenance_removal": true,
+      "dataflow_obfuscation": true
+    },
+    "irgen": {
+      "optimization_level": 2,
+      "variant_pool": true,
+      "semantic_fragmentation": true,
+      "jit_templates": true,
+      "watermarking": true,
+      "bitslicing": {
+        "enabled": true,
+        "word_size": 64
+      },
+      "chaff_circuits": {
+        "enabled": true,
+        "num_chaff": 10,
+        "target_functions": []
+      }
+    },
+    "llvmgen": {
+      "ollvm_passes": [
+        "bcf",
+        "fla",
+        "sub"
+      ],
+      "enable_integrity": true,
+      "rop": {
+        "enabled": true,
+        "target_functions": []
+      }
+    },
+    "encrypt": {
+      "cipher": "aes-256-ctr",
+      "block_size": 64,
+      "entropy_flatten": {
+        "enabled": true,
+        "tolerance": 0.3,
+        "chaff_per_page": 64
+      }
+    },
+    "vm": {
+      "enabled": true,
+      "mutation_level": 3,
+      "num_registers": 16,
+      "opcode_width": 8,
+      "ephemeral_isa": true
+    },
+    "advanced_protection": {
+      "enabled": true,
+      "features": {
+        "provenance_removal": true,
+        "dataflow_obfuscation": true,
+        "variant_pool": true,
+        "semantic_fragmentation": true,
+        "jit_templates": true,
+        "mutation": true,
+        "watermark": true,
+        "adversarial": true,
+        "microjit": true,
+        "entropy_flatten": true,
+        "bitslice": true,
+        "chaff_circuits": true,
+        "classification": true,
+        "vm_isa": true,
+        "ephemeral_isa": true
+      }
+    },
+    "phase2": {
+      "enabled": true,
+      "features": {
+        "provenance_removal": true,
+        "dataflow_obfuscation": true,
+        "variant_pool": true,
+        "semantic_fragmentation": true,
+        "jit_templates": true,
+        "watermarking": true,
+        "vm": true,
+        "mutating_isa": true,
+        "adversarial": true,
+        "replay_poison": true,
+        "timing_traps": true,
+        "oram": false,
+        "microjit": false,
+        "ephemeral_isa": true,
+        "ledger_proof": true
+      }
+    },
+    "adversarial_loop": {
+      "enabled": true,
+      "deobfuscation_threshold": 0.7,
+      "evolution_iterations": 1,
+      "history_file": "build/evolution_history.json"
+    },
+    "runtime": {
+      "minimal": true,
+      "static_python": false,
+      "jit_memory": false,
+      "exec_guard": true,
+      "microjit": true,
+      "tee": {
+        "enabled": true,
+        "tee_type": "sgx",
+        "target_functions": []
+      },
+      "oram": {
+        "enabled": true,
+        "tree_height": 8,
+        "block_size": 64
+      },
+      "scratch_buffer_size": 4096
+    },
+    "phase2_extras": {
+      "enabled": true,
+      "features": {
+        "bitslicing": true,
+        "chaff_circuits": true,
+        "entropy_flatten": true,
+        "tee": true,
+        "speculative_traps": true,
+        "transient_exec": true,
+        "crypto_cfg": true,
+        "port_entangle": true
+      }
+    }
+  }
+}

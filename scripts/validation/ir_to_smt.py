@@ -16,7 +16,8 @@ semantics.
 Dependencies:
 - z3 (BitVec solver)
 """
-import z3
+from __future__ import annotations
+from scripts.z3_optional import z3
 
 BITWIDTH = 64
 

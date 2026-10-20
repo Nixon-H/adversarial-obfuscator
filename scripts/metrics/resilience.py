@@ -22,6 +22,8 @@ Dependencies:
 - z3: SMT solver for symbolic-resistance measurement
 - json, math, os, subprocess, tempfile, time, collections: standard library
 """
+from __future__ import annotations
+
 import ast
 import json
 import math
@@ -33,7 +35,7 @@ import tempfile
 import time
 from collections import Counter
 
-import z3
+from scripts.z3_optional import z3
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

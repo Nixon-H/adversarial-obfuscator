@@ -20,8 +20,8 @@ Dependencies:
 
 Security Relevance:
 Configuration controls whether ZK proofs are generated and verified.
-An attacker who can disable ZK (--no-zk-state) can bypass state-bound
-execution checks.
+An attacker who can disable ZK (by not passing --zk-state, or by
+editing the config file) can bypass state-bound execution checks.
 
 # Why this approach was chosen:
 # Simple dataclass-based config with JSON file support. The CLI

@@ -1,0 +1,16 @@
+{
+  "test_pass_rate": 1.0,
+  "test_count": 820,
+  "test_passed": 820,
+  "test_failed": 0,
+  "build_success": true,
+  "cli_flags": 250,
+  "features_181_200": 20,
+  "verification_reports": 6,
+  "total_source_files": 341,
+  "feature_test_count": 374,
+  "timestamp": 1781436323.581033,
+  "new_features_f181_200": 20,
+  "feature_specific_tests": 374,
+  "build_output_files": 60
+}
