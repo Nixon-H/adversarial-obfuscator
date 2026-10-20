@@ -255,6 +255,30 @@ install-deps:
 lint:
 	ruff check --no-cache .
 	python3 scripts/lint/check_undefined_globals.py
+	python3 scripts/lint/generate_core_facade.py --check
+
+# Bump the pinned linter.  The pin is deliberate -- an unpinned linter
+# can turn a green tree red with no change to the code -- but a pin
+# that is never reviewed goes stale.  This is the deliberate act.
+lint-upgrade:
+	@echo "Current pin:"; grep '^ruff==' requirements-dev.txt
+	@echo "Latest on PyPI:"; pip index versions ruff 2>/dev/null | head -1
+	@echo
+	@echo "To bump: edit the ruff== line in requirements-dev.txt, then run"
+	@echo "  ruff check --no-cache .   # and fix anything the new version reports"
+	@echo "Review the diff before committing: a new ruff may find new"
+	@echo "findings, and those are yours to accept or fix."
+
+# Regenerate the hash-pinned dependency lock.  Review the diff: a new
+# lock is a change to what CI is allowed to install.
+lock:
+	uv pip compile requirements.txt --generate-hashes --universal \
+		--python-version 3.10 -o requirements.lock
+	@echo "Review the diff, then verify: make lock-verify"
+lock-verify:
+	python3 -m venv /tmp/nixon-lock-venv
+	/tmp/nixon-lock-venv/bin/pip install --require-hashes -r requirements.lock
+	@echo "the lock installs cleanly with --require-hashes"
 
 # End-to-end: every build must produce an artifact that RUNS.
 # A build that produces a file which dies at import is a failure --

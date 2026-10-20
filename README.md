@@ -13,6 +13,13 @@ audit-hook plant detection, optional kernel-driver gate).
 
 ## Requirements
 
+Python dependencies are installed from a **hash-pinned lock**
+(`requirements.lock`): every artefact, including the transitive
+closure, carries its SHA-256, and CI installs with `--require-hashes`,
+so a substituted artefact fails the install rather than landing.
+`requirements.txt` states the wanted versions; regenerate the lock with
+`make lock` after changing it.
+
 - Python **3.10–3.14** for builder **and** payloads
   (`obfuscator/nyser.py: SUPPORTED_MINORS`,
   `obfuscator/py_matrix.py: SUPPORTED`, builder floor
@@ -152,8 +159,13 @@ build <script.py>          Obfuscate and compile a Python script
   --compile                 Compile the final loader with Nuitka
   --skip-cloud              Build locally even if --compile/--auto would use the farm
   --platform {auto,github}  Build farm platform (GitHub is the only implemented farm)
-  --section-split           Ship the payload as N sealed sections (needs a fallback)
+  --section-split           Ship the payload as N sealed sections (needs a
+                            fallback). ON by default: the whole encrypted
+                            payload is never resident in one buffer
+  --no-section-split        Ship it as a single blob instead (the escape hatch)
   --section-count N         Number of sealed sections (default 4)
+  --opt-level 0-5           Protection ladder; without it the loader build
+                            applies the full transform set
   --tls-ca-bundle PEM       Extra CA for the emitted key fetch; verification is never disabled
   --expire YYYY-MM-DD       Expiration date
   --hwid / --trial / --vm-threshold / --kod / --hostguard / --hwid-lock
@@ -166,11 +178,10 @@ build-farm --payload PATH   Trigger the cloud build farm
 version                     Show the version
 ```
 
-`--opt-level` (the 0-5 protection ladder) is on the **native** pipeline
-and on the `obfuscate` subcommand, but deliberately **not** on
-`pipeline.py build`: the loader build always applies the full transform
-set, because a loader built at level 0 would be a weaker artifact by
-construction.
+`--opt-level` (the 0-5 protection ladder) resolves the same 17 canonical
+transform flags on all three CLIs now. Without it the loader build
+applies the full transform set, as it always has; with it, the flags the
+ladder controls follow the level.
 
 The two CLIs' `--watermark` means different things, which is why the
 loader CLI's flag was renamed: there it is `--lock-hwid` (the target
@@ -224,7 +235,7 @@ enforceable lint gate) and
 [`docs/AUDIT-2026-10-20.md`](docs/AUDIT-2026-10-20.md) (the CLI audit:
 dropped flags, an unpinned lint gate, an untracked build config, a hard
 `z3` dependency, and the documentation refresh). The current suite is
-**4271 passed, 23 skipped, 0 failed** (plus 289 Rust runtime tests and
+**4286 passed, 23 skipped, 0 failed** (plus 289 Rust runtime tests and
 4 Rust relay tests).
 
 ### Which version numbers are which

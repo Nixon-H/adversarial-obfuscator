@@ -21,7 +21,11 @@ jobs:
           python-version: '3.11'
       - name: Install Python deps
         run: |
-          pip install -r requirements.txt
+          # requirements.lock is hash-pinned: --require-hashes makes a
+          # substituted or tampered artefact fail the install instead of
+          # landing.  requirements.txt states the wanted versions; the
+          # lock states the exact artefacts allowed.
+          pip install --require-hashes -r requirements.lock
           pip install -r requirements-dev.txt
           pip install pytest
       - name: Lint Python

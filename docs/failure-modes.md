@@ -87,7 +87,10 @@ it had been resolved.
 - **D3 — z3 hard dependency**: **RESOLVED**. Every `import z3` now
   goes through `scripts/z3_optional.py`; a build without z3 works and
   the proof path fails with a message that says what to install.
-  Proven by `tests/test_failure_modes.py`.
+  Proven by `tests/test_failure_modes.py`. Verified for real, not by
+  stubbing: a venv built from the hash-pinned lock with `z3-solver`
+  uninstalled imports the build CLI, completes a full build, and the
+  artifact runs.
 - **D13 — build-input symlinks**: **RESOLVED** as an explicit trust
   statement. The build host is trusted (stated in `THREAT_MODEL.md`),
   so a symlinked input is followed and **warned about** with its

@@ -1,6 +1,18 @@
 import sys, os, zipfile, base64, io, shutil, tempfile, random, hashlib, lzma, struct, time, json, uuid, inspect, platform, marshal, secrets, ctypes, importlib.util, atexit, warnings, zlib, codecs, string, dis, types, traceback, gc, ast, socket, threading, concurrent.futures, logging  # noqa: F401 (this line binds a name used by an embedded template)
-from .utils import *
-from .transforms import *
+from .utils import (
+    FUNC_DECOY_XFORM, FUNC_FAKE_DEC, FUNC_FAKE_ENC, FUNC_GC_RESTORE, FUNC_GC_SHIELD, FUNC_HIDE_OBJ,
+    FUNC_NEXT_H, FUNC_PIPE_WRAP, FUNC_PROT_EXEC, FUNC_REM_ENT, FUNC_SEC_WIPE, FUNC_STACK_XOR,
+    FUNC_STATE_DEC1, FUNC_STATE_EXEC, FUNC_STATE_INIT, FUNC_STATE_LOAD, FUNC_STATE_ON1,
+    FUNC_STATE_ON2, FUNC_STATE_PAD, FUNC_STATE_REC, FUNC_STATE_STG0, FUNC_STATE_VM, FUNC_STATE_ZIP1,
+    UI
+)
+from .transforms import (
+    ASTMutator, BogusExceptionHandler, BuiltinAliaser, CallGraphObfuscator, CodeChecksumInjector,
+    ConstantUnfolder, ControlFlowFlattener, DynamicCodeGenerator, EnhancedJunkInserter,
+    ExtendedArgBreaker, FStringLowering, InstructionSubstitutor, MetadataStripper,
+    OpaquePredicateInjector, ScopeAnalyzer, StringLiteralObfuscator, SymbolRenamer,
+    TypeHintStripper, UnicodeIdentifierEncoder, VariableSplitter, get_random_var_name, stego_encode
+)
 MEMORY_PROTECTION_SOURCE = '''def {FUNC_SEC_WIPE}(data):
     try:
         if isinstance(data, (bytes, bytearray)):
@@ -1161,7 +1173,6 @@ class {vars_dict["VM_CLS"]}:
         o_id = id(self.stack); _ = self.stack + []
         if id(self.stack) != o_id: self.stack[:] = [b'\\x00' * 32]
 '''
-    return mapping, rev_mapping
 VM_FACTORY_SOURCE = r'''
 class {VM_FACTORY_CLS}:
     def __init__(self, base_seed):

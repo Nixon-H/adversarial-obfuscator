@@ -24,7 +24,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install --require-hashes -r requirements.lock
       - name: Python tests
         run: python3 -m pytest tests/ -v
       - name: End-to-end artifact check
@@ -48,14 +48,18 @@ jobs:
 
   pip-audit:
     # Supply chain HARD gate: pip-audit exits nonzero when any advisory
-    # matches requirements.txt, and continue-on-error stays false (the
-    # default) so a vulnerable pin breaks the build until a human bumps the
-    # pin in requirements.txt after reviewing the advisory. Deliberately no
-    # --fix auto-mutation in CI. NOTE (2026-09-28): pins were bumped
+    # matches a pinned dependency, and continue-on-error stays false (the
+    # default) so a vulnerable pin breaks the build until a human bumps
+    # the pin after reviewing the advisory. Deliberately no --fix
+    # auto-mutation in CI. NOTE (2026-09-28): pins were bumped
     # (requests 2.33.0, urllib3 2.7.0, cryptography 50.0.0, pytest 9.0.3)
     # and a local `pip-audit -r requirements.txt` run reports clean, so
     # this job is green on current pins. That is the gate working as
     # designed: it will go red the moment a new advisory matches a pin.
+    #
+    # The LOCK is audited as well as requirements.txt: the lock is what
+    # CI installs, and it carries the transitive closure, so a
+    # vulnerable indirect dependency is only visible there.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,8 +68,10 @@ jobs:
           python-version: "3.11"
       - name: Install pip-audit
         run: pip install pip-audit
-      - name: Audit pinned dependencies (hard gate)
+      - name: Audit the direct pins (hard gate)
         run: pip-audit -r requirements.txt --desc
+      - name: Audit the hash-pinned lock (hard gate)
+        run: pip-audit -r requirements.lock --desc
 
   gitleaks:
     # Secret scanning on every push/PR: default rule set plus the

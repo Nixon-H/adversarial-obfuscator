@@ -16,14 +16,21 @@ import time
 def secure_write_temp(data: bytes, suffix: str, prefix: str = "_nx_") -> str:
     """Write *data* to a securely-created temp file and return its path.
 
-    Uses ``os.open`` with ``O_EXCL | O_CREAT | O_RDWR`` and mode ``0o600``
-    (plus an explicit ``fchmod`` to neutralise umask effects). Retries with a
+    Uses ``os.open`` with ``O_EXCL | O_CREAT | O_RDWR | O_NOFOLLOW`` and mode
+    ``0o600`` (plus an explicit ``fchmod`` to neutralise umask effects).
+    ``O_NOFOLLOW`` is redundant on POSIX (``O_EXCL`` already refuses a
+    symlink) but makes the property explicit and portable. Retries with a
     fresh random name on collision. Raises on failure.
     """
     if not isinstance(data, (bytes, bytearray)):
         raise TypeError("data must be bytes")
     tmpdir = tempfile.gettempdir()
-    flags = os.O_EXCL | os.O_CREAT | os.O_RDWR
+    # O_EXCL already refuses an existing path, including a symlink (POSIX:
+    # "if pathname is a symbolic link, open() shall fail with EEXIST").
+    # O_NOFOLLOW is added anyway so the property is EXPLICIT rather than
+    # a side effect of the standard, and so it is enforced on platforms
+    # whose O_EXCL semantics differ.
+    flags = os.O_EXCL | os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
     last_err: OSError | None = None
     for _ in range(100):
         name = f"{prefix}{secrets.token_hex(8)}{suffix}"
@@ -218,7 +225,7 @@ def _nx_secure_write(data, suffix="", prefix="_nx_"):
     """Write bytes via O_EXCL|O_CREAT|O_RDWR mode 0o600; track for atexit."""
     import secrets as _nx_secrets
     _nx_tmpdir = _nx_tempfile.gettempdir()
-    _nx_flags = _nx_os.O_EXCL | _nx_os.O_CREAT | _nx_os.O_RDWR
+    _nx_flags = _nx_os.O_EXCL | _nx_os.O_CREAT | _nx_os.O_RDWR | getattr(_nx_os, "O_NOFOLLOW", 0)
     for _ in range(100):
         _nx_name = "%s%s%s" % (prefix, _nx_secrets.token_hex(8), suffix)
         _nx_path = _nx_os.path.join(_nx_tmpdir, _nx_name)

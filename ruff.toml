@@ -60,10 +60,10 @@ select = [
     "F821",
     "F841",
 ]
-ignore = [
-    "F403",
-    "F405",
-]
+# Nothing is ignored: the package used to import its own modules with
+# `from .mod import *`, which made F403/F405 unavoidable.  The core
+# package now spells out its imports, so the two checks are enforced
+# and a name that arrives from nowhere fails the gate.
 
 [lint.per-file-ignores]
 # Deliberate decoy / prompt-poison fixtures.  These files are TEST DATA:

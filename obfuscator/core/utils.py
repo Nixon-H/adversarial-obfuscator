@@ -696,6 +696,18 @@ class GitHubBuildFarm:
                 self.headers["Host"]=domain
                 return f"https://{ip}"
         except Exception as e:print(f" [!] DoH Resolution Failed: {e}")
+        # Fallback: the plain hostname instead of a DoH-resolved address.
+        # The TRAFFIC still goes through the configured proxy -- every
+        # request carries self.proxies -- so the Tor transport is not
+        # dropped; what is lost is the DoH resolution path itself.  Say
+        # so, because "DoH failed" and "the request left over the direct
+        # connection" are very different statements.
+        if self.proxies:
+            print(f" [!] DoH resolution failed: using {domain} directly "
+                  f"(traffic still goes through the configured proxy)")
+        else:
+            print(f" [!] DoH resolution failed: using {domain} directly, "
+                  f"with NO proxy -- this request will NOT go through Tor")
         return f"https://{domain}"
     def _get_username(self):
         try:

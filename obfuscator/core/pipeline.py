@@ -1,13 +1,69 @@
 import sys, os, zipfile, base64, io, tokenize, py_compile, shutil, tempfile, random, hashlib, lzma, struct, time, json, argparse, uuid, re, platform, subprocess, marshal, hmac, secrets, ctypes, importlib.util, zlib, string, traceback, ast, concurrent.futures, logging  # noqa: F401 (this line binds a name used by an embedded template)
 from datetime import datetime
 from . import utils as _nixon_utils
-from .utils import *
-from .transforms import *
-from .sources import *
+from .utils import (
+    ConfigManager, GitHubNuitkaFarm, HAS_NUMPY, NEXT_H_SOURCE, STRING_SESSION_KEY, UI,
+    check_dependencies, enable_log_redirect, fast_xor_bytes, generate_xz_loader_file, next_h,
+    optimize_and_pack_binaries
+)
+from .transforms import DependencyScanner, get_random_var_name, stego_wrap_output
+from .sources import (
+    ANTI_DECOMPILER_SOURCE, ANTI_EMULATOR_SOURCE, ANTI_FRIDA_SOURCE, ANTI_SANDBOX_SOURCE,
+    ANTMAN_SOURCE, API_HASH_SOURCE, ATTRITION_WARFARE_SOURCE, BLOCKCHAIN_LICENSE_SOURCE,
+    BYTECODE_PAGING_SOURCE, BYTECODE_PATCHER_SOURCE, CANARY_SOURCE, CHIMERIC_JIT_SOURCE,
+    CIPHER_SOURCE, CODE_BLOAT_SOURCE, CODE_SIGNING_SOURCE, COMMITMENT_SOURCE,
+    CROSS_PLATFORM_GUARD_SOURCE, CUSTOM_VM_SOURCE, CYTHON_VM_SOURCE, DECOY_DECRYPT_SOURCE,
+    DECOY_VM_SOURCE, DOH_SOURCE, DUAL_CIPHER_SOURCE, DYNAMIC_MORPH_SOURCE,
+    ENHANCED_ENV_KEYING_SOURCE, EXECUTION_TRACE_SOURCE, EXEC_TRACE_SOURCE, FAKE_CRYPTO_LAYER_SOURCE,
+    FHE_SOURCE, FRAME_ANTI_DEBUG_SOURCE, GC_ANTI_DUMP_SOURCE, GC_MANIPULATION_SOURCE,
+    GEOFENCE_SOURCE, GHOST_FUNC_SOURCE, GORDIAN_KNOT_SOURCE, HARDENING_SOURCE, HONEY_DECOY_SOURCE,
+    HOOK_SOURCE, HW_PERF_FINGERPRINT_SOURCE, IMPORTER_SOURCE, INTEGRITY_CHECK_SOURCE,
+    INTEGRITY_MONITOR_SOURCE, IO_ENCODING_SOURCE, ISR_ENCODER_SOURCE, JIT_AST_SOURCE,
+    KEY_SHARD_SOURCE, LOADER_BODY, LOADER_HEAD, LOGIC_ENTANGLE_SOURCE, MASK_SOURCE,
+    MEM_RANDOMIZER_SOURCE, MERKLE_TREE_SOURCE, METAMORPHIC_SOURCE, MULTIDIM_ENCODE_SOURCE,
+    NANOMITE_GUARD_SOURCE, NANOMITE_SOURCE, NATIVE_LOADER_SOURCE, NN_OBFUSCATION_SOURCE,
+    NON_DETERM_SOURCE, OPAQUE_CONST_SOURCE, ORAM_SOURCE, OpcodeMorpher, POLY_CONST_SOURCE,
+    PROACTIVE_CORRUPT_SOURCE, PROGRESSIVE_DECRYPT_SOURCE, QUANTUM_CRYPTO_SOURCE,
+    QUANTUM_ENTANGLE_SOURCE, QUINE_CHECK_SOURCE, RDTSC_SOURCE, ROLLING_ISA_SOURCE,
+    RUNTIME_MUTATION_SOURCE, SECURE_ENCLAVE_SOURCE, SECURE_MEM_SOURCE, SELF_MORPH_GRAPH_SOURCE,
+    SEMANTIC_SYNTH_SOURCE, SHAPESHIFTER_SOURCE, SMART_DECOY_SOURCE, STACK_CFI_SOURCE,
+    STACK_STR_SOURCE, TEMPORAL_DEGRADE_SOURCE, TEMPORAL_LOGIC_SOURCE, TIMING_KEY_SOURCE,
+    TIMING_SIDECHAIN_SOURCE, TLS_CTX_SOURCE, TOR_CLIENT_SOURCE, TRAITOR_TRACE_SOURCE,
+    TRIPLE_REDUNDANCY_SOURCE, VARS, WATERMARK_SOURCE, WHITEBOX_CIPHER_SOURCE,
+    WHITEBOX_CRYPTO_SOURCE, WHITEBOX_ENHANCED_SOURCE, WINDOWS_REFLECTIVE_LOADER_SOURCE,
+    apply_ast_mutation, apply_vars, compile_vm_stage1_decryptor, compile_vm_stage2_Nixon_Enc,
+    generate_dead_code_paths, generate_decoy_code, generate_poly_vm, generate_polymorphic_map,
+    generate_recipe, inject_entropy_tlv, recursive_package, remove_entropy_source
+)
 
 def build_pipeline(source, seed=None, mba_validator=None, extra_options=None):
     t = ObfuscationTransformer(seed=seed, mba_validator=mba_validator)
     return t.transform(source, options=extra_options)
+
+#: Maps the canonical protection-ladder flags (``obfuscator.opt_levels``)
+#: onto the option names the AST mutator understands.  Shared by the
+#: source-level transform and the loader build, so the two CLIs resolve
+#: a level the same way.
+OPT_LEVEL_TO_AST = {
+    'cfg_flatten': 'cfg_flatten',
+    'opaque_predicates': 'opaque_predicates',
+    'bogus_exceptions': 'bogus_exceptions',
+    'mba_subs': 'mba_subs',
+    'fragment_strings': 'fragment_strings',
+    'unicode_ids': 'unicode_ids',
+    'junk': 'enhanced_junk',
+    'decoys': 'decoy_apis',
+    'minify': 'strip_meta',
+    'const_unfold': 'unfold_constants',
+    'call_indirection': 'obf_calls',
+    'reflection': 'dynamic_code',
+    'dataflow': 'dataflow',
+    'watermark': 'watermark',
+    'variant_pool': 'variant_pool',
+    'fragmentation': 'fragmentation',
+    'provenance': 'provenance',
+}
+
 
 class ObfuscationTransformer:
     def __init__(self, seed=None, mba_validator=None):
@@ -67,26 +123,7 @@ class ObfuscationTransformer:
         if 'opt_level' in options and options.get('opt_level') is not None:
             from obfuscator.opt_levels import resolve as _resolve_level
             _resolved = _resolve_level(options['opt_level'])
-            _canonical_to_ast = {
-                'cfg_flatten': 'cfg_flatten',
-                'opaque_predicates': 'opaque_predicates',
-                'bogus_exceptions': 'bogus_exceptions',
-                'mba_subs': 'mba_subs',
-                'fragment_strings': 'fragment_strings',
-                'unicode_ids': 'unicode_ids',
-                'junk': 'enhanced_junk',
-                'decoys': 'decoy_apis',
-                'minify': 'strip_meta',
-                'const_unfold': 'unfold_constants',
-                'call_indirection': 'obf_calls',
-                'reflection': 'dynamic_code',
-                'dataflow': 'dataflow',
-                'watermark': 'watermark',
-                'variant_pool': 'variant_pool',
-                'fragmentation': 'fragmentation',
-                'provenance': 'provenance',
-            }
-            for _canon, _ast_key in _canonical_to_ast.items():
+            for _canon, _ast_key in OPT_LEVEL_TO_AST.items():
                 if _canon not in _resolved:
                     continue
                 if _ast_key not in options:
@@ -278,6 +315,10 @@ def get_Nixon_Enc_table():
 def get_legacy_count(): return sum(len(t) for t in STRING_TABLES.values())
 def swizzle_bytecode(data, key):
     if HAS_NUMPY:
+        # Lazy import: numpy is optional, and `utils.np` only exists when
+        # it is installed.  Importing it at module level made the whole
+        # package unimportable on a numpy-less interpreter.
+        import numpy as np
         arr = np.frombuffer(data, dtype=np.uint8).copy()
         k = np.frombuffer(key, dtype=np.uint8)
         k_tiled = np.resize(k, len(arr))
@@ -2432,6 +2473,20 @@ def _VERIFY_INTEGRITY():
         'runtime_check_code': f"if '_RUNTIME_KEY' not in globals() or _RUNTIME_KEY != bytes.fromhex('{runtime_key}'): import sys; sys.exit(0)",
         'force_native': repr(VARS.get("FORCE_NATIVE_EXEC", False))
     }
+    # The protection ladder applies to the loader build too, so both
+    # CLIs resolve a level the same way.  Without --opt-level the
+    # transform set above is unchanged (the loader build has always
+    # applied the full set); with it, the flags the ladder controls
+    # follow the level.  The flags the ladder does NOT control (the
+    # loader's own structural requirements) are untouched.
+    _loader_level = getattr(args, 'opt_level', None)
+    if _loader_level is not None:
+        from obfuscator.opt_levels import resolve as _resolve_level
+        _resolved = _resolve_level(_loader_level)
+        for _canon, _ast_key in OPT_LEVEL_TO_AST.items():
+            if _canon in _resolved and _ast_key in ast_options:
+                ast_options[_ast_key] = bool(_resolved[_canon])
+        UI.dot_item("Opt level", f"level {_loader_level}", "ACTIVE")
     enabled = [k for k, v in ast_options.items() if v]
     if enabled:
         UI.dot_item("Protection", f"Applied {len(enabled)} mutations", "ACTIVE")
@@ -3097,12 +3152,18 @@ def build_parser():
     build.add_argument('--compile', action='store_true', help='Compile FINAL loader with Nuitka (Creates EXE/ELF)')
     build.add_argument('--lock-hwid', '--watermark', dest='lock_hwid', default='',
                        help='Lock the build to a target HWID: registers a license for it and '
-                            'seeds the build deterministically. "--watermark" is a deprecated alias.')
+                            'seeds the build deterministically. "--watermark" is a deprecated '
+                            'alias for this flag')
     build.add_argument('--one-shot', action='store_true', help='Self-destruct')
     build.add_argument('--net-url', help='Auth URL (if not using auto=cf)')
     build.add_argument('--tls-ca-bundle', help='PEM CA bundle for the emitted key fetch. The artifact verifies the certificate chain AND the hostname against the system trust store plus this CA (it never disables verification)')
-    build.add_argument('--section-split', action='store_true', help='Ship the payload as N independently sealed sections instead of one blob, so the whole encrypted payload is never resident in a single buffer. Needs a fallback payload to split, so it is not available with --native-only (default off)')
+    build.add_argument('--section-split', dest='section_split', action='store_true', default=True,
+                       help='Ship the payload as N independently sealed sections instead of one blob, so the whole encrypted payload is never resident in a single buffer. Needs a fallback payload to split, so it is not available with --native-only (default: on)')
+    build.add_argument('--no-section-split', dest='section_split', action='store_false',
+                       help='Ship the payload as a single blob instead of N sealed sections (default: sections are on)')
     build.add_argument('--section-count', type=int, default=4, help='Number of sealed sections when --section-split is used (default 4)')
+    build.add_argument('--opt-level', dest='opt_level', type=int, default=None,
+                       help='Protection ladder 0-5: resolve the 17 canonical transform flags from the level. Without it the loader build applies the full set')
     build.add_argument('--bind', help='Bind files inside payload')
     build.add_argument('--expire', help='Expiration Date (YYYY-MM-DD)')
     build.add_argument('--webhook', help='Alert Webhook URL')
@@ -3217,6 +3278,12 @@ def main():
             parser.print_help(file=_nixon_utils._console)
             sys.exit(1)
         args = parser.parse_args()
+        # A deprecated spelling must SAY so.  A silent alias is how
+        # a rename outlives its documentation.
+        if "--watermark" in sys.argv and "--lock-hwid" not in sys.argv:
+            UI.warn("--watermark is deprecated on this command; "
+                    "use --lock-hwid (it locks the build to a target "
+                    "HWID, which is what it always did here)")
         if not getattr(args, 'command', None):
             UI._out(f"\n {UI.RED}[!] no command given; expected one of: "
                     f"{', '.join(valid_cmds)}{UI.RESET}\n")

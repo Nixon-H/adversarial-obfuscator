@@ -28,14 +28,38 @@ Two gates, both of which must pass:
 * `ruff check --no-cache .` — the enforced rule set is in `ruff.toml`.
   The `target-version = "py310"` there is what catches Python 3.12+
   f-string syntax (PEP 701), which the repo's own
-  `ast.parse(feature_version=(3, 10))` check cannot see.
+  `ast.parse(feature_version=(3, 10))` check cannot see. F403 and F405
+  are enforced too: the core package spells out its imports instead of
+  using `from .mod import *`, so a name arriving from nowhere fails the
+  gate.
 * `python3 scripts/lint/check_undefined_globals.py` — resolves every
-  global read in the live tree at runtime. This exists because the
-  package uses `from .mod import *`, which hides undefined names from
-  the linter (F403/F405 are ignored for that reason).
+  global read in the live tree at runtime. It is the second line of
+  defence behind the static checks, and it is what caught the
+  `datetime` NameError in `build_project` and the `_console` NameError
+  in the CLI's usage message.
 
 ruff is pinned in `requirements-dev.txt` on purpose: an unpinned linter
-can turn a green tree red with no change to the code.
+can turn a green tree red with no change to the code. `make lint-upgrade`
+prints the current pin and the latest release, so bumping it is a
+reviewed act rather than an accident.
+
+## Dependency lock
+
+`requirements.lock` is hash-pinned: every artefact, including the
+transitive closure, carries its SHA-256, and CI installs it with
+`--require-hashes`. A substituted or tampered artefact fails the
+install instead of landing.
+
+`requirements.txt` states the wanted versions. After changing it:
+
+```bash
+make lock          # regenerate the lock (needs uv)
+make lock-verify   # install it with --require-hashes in a clean venv
+```
+
+Review the lock diff — a new lock is a change to what CI is allowed to
+install. `tests/test_dependency_lock.py` fails if the two files drift
+apart.
 
 ## End-to-end checks
 
