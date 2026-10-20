@@ -561,6 +561,49 @@ def _github_backoff(attempt, response=None, base=2.0):
     return delay
 
 
+def _confined_member_path(base_dir, member_name):
+    """The resolved destination of an archive member, or raise.
+
+    A member named ``../x`` (or one behind a symlink) would otherwise
+    write outside the extraction directory (ZipSlip / tar traversal).
+    The check is on the RESOLVED destination, so neither a ``..``
+    component nor a symlinked member can escape.
+
+    Every archive this project extracts goes through here, so the
+    build-farm paths and the tool-download path share one check rather
+    than each growing its own.
+    """
+    base_real = os.path.realpath(base_dir)
+    dest = os.path.realpath(os.path.join(base_dir, member_name))
+    if dest != base_real and not dest.startswith(base_real + os.sep):
+        raise ValueError(
+            "refusing archive member escaping output dir: %r" % (member_name,))
+    return dest
+
+
+def _extract_zip_confined(zip_path, output_dir):
+    """Extract *zip_path* into *output_dir*, refusing to escape it."""
+    with zipfile.ZipFile(zip_path, "r") as z:
+        for member in z.namelist():
+            _confined_member_path(output_dir, member)
+        z.extractall(output_dir)
+
+
+def _extract_tar_confined(tar_path, output_dir, mode="r:*"):
+    """Extract *tar_path* into *output_dir*, refusing to escape it."""
+    import tarfile
+    with tarfile.open(tar_path, mode) as t:
+        for member in t.getmembers():
+            _confined_member_path(output_dir, member.name)
+        if hasattr(tarfile, "data_filter"):
+            # 3.12+ (and the 3.9-3.11 security backports): the data
+            # filter is stricter than our own check -- it also strips
+            # absolute paths and refuses links that point outside.
+            t.extractall(output_dir, filter="data")
+        else:
+            t.extractall(output_dir)
+
+
 def _artifact_sign_key(explicit_hex=None):
     """Resolve the farm artifact HMAC key (bytes) or ``None``.
 
@@ -941,12 +984,7 @@ jobs:
             zip_path=os.path.join(output_dir,f"{name}.zip")
             with open(zip_path,"wb")as f:f.write(zip_resp.content)
             _verify_download_zip(zip_path, name, _sign_key)
-            with zipfile.ZipFile(zip_path,'r')as z:
-                for _m in z.namelist():
-                    _dest=os.path.realpath(os.path.join(output_dir,_m))
-                    if _dest != os.path.realpath(output_dir) and not _dest.startswith(os.path.realpath(output_dir)+os.sep):
-                        raise ValueError(f"refusing zip member escaping output dir: {_m!r}")
-                z.extractall(output_dir)
+            _extract_zip_confined(zip_path, output_dir)
             os.remove(zip_path)
             clean_name=name.replace("blob-","")
             if "android.so" in clean_name: clean_name = "android.so" 
@@ -1559,8 +1597,8 @@ jobs:
         # inside the zips when a key is configured (explicit hex or
         # NIXON_ARTIFACT_KEY_HEX / NIXON_SIGN_KEY); mismatch aborts
         # fail-closed (fast, no retry on tamper). No key → auditable
-        # warning + proceed. NOTE: no ZipSlip confinement on this path
-        # (unlike GitHubBuildFarm.download_artifacts) — residual risk.
+        # warning + proceed.  ZipSlip confinement is applied on this path
+        # too, through the shared _extract_zip_confined() helper.
         _sign_key = _artifact_sign_key(sign_key_hex)
         time.sleep(3)
         try:
@@ -1612,7 +1650,7 @@ jobs:
                         zip_path = os.path.join(output_dir, f"{name}.zip")
                         self._smart_download(down_url, zip_path, t, size_mb, optimal_threads)
                         _verify_download_zip(zip_path, name, _sign_key)
-                        with zipfile.ZipFile(zip_path, 'r') as z: z.extractall(output_dir)
+                        _extract_zip_confined(zip_path, output_dir)
                         os.remove(zip_path)
                         t.success()
                         success = True
@@ -1628,8 +1666,6 @@ jobs:
 def ensure_upx_installed():
     import shutil
     import urllib.request
-    import zipfile as zf
-    import tarfile
     if shutil.which("upx"):
         return shutil.which("upx")
     print("    [*] UPX not found, attempting install...")
@@ -1678,11 +1714,9 @@ def ensure_upx_installed():
         archive_path = os.path.join(local_tools_dir, os.path.basename(url))
         urllib.request.urlretrieve(url, archive_path)
         if archive_path.endswith(".zip"):
-            with zf.ZipFile(archive_path, 'r') as z:
-                z.extractall(local_tools_dir)
+            _extract_zip_confined(archive_path, local_tools_dir)
         elif archive_path.endswith(".tar.xz"):
-            with tarfile.open(archive_path, 'r:xz') as t:
-                t.extractall(local_tools_dir)
+            _extract_tar_confined(archive_path, local_tools_dir, "r:xz")
         for root, dirs, files in os.walk(local_tools_dir):
             for f in files:
                 if f in ("upx", "upx.exe"):

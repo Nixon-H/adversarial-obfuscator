@@ -34,4 +34,6 @@ configuration — all compiled into the binary at build time.
 ## `config/relay.json`
 
 Present as an empty placeholder (`{}`) for future settings. Currently unused
-by the relay binary. The `--config` CLI flag is not implemented.
+by the relay binary: the relay has **no** `--config` flag, and the file
+is not read at run time. The relay's settings come entirely from its
+three CLI arguments above.

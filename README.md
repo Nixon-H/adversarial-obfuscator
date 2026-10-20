@@ -224,7 +224,7 @@ enforceable lint gate) and
 [`docs/AUDIT-2026-10-20.md`](docs/AUDIT-2026-10-20.md) (the CLI audit:
 dropped flags, an unpinned lint gate, an untracked build config, a hard
 `z3` dependency, and the documentation refresh). The current suite is
-**4264 passed, 23 skipped, 0 failed** (plus 289 Rust runtime tests and
+**4271 passed, 23 skipped, 0 failed** (plus 289 Rust runtime tests and
 4 Rust relay tests).
 
 ### Which version numbers are which

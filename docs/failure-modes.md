@@ -77,37 +77,51 @@ continues as if protected.
    to the gate; unreadable/missing counts as stale (flag, don't trust).
    Proven by `tests/test_failure_modes.py::test_fingerprint_staleness_flag`.
 
-## Findings deferred (report, not implemented)
+## Deferred findings and their current state
 
-- **D26 — farm artifact integrity (DONE per ADR-0005, residuals noted)**: package
-  step signs metadata-bound sidecars (`scripts/artifact_sign.py:
-  sign_artifact`, `scripts/phases/phase06_package.py:59`); both
-  `download_artifacts` paths verify-before-extract and fail closed on
-  mismatch (`obfuscator/core/utils.py:843,1480`); no-key → auditable
-  `ARTIFACT-AUTH` warning + proceed (fail-open by operator choice, never
-  silent). Still open: farm-runner binaries are unsigned by design
-  (runners keyless — TLS + provenance only); Nuitka download path still
-  lacks ZipSlip confinement; shared-secret limits (no per-farm identity
-  / rotation / replay expiry) per `docs/adr/0005-artifact-authenticity.md`.
-- **D24/D25 — farm network robustness**: overall deadline for
-  `trigger_and_wait`, honor `Retry-After`/`X-RateLimit-Reset` with capped
-  backoff, make DoH→direct fallback explicit/logged (it drops Tor posture).
-- **D3 — z3 hard dependency**: RESOLVED. Every `import z3` now goes
-  through `scripts/z3_optional.py`; a build without z3 works and the
-  proof path fails with a message that says what to install.
-- **D29 — `atomic_write` temp-name collision**: RESOLVED. The temp
+One entry per finding, each marked. The list used to carry duplicate
+entries (D24/D25 and D29 appeared twice, once as a recommendation and
+once as a resolution) and D13 was still listed as unimplemented after
+it had been resolved.
+
+- **D3 — z3 hard dependency**: **RESOLVED**. Every `import z3` now
+  goes through `scripts/z3_optional.py`; a build without z3 works and
+  the proof path fails with a message that says what to install.
+  Proven by `tests/test_failure_modes.py`.
+- **D13 — build-input symlinks**: **RESOLVED** as an explicit trust
+  statement. The build host is trusted (stated in `THREAT_MODEL.md`),
+  so a symlinked input is followed and **warned about** with its
+  target, rather than refused -- refusing would break legitimate
+  setups that symlink a runtime. The runtime side was already
+  `O_NOFOLLOW` and fails closed. Proven by
+  `tests/test_build_input_symlinks.py`.
+- **D24 / D25 — build-farm network robustness**: **RESOLVED**. Every
+  `requests` call in the farm has a timeout, both farm classes have an
+  overall deadline, `download_artifacts` checks the status code and
+  retries once on a rate limit, and `Retry-After` /
+  `X-RateLimit-Reset` are honoured with capped backoff. Proven by
+  `tests/test_build_farm_network.py`. One residual remains open and
+  is stated in the table: the DoH-to-direct fallback still drops Tor
+  posture silently.
+- **D26 — farm artifact integrity**: **DONE per ADR-0005**, residuals
+  noted. The package step signs metadata-bound sidecars
+  (`scripts/artifact_sign.py:sign_artifact`,
+  `scripts/phases/phase06_package.py:59`); both `download_artifacts`
+  paths verify-before-extract and fail closed on mismatch; no key
+  means an auditable `ARTIFACT-AUTH` warning and proceed (fail-open by
+  operator choice, never silent). ZipSlip confinement is now applied on
+  **every** extraction path -- both farm download paths and the tool
+  download -- through the shared `_extract_zip_confined()` /
+  `_extract_tar_confined()` helpers, checked on the RESOLVED
+  destination (proven by `tests/test_archive_confinement.py`).
+  **Still open:** farm-runner binaries
+  are unsigned by design (runners are keyless -- TLS plus provenance
+  only); and a shared secret has no per-farm identity, rotation or
+  replay expiry (`docs/adr/0005-artifact-authenticity.md`).
+- **D29 — `atomic_write` temp-name collision**: **RESOLVED**. The temp
   name now carries the pid and a random suffix, so concurrent builds of
   the same target no longer share it. Proven by
   `tests/test_atomic_write_concurrency.py`.
-- **D24 / D25 — build-farm network robustness**: RESOLVED. Every
-  `requests` call in the farm has a timeout, `trigger_and_wait` has an
-  overall deadline, `download_artifacts` checks the status code and
-  retries once on a rate limit, and `Retry-After` / `X-RateLimit-Reset`
-  are honoured. Proven by `tests/test_build_farm_network.py`.
-- **D13 — build-input symlinks**: `O_NOFOLLOW`/islink refusal for
-  `generate_payload_h` inputs (or an explicit build-host-trust statement).
-- **D29 — `atomic_write` temp-name collision**: unique tmp suffix
-  (`pid`+`rand`) so concurrent builds cannot clobber each other's `.tmp`.
 
 ## Behavior / verdict counts
 
