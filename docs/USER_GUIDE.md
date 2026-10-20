@@ -99,10 +99,8 @@ This is a LOADER gate. `scripts/build.py --trial 7d` is accepted but
 ignored by that pipeline, and it now says so:
 
 ```text
-[        WARN] These flags configure the HYBRID LOADER and are ignored by
-                this native pipeline: trial period
-[        WARN] Use `python3 -m obfuscator.core.pipeline build` for the loader
-                build path.
+[        WARN] These flags configure the HYBRID LOADER and are ignored by this native pipeline: trial period
+[        WARN] Use `python3 -m obfuscator.core.pipeline build` for the loader build path.
 ```
 
 ## 4. HWID binding (`--hwid` + `--hwid-lock`)

@@ -214,6 +214,26 @@ def generate_payload_h(
     if output_path is None:
         output_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "native", "payload.h")
 
+    # Build inputs are read and embedded verbatim.  A symlinked input
+    # therefore embeds whatever it points at.  The build host is trusted
+    # (see THREAT_MODEL.md), so this is NOT a refusal -- refusing would
+    # break legitimate setups that symlink a runtime -- but the
+    # condition is surfaced, because "the artifact contains a file
+    # nobody named" is exactly the kind of thing that must not be
+    # silent.
+    for _label, _path in (("payload", obfuscated_py_path),
+                          ("python-dll", python_dll_path),
+                          ("rust-exe", rust_exe_path)):
+        if _path and os.path.islink(_path):
+            try:
+                _real = os.path.realpath(_path)
+            except OSError:
+                _real = "?"
+            print(f"  [!] WARNING: build input {_label} is a symlink: "
+                  f"{_path} -> {_real}")
+            print("      Its contents are embedded in the artifact. "
+                  "The build host is trusted (THREAT_MODEL.md).")
+
     # ── 1. Read obfuscated payload ──────────────────────────────────
     with open(obfuscated_py_path, "rb") as f:
         payload_data = f.read()

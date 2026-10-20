@@ -502,6 +502,65 @@ def tor_proxies(explicit=None):
     return {"http": url, "https": url}
 
 
+def _github_retry_after(response, default=2.0):
+    """Seconds to wait before retrying, honouring the rate-limit headers.
+
+    GitHub signals a rate limit with ``Retry-After`` (seconds, or an
+    HTTP-date) and/or ``X-RateLimit-Reset`` (a unix timestamp).  The old
+    code ignored both and used a fixed sleep, so a 429 was retried far
+    too early and the request was rate-limited again.
+
+    Never raises: a missing or malformed header falls back to *default*.
+    """
+    if response is None:
+        return default
+    headers = getattr(response, "headers", None) or {}
+    try:
+        raw = headers.get("Retry-After") or headers.get("retry-after")
+        if raw is not None:
+            value = float(str(raw).strip())
+            if value >= 0:
+                return min(value, _GITHUB_MAX_BACKOFF)
+    except (TypeError, ValueError):
+        pass
+    try:
+        reset = headers.get("X-RateLimit-Reset") or headers.get("x-ratelimit-reset")
+        if reset is not None:
+            import time as _time
+            when = float(str(reset).strip())
+            delta = when - _time.time()
+            if delta > 0:
+                return min(delta, _GITHUB_MAX_BACKOFF)
+    except (TypeError, ValueError, OverflowError, OSError):
+        pass
+    return default
+
+
+#: Per-request timeout for GitHub API calls that had none.
+_GITHUB_REQUEST_TIMEOUT = 30
+
+#: Upper bound on any single backoff wait.
+_GITHUB_MAX_BACKOFF = 60.0
+
+#: Overall deadline for waiting on a cloud build to finish.  Without it
+#: a run that never completes left the CLI polling forever.
+_GITHUB_WAIT_DEADLINE = 1800
+
+
+def _github_backoff(attempt, response=None, base=2.0):
+    """Sleep for the right amount before a retry.
+
+    Honours ``Retry-After`` when the server sent one, otherwise uses
+    capped exponential backoff.
+    """
+    import time as _time
+    delay = _github_retry_after(response, default=base * (2 ** attempt))
+    delay = min(max(delay, 0.0), _GITHUB_MAX_BACKOFF)
+    if delay > 0:
+        _time.sleep(delay)
+    return delay
+
+
 def _artifact_sign_key(explicit_hex=None):
     """Resolve the farm artifact HMAC key (bytes) or ``None``.
 
@@ -598,7 +657,7 @@ class GitHubBuildFarm:
     def _get_username(self):
         try:
             import requests
-            r=requests.get(f"{self.base_url}/user",headers=self.headers,proxies=self.proxies,verify=True)
+            r=requests.get(f"{self.base_url}/user",headers=self.headers,proxies=self.proxies,verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
             r.raise_for_status()
             return r.json()['login']
         except Exception as e:
@@ -608,7 +667,7 @@ class GitHubBuildFarm:
         print(f"\n [*] [Cloud] Ensuring private repo exists: {self.repo_name}...")
         import requests
         data={"name":self.repo_name,"private":True,"auto_init":True}
-        r=requests.post(f"{self.base_url}/user/repos",headers=self.headers,json=data,proxies=self.proxies,verify=True)
+        r=requests.post(f"{self.base_url}/user/repos",headers=self.headers,json=data,proxies=self.proxies,verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
         if r.status_code==201 or r.status_code==422:                           
             return True
         print(f" [!] Repo creation failed: {r.text}")
@@ -618,7 +677,7 @@ class GitHubBuildFarm:
         with open(local_path,"rb")as f:content=base64.b64encode(f.read()).decode()
         url=f"{self.base_url}/repos/{self.username}/{self.repo_name}/contents/{remote_name}"
         data={"message":f"Upload {remote_name}","content":content}
-        r=requests.put(url,headers=self.headers,json=data,proxies=self.proxies,verify=True)
+        r=requests.put(url,headers=self.headers,json=data,proxies=self.proxies,verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
         try:
             r.raise_for_status()
         except Exception:
@@ -754,12 +813,12 @@ jobs:
                 prev_run_id=runs['workflow_runs'][0]['id']
         except Exception: pass
         url=f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/workflows/build.yml/dispatches"
-        requests.post(url,headers=self.headers,json={"ref":"main"},proxies=self.proxies,verify=True)
+        requests.post(url,headers=self.headers,json={"ref":"main"},proxies=self.proxies,verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
         print(" [*] Waiting for runners (this takes 3-5 mins)...")
         run_id=None
         for _ in range(30):
             time.sleep(10)
-            r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs",headers=self.headers,proxies=self.proxies,verify=True)
+            r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs",headers=self.headers,proxies=self.proxies,verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
             runs=r.json()
             if runs.get('total_count',0)>0:
                 current_id=runs['workflow_runs'][0]['id']
@@ -779,9 +838,17 @@ jobs:
         time.sleep(5)
         job_start_times = {}
         job_end_times = {}
+        # An overall deadline: the loop below only breaks when the
+        # workflow reports "completed", so a run that never completes (or
+        # a farm that stops answering) would poll forever.
+        deadline = time.time() + _GITHUB_WAIT_DEADLINE
         while True:
+            if time.time() >= deadline:
+                print(" [!] Timed out waiting for the build farm. The build "
+                      "may still be running on the server.")
+                return None
             try:
-                r = requests.get(jobs_url, headers=self.headers, proxies=self.proxies, verify=True)
+                r = requests.get(jobs_url, headers=self.headers, proxies=self.proxies, verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
                 jobs_data = r.json()
                 jobs = jobs_data.get("jobs", [])
                 states = {"Wind": "Q", "Linux": "Q", "macOS": "Q", "Android": "Q"}
@@ -811,7 +878,7 @@ jobs:
                         states[short_code] = "IP"
                     else:
                         states[short_code] = "Q"
-                r_wf = requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}", headers=self.headers, proxies=self.proxies, verify=True)
+                r_wf = requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}", headers=self.headers, proxies=self.proxies, verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
                 wf_data = r_wf.json()
                 wf_status = wf_data.get('status')
                 wf_conclusion = wf_data.get('conclusion')
@@ -891,7 +958,7 @@ jobs:
     def nuke(self):
         import requests
         url = f"{self.base_url}/repos/{self.username}/{self.repo_name}"
-        requests.delete(url, headers=self.headers, proxies=self.proxies, verify=True)
+        requests.delete(url, headers=self.headers, proxies=self.proxies, verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
         UI.dot_item("Cleanup", "Repository Nuked", "SCORCHED")
 class GitHubNuitkaFarm:
     def __init__(self, token, is_public=False, use_tor=False, tor_proxy=None):
@@ -906,7 +973,7 @@ class GitHubNuitkaFarm:
     def _get_username(self):
         try:
             import requests
-            r = requests.get(f"{self.base_url}/user", headers=self.headers, proxies=self.proxies, verify=True)
+            r = requests.get(f"{self.base_url}/user", headers=self.headers, proxies=self.proxies, verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
             return r.json()['login']
         except Exception: return "unknown"
     def create_disposable_repo(self):
@@ -914,7 +981,7 @@ class GitHubNuitkaFarm:
             import requests
             with UI.Task("Repo Access", f"Repo {self.repo_name}") as t:
                 data = {"name": self.repo_name, "private": not self.is_public, "auto_init": True}
-                r = requests.post(f"{self.base_url}/user/repos", headers=self.headers, json=data, proxies=self.proxies, verify=True)
+                r = requests.post(f"{self.base_url}/user/repos", headers=self.headers, json=data, proxies=self.proxies, verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
                 if r.status_code in [201, 422]:
                     t.success(f"{self.repo_name} Verified")
                     return True
@@ -980,6 +1047,13 @@ class GitHubNuitkaFarm:
                         elif r.status_code == 409:
                             time.sleep(1)
                             continue
+                        elif r.status_code in (403, 429):
+                            # Rate limited / secondary rate limit.  The
+                            # server tells us how long to wait; retrying
+                            # on a fixed schedule just hits the limit
+                            # again.
+                            _wait = _github_backoff(attempt, r)
+                            t.update(value=f"Rate limited (HTTP {r.status_code}); retrying in {_wait:.0f}s")
                         else:
                             time.sleep(2 * (attempt + 1))
                     except Exception:
@@ -992,17 +1066,17 @@ class GitHubNuitkaFarm:
     def delete_file(self, filename):
         import requests
         url = f"{self.base_url}/repos/{self.username}/{self.repo_name}/contents/{filename}"
-        get_r = requests.get(url, headers=self.headers, proxies=self.proxies, verify=True)
+        get_r = requests.get(url, headers=self.headers, proxies=self.proxies, verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
         if get_r.status_code == 200:
             sha = get_r.json().get("sha")
             data = {"message": "Cleanup payload", "sha": sha}
-            requests.delete(url, headers=self.headers, json=data, proxies=self.proxies, verify=True)
+            requests.delete(url, headers=self.headers, json=data, proxies=self.proxies, verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
             UI.item("Cleanup", f"Wiped {filename}", "SECURE")
     def nuke(self):
         import requests
         url = f"{self.base_url}/repos/{self.username}/{self.repo_name}"
         try:
-            r = requests.delete(url, headers=self.headers, proxies=self.proxies, verify=True)
+            r = requests.delete(url, headers=self.headers, proxies=self.proxies, verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
             if r.status_code == 204:
                 UI.dot_item("Cleanup", "Repo Deleted", "SCORCHED")
             elif r.status_code == 403:
@@ -1218,11 +1292,11 @@ jobs:
         import requests
         with UI.Task("Build Config", "Updating Workflow...") as t:
             url = f"{self.base_url}/repos/{self.username}/{self.repo_name}/contents/.github/workflows/nuitka.yml"
-            get_r = requests.get(url, headers=self.headers, proxies=self.proxies, verify=True)
+            get_r = requests.get(url, headers=self.headers, proxies=self.proxies, verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
             sha = get_r.json().get("sha") if get_r.status_code == 200 else None
             data = {"message": "Update Nuitka workflow", "content": base64.b64encode(workflow_yaml.encode()).decode()}
             if sha: data["sha"] = sha
-            r = requests.put(url, headers=self.headers, json=data, proxies=self.proxies, verify=True)
+            r = requests.put(url, headers=self.headers, json=data, proxies=self.proxies, verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
             if r.status_code in [200, 201]:
                 t.success("Workflow Updated")
             else:
@@ -1284,7 +1358,18 @@ jobs:
         run_status = "starting"
         run_conclusion = None
         loops = 0
+        # An overall deadline.  The poll loop used to be `while True`
+        # with no bound, so a run that never completed (or a farm that
+        # stopped answering) left the CLI polling forever.  The build
+        # keeps running on the server either way; the client gives up.
+        deadline = time.time() + _GITHUB_WAIT_DEADLINE
         while True:
+            if time.time() >= deadline:
+                UI.dot_item("Build Result", "TIMED OUT waiting for the farm",
+                            "FAIL")
+                print(" [!] The build may still be running on the server; "
+                      f"resume with --resume {run_id}")
+                return None
             try:
                 if loops % 10 == 0:
                     r = requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}", headers=self.headers, proxies=self.proxies, verify=True, timeout=30)
@@ -1479,7 +1564,17 @@ jobs:
         _sign_key = _artifact_sign_key(sign_key_hex)
         time.sleep(3)
         try:
-            r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}/artifacts",headers=self.headers,proxies=self.proxies,verify=True)
+            r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}/artifacts",headers=self.headers,proxies=self.proxies,verify=True,timeout=_GITHUB_REQUEST_TIMEOUT)
+            if r.status_code == 429:
+                # Rate limited: wait as long as the server says, then try
+                # once more.  Treating it as a terminal failure is what
+                # made a rate limit look like a broken farm.
+                _wait = _github_backoff(0, r, base=5.0)
+                print(f"    [!] Rate limited by GitHub; retrying in {_wait:.0f}s")
+                r=requests.get(f"{self.base_url}/repos/{self.username}/{self.repo_name}/actions/runs/{run_id}/artifacts",headers=self.headers,proxies=self.proxies,verify=True,timeout=_GITHUB_REQUEST_TIMEOUT)
+            if r.status_code != 200:
+                UI.dot_item("Artifacts", f"Access Failed (HTTP {r.status_code})", "FAIL")
+                return
             all_artifacts=r.json().get('artifacts',[])
         except Exception:
             UI.dot_item("Artifacts", "Access Failed", "FAIL")

@@ -9,13 +9,7 @@ from pathlib import Path
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# httpx is an OPTIONAL dependency of the LLM evaluation tools.  It is
-# not needed to build or test the obfuscator; install it with
-#   pip install -r requirements-ai.txt
-try:
-    import httpx
-except ImportError:  # pragma: no cover - optional dependency
-    httpx = None
+from scripts.httpx_optional import httpx
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("deobf_test")
@@ -70,10 +64,6 @@ def call_model(model: str, code: str, timeout_s: int = 180, max_tokens: int = 40
     for attempt in range(3):
         proxy = _get_proxy()
         try:
-            if httpx is None:
-                raise RuntimeError(
-                    "httpx is required for the LLM evaluation tools; "
-                    "install it with: pip install -r requirements-ai.txt")
             with httpx.Client(proxy=proxy, timeout=timeout_s) as client:
                 resp = client.post(_ZEN_URL, headers=_headers(), json=payload)
                 if resp.status_code in (403, 429, 502, 503):

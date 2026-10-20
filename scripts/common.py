@@ -79,14 +79,19 @@ def atomic_write(path, data, mode="w"):
     content, never a partial write. Temp file is removed on error to avoid
     leaking sensitive data to disk.
     """
-    tmp = path + ".tmp"
+    # The temp name must be unique per writer.  A fixed "path + .tmp"
+    # meant two concurrent builds of the same target wrote to the SAME
+    # temporary file: one build's content could win the rename, and a
+    # reader could see the other's bytes.  The pid plus random suffix
+    # makes the temp file private to this writer.
+    unique = "%s.%d.%s" % (path, os.getpid(), os.urandom(6).hex())
     try:
-        with open(tmp, mode) as f:
+        with open(unique, mode) as f:
             f.write(data)
-        os.rename(tmp, path)
+        os.rename(unique, path)
     except BaseException:
-        if os.path.exists(tmp):
-            os.remove(tmp)
+        if os.path.exists(unique):
+            os.remove(unique)
         raise
 
 

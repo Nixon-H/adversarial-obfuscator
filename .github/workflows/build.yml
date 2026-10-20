@@ -33,6 +33,13 @@ jobs:
         run: python3 -m pytest tests/ -v
       - name: Obfuscate test payload
         run: python3 scripts/build.py --payload tests/fixtures/test_payload.py --skip-relay --no-cfg-flatten
+      - name: End-to-end artifact check
+        # Build a payload, RUN the artifact it produced, and assert the
+        # output.  This is the class of regression the unit suite
+        # structurally cannot see: the seal-corruption bug produced
+        # artifacts that died at import, and every unit test still
+        # passed.  A build that does not RUN is a failed build.
+        run: python3 scripts/lint/e2e_build_check.py 2
       - name: Fuzz smoke (60s per target)
         # cargo-fuzz needs nightly; the fuzz crate builds on stable via
         # `cargo test --no-run`, but libfuzzer execution requires nightly.

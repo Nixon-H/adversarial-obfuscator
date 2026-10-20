@@ -52,3 +52,23 @@ def test_config_default_json_agrees_with_the_constant():
     assert cfg["shadow_compiler"]["version"] == VERSION, (
         "config/default.json says %r, obfuscator.version says %r"
         % (cfg["shadow_compiler"]["version"], VERSION))
+
+
+def test_the_changelog_exists_and_names_the_version():
+    """There must be one place that says what the product's version is."""
+    path = os.path.join(ROOT, "docs", "CHANGELOG.md")
+    assert os.path.exists(path), "docs/CHANGELOG.md is missing"
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    assert VERSION in text, "the changelog does not mention version %s" % VERSION
+
+
+def test_the_readme_distinguishes_the_product_version_from_the_vendor_matrix():
+    """The product version and the vendor's v1.1-V10 must not be confused."""
+    path = os.path.join(ROOT, "README.md")
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    assert "Which version numbers are which" in text, (
+        "the README does not separate the product version from the "
+        "vendor's version matrix")
+    assert "not the vendor" in text.lower() or "not releases" in text.lower()

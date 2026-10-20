@@ -68,6 +68,7 @@ commit deleted and isolates the ones whose *call* was the point.
   - `scripts/validation/`, `scripts/proofs/` — the SMT proof stack
     (optional: `z3-solver`)
 - `tests/` — Test suites
+- `docs/` — the guides, the ADRs, the audit reports and the CHANGELOG
 - `config/` — Build configuration (JSON). `config/default.json` and
   `config/baseline_report.json` are tracked (the build depends on
   them); everything else in that directory is machine-local.

@@ -166,6 +166,12 @@ build-farm --payload PATH   Trigger the cloud build farm
 version                     Show the version
 ```
 
+`--opt-level` (the 0-5 protection ladder) is on the **native** pipeline
+and on the `obfuscate` subcommand, but deliberately **not** on
+`pipeline.py build`: the loader build always applies the full transform
+set, because a loader built at level 0 would be a weaker artifact by
+construction.
+
 The two CLIs' `--watermark` means different things, which is why the
 loader CLI's flag was renamed: there it is `--lock-hwid` (the target
 machine the build is licensed to). `scripts/build.py --watermark` embeds
@@ -218,7 +224,19 @@ enforceable lint gate) and
 [`docs/AUDIT-2026-10-20.md`](docs/AUDIT-2026-10-20.md) (the CLI audit:
 dropped flags, an unpinned lint gate, an untracked build config, a hard
 `z3` dependency, and the documentation refresh). The current suite is
-**4242 passed, 23 skipped, 0 failed**.
+**4264 passed, 23 skipped, 0 failed** (plus 289 Rust runtime tests and
+4 Rust relay tests).
+
+### Which version numbers are which
+
+| Numbering | Meaning |
+|---|---|
+| **2.0.0** | **this product's** version. One constant, in `obfuscator/version.py`; the CLI reports it and `config/default.json` carries the same value (a test checks they agree). See [`docs/CHANGELOG.md`](docs/CHANGELOG.md). |
+| **v1.1 … V10** | the **vendor's** obfuscation-technique generations, tracked in the audit report's version matrix. They are NOT releases of this tool and must not be compared with 2.0.0. |
+
+## Changelog
+
+[`docs/CHANGELOG.md`](docs/CHANGELOG.md).
 
 The suite is green. The live count is a moving number -- read it from
 `python3 -m pytest tests/ -q` rather than from a doc; the dated

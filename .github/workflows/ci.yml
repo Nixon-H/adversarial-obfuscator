@@ -27,6 +27,12 @@ jobs:
         run: pip install -r requirements.txt
       - name: Python tests
         run: python3 -m pytest tests/ -v
+      - name: End-to-end artifact check
+        # Build a payload on THIS Python version, run the artifact, and
+        # assert the output.  The unit suite proves the modules import
+        # on this version; this proves the BUILD works on it.  The
+        # seal-corruption bug shipped because neither was true.
+        run: python3 scripts/lint/e2e_build_check.py 1
       - name: Rust runtime tests
         run: cd runtime && cargo test
       - name: Rust relay tests

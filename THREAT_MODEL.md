@@ -7,6 +7,28 @@ stdlib-audit, audit-hook plant detector, BYOVD driver gate, kill ladder).
 Out of scope: research/experimental flags (FHE-VM, iO, ZK, GPU/TEE/SGX,
 distributed execution) unless stated.
 
+## Build-host trust boundary
+
+**The build host is trusted.** The pipeline reads its build inputs
+(the obfuscated payload, the Python DLL, the Rust EXE) and embeds them
+verbatim in the artifact. A build input that is a symlink therefore
+embeds whatever it points at, and the paths come from the operator's
+command line. An attacker who can set the operator's build arguments
+can make the artifact contain an arbitrary file; that is inside the
+threat model and is not defended against.
+
+The build warns when a build input is a symlink
+(`scripts/generate_payload_h.py`) rather than refusing it, because
+refusing would break legitimate setups that symlink a runtime, and
+because the condition is a property of a trusted host rather than an
+attack. This is a deliberate, documented decision, not an oversight —
+`docs/failure-modes.md` row 13 records it.
+
+The runtime side is different and is defended: the trial state file is
+opened with `O_NOFOLLOW` and fails closed on a symlink
+(`obfuscator/trial_bind.py`), because that file is written by the
+emitted loader on the *target* machine, which is not trusted.
+
 ## How to read this table (evidence taxonomy)
 
 Every row carries a **Status** — the strongest claim the in-tree evidence
