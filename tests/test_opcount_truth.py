@@ -17,6 +17,7 @@ Python 3.10 compatible: stdlib only, no match statements.
 """
 import ast
 import os
+import subprocess
 
 from obfuscator import lowering
 from obfuscator.kernel_gen import NATIVE_OPS
@@ -99,6 +100,22 @@ def test_design_doc_states_verified_140():
             raise AssertionError(line)
 
 
+def _is_ignored(path):
+    """True when git ignores *path* (a build leftover, not source)."""
+    try:
+        rel = os.path.relpath(path, REPO_ROOT)
+    except ValueError:
+        return False
+    if rel.startswith(".."):
+        return False
+    try:
+        out = subprocess.run(["git", "-C", REPO_ROOT, "check-ignore", "-q", rel],
+                             capture_output=True, timeout=30)
+        return out.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def test_no_bare_141_claim_in_code():
     # Only archive fixtures, generated build outputs, and test fixture
     # data may contain the digits 141; live code + user docs must frame
@@ -121,6 +138,12 @@ def test_no_bare_141_claim_in_code():
             if fn in skip_files or ".decoy.py" in fn or "attention_poison" in fn:
                 continue
             p = os.path.join(root, fn)
+            # Git-ignored files are build leftovers, not source: a failed
+            # build used to leave its staging file in the repository root,
+            # and the check is about the SOURCE, not about whatever a
+            # half-finished build left behind.
+            if _is_ignored(p):
+                continue
             try:
                 with open(p, encoding="utf-8", errors="replace") as f:
                     src = f.read()

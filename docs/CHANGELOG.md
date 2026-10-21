@@ -80,12 +80,44 @@ checks they agree).
   emitted after the payload entry point, so a trial-expired artifact
   ran its payload and only then died. The entry point is now last.
 
+- **A tamper that disabled the entry point left the artifact exiting
+  0.** The loader's integrity check and its "the payload must have
+  run" check lived inside functions, so a tamper that broke the
+  `__main__` block skipped both. They are now at module level,
+  outside that block.
+- **The payload was not authenticated.** The loader XOR-encrypts the
+  payload and had no MAC over it, so a byte flipped in the payload
+  region corrupted the payload silently: the loader ran, the payload
+  was garbage, and the artifact exited 0. The build now computes an
+  HMAC over the payload and the loader verifies it before extracting
+  anything.
+- **The loader's environment detections could not be gates.** The
+  anti-sandbox, anti-emulator, anti-debug-frame, geo-fence and
+  licence checks only perturbed the loader's hash chain. They are now
+  armable with `--strict-detections`, which makes a detection terminate
+  the artifact.
+- **The 11 loader-only flags on `scripts/build.py` were accepted and
+  silently ignored.** They now fail loudly, with a pointer to the
+  loader CLI that arms them.
+- **The artifact sidecar had no farm identity and no replay window.**
+  The signed metadata now carries the producing `farm` (pinned on
+  download) and `issued_at`/`expires_at` (`NIXON_ARTIFACT_TTL`, default
+  30 days); both are covered by the MAC.
+- **A failed build left its staging file in the repository root.** It
+  now goes to the build directory.
+
 ### Changed
 
 - **The core package no longer uses `from .mod import *`.** The
   imports are spelled out, so F403 and F405 are enforced. The
   conversion found a dead `return` referencing two names nobody had
   ever defined.
+- **The lint rule set is the whole pyflakes family** (`select =
+  ["F"]`), which the tree satisfies. The other families (pycodestyle,
+  bugbear, pyupgrade) are style migrations rather than fixes, and are
+  recorded as deliberately out of scope in `ruff.toml`.
+- **A scheduled CI job reports when a newer ruff exists**, so the pin
+  cannot go stale unnoticed.
 - **Dependencies are hash-pinned.** `requirements.lock` pins all 23
   artefacts -- the full transitive closure -- with their SHA-256, and
   CI installs with `--require-hashes`.

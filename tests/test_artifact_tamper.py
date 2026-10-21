@@ -61,18 +61,45 @@ def test_the_untampered_artifact_runs(artifact):
 
 
 def test_a_tampered_artifact_does_not_look_successful(tmp_path, artifact):
-    """Flip one byte: the artifact must fail, not exit 0 doing nothing."""
-    tampered = os.path.join(str(tmp_path), "tampered.py")
-    with open(artifact, "rb") as fh:
-        data = bytearray(fh.read())
-    mid = len(data) // 2
-    data[mid] = (data[mid] + 1) % 256
-    with open(tampered, "wb") as fh:
-        fh.write(bytes(data))
+    """A flipped byte must not look like a clean run.
 
-    run = _run(tampered)
-    assert "PAYLOAD-RAN" not in run.stdout, (
+    The flip position is chosen OUTSIDE the integrity anchors: those
+    lines are excluded from the loader's self-hash by design (the build
+    fills them in after hashing the rest), so a flip inside them is
+    the one place the loader cannot detect a change.
+    """
+    with open(artifact, "rb") as fh:
+        data = fh.read()
+    anchor_spans = []
+    offset = 0
+    for line in data.splitlines(keepends=True):
+        if b"__SIG_ANCHOR__" in line or b"__HMAC_ANCHOR__" in line:
+            anchor_spans.append((offset, offset + len(line)))
+        offset += len(line)
+
+    def _in_anchor(pos):
+        return any(a <= pos < b for a, b in anchor_spans)
+
+    mid = len(data) // 2
+    off = None
+    for delta in range(len(data)):
+        for cand in (mid + delta, mid - delta):
+            if 0 <= cand < len(data) and not _in_anchor(cand):
+                off = cand
+                break
+        if off is not None:
+            break
+    assert off is not None, "no flippable byte outside the anchors"
+
+    tampered = bytearray(data)
+    tampered[off] = (tampered[off] + 1) % 256
+    path = os.path.join(str(tmp_path), "tampered.py")
+    with open(path, "wb") as fh:
+        fh.write(bytes(tampered))
+
+    run = _run(path)
+    assert "PAYLOAD-RAN" not in run.stdout + run.stderr, (
         "the tampered artifact ran its payload")
     assert run.returncode != 0, (
         "the tampered artifact exited 0 -- a tamperer sees a clean success:\n%s"
-        % (run.stdout[-2000:] + run.stderr[-2000:]))
+        % (run.stdout[-2000:]))

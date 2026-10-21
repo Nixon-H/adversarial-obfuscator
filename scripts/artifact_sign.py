@@ -25,6 +25,7 @@ import logging
 import os
 import platform
 import sys
+import time
 import zipfile
 
 LOG = logging.getLogger(__name__)
@@ -37,6 +38,11 @@ BINDING_ALGO = "hmac-sha256-binding-v1"
 #: Sidecar filename suffix (``<artifact>.sig.json``), shared by the
 #: package step, the farm upload path, and the download verifier.
 SIDECAR_SUFFIX = ".sig.json"
+
+#: How long a signed artifact sidecar stays valid.  Bounds replay: a
+#: captured sidecar cannot be presented indefinitely.  Override with
+#: NIXON_ARTIFACT_TTL (seconds); 0 means "no expiry".
+DEFAULT_ARTIFACT_TTL_SECONDS = 30 * 24 * 3600
 
 #: Key env vars, precedence order. ``NIXON_SIGN_KEY`` is the pre-existing
 #: convention (CLI default, ``SECURITY.md``); ``NIXON_ARTIFACT_KEY_HEX``
@@ -114,16 +120,37 @@ def default_metadata(extra: dict | None = None) -> dict:
     """Best-effort repo/commit/build-id/platform binding (ADR-0005).
 
     Sourced from the environment (``GITHUB_REPOSITORY``, ``GITHUB_SHA``,
-    ``NIXON_BUILD_ID``) plus host facts. Unknown fields are ``""`` —
-    documented: the MAC authenticates the *claim*, it cannot make an
-    empty environment truthful. ``extra`` overrides on collision.
+    ``NIXON_BUILD_ID``, ``NIXON_FARM_ID``) plus host facts. Unknown
+    fields are ``""`` — documented: the MAC authenticates the *claim*,
+    it cannot make an empty environment truthful. ``extra`` overrides
+    on collision.
+
+    Two fields close the limits ADR-0005 recorded:
+
+    * ``farm`` — which farm produced the artifact.  The MAC covers it,
+      so a sidecar minted by one farm cannot be presented as another
+      farm's, and a verifier can pin it with
+      ``expected={"farm": "..."}``.
+    * ``issued_at`` / ``expires_at`` — a replay window.  ``expires_at``
+      is ``issued_at`` plus ``NIXON_ARTIFACT_TTL`` seconds (default 30
+      days).  A sidecar past its window no longer verifies, so a
+      captured sidecar cannot be replayed indefinitely.
     """
+    issued = int(time.time())
+    ttl = os.environ.get("NIXON_ARTIFACT_TTL", "")
+    try:
+        ttl_s = int(ttl) if ttl else DEFAULT_ARTIFACT_TTL_SECONDS
+    except (TypeError, ValueError):
+        ttl_s = DEFAULT_ARTIFACT_TTL_SECONDS
     meta = {
         "repo": os.environ.get("GITHUB_REPOSITORY", ""),
         "commit": os.environ.get("GITHUB_SHA", ""),
         "build_id": os.environ.get("NIXON_BUILD_ID", ""),
+        "farm": os.environ.get("NIXON_FARM_ID", ""),
         "platform": sys.platform,
         "python": platform.python_version(),
+        "issued_at": issued,
+        "expires_at": issued + max(0, ttl_s),
     }
     if extra:
         for k, v in dict(extra).items():
@@ -171,6 +198,15 @@ def verify_artifact(path: str, key: bytes, sig: dict,
         meta = sig.get("metadata")
         if not isinstance(meta, dict):
             return False
+        # Replay window: a sidecar past its expiry no longer verifies.
+        # The MAC covers ``expires_at``, so it cannot be edited forward.
+        expires = meta.get("expires_at")
+        if expires is not None:
+            try:
+                if int(expires) < int(time.time()):
+                    return False
+            except (TypeError, ValueError):
+                return False
         if expected:
             try:
                 for k, v in dict(expected).items():
@@ -232,7 +268,8 @@ def zip_sidecar_names(zip_path: str) -> list:
         return []
 
 
-def verify_zip_sidecars(zip_path: str, key: bytes) -> int:
+def verify_zip_sidecars(zip_path: str, key: bytes,
+                        expected: dict | None = None) -> int:
     """Verify every ``*.sig.json`` member against its sibling zip member.
 
     The sibling of ``foo.sig.json`` is ``foo`` (same directory inside the
@@ -240,6 +277,10 @@ def verify_zip_sidecars(zip_path: str, key: bytes) -> int:
     carries none). Raises :class:`SignatureMismatchError` fail-closed on
     any mismatch, unreadable sidecar, or missing sibling — the caller
     must not extract on raise.
+
+    ``expected`` is an optional metadata pin (e.g. ``{"farm": "..."}``):
+    every sidecar must carry those values, so a sidecar minted by a
+    different farm is a mismatch rather than a pass.
     """
     if not isinstance(key, (bytes, bytearray)) or not key:
         raise ValueError("key must be non-empty bytes")
@@ -273,6 +314,30 @@ def verify_zip_sidecars(zip_path: str, key: bytes) -> int:
                     if not isinstance(meta, dict):
                         raise SignatureMismatchError(
                             f"sidecar {sidecar_name!r} has no metadata binding")
+                    # Replay window: a sidecar past its expiry does not
+                    # verify.  The MAC covers expires_at, so it cannot be
+                    # edited forward.
+                    expires = meta.get("expires_at")
+                    if expires is not None:
+                        try:
+                            if int(expires) < int(time.time()):
+                                raise SignatureMismatchError(
+                                    f"sidecar {sidecar_name!r} expired")
+                        except (TypeError, ValueError):
+                            raise SignatureMismatchError(
+                                f"sidecar {sidecar_name!r} has a malformed expiry")
+                    if expected:
+                        try:
+                            for _k, _v in dict(expected).items():
+                                if meta.get(_k) != _v:
+                                    raise SignatureMismatchError(
+                                        f"sidecar {sidecar_name!r} does not "
+                                        f"match the pinned {_k!r}")
+                        except SignatureMismatchError:
+                            raise
+                        except Exception as _e:
+                            raise SignatureMismatchError(
+                                f"sidecar {sidecar_name!r} pin check failed: {_e}")
                     actual = _bound_hex(data, bytes(key), meta)
                 elif algo == "hmac-sha256":
                     actual = hmac.new(bytes(key), data, "sha256").hexdigest()

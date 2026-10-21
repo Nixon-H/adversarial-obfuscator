@@ -929,6 +929,41 @@ in config/default.json.
 
     opts = parser.parse_args()
 
+    # The loader-emission flags do not apply here: this pipeline compiles
+    # the payload to a native binary and emits NO hybrid loader, so these
+    # could never do anything.  They used to be accepted, logged as if
+    # applied, and silently ignored -- which is worse than refusing:
+    # an operator believed they had armed a gate.  They now fail with a
+    # pointer to the CLI that does arm them.
+    _LOADER_ONLY_FLAGS = (
+        ("hwid", "", "--hwid", "the HWID string"),
+        ("trial", "", "--trial", "the trial period"),
+        ("vm_threshold", 50.0, "--vm-threshold", "the VM-score threshold"),
+        ("kod", False, "--kod", "kill-on-detect"),
+        ("hostguard", False, "--hostguard", "the hostguard snippet"),
+        ("hwid_lock", False, "--hwid-lock", "the HWID-locked fallback"),
+        ("audit_hook_plant_off", False, "--no-audit-hook-plant",
+         "the audit-hook plant detector"),
+        ("driver_check", False, "--driver-check", "the kernel-driver gate"),
+        ("split_bootstrap", False, "--split-bootstrap", "the split-bootstrap key"),
+        ("snapshot_off", False, "--no-snapshot", "the frozen-stdlib snapshot gate"),
+        ("stdlib_audit_off", False, "--no-stdlib-audit", "the stdlib audit gate"),
+    )
+    _misused = []
+    for _dest, _default, _flag, _what in _LOADER_ONLY_FLAGS:
+        if getattr(opts, _dest, _default) != _default:
+            _misused.append("%s (%s)" % (_flag, _what))
+    if _misused:
+        print("[!] These flags configure the HYBRID LOADER and have no "
+              "effect on this native pipeline:", file=sys.stderr)
+        for _m in _misused:
+            print("      %s" % _m, file=sys.stderr)
+        print("    The loader build applies them:",
+              file=sys.stderr)
+        print("      python3 -m obfuscator.core.pipeline build <script.py> "
+              "--<flag> ...", file=sys.stderr)
+        sys.exit(2)
+
     # SEED/NIXON_SEED env fallback for --randomization-seed (reproducible
     # builds; documented in docs/DEVELOPER.md). Explicit flag always wins.
     if getattr(opts, "randomization_seed", None) is None:
@@ -1041,7 +1076,12 @@ in config/default.json.
 
     base = os.path.splitext(os.path.basename(opts.payload))[0]
     obfuscated_name = f"{base}_obfuscated.py"
-    obfuscated_output = opts.output or os.path.join(ROOT, f".build_tmp_{obfuscated_name}")
+    # The staging file belongs in the build directory, not in the
+    # repository root: the root is the user's working tree, and a
+    # failed build used to leave its staging file there.
+    os.makedirs(BUILD_DIR, exist_ok=True)
+    obfuscated_output = opts.output or os.path.join(
+        BUILD_DIR, f".build_tmp_{obfuscated_name}")
     obfuscated_output = os.path.abspath(obfuscated_output)
     # Output guard: -o outside the repo build dir overwrites silently
     # (audit: refuse absolute/escaping paths unless --force-output).
@@ -1358,7 +1398,8 @@ in config/default.json.
     # =========================================================================
 
     if not opts.skip_obfuscate:
-        adv_inj_output = os.path.join(ROOT, f".build_tmp_adv_{obfuscated_name}")
+        adv_inj_output = os.path.join(
+            BUILD_DIR, f".build_tmp_adv_{obfuscated_name}")
         phase_adversarial_injection(obfuscated_output, adv_inj_output, opts)
         if os.path.exists(adv_inj_output):
             shutil.copy2(adv_inj_output, obfuscated_output)

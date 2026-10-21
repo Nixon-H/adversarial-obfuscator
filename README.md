@@ -160,6 +160,10 @@ build <script.py>          Obfuscate and compile a Python script
                             loader, HMAC-tagged and checked at load time
   --debug-dump-raw          Compile the plaintext-dump debug aid into the
                             artifact (off by default)
+  --strict-detections       Make the environment detections (sandbox,
+                            emulator, debugger frame, geo-fence, licence)
+                            terminate the artifact instead of only
+                            perturbing it (off by default)
   --compile                 Compile the final loader with Nuitka
   --skip-cloud              Build locally even if --compile/--auto would use the farm
   --platform {auto,github}  Build farm platform (GitHub is the only implemented farm)
@@ -240,7 +244,7 @@ enforceable lint gate) and
 [`docs/AUDIT-2026-10-20.md`](docs/AUDIT-2026-10-20.md) (the CLI audit:
 dropped flags, an unpinned lint gate, an untracked build config, a hard
 `z3` dependency, and the documentation refresh). The current suite is
-**4303 passed, 23 skipped, 0 failed** (plus 289 Rust runtime tests and
+**4314 passed, 23 skipped, 0 failed** (plus 289 Rust runtime tests and
 4 Rust relay tests).
 
 ### Which version numbers are which

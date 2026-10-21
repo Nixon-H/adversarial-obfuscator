@@ -5851,6 +5851,21 @@ def constant_time_compare(a, b):
     result = 0
     for x, y in zip(a, b): result |= x ^ y
     return result == 0
+def _nx_strict_fail(reason):
+    """Terminate when a detection fires and the operator armed it.
+
+    The environment detections (sandbox, emulator, debugger, geo-fence,
+    licence) are SIGNALS by default: they perturb the loader's hash
+    chain, so the artifact behaves differently on a hostile host.  With
+    --strict-detections they become gates and the artifact dies.
+    """
+    if not globals().get("_NX_STRICT_DETECTIONS"):
+        return
+    try:
+        import os as _nx_st_os
+        _nx_st_os._exit(137)
+    except Exception:
+        pass
 def _nx_self_fail(reason):
     """Terminate on a self-integrity mismatch.
 
@@ -6282,6 +6297,7 @@ def {FUNC_BOOT}():
             if not {FUNC_FETCH_CRITICAL}(str(_uuid_rce.getnode())) and not {VAR_IS_DEBUG}:
                 {FUNC_LOG}("[WARN] Remote Critical Code Fetch Failed")
                 ctx['h'] = {FUNC_NEXT_H}(ctx['h'], "NET_FAIL")
+                _nx_strict_fail("net-fail")
             {runtime_check_code}
         except: pass
         try:
@@ -6290,12 +6306,14 @@ def {FUNC_BOOT}():
             if not _emu_ok and not {VAR_IS_DEBUG}:
                 {FUNC_LOG}("[WARN] Emulator/VM detected")
                 ctx['h'] = {FUNC_NEXT_H}(ctx['h'], "EMU_FAIL")
+                _nx_strict_fail("emu")
         except: pass
         try:
             _frame_chk = {VAR_FRAME_ANTI_DEBUG_CLS}
             if _frame_chk.{METHOD_CHECK_FRAME}() and not {VAR_IS_DEBUG}:
                 {FUNC_LOG}("[WARN] Debugger frame detected")
                 ctx['h'] = {FUNC_NEXT_H}(ctx['h'], "DBG_FRAME")
+                _nx_strict_fail("dbg-frame")
         except: pass
         try:
             _opaque = {VAR_OPAQUE_CONST_CLS}
@@ -6313,6 +6331,7 @@ def {FUNC_BOOT}():
             if not _lic.{METHOD_CHECK_LICENSE}(_hw_id_for_chain) and not {VAR_IS_DEBUG}:
                 {FUNC_LOG}("[WARN] Blockchain license check failed")
                 ctx['h'] = {FUNC_NEXT_H}(ctx['h'], "NO_TOKEN")
+                _nx_strict_fail("no-token")
         except: pass
         try:
             _shard_urls = {key_shard_urls}
@@ -6329,6 +6348,7 @@ def {FUNC_BOOT}():
             if not _geo.{METHOD_CHECK_ALLOWED}() and not {VAR_IS_DEBUG}:
                 {FUNC_LOG}("[WARN] Geographic restriction failed")
                 ctx['h'] = {FUNC_NEXT_H}(ctx['h'], "GEO_BLOCK")
+                _nx_strict_fail("geo-block")
         except: pass
         try:
             _int_mon = {VAR_INTEGRITY_MON_CLS}()
@@ -6395,6 +6415,29 @@ def {FUNC_BOOT}():
         if not ctx["dec"].startswith(m): 
             {FUNC_LOG}("[FATAL] Magic Mismatch (Decryption Failed)"); _nixon_システム시스템.exit(1)
         ctx["zip"] = ctx["dec"][len(m):]
+        # Authenticate the payload before anything is extracted from
+        # it.  The zip is XOR-encrypted with no MAC of its own, so a
+        # byte flipped in the payload region used to corrupt the
+        # payload SILENTLY -- the loader ran, the payload was garbage,
+        # and nothing said so.  The tag is keyed with the inner key
+        # (already embedded) and computed by the build.
+        try:
+            import hmac as _nx_mac_h
+            import hashlib as _nx_mac_sha
+            _nx_mac_key = bytes.fromhex('{INNER_KEY_HEX}')
+            _nx_mac_got = _nx_mac_h.new(_nx_mac_key, ctx["zip"],
+                                        _nx_mac_sha.sha256).hexdigest()
+            if not _nx_mac_h.compare_digest(_nx_mac_got,
+                                          "{VAR_PAYLOAD_MAC}"):
+                {FUNC_LOG}("[FATAL] Payload integrity check failed")
+                import os as _nx_mac_os
+                _nx_mac_os._exit(137)
+        except SystemExit:
+            raise
+        except Exception as _nx_mac_e:
+            {FUNC_LOG}(f"[FATAL] Payload integrity check error: {{_nx_mac_e}}")
+            import os as _nx_mac_os2
+            _nx_mac_os2._exit(137)
         ctx['h'] = {FUNC_NEXT_H}(ctx['h'], 8)
         return S_LOAD
     def {FUNC_STATE_LOAD}():
@@ -6507,6 +6550,18 @@ def {FUNC_BOOT}():
     if not globals().get("_nx_payload_ran"):
         import os as _nx_pr_os
         _nx_pr_os._exit(137)
+# Verify the loader's own integrity BEFORE anything else runs, and
+# at MODULE level so a tamper cannot dodge it by disabling the
+# entry point below.  A mismatch exits 137.
+{FUNC_SELF}()
 if __name__ == "__main__":
     _nixon_マルチ멀티.freeze_support()
-    {FUNC_BOOT}()'''
+    {FUNC_BOOT}()
+# The payload must actually have run.  A tampered loader can divert
+# the state machine before the payload is executed, and the loader
+# used to exit 0 in that case -- indistinguishable from a clean
+# run.  This check is outside the __main__ block on purpose: if the
+# block above was tampered with, this still fires.
+if not globals().get("_nx_payload_ran"):
+    import os as _nx_pr_os
+    _nx_pr_os._exit(137)'''

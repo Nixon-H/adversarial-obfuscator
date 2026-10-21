@@ -635,6 +635,10 @@ def _verify_download_zip(zip_path, artifact_name, sign_key):
     + proceed. No key + no sidecars → auditable warning + proceed. Key
     + no sidecars → info note (farm-runner binaries are unsigned by
     design: runners never hold the key — ADR-0005).
+
+    The farm identity is pinned when one is configured: a sidecar
+    minted by a *different* farm is a mismatch, not a pass.  That closes
+    the "no per-farm identity" limit ADR-0005 recorded.
     """
     import logging as _logging
     _log = _logging.getLogger("scripts.artifact_sign")
@@ -643,10 +647,14 @@ def _verify_download_zip(zip_path, artifact_name, sign_key):
         _names = _as.zip_sidecar_names(zip_path)
     except Exception:
         return False
+    _expected = {}
+    _farm = os.environ.get("NIXON_FARM_ID", "").strip()
+    if _farm:
+        _expected["farm"] = _farm
     if sign_key is not None:
         if _names:
             try:
-                _n = _as.verify_zip_sidecars(zip_path, sign_key)
+                _n = _as.verify_zip_sidecars(zip_path, sign_key, _expected or None)
             except Exception as _e:
                 try:
                     os.remove(zip_path)

@@ -2660,7 +2660,16 @@ def _VERIFY_INTEGRITY():
                                 z.writestr("__main__.nixon", enc_marshalled)
                             except Exception: z.write(full_path, rel_path)
                         else: z.write(full_path, rel_path)
-            raw = VARS["MAGIC"] + buf.getvalue()
+            zip_bytes = buf.getvalue()
+            # Authenticate the payload.  The zip is XOR-encrypted and has
+            # no MAC of its own, so a byte flipped in the payload region
+            # used to corrupt the payload SILENTLY: the loader ran, the
+            # payload was garbage, and nothing said so.  The tag is keyed
+            # with the inner key (already embedded) and checked by the
+            # loader before it extracts anything.
+            payload_mac = hmac.new(inner_key, zip_bytes,
+                                   hashlib.sha256).hexdigest()
+            raw = VARS["MAGIC"] + zip_bytes
             entropy_marker = os.urandom(16)
             padded_raw = inject_entropy_tlv(raw, entropy_marker)
             key = getattr(args, '_inner_key', None) or os.urandom(32); nonce = os.urandom(16)
@@ -2894,6 +2903,10 @@ def _VERIFY_INTEGRITY():
                 'vm_bc_1': bytes(bc1),
                 'vm_seed_val': vm_seed1,
                 'VAR_IS_DEBUG': VARS["IS_DEBUG"],
+                # The environment detections are signals by default; with
+                # --strict-detections they become gates.
+                'VAR_STRICT_DETECTIONS': bool(
+                    getattr(args, 'strict_detections', False)),
                 'is_debug_val': str(is_debug),
                 'EXC_STATE': VARS["EXC_STATE"],
                 'FUNC_WIPE': VARS["FUNC_WIPE"],
@@ -2920,6 +2933,7 @@ def _VERIFY_INTEGRITY():
                 'VAR_FUNC_ADV_HK': VARS["FUNC_ADV_HK"],
                 'HMAC_SECRET_HEX': hmac_secret,
                 'INNER_KEY_HEX': inner_key_hex,
+                'VAR_PAYLOAD_MAC': payload_mac,
                 'NATIVE_BLOB_KEY_HEX': key.hex(),
                 'DECOY_FUNC': VARS['DECOY_FUNC'],
                 'remove_entropy_code': remove_entropy_source(VARS["ENTROPY_MARKER"]),
@@ -3238,6 +3252,13 @@ def build_parser():
                        help='Embed an owner-supplied watermark message in the loader, '
                             'HMAC-tagged and checked at load time: a stripped or edited '
                             'watermark kills the artifact')
+    build.add_argument('--strict-detections', dest='strict_detections',
+                       action='store_true', default=False,
+                       help="Make the loader's environment detections (sandbox, "
+                            "emulator, debugger frame, geo-fence, licence) "
+                            "terminate the artifact instead of only perturbing "
+                            "it (off by default: a detection is a signal, not "
+                            "a gate)")
     build.add_argument('--debug-dump-raw', dest='debug_dump_raw',
                        action='store_true', default=False,
                        help='Compile the plaintext-dump debug aid into the artifact '

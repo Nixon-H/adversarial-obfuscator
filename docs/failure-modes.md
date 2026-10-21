@@ -117,10 +117,16 @@ it had been resolved.
   download -- through the shared `_extract_zip_confined()` /
   `_extract_tar_confined()` helpers, checked on the RESOLVED
   destination (proven by `tests/test_archive_confinement.py`).
+  **Also closed (2026-10-20):** the signed metadata now carries the
+  producing **farm** (pinned on download, so another farm's sidecar is a
+  mismatch, not a pass) and an **issued_at / expires_at** replay window
+  (`NIXON_ARTIFACT_TTL`, default 30 days); both are covered by the MAC
+  (proven by `tests/test_artifact_sidecar_binding.py`).
   **Still open:** farm-runner binaries
   are unsigned by design (runners are keyless -- TLS plus provenance
-  only); and a shared secret has no per-farm identity, rotation or
-  replay expiry (`docs/adr/0005-artifact-authenticity.md`).
+  only); the signing key is still shared, so a verifier can still forge
+  a sidecar for any farm id; and key *versioning* is deferred
+  (`docs/adr/0005-artifact-authenticity.md`).
 - **D29 — `atomic_write` temp-name collision**: **RESOLVED**. The temp
   name now carries the pid and a random suffix, so concurrent builds of
   the same target no longer share it. Proven by

@@ -225,13 +225,15 @@ Each var verified by grep against the tree (sources + tests):
 | Variable | Effect | Default | Source |
 |---|---|---|---|
 | `NIXON_LOG_REDIRECT` | `1` redirects stdout/stderr to `build.log`; `0` keeps console | `1` (but `scripts/build.py` calls `setdefault("0")`, so a plain build prints to console) | `obfuscator/core/utils.py`, `scripts/build.py` |
-| `NIXON_KOD` | Anything but `"0"` arms kill-on-detect for the VM verdict (`os._exit`) and mirrors into the audit-hook timing gate; unset or `"0"` = report-only, while even `""` (empty string) arms | report-only | `obfuscator/vm_score.py`, `obfuscator/audit_hook.py`; `tests/test_vm_score.py`, `tests/test_vm_subset.py` |
+| `NIXON_KOD` | Anything but `"0"` arms kill-on-detect for the VM verdict (`os._exit`); unset or `"0"` = report-only, while even `""` (empty string) arms. It does NOT arm the audit-hook timing gate -- that one is `NIXON_AUDIT_TIMING` | report-only | `obfuscator/vm_score.py`; `tests/test_vm_score.py`, `tests/test_vm_subset.py` |
 | `NIXON_DRIVER_CHECK` | Arms the BYOVD driver gate at runtime (fail-closed `_nx_kill("driver-blocked")`, exit 137, + 60 s daemon re-check); disarmed = enumerate-only, never exits (Python loader snippet; the native `CheckBYOVDDrivers` gate returns immediately without enumerating when disarmed) | disarmed | `obfuscator/driver_blocklist.py`, `obfuscator/core/pipeline.py`; `tests/test_driver_blocklist.py` |
 | `NIXON_AUDIT_TIMING` | Arms timing-kill in the audit hook; unset or `"0"` = disarmed, any other value (including `""`) arms | disarmed | `obfuscator/audit_hook.py`; `tests/test_audit_timing.py` |
 | `NIXON_SNAPSHOT_OFF` | Truthy (`1/true/True/TRUE`, see `frozen_snapshot.py`) disables the frozen-stdlib snapshot gate at runtime | gate ON | `obfuscator/frozen_snapshot.py`, `obfuscator/core/pipeline.py`; `tests/test_frozen_snapshot.py` |
 | `NIXON_STDLIB_AUDIT_OFF` | Same truthy set; disables the stdlib function-audit gate at runtime | gate ON | `obfuscator/stdlib_audit.py`, `obfuscator/core/pipeline.py`; `tests/test_stdlib_audit.py` |
 | `NIXON_AUDITHOOK_PLANT_OFF` | Disables the site-packages plant detector at runtime | detector ON | `obfuscator/audit_hook.py`, `obfuscator/core/pipeline.py`; `tests/test_sitepackages_hook.py` |
 | `NIXON_LADDER_DEBUG` | `1` prints kill reasons to stderr (kills are silent otherwise) | silent | `obfuscator/kill_ladder.py`; `tests/test_kill_ladder.py` |
+| `NIXON_FARM_ID` | The farm identity bound into the signed artifact sidecar. The download path pins it, so a sidecar minted by a different farm is a mismatch, not a pass | unset (no pin) | `scripts/artifact_sign.py`, `obfuscator/core/utils.py`; `tests/test_artifact_sidecar_binding.py` |
+| `NIXON_ARTIFACT_TTL` | How long a signed sidecar stays valid, in seconds. The MAC covers `expires_at`, so it cannot be edited forward; `0` means no expiry | 30 days | `scripts/artifact_sign.py`; `tests/test_artifact_sidecar_binding.py` |
 
 Runtime examples:
 

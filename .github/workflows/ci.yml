@@ -101,3 +101,36 @@ jobs:
         run: |
           git log --oneline -3 -- requirements.txt
           git diff HEAD~1 -- requirements.txt || true
+
+  lint-pin:
+    # The ruff pin is deliberate -- an unpinned linter can turn a green
+    # tree red with no change to the code -- but a pin that is never
+    # reviewed goes stale.  This job reports (it never gates): it says
+    # whether a newer ruff exists, so the bump is a reviewed act.
+    # `make lint-upgrade` prints the same thing locally.
+    schedule:
+      - cron: "0 6 * * 1"    # Mondays
+    workflow_dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compare the pinned ruff with the latest release
+        run: |
+          pip install -q ruff
+          pinned=$(grep '^ruff==' requirements-dev.txt | cut -d= -f3)
+          latest=$(pip index versions ruff 2>/dev/null | head -1 | awk '{print $3}')
+          echo "pinned: $pinned"
+          echo "latest: $latest"
+          if [ -n "$latest" ] && [ "$pinned" != "$latest" ]; then
+            echo "::notice title=ruff pin is behind::A newer ruff ($latest) is available; the pin is $pinned. Review the new findings and bump requirements-dev.txt deliberately (make lint-upgrade)."
+          else
+            echo "the ruff pin is current"
+          fi
+      - name: Report what a newer ruff would say (informational)
+        continue-on-error: true
+        run: |
+          pip install -q "ruff!=$(grep '^ruff==' requirements-dev.txt | cut -d= -f3)" || true
+          ruff check --no-cache . || echo "the newer ruff reports findings; review them before bumping the pin"

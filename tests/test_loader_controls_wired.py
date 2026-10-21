@@ -136,6 +136,29 @@ def test_without_split_bootstrap_the_effective_key_is_the_direct_one():
     assert "_NX_EFF_KEY = BLOB_KEY_SB" not in src
 
 
+# --- the environment detections are armable -------------------------------
+
+def test_strict_detections_is_accepted_by_the_cli():
+    """The arming flag must reach the emitted loader, not just the CLI."""
+    from obfuscator.core.pipeline import build_parser
+    parser, _subs = build_parser()
+    args = parser.parse_args(["build", "p.py", "--strict-detections"])
+    assert args.strict_detections is True
+    args = parser.parse_args(["build", "p.py"])
+    assert args.strict_detections is False
+
+
+def test_strict_detections_reaches_the_outer_loader():
+    """The outer loader is where the detections live."""
+    src = open(os.path.join(ROOT, "obfuscator", "core", "sources.py"),
+               encoding="utf-8").read()
+    assert "_NX_STRICT_DETECTIONS" in src
+    assert "_nx_strict_fail" in src
+    # Every detection calls it.
+    assert src.count("_nx_strict_fail(") >= 5, (
+        "the environment detections do not all reach the strict path")
+
+
 # --- the plaintext-dump aid is not in a normal artifact -------------------
 
 def test_the_plaintext_dump_aid_is_not_in_a_normal_artifact():

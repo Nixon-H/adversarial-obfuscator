@@ -106,25 +106,36 @@ Concretely:
   positional signature, and the no-key download flow all keep working.
 - Honest limitations (residual risk, not coverage):
   1. **Shared secret:** every verifier can also forge. No
-     non-repudiation, no per-farm blame. Per-farm key IDs are deferred
-     (no `kid` field in v1 sidecars).
+     non-repudiation, no per-farm blame. **Partly closed 2026-10-20:**
+     the signed metadata now carries a `farm` field
+     (`NIXON_FARM_ID`), and the download path pins it when one is
+     configured, so a sidecar minted by one farm is a mismatch, not a
+     pass, for a farm that expects a different identity. What is still
+     open is the *key* itself: it is still shared, so a verifier can
+     still forge a sidecar for any farm id. Per-farm key pairs remain
+     deferred (see the rejected alternatives above).
   2. **Runner binaries unsigned:** a farm-runner compromise is NOT
      detected by this mechanism — TLS + provenance is the only story
      there, as before.
-  3. **No rotation versioning / expiry / replay protection:** rotation
-     is manual (set new env, re-sign); old-key artifacts fail after
-     rotation (expected); a captured signed artifact replays as valid
-     forever (no timestamp in v1 metadata — clock trust was out of
-     scope).
+  3. **Rotation versioning:** rotation is manual (set new env,
+     re-sign); old-key artifacts fail after rotation (expected).
+     **Replay protection closed 2026-10-20:** the signed metadata now
+     carries `issued_at` and `expires_at` (`NIXON_ARTIFACT_TTL`,
+     default 30 days), the MAC covers both, and a sidecar past its
+     window no longer verifies. Key *versioning* (a `kid` identifying
+     which key signed it) is still deferred.
   4. **Binding is only as truthful as the signer env:** the MAC
      authenticates the metadata *claim*; a liar holding the key can
      bind false repo/commit values.
   5. **Upload sidecars are audit trail, not runner enforcement:**
      runners cannot verify them (keyless); they let the key-holder
      detect repo-content tampering after the fact.
-  6. **Nuitka download path still lacks ZipSlip confinement** (present
-     only on the `GitHubBuildFarm` path) — out of scope, still tracked
-     by D26-adjacent work.
+  6. **Nuitka download path still lacks ZipSlip confinement** — CLOSED
+     2026-10-20: all three extraction paths (both farm download paths
+     and the tool download) now go through the shared
+     `_extract_zip_confined()` / `_extract_tar_confined()` helpers,
+     which check the RESOLVED destination of every member
+     (`tests/test_archive_confinement.py`).
   7. The `utils.py` glue (upload/download wiring) is covered by
      `py_compile` + review, not unit tests (importing
      `obfuscator.core.utils` has log-redirect/UI side effects); all
