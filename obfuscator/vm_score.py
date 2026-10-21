@@ -92,7 +92,7 @@ def verdict(percent: float, threshold: float = 50.0) -> str:
     return "VM" if p >= t else "CLEAN"
 
 
-def emit_loader_snippet(threshold: float = 50.0) -> str:
+def emit_loader_snippet(threshold: float = 50.0, armed: bool = False) -> str:
     """Return Python source implementing the runtime VM-check subset.
 
     Checks (Linux, registry-free, stdlib-only, no match statement):
@@ -146,6 +146,7 @@ def emit_loader_snippet(threshold: float = 50.0) -> str:
         "import subprocess as _subprocess\n"
         "\n"
         f"_NX_VM_THRESHOLD = {thr!r}\n"
+        f"_NX_KOD_ARMED_BUILD = {bool(armed)!r}\n"
         f"_NX_VM_WEIGHTS = {weights_json}\n"
         "_NX_VM_OUIS = {\"000569\", \"000c29\", \"001c14\", \"005056\","
         " \"080027\", \"00155d\", \"525400\", \"000f4b\", \"00163e\", \"00215e\"}\n"
@@ -414,7 +415,7 @@ def emit_loader_snippet(threshold: float = 50.0) -> str:
         "    _total = sum(_NX_VM_WEIGHTS.values())\n"
         "    _pct = (_hit / _total * 100.0) if _total else 0.0\n"
         "    _verdict = \"VM\" if _pct >= _thr else \"CLEAN\"\n"
-        "    if _verdict == \"VM\" and _os.environ.get(\"NIXON_KOD\", \"0\") != \"0\":\n"
+        "    if _verdict == \"VM\" and (_os.environ.get(\"NIXON_KOD\", \"0\") != \"0\" or _NX_KOD_ARMED_BUILD):\n"
         "        _nx_kill(\"vm-detect\")\n"
         "    return _verdict\n"
         "\n"

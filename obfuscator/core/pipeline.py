@@ -211,7 +211,17 @@ def Nixon_Enc_strings(code):
                 "__NX_STR_TABLE_SENTINEL__", "__NX_STR_KEY_A__", "__NX_STR_KEY_B__",
                 "little", "big", "rb", "wb", "r", "w", "ab", "a", "HOOK_SECTION", "PY_LOGGER", "debugger", "HOOK_", "SECTION", "PY_", "LOGGER",
                 "/proc", "fd", "NX_ORIGIN", "Windows"]
-    SKIP_MARKERS = ["_NX_PART_", "PAYLOAD =", "NATIVE_BLOBS =", "FALLBACK_BLOB =", "BLOBS =", "__NX_STR_KEY_"]
+    SKIP_MARKERS = ["_NX_PART_", "PAYLOAD =", "NATIVE_BLOBS =", "FALLBACK_BLOB =", "BLOBS =", "__NX_STR_KEY_",
+                    # The integrity anchors must stay PLAIN literals.  They
+                    # hold the Merkle root and the HMAC the build computes
+                    # over the finished loader, and the build fills them in
+                    # after the content is final -- which it cannot do if
+                    # the value has been turned into a string-table lookup.
+                    # (It did: the runtime compared the root against a
+                    # placeholder, so the check never matched and its
+                    # verdict was discarded.  The anti-tamper control was
+                    # inert.)
+                    "__SIG_ANCHOR__", "__HMAC_ANCHOR__"]
     lines = code.split('\n')
     out_lines = []
     pattern = re.compile(r'(?<![bfruBFRU])(?<!["\'])("[\w\d\s_\./:-]+?"|\'[\w\d\s_\./:-]+?\')(?!["\'])')
@@ -1192,7 +1202,7 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         pass
     try:
         from obfuscator.vm_score import emit_loader_snippet as _emit_vm
-        _phase4_suffix += _emit_vm(_vm_thr) + "\n"
+        _phase4_suffix += _emit_vm(_vm_thr, bool(kod)) + "\n"
         # The VM snippet defines vm_check()/vm_score_percent() (KOD-gated
         # kill inside vm_check). Invoke once at loader import so a VM host
         # is caught at startup, not only when something calls vm_check().
@@ -1266,6 +1276,8 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
                 "    BLOB_KEY_SB = _nx_sb_activate()\n"
                 "except Exception:\n"
                 "    BLOB_KEY_SB = None\n"
+                "if BLOB_KEY_SB is not None:\n"
+                "    _NX_EFF_KEY = BLOB_KEY_SB\n"
             )
         except Exception:
             try:
@@ -1605,6 +1617,10 @@ def _nx_key_reconstruct():
     _nx_wipe(_raw)
     return _key
 BLOB_KEY = _nx_key_reconstruct()
+# The key the payload is actually decrypted with.  When split-bootstrap
+# is armed this becomes the 2-of-3 Shamir reconstruction, so the
+# control is on the path that matters and not merely emitted.
+_NX_EFF_KEY = BLOB_KEY
 del _BLOB_S0
 del _BLOB_S1
 def _xor_decrypt(data, key):
@@ -1739,7 +1755,7 @@ def _exec_fallback():
             # sections and is joined here, so the whole encrypted payload
             # is never resident in a single buffer.  A tampered, truncated
             # or mis-keyed pack fails closed (the join returns None).
-            _joined = _nx_section_join(_NX_SECTION_PACK, BLOB_KEY)
+            _joined = _nx_section_join(_NX_SECTION_PACK, _NX_EFF_KEY)
             if not _joined:
                 # Fail closed through the kill ladder (silent, exit 137),
                 # like every other tamper path in the loader.
@@ -1751,7 +1767,7 @@ def _exec_fallback():
             compressed = bytearray(_joined)
         else:
             encrypted = bytearray(base64.b85decode(FALLBACK_BLOB))
-            compressed = bytearray(_xor_decrypt(bytes(encrypted), BLOB_KEY))
+            compressed = bytearray(_xor_decrypt(bytes(encrypted), _NX_EFF_KEY))
         # Batch-2 compress contest: backend-ID envelope (0x00=zlib,
         # 0x01=bz2, 0x02=lzma, 0x03=zstd) with backward compat for legacy
         # prefix-less zlib blobs. stdlib-only on the loader path.
@@ -1790,7 +1806,22 @@ def _exec_fallback():
             import os as _nx_hwid_os
             _nx_hwid_os._exit(137)
         code = _ct_unmarshal(bytes(raw))
-        exec(code, globals())
+        # Hostguard (opt-in, --hostguard): bind the host namespace,
+        # verify exec/eval/compile are unpatched, and only then run the
+        # payload.  The snippet used to be emitted but never called, so
+        # the control did nothing at all.
+        _nx_ns = globals()
+        _nx_hg = globals().get("_NX_HOSTGUARD")
+        if _nx_hg:
+            # Hostguard (opt-in, --hostguard): bind the host namespace,
+            # verify exec/eval/compile are unpatched, and only then run
+            # the payload.  The snippet used to be emitted but never
+            # called, so the control did nothing at all.  The template
+            # stays free of hostguard-specific names: the snippet
+            # publishes a callable under _NX_HOSTGUARD.
+            _nx_hg(code, _nx_ns)
+        else:
+            exec(code, _nx_ns)
         _nx_wipe(encrypted)
         _nx_wipe(compressed)
         _nx_wipe(raw)
@@ -1859,7 +1890,7 @@ def _load_native():
         return None
     try:
         encrypted_blob = base64.b85decode(blobs[blob_key])
-        blob_data = _xor_decrypt(encrypted_blob, BLOB_KEY)
+        blob_data = _xor_decrypt(encrypted_blob, _NX_EFF_KEY)
         fd, path = tempfile.mkstemp(suffix=ext, prefix="_nx_")
         with os.fdopen(fd, "wb") as f:
             f.write(blob_data)
@@ -1993,7 +2024,31 @@ if __name__ == "__main__":
     assert "{share0}" not in loader_src and "{share1}" not in loader_src
     assert "{build_id}" not in loader_src and "{fallback_blob_val}" not in loader_src
     assert "{key_hex}" not in loader_src, "stale {key_hex} placeholder"
-    loader_src = _phase4_prefix + loader_src + "\n" + _phase4_suffix
+    # The payload entry point must be LAST.
+    #
+    # The template ends with `if __name__ == "__main__": _load_native()`,
+    # and the phase-4 suffix -- which holds EVERY gate (VM score, driver
+    # gate, snapshot gate, stdlib audit, trial, watermark) -- is appended
+    # after it.  That meant the payload was decrypted and executed
+    # FIRST, and the gates ran afterwards: a trial-expired artifact ran
+    # its payload and only then died.  The gates were advisory.
+    #
+    # Moving the entry point to the end makes them gating: a gate that
+    # fires kills the artifact before the payload ever executes.
+    _ENTRY = '\nif __name__ == "__main__":\n    _load_native()\n'
+    _entry_at = loader_src.rfind(_ENTRY)
+    if _entry_at < 0:
+        # Fall back to a looser match so an unexpected template shape
+        # cannot silently reintroduce the ordering bug.
+        _entry_at = loader_src.rfind('if __name__ == "__main__":')
+        if _entry_at < 0:
+            raise RuntimeError("loader template lost its __main__ entry point")
+        _body = loader_src[:_entry_at]
+        _entry = loader_src[_entry_at:]
+    else:
+        _body = loader_src[:_entry_at]
+        _entry = _ENTRY
+    loader_src = _phase4_prefix + _body + "\n" + _phase4_suffix + _entry
     return loader_src, native_blobs, fallback_compressed
 def validate_obfuscated_code(code_string):
     try:
@@ -2289,6 +2344,7 @@ def build_project(args):
                 stdlib_audit_off=_w_stdlib_audit_off,
                 section_split=bool(getattr(args, 'section_split', False)),
                 section_count=int(getattr(args, 'section_count', 4) or 4),
+                watermark=str(getattr(args, 'watermark', '') or '') or None,
             )
             if getattr(args, 'section_split', False):
                 # The split needs a fallback payload to split, and there
@@ -2682,6 +2738,25 @@ def _VERIFY_INTEGRITY():
             VARS["TOR_CLIENT_CLS"] = var_tor_cls
             VARS["VAR_TOR_CLIENT_CLS"] = var_tor_cls
             session_token_bytes = secrets.token_bytes(32)
+            # The plaintext-dump debug aid.  It used to be a RUNTIME env
+            # switch (NIXON_DUMP_RAW=1), which meant every release
+            # artifact carried the ability to write its own decrypted
+            # source to disk.  It is now a build-time opt-in: the code is
+            # simply not compiled into a normal artifact.
+            _raw_dump_block = "pass"
+            if getattr(args, "debug_dump_raw", False):
+                _raw_dump_block = (
+                    "if _nixon_オペレーション運営.environ.get("
+                    '"NIXON_DUMP_RAW", "0") == "1":\n'
+                    "    _nx_dfd, _nx_dpath = "
+                    "_nixon_テンプ임시.mkstemp("
+                    'prefix="nixon_raw_", suffix=".py")\n'
+                    "    try:\n"
+                    "        _nixon_オペレーション運営.write("
+                    "_nx_dfd, raw if isinstance(raw, bytes) "
+                    'else raw.encode("utf-8"))\n'
+                    "    finally:\n"
+                    "        _nixon_オペレーション運営.close(_nx_dfd)")
             build_context = {
                 'NTRU_PUB_KEY': getattr(args, '_ntru_pub', '[]'),
                 'SESSION_TOKEN': session_token_bytes.hex(),
@@ -2728,7 +2803,13 @@ def _VERIFY_INTEGRITY():
                 'swizzle_key': bytes(swizzle_key),
                 'payload_parts_code': parts_code,
                 'cipher_source': CIPHER_SOURCE,
-                'importer_source': IMPORTER_SOURCE,
+                # The importer source carries the plaintext-dump debug
+                # aid behind a {RAW_DUMP_BLOCK} placeholder.  It is
+                # substituted HERE, not by the outer .format(): the
+                # importer source is a build_context VALUE, and a
+                # one-pass .format() does not re-scan substituted text.
+                'importer_source': IMPORTER_SOURCE.replace(
+                    "{RAW_DUMP_BLOCK}", _raw_dump_block),
                 'anti_sandbox_source': ANTI_SANDBOX_SOURCE,
                 'VAR_ANTI_SANDBOX_CLS': VARS["ANTI_SANDBOX_CLS"],
                 'vm_source': vm_source,
@@ -3150,10 +3231,19 @@ def build_parser():
     build.add_argument('--tor', action='store_true', help='Route build traffic through Tor (default 127.0.0.1:9050; override via --tor-proxy or NIXON_TOR_PROXY)')
     build.add_argument('--tor-proxy', default=None, help='Tor SOCKS endpoint host:port (default 127.0.0.1:9050; env NIXON_TOR_PROXY)')
     build.add_argument('--compile', action='store_true', help='Compile FINAL loader with Nuitka (Creates EXE/ELF)')
-    build.add_argument('--lock-hwid', '--watermark', dest='lock_hwid', default='',
+    build.add_argument('--lock-hwid', dest='lock_hwid', default='',
                        help='Lock the build to a target HWID: registers a license for it and '
-                            'seeds the build deterministically. "--watermark" is a deprecated '
-                            'alias for this flag')
+                            'seeds the build deterministically')
+    build.add_argument('--watermark', dest='watermark', default='',
+                       help='Embed an owner-supplied watermark message in the loader, '
+                            'HMAC-tagged and checked at load time: a stripped or edited '
+                            'watermark kills the artifact')
+    build.add_argument('--debug-dump-raw', dest='debug_dump_raw',
+                       action='store_true', default=False,
+                       help='Compile the plaintext-dump debug aid into the artifact '
+                            '(it writes the decrypted payload to a 0600 temp file when '
+                            'NIXON_DUMP_RAW=1). Off by default: a normal artifact has '
+                            'no such capability')
     build.add_argument('--one-shot', action='store_true', help='Self-destruct')
     build.add_argument('--net-url', help='Auth URL (if not using auto=cf)')
     build.add_argument('--tls-ca-bundle', help='PEM CA bundle for the emitted key fetch. The artifact verifies the certificate chain AND the hostname against the system trust store plus this CA (it never disables verification)')
@@ -3278,12 +3368,6 @@ def main():
             parser.print_help(file=_nixon_utils._console)
             sys.exit(1)
         args = parser.parse_args()
-        # A deprecated spelling must SAY so.  A silent alias is how
-        # a rename outlives its documentation.
-        if "--watermark" in sys.argv and "--lock-hwid" not in sys.argv:
-            UI.warn("--watermark is deprecated on this command; "
-                    "use --lock-hwid (it locks the build to a target "
-                    "HWID, which is what it always did here)")
         if not getattr(args, 'command', None):
             UI._out(f"\n {UI.RED}[!] no command given; expected one of: "
                     f"{', '.join(valid_cmds)}{UI.RESET}\n")

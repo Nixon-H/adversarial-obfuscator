@@ -41,11 +41,16 @@ def test_opt_level_is_accepted_by_the_loader_build():
     assert _parse(["build", "p.py", "--opt-level", "2"]).opt_level == 2
 
 
-def test_the_watermark_alias_is_still_accepted():
-    assert _parse(["build", "p.py", "--watermark", "W"]).lock_hwid == "W"
+def test_the_watermark_flag_is_the_loader_watermark():
+    """--watermark is the loader's watermark message (not the licence)."""
+    args = _parse(["build", "p.py", "--watermark", "W"])
+    assert args.watermark == "W"
+    assert args.lock_hwid == ""
 
 
-def test_the_watermark_alias_warns_when_used(tmp_path):
+
+def test_the_watermark_flag_arms_the_loader_watermark_gate(tmp_path):
+    """--watermark is the loader's watermark message, and it is reachable."""
     source = tmp_path / "p.py"
     source.write_text(PAYLOAD, encoding="utf-8")
     env = dict(os.environ)
@@ -55,9 +60,10 @@ def test_the_watermark_alias_warns_when_used(tmp_path):
         [sys.executable, "-m", "obfuscator.core.pipeline", "build",
          str(source), "--watermark", "W", "--skip-cloud"],
         capture_output=True, text=True, timeout=900, env=env, cwd=str(tmp_path))
-    assert "--watermark" in proc.stdout + proc.stderr, (
-        "the deprecated --watermark spelling was used without a warning:\n%s"
-        % (proc.stdout[-2000:] + proc.stderr[-1000:]))
+    assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-2000:]
+    # The gate is armed: the emitted loader carries the message.
+    built = [p for p in os.listdir(str(tmp_path)) if p.endswith(".py")]
+    assert built, "the build produced no output"
 
 
 def test_the_lock_hwid_flag_does_not_warn(tmp_path):

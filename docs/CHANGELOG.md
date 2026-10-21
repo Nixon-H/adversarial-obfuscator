@@ -48,6 +48,38 @@ checks they agree).
 - **The CLI's usage message raised `NameError`** instead of printing
   the usage, because a star import cannot bring `_console` across.
 
+### Fixed
+
+- **A tampered artifact looked like a successful one.** The loader's
+  self-integrity check computed a Merkle root and an HMAC over its own
+  bytes and then discarded both verdicts; the build filled the anchors
+  after the string table had turned them into lookups, so the runtime
+  compared the root against a placeholder and the check never matched.
+  A byte flipped in the artifact made it run nothing, print nothing and
+  **exit 0**. The anchors now stay plain literals, the check runs
+  before the state machine, and a mismatch exits 137.
+- **A payload that crashed was swallowed.** The importer retried it and
+  then discarded the failure, so a broken artifact exited 0. It now
+  fails closed, as does the loader's state machine.
+- **`--kod` armed nothing.** The flag only wrote a marker; the kill
+  needed `NIXON_KOD` in the *target's* environment, so the flag's help
+  text was false. The arming is now baked into the loader.
+- **The watermark gate was unreachable** from any CLI, while the threat
+  model promoted the row to ENVIRONMENT_VALIDATED. It is now reachable
+  (`--watermark MSG` on the loader CLI).
+- **The hostguard snippet was emitted but never called**, so it checked
+  nothing. The loader now binds the host and verifies the builtins are
+  unpatched before running the payload.
+- **The split-bootstrap (Shamir) key was reconstructed and then
+  ignored** — the payload was decrypted with the direct key. It is now
+  the key that decrypts the payload.
+- **The plaintext-dump debug aid shipped in every release artifact.**
+  It is now a build-time opt-in (`--debug-dump-raw`); a normal artifact
+  has no such capability.
+- **The hybrid loader's gates ran after the payload.** Every gate was
+  emitted after the payload entry point, so a trial-expired artifact
+  ran its payload and only then died. The entry point is now last.
+
 ### Changed
 
 - **The core package no longer uses `from .mod import *`.** The

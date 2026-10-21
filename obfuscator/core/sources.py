@@ -5138,21 +5138,21 @@ IMPORTER_SOURCE = r'''class {LOADER_CLS}(_nixon_インポート임포트.abc.Met
                 if isinstance(raw, str): raw = raw.replace('\x00', '')
                 elif isinstance(raw, bytes): raw = raw.replace(b'\x00', b'')
                 try:
-                    # Debug aid only.  This used to write the raw
-                    # (decrypted) payload source to a hardcoded absolute
-                    # path on the build machine: everywhere else the write
-                    # silently failed, and on that machine it dropped a
-                    # plaintext copy of the protected payload into a
-                    # directory.  Now it is opt-in (NIXON_DUMP_RAW=1) and
-                    # goes to a private 0600 temp file with a random name.
-                    if _nixon_オペレーション運営.environ.get("NIXON_DUMP_RAW", "0") == "1":
-                        _nx_dfd, _nx_dpath = _nixon_テンプ임시.mkstemp(prefix="nixon_raw_", suffix=".py")
-                        try:
-                            _nixon_オペレーション運営.write(_nx_dfd, raw if isinstance(raw, bytes) else raw.encode('utf-8'))
-                        finally:
-                            _nixon_オペレーション運営.close(_nx_dfd)
+                    # Debug aid only, and BUILD-TIME opt-in.  This used to
+                    # write the raw (decrypted) payload source to a
+                    # hardcoded absolute path on the build machine:
+                    # everywhere else the write silently failed, and on
+                    # that machine it dropped a plaintext copy of the
+                    # protected payload into a directory.  It was then
+                    # moved to a runtime env switch -- which meant every
+                    # RELEASE artifact carried the ability to write its
+                    # own plaintext to disk.  It is now compiled in only
+                    # when the build asks for it, so a normal artifact
+                    # has no such capability at all.
+                    {RAW_DUMP_BLOCK}
                 except: pass
                 exec(raw, module.__dict__)
+                globals()["_nx_payload_ran"] = True
                 with self._lock:
                     self.module_cache[name] = module.__dict__.copy()
                     self.cache_expiry[name] = now + 60
@@ -5168,7 +5168,13 @@ IMPORTER_SOURCE = r'''class {LOADER_CLS}(_nixon_インポート임포트.abc.Met
                         if isinstance(raw, str): raw = raw.rstrip('\x00')
                         elif isinstance(raw, bytes): raw = raw.rstrip(b'\x00')
                         exec(raw, module.__dict__)
-                    except: pass
+                        globals()["_nx_payload_ran"] = True
+                    except Exception:
+                        # The payload failed twice.  Swallowing this made a
+                        # broken or tampered artifact exit 0, which is
+                        # indistinguishable from a clean run: the
+                        # operator saw a success that ran nothing.
+                        raise
             finally:
                 if 'ba' in locals():
                     for i in range(len(ba)): ba[i] = 0
@@ -5845,6 +5851,30 @@ def constant_time_compare(a, b):
     result = 0
     for x, y in zip(a, b): result |= x ^ y
     return result == 0
+def _nx_self_fail(reason):
+    """Terminate on a self-integrity mismatch.
+
+    The loader checks its OWN bytes against the Merkle root and the HMAC
+    the build computed over the finished loader.  Both verdicts used to
+    be discarded with a bare `pass`, so a tampered artifact carried on.
+    A mismatch is now terminal: wipe and exit 137, the same shape as
+    the kill ladder in the inner loader.
+    """
+    try:
+        import os as _nx_osf
+        try:
+            import sys as _nx_sysf
+            _nx_sysf.stdout.flush()
+            _nx_sysf.stderr.flush()
+        except Exception:
+            pass
+        _nx_osf._exit(137)
+    except Exception:
+        try:
+            import sys as _nx_sysf
+            _nx_sysf.exit(137)
+        except Exception:
+            pass
 def {FUNC_SELF}():
     try:
         with open(__file__, 'rb') as f: lines = f.readlines()
@@ -5857,13 +5887,15 @@ def {FUNC_SELF}():
         tree_root = {FUNC_MERKLE_BUILD}(chunks)
         root_hash = tree_root.hash if tree_root else ""
         if not constant_time_compare(root_hash.encode(), {VAR_CHECKSUM}.encode()):
-            pass
+            _nx_self_fail("merkle")
         secret = bytes.fromhex(_HMAC_KEY_)
         sig = _nixon_エイチマック에이치.new(secret, content, _nixon_ハッシュ해시.sha256).hexdigest()
         if sig != {VAR_HMAC_SIG}:
-            pass
+            _nx_self_fail("hmac")
         return _nixon_ハッシュ해시.sha256(content).digest()
-    except Exception as e: 
+    except SystemExit:
+        raise
+    except Exception as e:
         {FUNC_LOG}(f"[WARN] Self-check error: {{e}}")
         return _nixon_ハッシュ해시.sha256(b"ERROR").digest()
 def {FUNC_LIVE_CHK}():
@@ -6190,6 +6222,10 @@ def {FUNC_FETCH_CRITICAL}(auth_input):
         return False
     except: return False
 def {FUNC_BOOT}():
+    # Verify the loader's own integrity BEFORE anything else runs.  A
+    # tampered loader must not be able to divert the state machine and
+    # then exit 0.  {FUNC_SELF}() exits 137 on a mismatch.
+    {FUNC_SELF}()
     _gc_handle = {FUNC_GC_SHIELD}() if '{FUNC_GC_SHIELD}' in dir() else None
     {FUNC_LOG}("[DEBUG] Bootloader starting...")
     if not {FUNC_NANOMITE_MAIN}(): return
@@ -6396,6 +6432,7 @@ def {FUNC_BOOT}():
                         if "__main__.nixon" in ldr.z.namelist():
                             enc_data = ldr.z.read("__main__.nixon")
                             key = bytes.fromhex('{INNER_KEY_HEX}')
+                            globals()["_nx_payload_ran"] = True
                             h.NativeVM({{}}, 0).exec_secure(enc_data, key)
                             return S_EXIT
                     else:
@@ -6422,6 +6459,7 @@ def {FUNC_BOOT}():
                     module = _nixon_インポート임포트.util.module_from_spec(spec)
                     module.__name__ = "__main__"
                     _nixon_システム시스템.modules["__main__"] = module
+                    globals()["_nx_payload_ran"] = True
                     ldr.exec_module(module)
                 else:
                     raise Exception("Entry point not found")
@@ -6451,8 +6489,24 @@ def {FUNC_BOOT}():
             try:
                 curr = dispatcher[curr]()
             except Exception as e:
-                if {VAR_IS_DEBUG}: {FUNC_LOG}(f"[FATAL] State Machine Crash: {{e}}")
-                break
+                if {VAR_IS_DEBUG}:
+                    {FUNC_LOG}(f"[FATAL] State Machine Crash: {{e}}")
+                    break
+                # Fail closed.  The loader used to `break` out of the
+                # state machine on ANY failure, so a tampered artifact
+                # (its own hash feeds the key derivation, so tampering
+                # corrupts the payload) simply ran nothing and exited 0.
+                # A tamperer saw a clean success.  Now a crashed loader
+                # dies like the kill ladder does: silent, exit 137.
+                import os as _nx_sm_os
+                _nx_sm_os._exit(137)
+    # The payload must actually have run.  A tampered loader can
+    # divert the state machine before the payload is executed, and the
+    # loader used to exit 0 in that case -- indistinguishable from a
+    # clean run.  Now it fails closed.
+    if not globals().get("_nx_payload_ran"):
+        import os as _nx_pr_os
+        _nx_pr_os._exit(137)
 if __name__ == "__main__":
     _nixon_マルチ멀티.freeze_support()
     {FUNC_BOOT}()'''

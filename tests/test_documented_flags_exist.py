@@ -100,14 +100,14 @@ def test_every_documented_flag_exists():
         "the documentation mentions flags that no CLI accepts: %r" % (unknown,))
 
 
-def test_the_pipeline_and_build_clis_share_no_ambiguous_flags():
-    """A flag with a different meaning in the two CLIs is a trap.
+def test_the_loader_cli_separates_the_watermark_from_the_licence_target():
+    """Two different controls must not share a name on one CLI.
 
     ``--watermark`` used to mean "license target" in the loader CLI and
     "semantic watermark in the IR" in the native pipeline.  The loader
-    CLI's flag is now ``--lock-hwid``, and the old spelling survives
-    there only as an ALIAS for it -- so it must resolve to the same
-    dest, and it must not be a separate flag with its own meaning.
+    CLI now has BOTH, under names that say which is which:
+    ``--lock-hwid`` is the licence target and ``--watermark`` is the
+    owner-supplied message the loader's watermark gate checks.
     """
     parser, subparsers = pipeline_parser()
     build_sub = subparsers.choices["build"]
@@ -117,13 +117,16 @@ def test_the_pipeline_and_build_clis_share_no_ambiguous_flags():
             if opt.startswith("--"):
                 dests[opt] = action.dest
     assert "--lock-hwid" in dests, "the loader CLI must offer --lock-hwid"
-    assert "--watermark" in dests, (
-        "the deprecated --watermark spelling should remain as an alias")
-    assert dests["--watermark"] == dests["--lock-hwid"], (
-        "--watermark must be an alias of --lock-hwid, not its own flag")
+    assert "--watermark" in dests, "the loader CLI must offer --watermark"
+    assert dests["--watermark"] != dests["--lock-hwid"], (
+        "--watermark and --lock-hwid are different controls and must not "
+        "resolve to the same destination")
+    assert dests["--watermark"] == "watermark"
+    assert dests["--lock-hwid"] == "lock_hwid"
 
     # --rename-internal is genuinely on both CLIs, with the same meaning.
     assert "--rename-internal" in _build_py_flags()
+
 
 
 def test_the_audit_reports_flag_removals_are_annotated():

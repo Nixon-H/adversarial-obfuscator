@@ -11,6 +11,20 @@ def emit_hostguard_snippet() -> str:
 import hashlib as _hashlib
 import builtins as _builtins
 
+# The loader calls _NX_HOSTGUARD(code, ns) when it is set, and runs a
+# plain exec() when it is not.  Publishing a CALLABLE (rather than a
+# flag) keeps the loader's template free of hostguard-specific names.
+def _nx_hostguard_exec(code_obj, ns):
+    """Bind the host, verify the builtins are unpatched, then exec."""
+    bind_host(ns)
+    for _bn in ("exec", "eval", "compile"):
+        if not verify_builtin(_bn):
+            raise RuntimeError("builtin %s patched" % _bn)
+    exec(code_obj, ns)
+    return ns
+
+_NX_HOSTGUARD = _nx_hostguard_exec
+
 _NX_HOST = None
 
 try:

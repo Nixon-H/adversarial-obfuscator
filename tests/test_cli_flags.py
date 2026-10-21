@@ -81,13 +81,20 @@ def test_every_build_flag_reaches_the_namespace():
             "dest %r missing from the parsed namespace" % action.dest)
 
 
-def test_deprecated_watermark_alias_still_works():
-    """--watermark was renamed to --lock-hwid; the old spelling works."""
+def test_the_watermark_and_the_lock_hwid_are_different_flags():
+    """Two different controls must not share a name on one CLI.
+
+    ``--watermark`` on the loader CLI is the owner-supplied message the
+    loader's watermark gate checks; ``--lock-hwid`` is the target
+    machine the build is licensed to.
+    """
     parser = _build_parser()
-    args = parser.parse_args(["build", "payload.py", "--watermark", "H1"])
-    assert args.lock_hwid == "H1"
+    args = parser.parse_args(["build", "payload.py", "--watermark", "W1"])
+    assert args.watermark == "W1"
+    assert args.lock_hwid == ""
     args = parser.parse_args(["build", "payload.py", "--lock-hwid", "H2"])
     assert args.lock_hwid == "H2"
+    assert args.watermark == ""
 
 
 def test_platform_choices_match_the_implemented_farms():

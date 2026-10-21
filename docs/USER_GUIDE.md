@@ -105,6 +105,11 @@ ignored by that pipeline, and it now says so:
 
 ## 4. HWID binding (`--hwid` + `--hwid-lock`)
 
+> These are LOADER gates: they apply to
+> `python3 -m obfuscator.core.pipeline build`, not to
+> `scripts/build.py` (which emits a native binary and no hybrid loader).
+> The native pipeline reports them as ignored.
+
 Two modes (`obfuscator/hwid_lock.py`):
 
 - dynamic (default): any opaque string; the loader collects
@@ -126,6 +131,11 @@ Malformed `HWID:`-prefixed values raise `ValueError`
 (`tests/test_hwid_static.py`, `tests/test_hwid_lock.py`).
 
 ## 5. Watermark (`--watermark`)
+
+> On the native pipeline `--watermark` embeds a semantic watermark in the
+> IR.  On the loader CLI it is the owner-supplied message the loader's
+> watermark gate checks at load time: a stripped or edited watermark
+> kills the artifact.
 
 ```bash
 NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \

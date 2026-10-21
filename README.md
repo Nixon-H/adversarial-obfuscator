@@ -155,7 +155,11 @@ implementation but not the flag set.
 build <script.py>          Obfuscate and compile a Python script
   --native | --native-only Cloud-farm Cython compilation (hybrid / no fallback)
   --auto [cf,nk]            Automation: cf=Cloudflare, nk=Nuitka (implies --native)
-  --lock-hwid HWID          Lock the build to a target HWID (alias: --watermark)
+  --lock-hwid HWID          Lock the build to a target HWID (licence target)
+  --watermark MSG          Embed an owner-supplied watermark message in the
+                            loader, HMAC-tagged and checked at load time
+  --debug-dump-raw          Compile the plaintext-dump debug aid into the
+                            artifact (off by default)
   --compile                 Compile the final loader with Nuitka
   --skip-cloud              Build locally even if --compile/--auto would use the farm
   --platform {auto,github}  Build farm platform (GitHub is the only implemented farm)
@@ -184,9 +188,10 @@ applies the full transform set, as it always has; with it, the flags the
 ladder controls follow the level.
 
 The two CLIs' `--watermark` means different things, which is why the
-loader CLI's flag was renamed: there it is `--lock-hwid` (the target
-machine the build is licensed to). `scripts/build.py --watermark` embeds
-a semantic watermark in the IR.
+loader CLI's flags say which is which: there `--lock-hwid` is the target
+machine the build is licensed to, and `--watermark` is the
+owner-supplied message the loader's watermark gate checks.
+`scripts/build.py --watermark` embeds a semantic watermark in the IR.
 
 Note: `--lowering`'s `--help` text lists the 9 node/call families
 (`io,scalar,string,container,service,protocol,function,import,fusion`)
@@ -207,7 +212,7 @@ Default-ON vs default-OFF matrix:
 | Audit-hook plant detector | `--no-audit-hook-plant` or `NIXON_AUDITHOOK_PLANT_OFF=1` |
 | `--opt-level 4` AST transforms | `--opt-level 0` / `--no-*` flags / `--skip-obfuscate` |
 | Lowering default families (15/20, incl `range`) once `--lowering` is passed | `--lowering none`, or `-fam` removals |
-| Watermark/trial/HWID gates | only when configured (`--watermark` on the native pipeline; `--lock-hwid` / `--trial` / `--hwid` on the loader CLI) |
+| Watermark/trial/HWID gates | only when configured (`--watermark` on the native pipeline; `--watermark` / `--lock-hwid` / `--trial` / `--hwid` on the loader CLI) |
 
 | Default OFF (opt-in) | How to enable |
 |---|---|
@@ -235,7 +240,7 @@ enforceable lint gate) and
 [`docs/AUDIT-2026-10-20.md`](docs/AUDIT-2026-10-20.md) (the CLI audit:
 dropped flags, an unpinned lint gate, an untracked build config, a hard
 `z3` dependency, and the documentation refresh). The current suite is
-**4286 passed, 23 skipped, 0 failed** (plus 289 Rust runtime tests and
+**4303 passed, 23 skipped, 0 failed** (plus 289 Rust runtime tests and
 4 Rust relay tests).
 
 ### Which version numbers are which

@@ -1,0 +1,78 @@
+"""A tampered artifact must not look like a successful run.
+
+The outer loader's state machine broke out of its loop on ANY failure
+(``break``), and the function then returned normally.  A tampered
+artifact therefore ran nothing at all and **exited 0**: to an operator,
+and to any script checking the exit code, the tampered artifact looked
+exactly like a clean success.
+
+The self-hash feeds the key derivation, so tampering corrupts the
+payload -- the failure was always there, it was just being reported as
+success.  A crashed loader now dies instead, the same shape as the
+kill ladder in the inner loader.
+"""
+import os
+import subprocess
+import sys
+
+import pytest
+
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+_BUILD_TIMEOUT = 600
+
+
+def _build(tmp_path):
+    source = os.path.join(str(tmp_path), "hello.py")
+    with open(source, "w", encoding="utf-8") as fh:
+        fh.write('print("PAYLOAD-RAN")\n')
+    env = dict(os.environ)
+    env["NIXON_LOG_REDIRECT"] = "0"
+    env["PYTHONPATH"] = REPO_ROOT + os.pathsep + env.get("PYTHONPATH", "")
+    proc = subprocess.run(
+        [sys.executable, "-m", "obfuscator.core.pipeline", "build", source,
+         "--net-url", "https://127.0.0.1:9443/"],
+        cwd=str(tmp_path), env=env, capture_output=True, text=True,
+        timeout=_BUILD_TIMEOUT)
+    assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]
+    artifact = os.path.join(str(tmp_path), "dist", "hello_protected.py")
+    assert os.path.exists(artifact), (
+        "no artifact produced; stdout tail: %s" % proc.stdout[-2000:])
+    return artifact
+
+
+def _run(path):
+    env = dict(os.environ)
+    env["NIXON_LOG_REDIRECT"] = "0"
+    env["PYTHONPATH"] = REPO_ROOT + os.pathsep + env.get("PYTHONPATH", "")
+    return subprocess.run([sys.executable, path], capture_output=True,
+                          text=True, timeout=300, env=env)
+
+
+@pytest.fixture(scope="module")
+def artifact(tmp_path_factory):
+    work = tmp_path_factory.mktemp("tamper")
+    return _build(str(work))
+
+
+def test_the_untampered_artifact_runs(artifact):
+    run = _run(artifact)
+    assert run.returncode == 0, run.stderr[-2000:]
+    assert "PAYLOAD-RAN" in run.stdout
+
+
+def test_a_tampered_artifact_does_not_look_successful(tmp_path, artifact):
+    """Flip one byte: the artifact must fail, not exit 0 doing nothing."""
+    tampered = os.path.join(str(tmp_path), "tampered.py")
+    with open(artifact, "rb") as fh:
+        data = bytearray(fh.read())
+    mid = len(data) // 2
+    data[mid] = (data[mid] + 1) % 256
+    with open(tampered, "wb") as fh:
+        fh.write(bytes(data))
+
+    run = _run(tampered)
+    assert "PAYLOAD-RAN" not in run.stdout, (
+        "the tampered artifact ran its payload")
+    assert run.returncode != 0, (
+        "the tampered artifact exited 0 -- a tamperer sees a clean success:\n%s"
+        % (run.stdout[-2000:] + run.stderr[-2000:]))
