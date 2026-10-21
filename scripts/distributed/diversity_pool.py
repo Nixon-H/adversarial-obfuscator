@@ -8,6 +8,17 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Set
 
 
+def _ctx():
+    """The multiprocessing context this module spawns workers with.
+
+    "spawn", not the platform default: forking a multi-threaded
+    process is deprecated (Python 3.12+ warns) and may deadlock in the
+    child, and Python 3.14 changes the default on Linux.
+    """
+    from .process_ctx import process_context
+    return process_context()
+
+
 @dataclass
 class VariantInfo:
     variant_id: int
@@ -182,19 +193,18 @@ class DistributedDiversityPool:
         return deployment
 
     def _distribute_multiprocess(self) -> Dict[int, int]:
-        import multiprocessing as mp
         processes = []
         queues = {}
         variant_ids = list(self._variants.keys())
         deployment: Dict[int, int] = {}
 
         for nid in sorted(self._nodes.keys()):
-            queues[nid] = mp.Queue()
+            queues[nid] = _ctx().Queue()
 
         for nid in sorted(self._nodes.keys()):
             vid = variant_ids[nid % len(variant_ids)]
             code = self._variants[vid].code
-            p = mp.Process(target=_verify_and_deploy, args=(nid, vid, code, queues[nid]))
+            p = _ctx().Process(target=_verify_and_deploy, args=(nid, vid, code, queues[nid]))
             processes.append(p)
             p.start()
 

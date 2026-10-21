@@ -34,11 +34,15 @@ class TestMultiBinaryIntegration:
         fragments = [b"integration_test_frag_" + str(i).encode() * 5 for i in range(6)]
         binaries, index = mbd.distribute(fragments, 3)
 
+        # The "spawn" start method, not the platform default: forking a
+        # multi-threaded process is deprecated (and may deadlock in the
+        # child), and Python 3.14 changes the default on Linux.
+        ctx = multiprocessing.get_context("spawn")
         queues = []
         processes = []
         for i, binary in enumerate(binaries):
-            q = multiprocessing.Queue()
-            p = multiprocessing.Process(target=_binary_holder_process, args=(binary, q))
+            q = ctx.Queue()
+            p = ctx.Process(target=_binary_holder_process, args=(binary, q))
             p.start()
             processes.append(p)
             queues.append(q)
@@ -107,7 +111,11 @@ class TestCrossProcessIntegration:
         ).digest()
         assert key == expected_key
 
-        result_queue = multiprocessing.Queue()
+        # The "spawn" start method, not the platform default: forking a
+        # multi-threaded process is deprecated (and may deadlock in the
+        # child), and Python 3.14 changes the default on Linux.
+        ctx = multiprocessing.get_context("spawn")
+        result_queue = ctx.Queue()
 
         shm_name = cpb._shm_name("integration_test")
         data_size = len(fragment_data) + 8
@@ -116,7 +124,7 @@ class TestCrossProcessIntegration:
         shm.buf[8:8 + len(fragment_data)] = fragment_data
         shm.close()
 
-        p = multiprocessing.Process(
+        p = ctx.Process(
             target=_fragment_holder_process,
             args=(shm_name, 0, fragment_data, pid_val, cpb.shared_secret, result_queue),
         )

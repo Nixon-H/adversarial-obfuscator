@@ -1,11 +1,12 @@
 import hashlib
 import hmac
-import multiprocessing
 import os
 import struct
 from dataclasses import dataclass
 from multiprocessing.shared_memory import SharedMemory
 from typing import List, Optional, Tuple
+
+from .process_ctx import process_context
 
 
 @dataclass
@@ -186,7 +187,7 @@ class CrossProcessBinder:
             result_name = self._shm_name(f"result_{fs.fragment_id}_{fs.process_id}")
             result_names.append(result_name)
 
-            p = multiprocessing.Process(
+            p = process_context().Process(
                 target=self._worker_process,
                 args=(
                     shm_name, fs.fragment_id, fs.data,

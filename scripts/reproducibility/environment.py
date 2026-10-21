@@ -48,19 +48,26 @@ def _get_git_info() -> Tuple[Optional[str], bool]:
 
 
 def _get_installed_packages() -> Dict[str, str]:
-    """Return a dict of installed Python package name → version, using pkg_resources or importlib.metadata."""
+    """Return a dict of installed Python package name → version.
+
+    ``importlib.metadata`` is the supported API; ``pkg_resources`` is
+    deprecated (and warns on import), so it is only a fallback for a
+    Python too old to have the former.
+    """
     packages: Dict[str, str] = {}
+    try:
+        import importlib.metadata as md
+        for dist in md.distributions():
+            packages[dist.metadata["Name"]] = dist.version
+        return packages
+    except Exception:
+        pass
     try:
         import pkg_resources
         for dist in pkg_resources.working_set:
             packages[dist.key] = dist.version
     except ImportError:
-        try:
-            import importlib.metadata as md
-            for dist in md.distributions():
-                packages[dist.name] = dist.version
-        except Exception:
-            pass
+        pass
     return packages
 
 

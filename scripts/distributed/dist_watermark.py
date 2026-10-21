@@ -1,9 +1,19 @@
 import hashlib
-import multiprocessing as mp
 import os
 import struct
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
+
+
+def _ctx():
+    """The multiprocessing context this module spawns workers with.
+
+    "spawn", not the platform default: forking a multi-threaded
+    process is deprecated (Python 3.12+ warns) and may deadlock in the
+    child, and Python 3.14 changes the default on Linux.
+    """
+    from .process_ctx import process_context
+    return process_context()
 
 
 @dataclass
@@ -271,8 +281,8 @@ class DistributedWatermark:
         processes = []
         queues = []
         for s in shares:
-            q = mp.Queue()
-            p = mp.Process(target=_watermark_holder, args=(s, q))
+            q = _ctx().Queue()
+            p = _ctx().Process(target=_watermark_holder, args=(s, q))
             p.start()
             processes.append(p)
             queues.append(q)
@@ -289,8 +299,8 @@ class DistributedWatermark:
         queues = []
         processes = []
         for s in shares:
-            q = mp.Queue()
-            p = mp.Process(target=_watermark_holder, args=(s, q))
+            q = _ctx().Queue()
+            p = _ctx().Process(target=_watermark_holder, args=(s, q))
             p.start()
             processes.append(p)
             queues.append(q)

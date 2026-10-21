@@ -15,6 +15,17 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
 
+def _ctx():
+    """The multiprocessing context this module spawns workers with.
+
+    "spawn", not the platform default: forking a multi-threaded
+    process is deprecated (Python 3.12+ warns) and may deadlock in the
+    child, and Python 3.14 changes the default on Linux.
+    """
+    from .process_ctx import process_context
+    return process_context()
+
+
 @dataclass
 class AttestationChallenge:
     challenger_id: int
@@ -189,17 +200,16 @@ class DistributedAttestation:
         return results
 
     def _run_multiprocess(self) -> Dict[Tuple[int, int], bool]:
-        import multiprocessing as mp
         processes = []
         in_queues = {}
         out_queues = {}
         for nid in range(self.num_nodes):
-            in_queues[nid] = mp.Queue()
-            out_queues[nid] = mp.Queue()
+            in_queues[nid] = _ctx().Queue()
+            out_queues[nid] = _ctx().Queue()
 
         for nid in range(self.num_nodes):
             secret = self._nodes[nid].secret
-            p = mp.Process(
+            p = _ctx().Process(
                 target=_attest_node,
                 args=(nid, secret, in_queues[nid], out_queues[nid],
                       self.challenge_timeout, self.max_failures),

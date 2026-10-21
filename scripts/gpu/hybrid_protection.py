@@ -184,11 +184,15 @@ class HybridProtector:
             result_queue.put(("gpu_error", str(e)))
 
     def hybrid_execute_multiprocess(self, control_input: Dict[str, Any], crypto_data: bytes) -> Tuple[int, bytes]:
-        result_queue = multiprocessing.Queue()
-        cpu_proc = multiprocessing.Process(
+        # "spawn", not the platform default: forking a multi-threaded
+        # process is deprecated (Python 3.12+ warns) and may deadlock
+        # in the child, and Python 3.14 changes the default on Linux.
+        ctx = multiprocessing.get_context("spawn")
+        result_queue = ctx.Queue()
+        cpu_proc = ctx.Process(
             target=self._cpu_worker, args=(control_input, self.seed, result_queue)
         )
-        gpu_proc = multiprocessing.Process(
+        gpu_proc = ctx.Process(
             target=self._gpu_worker, args=(crypto_data, "encrypt", self.seed, result_queue)
         )
         cpu_proc.start()

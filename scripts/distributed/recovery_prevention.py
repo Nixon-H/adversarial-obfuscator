@@ -1,6 +1,5 @@
 import hashlib
 import math
-import multiprocessing as mp
 import os
 import random
 import struct
@@ -8,6 +7,18 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
+
+
+def _ctx():
+    """The multiprocessing context this module spawns workers with.
+
+    "spawn", not the platform default: forking a multi-threaded
+    process is deprecated (Python 3.12+ warns) and may deadlock in the
+    child, and Python 3.14 changes the default on Linux.
+    """
+    from .process_ctx import process_context
+    return process_context()
+
 
 
 @dataclass
@@ -293,12 +304,12 @@ class ExecutionRecoveryPreventer:
         queues = []
         noise_queues = []
         for nid in range(self.num_nodes):
-            q = mp.Queue()
-            nq = mp.Queue()
+            q = _ctx().Queue()
+            nq = _ctx().Queue()
             queues.append(q)
             noise_queues.append(nq)
             visible = self._node_fragments.get(nid, [])
-            p = mp.Process(target=_slice_process, args=(nid, visible, q, nq))
+            p = _ctx().Process(target=_slice_process, args=(nid, visible, q, nq))
             processes.append(p)
             p.start()
 

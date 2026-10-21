@@ -5893,26 +5893,38 @@ def _nx_self_fail(reason):
 def {FUNC_SELF}():
     try:
         with open(__file__, 'rb') as f: lines = f.readlines()
-        anchor_sig = b"__SIG_ANCHOR__"
-        anchor_hmac = b"__HMAC_ANCHOR__"
-        filtered_lines = [l for l in lines if anchor_sig not in l and anchor_hmac not in l]
+        # The lines that hold the EXPECTED values are excluded from the
+        # hash: a value cannot be part of what it describes.  They are
+        # identified by the VALUES themselves, not by a marker string.
+        # A marker can be edited to still match -- and the marker's own
+        # line was excluded from the hash too, so the edit was invisible
+        # to the check.  With this filter the check's own code is hashed
+        # like everything else.
+        _nx_er = {VAR_CHECKSUM}
+        _nx_eh = {VAR_HMAC_SIG}
+        filtered_lines = [l for l in lines
+                          if _nx_er.encode() not in l and _nx_eh.encode() not in l]
         content = b"".join(filtered_lines)
         chunk_size = 1024
         chunks = [content[i:i+chunk_size] for i in range(0, len(content), chunk_size)]
         tree_root = {FUNC_MERKLE_BUILD}(chunks)
         root_hash = tree_root.hash if tree_root else ""
-        if not constant_time_compare(root_hash.encode(), {VAR_CHECKSUM}.encode()):
+        if not constant_time_compare(root_hash.encode(), _nx_er.encode()):
             _nx_self_fail("merkle")
         secret = bytes.fromhex(_HMAC_KEY_)
         sig = _nixon_エイチマック에이치.new(secret, content, _nixon_ハッシュ해시.sha256).hexdigest()
-        if sig != {VAR_HMAC_SIG}:
+        if sig != _nx_eh:
             _nx_self_fail("hmac")
         return _nixon_ハッシュ해시.sha256(content).digest()
     except SystemExit:
         raise
     except Exception as e:
         {FUNC_LOG}(f"[WARN] Self-check error: {{e}}")
-        return _nixon_ハッシュ해시.sha256(b"ERROR").digest()
+        # A self-check that could not RUN is a failed self-check.  It
+        # used to log and continue, so editing the check's own code was
+        # enough to disable it: the artifact carried on and exited 0.
+        _nx_self_fail("self-check error")
+
 def {FUNC_LIVE_CHK}():
     digest = _nixon_ハッシュ해시.sha256()
     try:

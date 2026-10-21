@@ -27,6 +27,10 @@ from typing import Any
 
 from .collector import ArtifactCollector
 from .hasher import file_sha256
+
+# The bundle is extracted through the shared confinement check: a
+# member must not be able to write outside the extraction directory.
+from obfuscator.core.archive_safety import extract_tar_confined
 from .manifest import ManifestBuilder
 
 
@@ -102,8 +106,7 @@ class VerificationBundler:
             return False, ["Bundle file not found"]
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
-                with tarfile.open(path, "r:gz") as tar:
-                    tar.extractall(tmpdir, filter="data")
+                extract_tar_confined(path, tmpdir, mode="r:gz")
                 manifest_path = os.path.join(tmpdir, "manifest.json")
                 if not os.path.isfile(manifest_path):
                     return False, ["manifest.json not found in bundle"]

@@ -6,6 +6,18 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 
+def _ctx():
+    """The multiprocessing context this module spawns workers with.
+
+    "spawn", not the platform default: forking a multi-threaded
+    process is deprecated (Python 3.12+ warns) and may deadlock in the
+    child, and Python 3.14 changes the default on Linux.
+    """
+    from .process_ctx import process_context
+    return process_context()
+
+
+
 @dataclass
 class HostFunction:
     function_id: int
@@ -170,20 +182,20 @@ class MultiHostExecutor:
         return self.run_multiprocess()
 
     def run_multiprocess(self) -> Dict[str, Any]:
-        queues = {hid: mp.Queue() for hid in range(self.num_hosts)}
-        result_queues = {hid: mp.Queue() for hid in range(self.num_hosts)}
+        queues = {hid: _ctx().Queue() for hid in range(self.num_hosts)}
+        result_queues = {hid: _ctx().Queue() for hid in range(self.num_hosts)}
         rpc_queues = {}
         for hid in range(self.num_hosts):
             for other in range(self.num_hosts):
                 if hid != other:
-                    rpc_queues[(hid, other)] = mp.Queue()
+                    rpc_queues[(hid, other)] = _ctx().Queue()
         processes = []
 
         for hid in range(self.num_hosts):
             host_fns = self.get_host_functions(hid)
             host_edges = [e for e in self._edges
                           if self._functions[e.caller_id].host_id == hid]
-            p = mp.Process(
+            p = _ctx().Process(
                 target=_host_process_rpc,
                 args=(hid, host_fns, host_edges, queues, result_queues, rpc_queues),
             )

@@ -3165,6 +3165,20 @@ def _VERIFY_INTEGRITY():
             final_bytes, _n2 = _ck_pat.subn(b'= "' + hmac_val.encode('utf-8') + b'"', final_bytes, count=1)
             if _n2 == 0:
                 final_bytes = final_bytes.replace(dummy_checksum.encode('utf-8'), hmac_val.encode('utf-8'), 1)
+            # The runtime identifies the excluded lines by the VALUES
+            # (not by a marker string), so the two filters must select
+            # the same lines.  If they do not -- e.g. the checksum hex
+            # occurs somewhere else in the file -- the runtime would
+            # hash a different content than the build did, and EVERY
+            # run of the artifact would die.  Fail the build instead.
+            _rt_keep = [l for l in final_bytes.splitlines(keepends=True)
+                        if final_hash.encode('utf-8') not in l
+                        and hmac_val.encode('utf-8') not in l]
+            if b"".join(_rt_keep) != verification_content:
+                raise RuntimeError(
+                    "self-check filter mismatch: the runtime would hash "
+                    "%d lines, the build hashed %d"
+                    % (len(_rt_keep), len(lines_for_hash)))
             with open(out_name, 'wb') as f: 
                 f.write(final_bytes)
             if ast_options.get('stego'):

@@ -81,7 +81,7 @@ def test_coverage_map_creation():
         covered_functions=1,
         coverage_percent=50.0,
         functions={"func_a": fc1, "func_b": fc2},
-        generated_at=datetime.datetime.utcnow().isoformat(),
+        generated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
     )
     assert cm.total_functions == 2
     assert cm.covered_functions == 1

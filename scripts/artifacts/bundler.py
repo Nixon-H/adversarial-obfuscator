@@ -17,12 +17,15 @@ Called by ArtifactBuilder._bundle_reproducibility_package() at build
 completion. The bundle is written to build/artifacts/bundle/.
 
 Dependencies:
-- Standard library only (hashlib, json, os, shutil, tarfile, time, zipfile)
+- Standard library, plus obfuscator.core.archive_safety for the
+  extraction confinement check (standard library only as well).
 
 Security Relevance:
-The reproducibility bundle provides cryptographic proof of what was
-built. The manifest SHA-256 chain (file hashes -> manifest hash)
-ensures tamper detection. verify_bundle() verifies the entire chain.
+    The reproducibility bundle provides cryptographic proof of what was
+    built. The manifest SHA-256 chain (file hashes -> manifest hash)
+    ensures tamper detection. verify_bundle() verifies the entire chain.
+    The bundle is extracted through the shared confinement check, so a
+    member cannot write outside the extraction directory.
 
 Maintenance Notes:
 - The bundle format is tar.gz by default; .zip is used if the
@@ -41,6 +44,15 @@ import shutil
 import tarfile
 import time
 import zipfile
+
+# The extraction goes through the shared confinement check: a bundle
+# member must not be able to write outside the extraction directory.
+# It lives in the library so that this script does not have to import
+# obfuscator.core.utils (which has import-time side effects).
+from obfuscator.core.archive_safety import (
+    extract_tar_confined,
+    extract_zip_confined,
+)
 
 
 class ReproducibilityBundle:
@@ -139,11 +151,9 @@ class ReproducibilityBundle:
 
         try:
             if bundle_path.endswith(".zip"):
-                with zipfile.ZipFile(bundle_path, "r") as zf:
-                    zf.extractall(extract_dir)
+                extract_zip_confined(bundle_path, extract_dir)
             else:
-                with tarfile.open(bundle_path, "r:gz") as tar:
-                    tar.extractall(extract_dir)
+                extract_tar_confined(bundle_path, extract_dir, mode="r:gz")
 
             bundle_contents = os.listdir(extract_dir)
             if not bundle_contents:

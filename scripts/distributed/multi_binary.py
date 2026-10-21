@@ -7,6 +7,18 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 
+def _ctx():
+    """The multiprocessing context this module spawns workers with.
+
+    "spawn", not the platform default: forking a multi-threaded
+    process is deprecated (Python 3.12+ warns) and may deadlock in the
+    child, and Python 3.14 changes the default on Linux.
+    """
+    from .process_ctx import process_context
+    return process_context()
+
+
+
 try:
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 except ImportError:
@@ -373,12 +385,12 @@ class MultiBinaryDistributor:
         processes = []
         queues = []
         for bid, binary in enumerate(binaries):
-            q = mp.Queue()
+            q = _ctx().Queue()
             tmp = tempfile.NamedTemporaryFile(prefix=f"nx_binary_{bid}_", suffix=".bin", delete=False)
             tmp.write(binary)
             tmp.close()
             self._binary_files.append(tmp.name)
-            p = mp.Process(target=_binary_worker, args=(bid, tmp.name, binary, q))
+            p = _ctx().Process(target=_binary_worker, args=(bid, tmp.name, binary, q))
             p.start()
             processes.append(p)
             queues.append(q)
@@ -429,7 +441,7 @@ class MultiBinaryDistributor:
             tmp.write(binary)
             tmp.close()
             tmp_files.append(tmp.name)
-            p = mp.Process(target=_share_writer, args=(bid, binary, tmp.name))
+            p = _ctx().Process(target=_share_writer, args=(bid, binary, tmp.name))
             p.start()
             processes.append(p)
         for p in processes:

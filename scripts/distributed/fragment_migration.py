@@ -1,10 +1,20 @@
 import hashlib
-import multiprocessing as mp
 import os
 import struct
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
+
+
+def _ctx():
+    """The multiprocessing context this module spawns workers with.
+
+    "spawn", not the platform default: forking a multi-threaded
+    process is deprecated (Python 3.12+ warns) and may deadlock in the
+    child, and Python 3.14 changes the default on Linux.
+    """
+    from .process_ctx import process_context
+    return process_context()
 
 
 class Platform(IntEnum):
@@ -142,18 +152,18 @@ class FragmentMigrator:
 
     def _migrate_multiprocess(self, fragment: MigratingFragment, target_platform: Platform) -> Optional[MigratingFragment]:
         encrypted_state, mac = self.serialize_state_for_migration(fragment, target_platform)
-        src_out = mp.Queue()
-        dst_in = mp.Queue()
-        dst_out = mp.Queue()
+        src_out = _ctx().Queue()
+        dst_in = _ctx().Queue()
+        dst_out = _ctx().Queue()
 
         from_plat = int(fragment.current_platform)
         to_plat = int(target_platform)
         secret = self.migration_secret
 
-        src_process = mp.Process(
+        src_process = _ctx().Process(
             target=_src_migrate, args=(fragment.fragment_id, from_plat, encrypted_state, mac, src_out),
         )
-        dst_process = mp.Process(
+        dst_process = _ctx().Process(
             target=_dst_migrate, args=(fragment.fragment_id, to_plat, secret, dst_in, dst_out),
         )
         src_process.start()
@@ -185,16 +195,16 @@ class FragmentMigrator:
     def migrate_multiprocess(self, fragment: MigratingFragment, target_platform: Platform) -> Optional[MigratingFragment]:
         encrypted_state, mac = self.serialize_state_for_migration(fragment, target_platform)
 
-        req_queue = mp.Queue()
-        resp_queue = mp.Queue()
+        req_queue = _ctx().Queue()
+        resp_queue = _ctx().Queue()
 
         from_plat = int(fragment.current_platform)
         to_plat = int(target_platform)
         secret = self.migration_secret
         fid = fragment.fragment_id
 
-        src = mp.Process(target=_platform_src_migrate, args=(fid, from_plat, to_plat, encrypted_state, mac, secret, req_queue))
-        dst = mp.Process(target=_platform_dst_migrate, args=(fid, to_plat, secret, req_queue, resp_queue))
+        src = _ctx().Process(target=_platform_src_migrate, args=(fid, from_plat, to_plat, encrypted_state, mac, secret, req_queue))
+        dst = _ctx().Process(target=_platform_dst_migrate, args=(fid, to_plat, secret, req_queue, resp_queue))
         src.start()
         dst.start()
 

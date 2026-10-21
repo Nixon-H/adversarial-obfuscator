@@ -487,9 +487,8 @@ def test_bundle_integrity_fail():
 
         extracted_dir = os.path.join(tmpdir, ".bundle_verify")
         os.makedirs(extracted_dir, exist_ok=True)
-        import tarfile
-        with tarfile.open(bundle_path, "r:gz") as tar:
-            tar.extractall(extracted_dir)
+        from obfuscator.core.archive_safety import extract_tar_confined
+        extract_tar_confined(bundle_path, extracted_dir, mode="r:gz")
 
         contents = os.listdir(extracted_dir)
         if contents:

@@ -14,6 +14,35 @@ checks they agree).
 
 ### Fixed
 
+- **Editing the artifact's self-check disabled it.** The check excluded
+  the lines it hashes by a MARKER string — and the marker's own line was
+  excluded from the hash too, so editing the marker was invisible to
+  the check. And an exception inside the check was logged and ignored,
+  so breaking the check's own code (a `NameError`, a damaged Merkle
+  helper) turned the anti-tamper control off: the artifact carried on
+  and exited 0. A scan of ~6900 byte positions across three builds
+  found 12 offsets that were not caught — every one of them in the
+  check's own code. The excluded lines are now identified by their
+  VALUES, the check's code is hashed like everything else, a check that
+  cannot run fails the artifact, and the build verifies that the two
+  filters select the same lines.
+- **The artifact bundler extracted with no confinement.**
+  `verify_bundle` unpacked a bundle with a bare `extractall`, so a
+  member named `../x` could write outside the extraction directory —
+  the same ZipSlip family the build-farm paths were fixed for, in a
+  file the test missed because the test only scanned one module. The
+  check now lives in one shared module
+  (`obfuscator/core/archive_safety.py`) and the test scans the whole
+  tree.
+- **The build spawned workers with `fork`.** Forking a multi-threaded
+  process is deprecated (Python 3.12+ warns) and can deadlock in the
+  child, and Python 3.14 changes the default on Linux. The distributed
+  modules now spawn with "spawn" explicitly.
+- **The test suite had warnings.** All of them are gone: the
+  `tarfile` extraction without an explicit filter (a behaviour change
+  in Python 3.14, not just noise), `datetime.utcnow()`, and the
+  deprecated `pkg_resources` import.
+
 - **The native build path did not build.** It was recorded as an
   environmental limitation because it failed identically on the
   unmodified tree. It was not environmental: twenty-two defects in the

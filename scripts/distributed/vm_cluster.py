@@ -6,6 +6,18 @@ from enum import IntEnum
 from typing import Dict, List, Optional
 
 
+def _ctx():
+    """The multiprocessing context this module spawns workers with.
+
+    "spawn", not the platform default: forking a multi-threaded
+    process is deprecated (Python 3.12+ warns) and may deadlock in the
+    child, and Python 3.14 changes the default on Linux.
+    """
+    from .process_ctx import process_context
+    return process_context()
+
+
+
 class VMStatePartition(IntEnum):
     REGISTERS = 0
     MEMORY = 1
@@ -205,12 +217,12 @@ class DistributedVMExecutor:
         num_hosts = 3
         sync_events = {hid: mp.Event() for hid in range(num_hosts)}
 
-        in_queues = {hid: mp.Queue() for hid in range(num_hosts)}
-        out_queues = {hid: mp.Queue() for hid in range(num_hosts)}
+        in_queues = {hid: _ctx().Queue() for hid in range(num_hosts)}
+        out_queues = {hid: _ctx().Queue() for hid in range(num_hosts)}
         processes = []
 
         for hid in range(num_hosts):
-            p = mp.Process(
+            p = _ctx().Process(
                 target=_vm_worker,
                 args=(hid, in_queues[hid], out_queues[hid]),
             )
@@ -250,14 +262,14 @@ class DistributedVMExecutor:
             hid = step_idx % num_hosts
             partitions[hid].append(inst)
 
-        in_queues = {hid: mp.Queue() for hid in range(num_hosts)}
-        out_queues = {hid: mp.Queue() for hid in range(num_hosts)}
+        in_queues = {hid: _ctx().Queue() for hid in range(num_hosts)}
+        out_queues = {hid: _ctx().Queue() for hid in range(num_hosts)}
         sync_events = {hid: mp.Event() for hid in range(num_hosts)}
         barrier_event = mp.Event()
         processes = []
 
         for hid in range(num_hosts):
-            p = mp.Process(
+            p = _ctx().Process(
                 target=_vm_partition_worker,
                 args=(hid, partitions[hid], in_queues[hid], out_queues[hid], sync_events, barrier_event),
             )

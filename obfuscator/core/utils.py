@@ -571,37 +571,25 @@ def _confined_member_path(base_dir, member_name):
 
     Every archive this project extracts goes through here, so the
     build-farm paths and the tool-download path share one check rather
-    than each growing its own.
+    than each growing its own.  The implementation lives in
+    ``obfuscator/core/archive_safety.py`` so that the build scripts
+    can use it without importing this module (which has import-time
+    side effects).
     """
-    base_real = os.path.realpath(base_dir)
-    dest = os.path.realpath(os.path.join(base_dir, member_name))
-    if dest != base_real and not dest.startswith(base_real + os.sep):
-        raise ValueError(
-            "refusing archive member escaping output dir: %r" % (member_name,))
-    return dest
+    from obfuscator.core.archive_safety import confined_member_path
+    return confined_member_path(base_dir, member_name)
 
 
 def _extract_zip_confined(zip_path, output_dir):
     """Extract *zip_path* into *output_dir*, refusing to escape it."""
-    with zipfile.ZipFile(zip_path, "r") as z:
-        for member in z.namelist():
-            _confined_member_path(output_dir, member)
-        z.extractall(output_dir)
+    from obfuscator.core.archive_safety import extract_zip_confined
+    return extract_zip_confined(zip_path, output_dir)
 
 
 def _extract_tar_confined(tar_path, output_dir, mode="r:*"):
     """Extract *tar_path* into *output_dir*, refusing to escape it."""
-    import tarfile
-    with tarfile.open(tar_path, mode) as t:
-        for member in t.getmembers():
-            _confined_member_path(output_dir, member.name)
-        if hasattr(tarfile, "data_filter"):
-            # 3.12+ (and the 3.9-3.11 security backports): the data
-            # filter is stricter than our own check -- it also strips
-            # absolute paths and refuses links that point outside.
-            t.extractall(output_dir, filter="data")
-        else:
-            t.extractall(output_dir)
+    from obfuscator.core.archive_safety import extract_tar_confined
+    return extract_tar_confined(tar_path, output_dir, mode)
 
 
 def _artifact_sign_key(explicit_hex=None):

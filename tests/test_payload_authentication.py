@@ -80,3 +80,37 @@ def test_every_tampered_artifact_fails(artifact, tmp_path):
                                _MARKER in run.stdout))
     assert not failures, (
         "a tampered artifact looked like a clean run: %r" % (failures,))
+
+
+def test_tampering_with_the_self_check_is_detected(artifact, tmp_path):
+    """Editing the self-check's own code must not disable it.
+
+    Two holes are closed here.  The check used to exclude the hashed
+    lines by a MARKER string -- and the marker's own line was excluded
+    from the hash too, so editing the marker was invisible to the
+    check.  And an exception inside the check was logged and ignored,
+    so breaking the check's code (a NameError, a bad Merkle helper)
+    disabled it: the artifact carried on and exited 0.
+    """
+    with open(artifact, "rb") as fh:
+        data = fh.read()
+    failures = []
+    for needle in (b"filtered_lines", b"constant_time_compare",
+                   b"Self-check error"):
+        base = data.find(needle)
+        assert base > 0, "the self-check is not in the artifact: %r" % needle
+        for delta in (0, 4, len(needle) // 2):
+            off = base + delta
+            tampered = bytearray(data)
+            tampered[off] = (tampered[off] + 1) % 256
+            path = os.path.join(str(tmp_path),
+                                "selfcheck_%s_%d.py" % (needle.decode(), off))
+            with open(path, "wb") as fh:
+                fh.write(bytes(tampered))
+            run = _run(path)
+            if run.returncode == 0 or _MARKER in run.stdout:
+                failures.append("%r at %d: exit %d, payload ran: %s"
+                                % (needle, off, run.returncode,
+                                   _MARKER in run.stdout))
+    assert not failures, (
+        "editing the self-check disabled it: %r" % (failures,))
