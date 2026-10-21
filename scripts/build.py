@@ -1984,6 +1984,37 @@ in config/default.json.
         log("SKIP", "ORAM not enabled")
 
     # =========================================================================
+    # The C core: the FHE/ORAM bootstrap's hardware-accelerated backend.
+    # The loader loads "nixon_core.so" from the directory of ITS OWN
+    # file -- the artifact's directory.  Nothing ever built it there,
+    # so the loader always fell back to the pure-Python path, where
+    # encrypt_batch/dec_batch are NO-OPS: the FHE bootstrap verified
+    # nothing while the report counted FHE and ORAM as enabled.
+    #
+    # The fallback stays (a Python-only host must still run), but the
+    # accelerated path must be reachable in a normal build.
+    try:
+        from obfuscator.core.c_core_build import (
+            build_c_core,
+            missing_loader_symbols,
+        )
+        _core = build_c_core(BUILD_DIR, root=ROOT)
+        if _core:
+            log("FHE", f"C core built: {_core}")
+            _missing = missing_loader_symbols(_core)
+            if _missing:
+                log("WARN", f"The C core does NOT export {', '.join(_missing)} -- "
+                            "the loader will use its pure-Python fallback, where "
+                            "the FHE encrypt/decrypt are no-ops. The FHE/ORAM "
+                            "bootstrap is a self-test, not a protection.")
+        else:
+            log("WARN", "C core not built; the loader will use the pure-Python "
+                        "fallback (the FHE bootstrap verifies nothing)")
+    except Exception as _e:
+        log("WARN", f"C core not built ({_e}); the loader will use the "
+                    "pure-Python fallback")
+
+    # =========================================================================
     # Stage 6: VM Compile (crown jewel functions into custom VM bytecode)
     # =========================================================================
 

@@ -42,6 +42,15 @@ checks they agree).
   `tarfile` extraction without an explicit filter (a behaviour change
   in Python 3.14, not just noise), `datetime.utcnow()`, and the
   deprecated `pkg_resources` import.
+- **The FHE/ORAM C backend could never load.** The loader looks for
+  `FHE_new` and `ORAM_new` in `nixon_core.so` — symbols that exist
+  nowhere in `native/`. The loader therefore always took its
+  pure-Python fallback, where `encrypt_batch`/`dec_batch` are no-ops:
+  the FHE bootstrap verified nothing while the build reported FHE and
+  ORAM as enabled. The library is now built next to the artifact
+  (where the loader looks), and the build reports which of the
+  loader's symbols the library actually exports, so an unimplemented
+  backend is not passed off as working.
 - **Nineteen tests skipped in CI.** They need a compiled artefact —
   the C shared libraries, the Rust relay, the microjit shared object —
   and each skips itself when the artefact is absent. CI built those

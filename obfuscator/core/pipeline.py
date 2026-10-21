@@ -3661,6 +3661,31 @@ def main():
             base_name = os.path.splitext(os.path.basename(args.source))[0]
             dist_dir = os.path.join(os.path.dirname(os.path.abspath(args.source)), "dist")
             os.makedirs(dist_dir, exist_ok=True)
+            # The FHE/ORAM bootstrap loads "nixon_core.so" from the
+            # artifact's own directory, so build it there.  Without it
+            # the loader falls back to the pure-Python path, where
+            # encrypt_batch/dec_batch are no-ops.
+            try:
+                from obfuscator.core.c_core_build import (
+                    build_c_core,
+                    missing_loader_symbols,
+                )
+                _core = build_c_core(dist_dir)
+                if _core:
+                    print("    [+] C core built: %s" % _core)
+                    _missing = missing_loader_symbols(_core)
+                    if _missing:
+                        print("    [!] The C core does NOT export %s -- the "
+                              "loader will use its pure-Python fallback, where "
+                              "the FHE encrypt/decrypt are no-ops.  The FHE/ORAM "
+                              "bootstrap is a self-test, not a protection."
+                              % ", ".join(_missing))
+                else:
+                    print("    [!] C core not built; the loader will use the "
+                          "pure-Python fallback (the FHE bootstrap verifies nothing)")
+            except Exception as _e:
+                print("    [!] C core not built (%s); the loader will use the "
+                      "pure-Python fallback" % _e)
             for suffix, out_file in generated_files_map.items():
                 if out_file and os.path.exists(out_file):
                     if suffix == "Debug":
