@@ -90,6 +90,81 @@ def _join_blocks(blocks: list[dict]) -> list[str]:
     return lines
 
 
+def _block_predecessors(blocks: list[dict]) -> dict:
+    """Map each block to the blocks that branch to it."""
+    preds: dict = {}
+    for block in blocks:
+        lines = block.get("lines", [])
+        # A switch's targets are on its case lines, not on the switch
+        # line itself.
+        is_switch = any(l.strip().startswith("switch ") for l in lines)
+        for line in lines:
+            s = line.strip()
+            if not (s.startswith("br ") or s.startswith("switch ")
+                    or (is_switch and "label %" in s)):
+                continue
+            for target in re.findall(r'label\s+%([A-Za-z0-9_.$]+)', s):
+                preds.setdefault(target, []).append(block["name"])
+    return preds
+
+
+_PHI_RE = re.compile(r'^(\s*)(%[\w.]+)\s*=\s*phi\s+(\S+)\s+(.*)$')
+
+
+def _repair_phis(blocks: list[dict]) -> None:
+    """Give every phi one entry per predecessor of its block.
+
+    A control-flow pass that adds a branch gives the target block a
+    new predecessor.  LLVM requires a phi to have exactly one entry
+    per predecessor, so the new entry is added with the same value as
+    the existing ones -- the value is the same on every path, which is
+    what the pass means.
+    """
+    preds = _block_predecessors(blocks)
+    for block in blocks:
+        incoming_preds = preds.get(block["name"], [])
+        if not incoming_preds:
+            continue
+        new_lines = []
+        for line in block.get("lines", []):
+            m = _PHI_RE.match(line)
+            if not m:
+                new_lines.append(line)
+                continue
+            indent, result, vtype, rest = m.groups()
+            entries = re.findall(r'\[\s*([^,\]]+?)\s*,\s*%([A-Za-z0-9_.$]+)\s*\]', rest)
+            if not entries:
+                new_lines.append(line)
+                continue
+            have = {label for _value, label in entries}
+            missing = [p for p in incoming_preds if p not in have]
+            if not missing:
+                new_lines.append(line)
+                continue
+            first_value = entries[0][0]
+            # The new entries need a value that DOMINATES the block: a
+            # constant does, a value from the original predecessor does
+            # not ("Instruction does not dominate all uses").  The new
+            # predecessors are dead paths, so the value does not matter.
+            zero = _zero_for_type(vtype, first_value)
+            extra = ", ".join(f"[ {zero}, %{p} ]" for p in missing)
+            new_lines.append(f"{indent}{result} = phi {vtype} {extra}, {rest}")
+        block["lines"] = new_lines
+
+
+def _zero_for_type(vtype: str, fallback: str) -> str:
+    """A constant of the given type, for a phi's new entry."""
+    if vtype == "i1":
+        return "false"
+    if vtype in ("i8", "i16", "i32", "i64"):
+        return "0"
+    if vtype == "ptr":
+        return "null"
+    if vtype in ("float", "double"):
+        return "0.0"
+    return fallback
+
+
 def apply_bcf(llvm_ir: str, probability: float = 0.3) -> str:
     header, functions = _split_functions(llvm_ir)
     result_header = "\n".join(header)
@@ -151,6 +226,7 @@ def apply_bcf(llvm_ir: str, probability: float = 0.3) -> str:
                 changed = True
 
         if changed:
+            _repair_phis(new_blocks)
             body = _join_blocks(new_blocks)
             result_bodies.append(f"{func_header}\n" + "\n".join(body) + "\n}")
         else:
@@ -169,6 +245,16 @@ def apply_fla(llvm_ir: str) -> str:
     for func_header, func_name, body_lines in functions:
         blocks = _get_blocks(body_lines)
         if len(blocks) < 2:
+            result_bodies.append(f"{func_header}\n" + "\n".join(body_lines) + "\n}")
+            continue
+
+        # Flattening a function that has PHIs breaks SSA: the phi
+        # nodes describe the original predecessors, and the dispatcher
+        # changes them.  Rebuilding them is an SSA-construction
+        # problem, so such a function is left alone -- the pass must
+        # not produce a module that does not verify.
+        if any(_PHI_RE.match(l.strip()) for b in blocks
+               for l in b.get("lines", [])):
             result_bodies.append(f"{func_header}\n" + "\n".join(body_lines) + "\n}")
             continue
 
@@ -280,6 +366,10 @@ def apply_fla(llvm_ir: str) -> str:
         flat_dispatcher = {"name": dispatcher, "lines": dispatcher_lines}
         all_blocks = [flat_preamble, flat_dispatcher] + blocks
 
+        # Flattening routes every branch through the dispatcher, so
+        # each block gains a predecessor: the phis need the matching
+        # entries.
+        _repair_phis(all_blocks)
         body = _join_blocks(all_blocks)
         result_bodies.append(f"{func_header}\n" + "\n".join(body) + "\n}")
 
@@ -427,6 +517,8 @@ def apply_replay_poison(llvm_ir: str, num_dead_cases: int = 4) -> str:
 
             new_blocks.append(block)
 
+        _repair_phis(new_blocks)
+
         body = _join_blocks(new_blocks)
         result_bodies.append(f"{func_header}\n" + "\n".join(body) + "\n}")
 
@@ -521,6 +613,7 @@ def apply_speculative_traps(ir_text: str, config: dict | None = None) -> str:
             new_blocks.append({"name": real_check, "lines": real_lines})
 
         if changed:
+            _repair_phis(new_blocks)
             body = _join_blocks(new_blocks)
             result_bodies.append(f"{func_header}\n" + "\n".join(body) + "\n}")
         else:
@@ -591,6 +684,8 @@ def apply_transient_execution(ir_text: str, config: dict) -> str:
             new_blocks.append(block)
             prev_name = block["name"]
             prev_idx = i
+
+        _repair_phis(new_blocks)
 
         body = _join_blocks(new_blocks)
         result_bodies.append(f"{func_header}\n" + "\n".join(body) + "\n}")
@@ -688,6 +783,8 @@ def apply_crypto_checkpointing(ir_text: str, config: dict | None = None) -> str:
                 ],
             }
             new_blocks.append(fail_block)
+
+        _repair_phis(new_blocks)
 
         body = _join_blocks(new_blocks)
         result_bodies.append(f"{func_header}\n" + "\n".join(body) + "\n}")

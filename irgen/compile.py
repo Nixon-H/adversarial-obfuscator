@@ -26,6 +26,7 @@ Dependencies:
 
 from __future__ import annotations
 import ast
+import builtins
 from typing import Optional
 
 
@@ -137,10 +138,14 @@ class IrValue:
 
     @staticmethod
     def const_none() -> 'IrValue':
-        """Create a null pointer constant."""
-        v = IrValue(IrType.ptr())
-        v.name = "null"
-        return v
+        """Create the None constant.
+
+        The IR's slots are i32, so None is the integer 0.  It used to
+        be a pointer-typed "null", which is not a valid i32 value
+        ("null must be a pointer type") and could not be stored in a
+        slot.
+        """
+        return IrValue.const_int(0)
 
     @staticmethod
     def const_str(value: str) -> 'IrValue':
@@ -240,8 +245,10 @@ class IrInstruction:
             ret_t = self.result_type if self.result_type else self.ty
             r = f"{self.result.name} = call" if self.result else "call"
             r += f" {ret_t} @{self.func_name}"
-            if self.operands:
-                r += "(" + ", ".join(str(o) for o in self.operands) + ")"
+            # The parentheses are always present: without them a call
+            # with no arguments ("call i32 @globals") is not a call
+            # the LLVM lowering can parse.
+            r += "(" + ", ".join(str(o) for o in self.operands) + ")"
             return r
         if self.opcode == 'phi':
             r = f"{self.result.name} = phi {self.result_type} " if self.result else f"phi {self.result_type} "
@@ -257,6 +264,10 @@ class IrInstruction:
         if self.opcode == 'zext':
             r = f"{self.result.name} = zext" if self.result else "zext"
             r += f" {self.result_type} {self.operands[0]} to {self.ty}"
+            return r
+        if self.opcode in ('sitofp', 'fptosi'):
+            r = f"{self.result.name} = {self.opcode}" if self.result else self.opcode
+            r += f" {self.ty} {self.operands[0]} to {self.result_type}"
             return r
         if self.opcode == 'trunc':
             r = f"{self.result.name} = trunc" if self.result else "trunc"
@@ -385,6 +396,12 @@ class IrBlock:
     def trunc(self, from_type: IrType, to_type: IrType, val: IrValue) -> IrInstruction:
         return self._make('trunc', result_type=from_type, operands=[val], ty=to_type)
 
+    def sitofp(self, from_type: IrType, to_type: IrType, val: IrValue) -> IrInstruction:
+        return self._make('sitofp', result_type=to_type, operands=[val], ty=from_type)
+
+    def fptosi(self, from_type: IrType, to_type: IrType, val: IrValue) -> IrInstruction:
+        return self._make('fptosi', result_type=to_type, operands=[val], ty=from_type)
+
     def call(self, func_name: str, args: list[IrValue], return_type: IrType = IrType.void()) -> IrInstruction:
         ret = return_type if return_type.kind != 'void' else None
         return self._make('call', result_type=ret, operands=args, func_name=func_name, ty=return_type)
@@ -466,6 +483,17 @@ class IrModule:
         self.name = name
         self.functions: list[IrFunction] = []
         self.global_counter = 0
+        #: Module-level globals, as ``(name, type, init)``.  Used for
+        #: the opaque handles that stand in for imported modules.
+        self.globals: list[tuple[str, str, str]] = []
+
+    def add_global(self, name: str, type_: str = "i32", init: str = "0") -> str:
+        """Declare a module-level global; return its name."""
+        for existing, _t, _i in self.globals:
+            if existing == name:
+                return name
+        self.globals.append((name, type_, init))
+        return name
 
     def new_value_id(self) -> str:
         """Generate a fresh module-scoped value ID."""
@@ -476,11 +504,45 @@ class IrModule:
     def __str__(self):
         """Serialize module to IR text format."""
         lines = [f"module @{self.name}"]
+        for name, type_, init in self.globals:
+            lines.append(f"  global {type_} @{name} = {init}")
         for func in self.functions:
             func_str = str(func)
             for line in func_str.split("\n"):
                 lines.append(f"  {line}")
         return "\n".join(lines)
+
+
+# The return type of the Python builtins the IR generator knows about.
+# Everything else defaults to i32.  "float" is the one that matters:
+# a float result makes the surrounding arithmetic floating point, and
+# an i32-typed float constant in an integer operation is not valid LLVM.
+BUILTIN_RETURN_TYPES = {
+    "float": "double",
+    "int": "i32",
+    "abs": "i32",
+    "len": "i32",
+    "round": "i32",
+    "min": "i32",
+    "max": "i32",
+    "sum": "i32",
+    "ord": "i32",
+    "chr": "i32",
+    "hex": "i32",
+    "oct": "i32",
+    "bin": "i32",
+}
+
+
+class UnresolvedNameError(ValueError):
+    """Raised when the IR cannot represent a name in the source.
+
+    The IR is a partial front end for Python.  A name it cannot
+    resolve used to become the integer ``0`` -- a SILENT
+    miscompilation: ``x & _nx_M`` became ``x & 0``, and a module-level
+    dict of checks became the integer 0 at every use.  In strict mode
+    (the native build) that is an error, not a zero.
+    """
 
 
 class IrCompiler:
@@ -493,7 +555,7 @@ class IrCompiler:
     subscript, attribute), and constants.
     """
 
-    def __init__(self, module_name: Optional[str] = None):
+    def __init__(self, module_name: Optional[str] = None, strict: bool = False):
         """Initialize compiler state."""
         IrValue.reset_counter()
         self.module = IrModule(module_name or "nixon_module")
@@ -503,6 +565,19 @@ class IrCompiler:
         self.break_targets: list[str] = []
         self.continue_targets: list[str] = []
         self.compiled_functions: dict[str, IrFunction] = {}
+        # Literal bindings visible to the code being compiled: the
+        # module-level constants, then the enclosing function's locals
+        # (a nested function closes over them).
+        self.const_globals: dict = {}
+        self.const_locals: dict = {}
+        # Module-level bindings whose value is a literal expression.
+        self.module_exprs: dict = {}
+        # Imported module names -> the global that holds their opaque
+        # handle.
+        self.import_handles: dict = {}
+        # Names the IR could not resolve, and whether to fail on them.
+        self.unresolved: list[str] = []
+        self.strict = strict
 
     def _py_type_to_ir(self, val) -> IrType:
         """Map Python value types to IR types."""
@@ -545,6 +620,10 @@ class IrCompiler:
     def compile(self, tree: ast.AST) -> IrModule:
         """Compile an AST into an IR module."""
         self._compile_module(tree)
+        if self.strict and self.unresolved:
+            raise UnresolvedNameError(
+                "the IR cannot represent these names: %s"
+                % ", ".join(sorted(self.unresolved)))
         return self.module
 
     def _compile_module(self, node: ast.Module):
@@ -554,6 +633,16 @@ class IrCompiler:
         Function definitions are compiled first, then module-level
         statements are collected into a __module_entry__ function.
         """
+        # Module-level CONSTANTS are collected first: a function body
+        # that refers to one (e.g. ``_nx_M = 0xFFFFFFFF``) must see
+        # its value.  Without this the name resolved to the fallback
+        # ``0``, so ``x & _nx_M`` was compiled as ``x & 0`` -- a silent
+        # miscompilation that the LLVM stage then rejected with "use of
+        # undefined value".
+        self.const_globals = self._collect_const_globals(node)
+        self.module_exprs = self._collect_module_exprs(node)
+        self._register_imports(node)
+
         func_defs = [s for s in node.body if isinstance(s, ast.FunctionDef)]
         other_stmts = [s for s in node.body if not isinstance(s, ast.FunctionDef)
                        and not isinstance(s, (ast.Import, ast.ImportFrom, ast.ClassDef))]
@@ -596,6 +685,7 @@ class IrCompiler:
         elif isinstance(stmt, ast.ImportFrom):
             pass
         elif isinstance(stmt, ast.Assign):
+            self._record_const_assign(stmt)
             self._compile_assign(stmt)
         elif isinstance(stmt, ast.AugAssign):
             self._compile_aug_assign(stmt)
@@ -617,8 +707,63 @@ class IrCompiler:
             self.current_block.nop()
         elif isinstance(stmt, ast.Delete):
             pass
+        elif isinstance(stmt, ast.Try):
+            self._compile_try(stmt)
         elif isinstance(stmt, ast.ClassDef):
             pass
+
+    def _compile_sequence_literal(self, ctor: str, elements: list) -> IrValue:
+        """Compile a list/tuple literal as a call to its constructor.
+
+        The IR has no aggregate type, so the literal becomes a call to
+        the runtime's constructor (``list`` / ``tuple``).  It used to
+        compile to the integer 0, which silently lost the contents.
+        """
+        args = [self._compile_expr(e) for e in elements
+                if not isinstance(e, ast.Starred)]
+        return self.current_block.call(ctor, args, IrType.i32()).result
+
+    def _compile_try(self, node: ast.Try):
+        """Compile a try/except statement.
+
+        The IR has no exception mechanism, so the handlers cannot be
+        represented.  The try BODY is compiled inline -- it used to be
+        dropped entirely, which silently removed every statement in
+        every try block (and left the variables it bound unbound, so
+        they resolved to the fallback 0).
+
+        The handlers are compiled into a block that is not reachable
+        from the entry path: their code is preserved in the IR rather
+        than discarded, and the try body keeps the flow of the
+        function.
+        """
+        for stmt in node.body:
+            self._compile_stmt(stmt)
+
+        for handler in node.handlers:
+            # The handler body cannot run in this IR, so it is compiled
+            # into its own block and left unreferenced.
+            handler_block = self.current_func.new_block()
+            saved_block = self.current_block
+            saved_symbols = dict(self.symbols)
+            self.current_block = handler_block
+            if handler.name:
+                # ``except E as e`` binds ``e``; without the binding
+                # every use of it resolved to the fallback 0.
+                exc_alloca = self.current_block.alloca(IrType.i32())
+                self.current_block.store(IrType.i32(), IrValue.const_int(0),
+                                         exc_alloca.result)
+                self.symbols[handler.name] = (exc_alloca, IrType.i32())
+            for stmt in handler.body:
+                self._compile_stmt(stmt)
+            if self.current_block.terminator is None:
+                # "unreachable" is valid whatever the function returns.
+                self.current_block.set_terminator("unreachable")
+            self.current_block = saved_block
+            self.symbols = saved_symbols
+
+        for stmt in node.finalbody:
+            self._compile_stmt(stmt)
 
     def _compile_func_def(self, node: ast.FunctionDef):
         """
@@ -632,6 +777,15 @@ class IrCompiler:
         old_symbols = dict(self.symbols)
         old_breaks = self.break_targets
         old_continues = self.continue_targets
+        # A nested function CLOSES over the enclosing function's
+        # constants (e.g. a mask defined just above it).  The constants
+        # are inherited, because a name that resolves to nothing used
+        # to become the fallback 0 -- a silent miscompilation.
+        old_const_locals = dict(self.const_locals)
+
+        # Imports inside the function body (the loader imports its
+        # crypto helpers inside a function) get handles too.
+        self._register_imports(node)
 
         ret_type = IrType.i32() if self._has_return_value(node) else IrType.void()
         func = IrFunction(node.name, ret_type)
@@ -671,6 +825,7 @@ class IrCompiler:
         self.symbols = old_symbols
         self.break_targets = old_breaks
         self.continue_targets = old_continues
+        self.const_locals = old_const_locals
 
     def _has_return_value(self, node: ast.FunctionDef) -> bool:
         """Check if a function has any return statement with a value."""
@@ -678,6 +833,20 @@ class IrCompiler:
             if isinstance(n, ast.Return) and n.value is not None:
                 return True
         return False
+
+    def _store_value(self, val: IrValue, ptr_result: IrValue):
+        """Store a value into an i32 slot, converting it if needed.
+
+        The IR's slots are i32, so a floating-point value is truncated
+        on the way in -- explicitly, rather than by storing a double
+        into an i32 slot, which is not valid LLVM.  A boolean is
+        widened the same way.
+        """
+        if val.type.kind == 'double':
+            val = self.current_block.fptosi(IrType.double(), IrType.i32(), val).result
+        elif val.type.kind == 'i1':
+            val = self.current_block.zext(IrType.i1(), IrType.i32(), val).result
+        self.current_block.store(IrType.i32(), val, ptr_result)
 
     def _compile_assign(self, node: ast.Assign):
         """
@@ -692,16 +861,16 @@ class IrCompiler:
             if isinstance(target, ast.Name):
                 if target.id in self.symbols:
                     alloca_inst, _ = self.symbols[target.id]
-                    self.current_block.store(IrType.i32(), val, alloca_inst.result)
+                    self._store_value(val, alloca_inst.result)
                 else:
                     alloca_inst = self.current_block.alloca(IrType.i32())
-                    self.current_block.store(IrType.i32(), val, alloca_inst.result)
+                    self._store_value(val, alloca_inst.result)
                     self.symbols[target.id] = (alloca_inst, IrType.i32())
             elif isinstance(target, ast.Subscript):
                 base = self._compile_expr(target.value)
                 index = self._compile_expr(target.slice)
                 gep_inst = self.current_block.gep(base, index)
-                self.current_block.store(IrType.i32(), val, gep_inst.result)
+                self._store_value(val, gep_inst.result)
             elif isinstance(target, ast.Tuple) or isinstance(target, ast.List):
                 pass
 
@@ -732,7 +901,18 @@ class IrCompiler:
         """
         if node.value is not None:
             val = self._compile_expr(node.value)
-            self.current_block.set_terminator('ret', operands=[val.type, val])
+            # The returned value must match the function's return type.
+            # A boolean expression yields an i1, and the IR's functions
+            # return i32, so the value is widened.
+            ret_type = self.current_func.return_type
+            if ret_type.kind == 'i32':
+                if val.type.kind == 'i1':
+                    val = self.current_block.zext(IrType.i1(), IrType.i32(),
+                                                  val).result
+                elif val.type.kind == 'double':
+                    val = self.current_block.fptosi(IrType.double(), IrType.i32(),
+                                                    val).result
+            self.current_block.set_terminator('ret', operands=[ret_type, val])
         else:
             self.current_block.set_terminator('ret')
 
@@ -857,6 +1037,16 @@ class IrCompiler:
             target_alloca = self.current_block.alloca(IrType.i32())
             self.current_block.store(IrType.i32(), next_val.result, target_alloca.result)
             self.symbols[node.target.id] = (target_alloca, IrType.i32())
+        elif isinstance(node.target, (ast.Tuple, ast.List)):
+            # A destructuring target: the IR has one value per slot, so
+            # each name is bound to the same iteration value.  Leaving
+            # them unbound made every use resolve to the fallback 0.
+            for element in node.target.elts:
+                if isinstance(element, ast.Name):
+                    target_alloca = self.current_block.alloca(IrType.i32())
+                    self.current_block.store(IrType.i32(), next_val.result,
+                                             target_alloca.result)
+                    self.symbols[element.id] = (target_alloca, IrType.i32())
 
         for stmt in node.body:
             self._compile_stmt(stmt)
@@ -904,11 +1094,18 @@ class IrCompiler:
         if isinstance(node, ast.Attribute):
             return self._compile_attribute(node)
         if isinstance(node, ast.List):
-            return IrValue.const_int(0)
+            return self._compile_sequence_literal("list", node.elts)
         if isinstance(node, ast.Tuple):
-            return IrValue.const_int(0)
+            return self._compile_sequence_literal("tuple", node.elts)
         if isinstance(node, ast.Dict):
-            return IrValue.const_int(0)
+            args = []
+            for key, value in zip(node.keys, node.values):
+                if key is None:
+                    # ``{**other}`` -- the spread has no element.
+                    continue
+                args.append(self._compile_expr(key))
+                args.append(self._compile_expr(value))
+            return self.current_block.call("dict", args, IrType.i32()).result
         if isinstance(node, ast.Starred):
             return self._compile_expr(node.value)
         if isinstance(node, ast.FormattedValue):
@@ -918,22 +1115,119 @@ class IrCompiler:
                 result = self._compile_expr(node.values[0])
                 for v in node.values[1:]:
                     val = self._compile_expr(v)
-                    op = IrInstruction('add', IrType.ptr(), [IrType.ptr(), result, val])
-                    op.parent_block = self.current_block
-                    self.current_block.instructions.append(op)
-                    result = op.result
+                    # Concatenation is a runtime operation: the parts can
+                    # have different types (a string and an int), which
+                    # a single typed add cannot express.  It returns an
+                    # i32 handle, like the other runtime objects.
+                    call = self.current_block.call(
+                        "__builtin_concat", [result, val], IrType.i32())
+                    result = call.result
                 return result
             return IrValue.const_str("")
         if isinstance(node, ast.Slice):
             return IrValue.const_int(0)
         return IrValue.const_int(0)
 
+    @staticmethod
+    def _collect_const_globals(node: ast.Module) -> dict:
+        """The module-level CONSTANT bindings, by name.
+
+        Only literal bindings count: a name bound to a computed value
+        cannot be folded at compile time, and treating it as a constant
+        would be wrong in the other direction.
+        """
+        consts = {}
+        for stmt in node.body:
+            if not isinstance(stmt, ast.Assign):
+                continue
+            value = stmt.value
+            if not isinstance(value, ast.Constant):
+                continue
+            if isinstance(value.value, (int, float, str, bool)) or value.value is None:
+                for target in stmt.targets:
+                    if isinstance(target, ast.Name):
+                        consts[target.id] = value.value
+        return consts
+
+    @staticmethod
+    def _collect_imports(node) -> dict:
+        """The names bound by import statements, mapped to their module.
+
+        The IR has no module-handle concept, so an imported module used
+        to resolve to the fallback ``0`` -- a silent miscompilation of
+        every ``hashlib.sha256(...)`` in the source.  Each imported
+        module gets an opaque global handle instead.
+        """
+        imports: dict = {}
+        for stmt in ast.walk(node):
+            if isinstance(stmt, ast.Import):
+                for alias in stmt.names:
+                    local = alias.asname or alias.name.split(".")[0]
+                    imports[local] = alias.name
+            elif isinstance(stmt, ast.ImportFrom):
+                for alias in stmt.names:
+                    local = alias.asname or alias.name
+                    imports[local] = f"{stmt.module or ''}.{alias.name}"
+        return imports
+
+    @staticmethod
+    def _handle_name(module_path: str) -> str:
+        """A global name for an imported module's opaque handle."""
+        safe = "".join(ch if ch.isalnum() else "_" for ch in module_path)
+        return f"__nx_mod_{safe}"
+
+    def _register_imports(self, node) -> None:
+        """Declare a handle for every module the code imports."""
+        for local, module_path in self._collect_imports(node).items():
+            gname = self._handle_name(module_path)
+            self.module.add_global(gname, "i32", "0")
+            self.import_handles[local] = gname
+
+    @staticmethod
+    def _collect_module_exprs(node: ast.Module) -> dict:
+        """Module-level bindings, kept as AST nodes.
+
+        A module-level variable referenced from a function used to
+        resolve to the fallback ``0`` -- so a module-level dict of
+        checks was the integer 0 at every use.  The binding is
+        re-materialised at the use site, which is an approximation
+        (the expression is evaluated once per use, not once per
+        module) but it is the value, not a zero.
+        """
+        exprs: dict = {}
+        for stmt in node.body:
+            if not isinstance(stmt, ast.Assign):
+                continue
+            for target in stmt.targets:
+                if isinstance(target, ast.Name):
+                    exprs[target.id] = stmt.value
+        return exprs
+
+    def _record_const_assign(self, stmt):
+        """Remember a literal binding, so a closure can read it.
+
+        A nested function that refers to a constant defined just above
+        it (e.g. a bit mask) resolves to nothing in the nested scope,
+        and the name fell back to 0 -- a silent miscompilation that the
+        LLVM stage only noticed as "use of undefined value".
+        """
+        value = stmt.value
+        if not isinstance(value, ast.Constant):
+            return
+        if not (isinstance(value.value, (int, float, str, bool))
+                or value.value is None):
+            return
+        for target in stmt.targets:
+            if isinstance(target, ast.Name):
+                self.const_locals[target.id] = value.value
+
     def _compile_name(self, node: ast.Name) -> IrValue:
         """
         Compile a name reference.
 
-        Handles built-in names (True, False, None, __name__) and
-        user-defined variables (loaded from their alloca).
+        Handles built-in names (True, False, None, __name__),
+        module-level constants, and user-defined variables (loaded from
+        their alloca).
         """
         if node.id == "__name__":
             return IrValue.const_str("__main__")
@@ -947,6 +1241,40 @@ class IrCompiler:
             alloca_inst, var_type = self.symbols[node.id]
             load_inst = self.current_block.load(var_type, alloca_inst.result)
             return load_inst.result
+        # An imported module: its opaque handle, not the fallback 0.
+        if node.id in getattr(self, "import_handles", {}):
+            gname = self.import_handles[node.id]
+            handle = IrValue(IrType.ptr(), name="@" + gname)
+            return self.current_block.load(IrType.i32(), handle).result
+        # A constant: a local of the enclosing scope (a closure) or a
+        # module-level constant.  Resolving it to 0 instead (the
+        # fallback) silently miscompiles `x & _nx_M` into `x & 0`.
+        if node.id in getattr(self, "const_locals", {}):
+            return self._make_constant_value(self.const_locals[node.id])
+        if node.id in getattr(self, "const_globals", {}):
+            return self._make_constant_value(self.const_globals[node.id])
+        # A module-level binding: re-materialised at the use site.  The
+        # guard keeps a self-referential binding from recursing.
+        module_exprs = getattr(self, "module_exprs", {})
+        resolving = getattr(self, "_resolving", None)
+        if resolving is None:
+            resolving = self._resolving = set()
+        if node.id in module_exprs and node.id not in resolving:
+            resolving.add(node.id)
+            try:
+                return self._compile_expr(module_exprs[node.id])
+            finally:
+                resolving.discard(node.id)
+        # A builtin used as a VALUE (e.g. ``bytes.fromhex``): an opaque
+        # handle for the builtin, not the fallback 0.
+        if node.id in dir(builtins):
+            gname = self.module.add_global(f"__nx_builtin_{node.id}", "i32", "0")
+            handle = IrValue(IrType.ptr(), name="@" + gname)
+            return self.current_block.load(IrType.i32(), handle).result
+        # The IR cannot represent this name.  Record it: in strict mode
+        # the build fails instead of shipping a zero.
+        if node.id not in self.unresolved:
+            self.unresolved.append(node.id)
         return IrValue.const_int(0)
 
     def _compile_binop(self, op, lhs: IrValue, rhs: IrValue, type_: IrType) -> IrValue:
@@ -982,7 +1310,18 @@ class IrCompiler:
         """Compile a binary expression node."""
         lhs = self._compile_expr(node.left)
         rhs = self._compile_expr(node.right)
+        # A float operand makes the whole operation a floating-point
+        # one.  Without the promotion the operation kept the integer
+        # type of the other side and carried a float constant in an
+        # i32 slot -- which llc rejects ("floating point constant
+        # invalid for type").
+        if lhs.type.kind == 'double' and rhs.type.kind not in ('double', 'ptr'):
+            rhs = self.current_block.sitofp(rhs.type, IrType.double(), rhs).result
+        elif rhs.type.kind == 'double' and lhs.type.kind not in ('double', 'ptr'):
+            lhs = self.current_block.sitofp(lhs.type, IrType.double(), lhs).result
         result_type = lhs.type if lhs.type.kind != 'ptr' else IrType.i32()
+        if result_type.kind != 'double' and rhs.type.kind == 'double':
+            result_type = IrType.double()
         return self._compile_binop(node.op, lhs, rhs, result_type)
 
     def _compile_unaryop(self, node: ast.UnaryOp) -> IrValue:
@@ -1048,44 +1387,49 @@ class IrCompiler:
 
         For 'and': if left is false, skip right evaluation.
         For 'or': if left is true, skip right evaluation.
+
+        The result is a phi of the short-circuit value and the right
+        operand's value.  The previous implementation left the
+        short-circuit block without a terminator and branched to an
+        empty block, so the IR had a block with no terminator -- which
+        llc rejects ("expected instruction opcode").
         """
-        if isinstance(node.op, ast.And):
-            result = self._compile_expr(node.values[0])
-            for val_node in node.values[1:]:
-                if result.type.kind != 'i1':
-                    result = self.current_block.ne(IrType.i32(), result, IrValue.const_int(0)).result
-                short_circuit_block = self.current_func.new_block()
-                next_block = self.current_func.new_block()
-                self.current_block.set_terminator("br", operands=[result, short_circuit_block.label, next_block.label])
-                self.current_block = short_circuit_block
-                right_val = self._compile_expr(val_node)
-                result = right_val
-                self.current_block = self.current_func.new_block()
-                if next_block.instructions or next_block.terminator:
-                    merge_block = self.current_block
-                    self.current_block = merge_block
-                    result = self.current_block.phi(IrType.i32(), [
-                        (IrValue.const_bool(False), short_circuit_block.label),
-                        (right_val, next_block.label)
-                    ]).result
-            return result
-        elif isinstance(node.op, ast.Or):
-            result = self._compile_expr(node.values[0])
-            for val_node in node.values[1:]:
-                if result.type.kind != 'i1':
-                    result = self.current_block.ne(IrType.i32(), result, IrValue.const_int(0)).result
-                short_circuit_block = self.current_func.new_block()
-                next_block = self.current_func.new_block()
-                self.current_block.set_terminator("br", operands=[result, short_circuit_block.label, next_block.label])
-                self.current_block = short_circuit_block
-                right_val = self._compile_expr(val_node)
-                merge_block = self.current_func.new_block()
-                self.current_block = self.current_func.new_block()
-                if self.current_block is not None:
-                    pass
-                result = right_val
-            return result
-        return IrValue.const_bool(False)
+        is_and = isinstance(node.op, ast.And)
+        result = self._compile_expr(node.values[0])
+        if result.type.kind != 'i1':
+            result = self.current_block.ne(IrType.i32(), result,
+                                           IrValue.const_int(0)).result
+        for val_node in node.values[1:]:
+            rhs_block = self.current_func.new_block()
+            short_block = self.current_func.new_block()
+            merge_block = self.current_func.new_block()
+            if is_and:
+                self.current_block.set_terminator(
+                    "br", operands=[result, rhs_block.label, short_block.label])
+            else:
+                self.current_block.set_terminator(
+                    "br", operands=[result, short_block.label, rhs_block.label])
+
+            self.current_block = rhs_block
+            right = self._compile_expr(val_node)
+            if right.type.kind != 'i1':
+                right = self.current_block.ne(IrType.i32(), right,
+                                              IrValue.const_int(0)).result
+            self.current_block.set_terminator("jmp", operands=[merge_block.label])
+
+            self.current_block = short_block
+            # The short-circuit value: "and" skips the right side when
+            # the left is false (so the result is false), "or" skips it
+            # when the left is true (so the result is true).
+            short_value = IrValue.const_bool(not is_and)
+            self.current_block.set_terminator("jmp", operands=[merge_block.label])
+
+            self.current_block = merge_block
+            result = self.current_block.phi(IrType.i1(), [
+                (short_value, short_block.label),
+                (right, rhs_block.label),
+            ]).result
+        return result
 
     def _compile_ifexp(self, node: ast.IfExp) -> IrValue:
         """
@@ -1127,7 +1471,7 @@ class IrCompiler:
             if func_name == "print":
                 self.current_block.call("__builtin_print", args, IrType.void())
                 return IrValue.const_int(0)
-            ret_type = IrType.i32()
+            ret_type = IrType(BUILTIN_RETURN_TYPES.get(func_name, "i32"))
             if func_name in self.compiled_functions:
                 ret_type = self.compiled_functions[func_name].return_type
             call_inst = self.current_block.call(func_name, args, ret_type)
@@ -1163,16 +1507,23 @@ class IrCompiler:
         return call.result
 
 
-def compile_py_to_ir(python_source: str, module_name: Optional[str] = None) -> IrModule:
+def compile_py_to_ir(python_source: str, module_name: Optional[str] = None,
+                     strict: bool = False) -> IrModule:
     """
-    Compile Python source code to an IR module.
+    Compile Python source code into an IR module.
 
     This is the main entry point for the compiler. Parses the Python
     source and runs it through the IrCompiler.
+
+    With ``strict=True`` a name the IR cannot represent raises
+    :class:`UnresolvedNameError` instead of silently becoming the
+    integer 0.  The native build uses strict mode: an IR that quietly
+    computes the wrong thing is worse than one that does not build.
     """
     tree = ast.parse(python_source)
-    compiler = IrCompiler(module_name)
+    compiler = IrCompiler(module_name, strict=strict)
     return compiler.compile(tree)
+
 
 
 def ir_module_to_text(module: IrModule) -> str:

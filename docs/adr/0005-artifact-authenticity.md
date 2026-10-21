@@ -84,6 +84,7 @@ Concretely:
   verify path (stdlib-only `hmac` works everywhere including the
   3.10 floor), and per-farm identities are deferred (below). The sig
   format reserves an `algo` tag so a v2 asymmetric scheme can coexist.
+  → **Superseded by the 2026-10-21 amendment below: implemented.**
 - **Shipping the key to the workflow for runner-side signing.**
   Rejected: secret would transit workflow YAML / runner env / caches;
   a tampered runner could sign its own malware anyway (signing oracle
@@ -106,17 +107,19 @@ Concretely:
   positional signature, and the no-key download flow all keep working.
 - Honest limitations (residual risk, not coverage):
   1. **Shared secret:** every verifier can also forge. No
-     non-repudiation, no per-farm blame. **Partly closed 2026-10-20:**
-     the signed metadata now carries a `farm` field
-     (`NIXON_FARM_ID`), and the download path pins it when one is
-     configured, so a sidecar minted by one farm is a mismatch, not a
-     pass, for a farm that expects a different identity. What is still
-     open is the *key* itself: it is still shared, so a verifier can
-     still forge a sidecar for any farm id. Per-farm key pairs remain
-     deferred (see the rejected alternatives above).
+     non-repudiation, no per-farm blame. **CLOSED 2026-10-21** by the
+     amendment above: the verifier now holds only a public key, so it
+     can check an artifact and cannot mint one; the farm identity is
+     the pinned public key rather than a claimed string. The HMAC path
+     remains available for compatibility, and a deployment that still
+     uses it keeps the old property — that is why the asymmetric path
+     is preferred automatically when a private key is configured.
   2. **Runner binaries unsigned:** a farm-runner compromise is NOT
      detected by this mechanism — TLS + provenance is the only story
-     there, as before.
+     there, as before. **Partly closed 2026-10-21:** a farm that holds
+     an Ed25519 private key signs what it stages, so a runner whose key
+     is not pinned is rejected at the gate. A runner with no key at all
+     still stages unsigned artifacts, and the gate says so loudly.
   3. **Rotation versioning:** rotation is manual (set new env,
      re-sign); old-key artifacts fail after rotation (expected).
      **Replay protection closed 2026-10-20:** the signed metadata now
@@ -140,6 +143,72 @@ Concretely:
      `py_compile` + review, not unit tests (importing
      `obfuscator.core.utils` has log-redirect/UI side effects); all
      policy logic tested at the helper level.
+
+## Amendment (2026-10-21) — per-farm Ed25519 keys
+
+**This amendment supersedes the shared-secret decision above.** The
+reason it was originally deferred was that the choice of who holds
+which key is a deployment question. The property that actually
+mattered, however, is a property of the *key*:
+
+> A verifier must not be able to mint an artifact it will later accept.
+
+A shared HMAC key cannot provide that: every verifier that holds the
+key is also a forger, for any farm id. An asymmetric key pair can.
+
+**Decision: per-farm Ed25519 key pairs, with the public half pinned by
+the operator.**
+
+- **Who holds what.** The farm holds the **private** key
+  (`NIXON_ARTIFACT_ED25519_KEY`, hex 32-byte seed). The operator holds
+  the **public** key — either one
+  (`NIXON_ARTIFACT_ED25519_PUBKEY`, hex) or a map of farm id → public
+  key (`NIXON_ARTIFACT_ED25519_KEYS`, JSON). The verifier holds no
+  secret and cannot sign.
+- **What is signed.** The same material as the HMAC path:
+  `file bytes + 0x00 + canonical-JSON(metadata)`, so `farm`,
+  `issued_at` and `expires_at` stay bound in. The signature is
+  Ed25519 over that message; the sidecar is
+  `{"algo": "ed25519-binding-v1", "sig": base64, "key_id", "metadata",
+  "file"}`. `key_id` is a SHA-256 fingerprint of the public key, so
+  the sidecar names the key that signed it.
+- **Which key is used.** `sign_artifact_auto` prefers Ed25519 whenever
+  a private key is configured and falls back to the HMAC path
+  otherwise. The HMAC path is unchanged and still verifies; it is
+  compatibility, not the preferred scheme.
+- **Download side.** `verify_zip_sidecars` and `enforce_dir_sidecars`
+  verify an Ed25519 sidecar against the pinned public keys. A sidecar
+  signed by a key the operator does not pin is a **mismatch**, not a
+  pass. The `algo` tag selects the path, so a public key can never be
+  checked with HMAC semantics.
+- **Farm-runner binaries.** The farm signs what it stages, so the
+  "runners are unsigned by design" limitation falls away for farms
+  that hold a key. A runner that does not hold the key produces no
+  valid sidecar; a runner whose key is not pinned is rejected at the
+  gate.
+- **Dependency.** `cryptography` is already a pinned dependency
+  (`requirements.txt`, `requirements.lock`); the import is lazy, so
+  the module stays importable without it and the HMAC path keeps
+  working.
+
+**What this does NOT change.** The CI-vs-service rule stands: a
+GitHub-hosted runner is not given a key, because shipping a secret to
+a runner exposes it in logs, forks and caches. A runner with no key
+stages unsigned artifacts, and the gate says so out loud rather than
+pretending otherwise.
+
+### Amendment evidence
+
+- `scripts/artifact_sign.py`: `sign_artifact_ed25519`,
+  `verify_artifact_ed25519`, `verify_ed25519_bytes`,
+  `resolve_ed25519_private_key`, `resolve_ed25519_public_keys`,
+  `ed25519_key_id`, `sign_artifact_auto`.
+- `tests/test_artifact_signing_ed25519.py`: roundtrip with the public
+  key only, **forgery with a different private key is rejected**,
+  metadata tamper, byte tamper, expiry, metadata pin, malformed
+  signature, key resolution (single + map), HMAC fallback, zip gate
+  accepts a pinned key and rejects an unpinned one.
+- `docs/AUDIT-2026-10-20.md` §8.2c.
 
 ## Evidence
 

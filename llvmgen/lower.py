@@ -15,12 +15,28 @@ NIXON_TYPE_MAP = {
 BINARY_OPS = {
     "add", "sub", "mul", "udiv", "sdiv", "urem", "srem",
     "and", "or", "xor", "shl", "lshr", "ashr",
+    # The project's own IR uses "shr" for a logical right shift; the
+    # LLVM spelling is "lshr".  Without this the instruction was
+    # dropped (as a comment) and its result stayed undefined.
+    "shr",
 }
 
 ICMP_PREDICATES = {
     "eq": "eq", "ne": "ne",
     "ugt": "ugt", "uge": "uge", "ult": "ult", "ule": "ule",
     "sgt": "sgt", "sge": "sge", "slt": "slt", "sle": "sle",
+}
+
+# The project's IR compares with "eq"/"ne"/"lt"/"le"/"gt"/"ge".  The
+# VM implements them as SIGNED comparisons (see irgen/bitslice.py),
+# so they lower to the signed icmp predicates.
+COMPARISONS = {
+    "eq": "eq",
+    "ne": "ne",
+    "lt": "slt",
+    "le": "sle",
+    "gt": "sgt",
+    "ge": "sge",
 }
 
 CONVERSION_OPS = {"zext", "sext", "trunc", "ptrtoint", "inttoptr", "bitcast",
@@ -61,6 +77,71 @@ def _parse_type(s: str) -> str:
     if s in NIXON_TYPE_MAP:
         return NIXON_TYPE_MAP[s]
     return s
+
+
+def _split_tokens(line: str) -> list:
+    """Split a line into whitespace-separated tokens.
+
+    A double-quoted string is ONE token, spaces and commas included:
+    the project's IR stores string constants inline
+    (``store i32 "IMPORTANT: read the guide", ptr %0``) and a plain
+    split() tore them apart.
+    """
+    tokens = []
+    current = []
+    in_string = False
+    escaped = False
+    for ch in line:
+        if in_string:
+            current.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            current.append(ch)
+            continue
+        if ch.isspace():
+            if current:
+                tokens.append("".join(current))
+                current = []
+            continue
+        current.append(ch)
+    if current:
+        tokens.append("".join(current))
+    return tokens
+
+
+_FLOAT_LITERAL = re.compile(r"^-?\d+\.\d*(e[-+]?\d+)?$|^-?\d*\.\d+(e[-+]?\d+)?$", re.IGNORECASE)
+
+# LLVM's floating-point opcodes are the integer ones with an "f"
+# prefix: "mul double" is an error, "fmul double" is not.
+FLOAT_OPS = {
+    "add": "fadd",
+    "sub": "fsub",
+    "mul": "fmul",
+    "div": "fdiv",
+    "sdiv": "fdiv",
+    "udiv": "fdiv",
+    "srem": "frem",
+    "urem": "frem",
+    "mod": "frem",
+}
+
+
+def _typed_operand(operand: str, type_: str) -> str:
+    """Give a floating-point constant its type.
+
+    LLVM requires a typed float constant (``double 0.001``); a bare
+    ``0.001`` is "invalid operand type".
+    """
+    if _FLOAT_LITERAL.match(operand) and type_ in ("double", "float"):
+        return f"{type_} {operand}"
+    return operand
 
 
 def _value_ref(s: str) -> str:
@@ -269,7 +350,7 @@ class NixonIRParser:
             if possible.startswith("%") or possible.startswith("@"):
                 result = possible
                 line = line[eq_idx + 3:].strip()
-        parts = line.split()
+        parts = _split_tokens(line)
         if not parts:
             return None
         opcode = parts[0]
@@ -302,13 +383,14 @@ class NixonIRParser:
             return {"result": result, "opcode": opcode, "type": vtype,
                     "operands": [lhs, rhs]}
 
-        if opcode == "eq":
+        if opcode in COMPARISONS:
             vtype = _parse_type(parts[1])
             lhs = parts[2].rstrip(",")
             rhs = parts[3].rstrip(",") if len(parts) > 3 else ""
             if result:
                 var_types[result] = "i1"
-            return {"result": result, "opcode": "icmp", "predicate": "eq",
+            return {"result": result, "opcode": "icmp",
+                    "predicate": COMPARISONS[opcode],
                     "type": vtype, "operands": [lhs, rhs]}
 
         if opcode == "mod":
@@ -362,15 +444,24 @@ class NixonIRParser:
             for i, p in enumerate(parts):
                 if p == "align" and i + 1 < len(parts):
                     align = int(parts[i + 1])
+            if val.startswith('"') and val.endswith('"'):
+                # A string constant is stored as the pointer to its
+                # global bytes, not as an integer.
+                val = self._resolve_call_arg(val, var_types or {}).split(" ", 1)[-1]
+                vtype = "ptr"
             return {"result": result, "opcode": "store", "type": vtype,
                     "value": val, "ptr": ptr_val, "align": align}
 
         if opcode == "call":
-            m = re.match(r'call\s+(\S+)\s+(@\S+)\s*\((.*)\)', line)
+            # The argument list is optional: a call with no arguments
+            # may be written without parentheses.  The callee must not
+            # swallow the parentheses -- "call i32 @f(\"x\")" is a call
+            # to f with one string argument.
+            m = re.match(r'call\s+(\S+)\s+(@[^\s(]+)\s*(?:\((.*)\))?', line)
             if m:
                 ret_type = _parse_type(m.group(1))
                 callee = m.group(2)
-                args_str = m.group(3).strip()
+                args_str = (m.group(3) or "").strip()
                 args = []
                 if args_str:
                     for a in args_str.split(","):
@@ -386,8 +477,12 @@ class NixonIRParser:
         if opcode == "phi":
             vtype = _parse_type(parts[1])
             incoming = []
-            for m in re.finditer(r'\[\s*(\S+)\s*,\s*%(\S+)\s*\]', line):
-                incoming.append({"value": m.group(1), "label": m.group(2)})
+            # The label may be written as "label bb5" (the IR form) or
+            # "%bb5" (the LLVM form), with or without the "%".
+            for m in re.finditer(
+                    r'\[\s*(\S+)\s*,\s*(?:label\s+)?%?(\S+)\s*\]', line):
+                incoming.append({"value": m.group(1),
+                                 "label": m.group(2).lstrip("%")})
             if result:
                 var_types[result] = vtype
             return {"result": result, "opcode": "phi", "type": vtype, "incoming": incoming}
@@ -413,6 +508,29 @@ class NixonIRParser:
                 var_types[result] = dst_type
             return {"result": result, "opcode": opcode, "src_type": src_type,
                     "value": val, "dst_type": dst_type}
+
+        if opcode == "gep":
+            # The project's own IR: "gep ptr <base>, i32 <index>".  The
+            # LLVM form is "getelementptr i32, ptr <base>, i32 <index>".
+            # The element type is i32: the IR's memory model indexes
+            # i32 slots.
+            ptr_val = parts[2].rstrip(",")
+            indices = []
+            i = 3
+            while i < len(parts):
+                if parts[i] in ("i32", "i64", "i8", "i16", "i1") and i + 1 < len(parts):
+                    indices.append(f"{parts[i]} {parts[i + 1].rstrip(',')}")
+                    i += 2
+                else:
+                    indices.append(parts[i].rstrip(","))
+                    i += 1
+            if result:
+                var_types[result] = "ptr"
+            return {"result": result, "opcode": "getelementptr",
+                    "type": "i32", "ptr": ptr_val, "indices": indices,
+                    # The IR passes pointers as i32; LLVM needs a real
+                    # pointer, so the base is converted at the GEP.
+                    "ptr_type": var_types.get(ptr_val.lstrip("%"), "i32")}
 
         if opcode == "getelementptr":
             vtype = _parse_type(parts[1])
@@ -489,10 +607,18 @@ def _emit_instruction(instr: dict) -> str:
         return "  unreachable"
 
     if opcode in BINARY_OPS:
-        lhs = _value_ref(instr["operands"][0])
+        lhs = _typed_operand(_value_ref(instr["operands"][0]), instr["type"])
         rhs = _value_ref(instr["operands"][1])
         t = instr["type"]
-        return f"{result_prefix}{opcode} {t} {lhs}, {rhs}"
+        # The project's IR spells a logical right shift "shr"; LLVM
+        # spells it "lshr".  Emitting "shr" verbatim would not
+        # assemble.
+        op = "lshr" if opcode == "shr" else opcode
+        # Floating-point arithmetic uses LLVM's f-prefixed opcodes
+        # ("fmul double"), not the integer ones.
+        if t in ("double", "float"):
+            op = FLOAT_OPS.get(op, op)
+        return f"{result_prefix}{op} {t} {lhs}, {rhs}"
 
     if opcode == "icmp":
         lhs = _value_ref(instr["operands"][0])
@@ -539,10 +665,24 @@ def _emit_instruction(instr: dict) -> str:
         val = _value_ref(instr["value"])
         return f"{result_prefix}{opcode} {instr['src_type']} {val} to {instr['dst_type']}"
 
-    if opcode == "getelementptr":
-        ptr = _value_ref(instr["ptr"])
+    if opcode in ("getelementptr", "gep"):
+        base = instr["ptr"]
         indices = " ".join(instr.get("indices", []))
-        return f"{result_prefix}getelementptr {instr['type']}, ptr {ptr}, {indices}"
+        # The indices are part of the ADDRESS, not decoration: dropping
+        # them computes a different pointer.
+        tail = (", " + indices) if indices else ""
+        base_type = instr.get("ptr_type", "i32")
+        if base_type != "ptr":
+            # The IR carries pointers as i32; LLVM wants a real pointer,
+            # so the base is converted where it is used as one.  The
+            # conversion needs its own register (an inttoptr of a
+            # non-constant is not a constant expression).  Its name
+            # must not START with a digit: LLVM reads "%79_x" as the
+            # number 79 followed by junk.
+            conv = f"%_gepbase_{(instr.get('result') or 't').lstrip('%')}"
+            return (f"  {conv} = inttoptr {base_type} {_value_ref(base)} to ptr\n"
+                    f"{result_prefix}getelementptr {instr['type']}, ptr {conv}{tail}")
+        return f"{result_prefix}getelementptr {instr['type']}, ptr {_value_ref(base)}{tail}"
 
     if opcode == "switch":
         val = _value_ref(instr["value"])
@@ -553,9 +693,57 @@ def _emit_instruction(instr: dict) -> str:
         return "\n".join(result)
 
     if "raw" in instr:
-        return f"  ; {instr['raw']}"
+        # An instruction the lowering does not know.  It used to be
+        # emitted as a COMMENT, which left its result undefined while
+        # later instructions still used it -- "use of undefined value"
+        # from llc, with the real cause three files away.  Fail loudly
+        # instead: the caller prints the offending instruction.
+        raise ValueError("unlowered instruction: %r" % (instr.get("raw"),))
 
-    return f"  ; unrecognized: {opcode}"
+    raise ValueError("unrecognized opcode: %r" % (opcode,))
+
+
+_UNNAMED_VALUE = re.compile(r"^%(\d+)$")
+
+
+def _renumber_function(func: dict) -> None:
+    """Renumber a function's unnamed values consecutively.
+
+    LLVM requires unnamed instruction results to be numbered 0, 1, 2,
+    ... in order of appearance within a function.  The project's IR
+    carries its own numbering, with gaps (%52, %54, %58, ...), which
+    llc rejects with "instruction expected to be numbered '%N' or
+    greater".  Named values (%_x) and named blocks are untouched: they
+    do not consume a number.
+    """
+    mapping: dict[str, str] = {}
+    counter = 0
+    for block in func.get("blocks", []):
+        for instr in block.get("instructions", []):
+            result = instr.get("result")
+            if isinstance(result, str) and _UNNAMED_VALUE.match(result):
+                if result not in mapping:
+                    mapping[result] = f"%{counter}"
+                    counter += 1
+    if not mapping:
+        return
+
+    def rewrite(value):
+        if isinstance(value, str):
+            if _UNNAMED_VALUE.match(value):
+                return mapping.get(value, value)
+            # An index string such as "i32 %58".
+            return re.sub(r"%\d+", lambda m: mapping.get(m.group(0), m.group(0)), value)
+        if isinstance(value, list):
+            return [rewrite(v) for v in value]
+        if isinstance(value, dict):
+            return {k: rewrite(v) for k, v in value.items()}
+        return value
+
+    for block in func.get("blocks", []):
+        for instr in block.get("instructions", []):
+            for key in list(instr):
+                instr[key] = rewrite(instr[key])
 
 
 def lower_ir_to_llvm(ir_text: str, module_name: str = "nixon_module") -> str:
@@ -588,6 +776,7 @@ def lower_ir_to_llvm(ir_text: str, module_name: str = "nixon_module") -> str:
     defined_funcs = {f["name"] for f in module.get("functions", [])}
     declared_funcs = {d["name"] for d in module.get("declares", [])}
     called_funcs: dict[str, str] = {}
+    call_params: dict[str, list] = {}
     for func in module.get("functions", []):
         for block in func.get("blocks", []):
             for instr in block.get("instructions", []):
@@ -595,11 +784,18 @@ def lower_ir_to_llvm(ir_text: str, module_name: str = "nixon_module") -> str:
                     callee = instr["callee"]
                     if callee not in called_funcs:
                         called_funcs[callee] = instr.get("return_type", "void")
+                        # The declaration must match the call.  A call
+                        # with more arguments than the declaration is
+                        # not the signature the runtime provides.
+                        call_params[callee] = [
+                            a.split()[0] for a in instr.get("args", []) if a.split()
+                        ]
 
     for callee, ret_type in called_funcs.items():
         if callee not in defined_funcs and callee not in declared_funcs:
             module.setdefault("declares", []).append(
-                {"name": callee, "return_type": ret_type, "params": []}
+                {"name": callee, "return_type": ret_type,
+                 "params": call_params.get(callee, [])}
             )
 
     for d in module.get("declares", []):
@@ -609,6 +805,7 @@ def lower_ir_to_llvm(ir_text: str, module_name: str = "nixon_module") -> str:
         lines.append("")
 
     for func in module.get("functions", []):
+        _renumber_function(func)
         params = []
         for p in func.get("params", []):
             ptype = p["type"]

@@ -39,6 +39,18 @@ until one is.)
   `scripts/artifact_sign.py:51`) or explicit testing-only flags
   (`--key-hex`, marked "testing only" in `--help`). Never commit a key,
   token, or hex secret to the tree, docs, or tests.
+- **Artifact signing keys.** Three environment variables are
+  recognised, in this order of preference:
+  - `NIXON_ARTIFACT_ED25519_KEY` — the farm's **Ed25519 private key**
+    (hex 32-byte seed). Used for signing when present.
+  - `NIXON_ARTIFACT_ED25519_PUBKEY` — a pinned **Ed25519 public key**
+    (hex 32 bytes) the verifier trusts.
+  - `NIXON_ARTIFACT_ED25519_KEYS` — a JSON map of farm id → hex public
+    key, for a verifier that trusts several farms.
+  The verifier holds **no secret**: it can check an artifact and cannot
+  mint one. The legacy shared-HMAC key (`NIXON_ARTIFACT_KEY_HEX`,
+  `NIXON_SIGN_KEY`) still works and is used only when no Ed25519 key is
+  configured. See `docs/adr/0005-artifact-authenticity.md`.
 - Build keys are generated per build (`os.urandom` /
   `secrets.token_bytes`, e.g. `obfuscator/watermark_gate.py:build_watermark_context`)
   and embedded only in the artifact that needs them — never logged, never

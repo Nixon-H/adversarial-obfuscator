@@ -52,28 +52,36 @@ def phase_package(payload, obfuscated_output, obfuscated_name, opts):
         # var holding a hex key; the packaged payload is signed with
         # metadata binding (repo/commit/build-id/platform) to
         # <file>.sig.json. Legacy bytes-only sigs still verify (weaker).
+        # An Ed25519 private key (NIXON_ARTIFACT_ED25519_KEY) is used
+        # when configured, so the verifier needs only a public key.
         try:
             _sign_env = str(getattr(opts, "sign_key_env", "") or "")
-            if _sign_env:
-                from scripts.artifact_sign import (
-                    sign_artifact as _phase4_sign,
-                    default_metadata as _phase4_meta,
-                    write_sidecar as _phase4_write,
-                )
-                _raw_key = os.environ.get(_sign_env, "")
-                if _raw_key:
-                    try:
-                        _meta = _phase4_meta(extra={
-                            "build_id": str(getattr(opts, "build_id", "") or ""),
-                            "file": os.path.basename(dst),
-                        })
-                        _sig = _phase4_sign(dst, bytes.fromhex(_raw_key), _meta)
-                        _sidecar = _phase4_write(dst, _sig)
-                        log("PACKAGE", f"  Signed: {_sidecar}")
-                    except Exception as _se:
-                        log("PACKAGE", f"  Signing failed (non-fatal): {_se}")
-                else:
-                    log("PACKAGE", f"  Sign key env {_sign_env!r} empty/unset (skipping signing)")
+            _raw_key = os.environ.get(_sign_env, "") if _sign_env else ""
+            from scripts.artifact_sign import (
+                sign_artifact_auto as _phase4_sign,
+                default_metadata as _phase4_meta,
+                write_sidecar as _phase4_write,
+                resolve_ed25519_private_key as _phase4_ed_priv,
+            )
+            # An Ed25519 private key alone is enough to sign: the
+            # verifier then needs only the matching public key.
+            _ed_priv = _phase4_ed_priv()
+            if _raw_key or _ed_priv is not None:
+                try:
+                    _meta = _phase4_meta(extra={
+                        "build_id": str(getattr(opts, "build_id", "") or ""),
+                        "file": os.path.basename(dst),
+                    })
+                    _key = bytes.fromhex(_raw_key) if _raw_key else None
+                    _sig = _phase4_sign(dst, _key, _meta)
+                    if _sig is None:
+                        raise RuntimeError("no signing key")
+                    _sidecar = _phase4_write(dst, _sig)
+                    log("PACKAGE", f"  Signed: {_sidecar}")
+                except Exception as _se:
+                    log("PACKAGE", f"  Signing failed (non-fatal): {_se}")
+            elif _sign_env:
+                log("PACKAGE", f"  Sign key env {_sign_env!r} empty/unset (skipping signing)")
         except Exception as _sign_outer:
             log("PACKAGE", f"  Signing sidecar skipped (non-fatal): {_sign_outer}")
 

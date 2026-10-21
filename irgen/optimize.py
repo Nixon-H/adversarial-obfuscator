@@ -186,6 +186,16 @@ def _dead_code_elimination(module: IrModule) -> IrModule:
                         for op in inst.operands:
                             if isinstance(op, IrValue):
                                 used_values.add(op.id)
+                    elif inst.opcode == 'phi':
+                        # A phi's operands are (value, label) PAIRS, not
+                        # values: without this the value the phi reads
+                        # looked unused and the instruction that
+                        # produced it was deleted, leaving the phi
+                        # pointing at nothing.
+                        for entry in inst.operands:
+                            val = entry[0] if isinstance(entry, tuple) else entry
+                            if isinstance(val, IrValue):
+                                used_values.add(val.id)
                     elif inst.result is not None:
                         for op in inst.operands:
                             if isinstance(op, IrValue):
@@ -344,6 +354,10 @@ def _replace_all_uses(block: IrBlock, func: IrFunction, old_val: IrValue, new_va
             for k, op in enumerate(inst.operands):
                 if isinstance(op, IrValue) and op.id == old_val.id:
                     inst.operands[k] = new_val
+                elif isinstance(op, tuple) and op and isinstance(op[0], IrValue):
+                    # A phi operand is a (value, label) pair.
+                    if op[0].id == old_val.id:
+                        inst.operands[k] = (new_val, op[1])
         if b.terminator:
             for k, op in enumerate(b.terminator.operands):
                 if isinstance(op, IrValue) and op.id == old_val.id:

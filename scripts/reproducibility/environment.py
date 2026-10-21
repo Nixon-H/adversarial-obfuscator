@@ -72,8 +72,20 @@ def snapshot_environment() -> Dict[str, str]:
     """
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     os_name = platform.platform()
-    processor = platform.processor() or platform.machine()
-    hostname = platform.node()
+    # os.uname() is a SYSCALL.  platform.processor() and
+    # platform.machine() each spawn an untimed `uname` subprocess, which
+    # can block the build indefinitely when the host is loaded (it hung
+    # for five minutes once).  The snapshot wants the architecture, not
+    # a subprocess.
+    try:
+        _uname = os.uname()
+        processor = _uname.machine or ""
+        hostname = _uname.nodename or ""
+    except Exception:
+        processor = ""
+        hostname = platform.node()
+    if not processor:
+        processor = os.environ.get("PROCESSOR_ARCHITECTURE", "") or "unknown"
     timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     git_commit, git_dirty = _get_git_info()

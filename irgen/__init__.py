@@ -23,12 +23,14 @@ Exports:
   - IrModule, IrFunction, IrBlock, IrInstruction, IrValue, IrType
 """
 
-from .compile import compile_py_to_ir, ir_module_to_text, IrModule, IrFunction, IrBlock, IrInstruction, IrValue, IrType
+from .compile import (compile_py_to_ir, ir_module_to_text, IrModule, IrFunction,
+                      IrBlock, IrInstruction, IrValue, IrType, UnresolvedNameError)
 from .optimize import optimize
 
 __all__ = [
     "compile_py_to_ir", "ir_module_to_text", "optimize",
     "IrModule", "IrFunction", "IrBlock", "IrInstruction", "IrValue", "IrType",
+    "UnresolvedNameError",
 ]
 
 
@@ -42,13 +44,18 @@ def main():
     parser.add_argument("-o", "--output", default=None, help="Output IR file")
     parser.add_argument("-O", "--optimize", type=int, default=2, choices=[0, 1, 2],
                         help="Optimization level (default: 2)")
+    parser.add_argument("--lenient", action="store_true",
+                        help="Do not fail on names the IR cannot represent "
+                             "(they become the integer 0)")
 
     args = parser.parse_args()
 
     with open(args.input, "r") as f:
         source = f.read()
 
-    module = compile_py_to_ir(source)
+    # Strict by default: a name the IR cannot represent is an error,
+    # not a silent zero.
+    module = compile_py_to_ir(source, strict=not args.lenient)
     if args.optimize > 0:
         module = optimize(module, level=args.optimize)
 

@@ -14,6 +14,46 @@ checks they agree).
 
 ### Fixed
 
+- **The native build path did not build.** It was recorded as an
+  environmental limitation because it failed identically on the
+  unmodified tree. It was not environmental: twenty-two defects in the
+  IR → LLVM path, each hiding the next. The right shift (`shr`) and the
+  pointer arithmetic (`gep`) were not lowered — and an instruction the
+  lowering did not recognise was emitted as a **comment**, so its
+  result stayed undefined; the GEP dropped its indices, computing the
+  wrong address; a constant captured by a nested function resolved to
+  `0`, so `x & _nx_M` compiled to `x & 0`; the IR carries pointers as
+  `i32` and the GEP did not convert the base; LLVM requires unnamed
+  values to be numbered consecutively and the IR numbering has gaps;
+  the comparison opcodes were not lowered and the tokenizer split
+  string constants containing spaces; a float constant in an integer
+  operation is not valid LLVM; a call with no arguments lost its
+  parentheses; a `try` block was dropped whole; the boolean operators
+  produced a block with no terminator and the wrong short-circuit
+  value; the dead-code pass deleted values a phi still reads; and the
+  OLLVM passes broke the module they obfuscated (the BCF pass failed
+  on roughly half its runs). The lowering now **fails loudly** on an
+  instruction it does not recognise instead of dropping it, the IR
+  generator resolves closures, imports, module-level bindings and
+  literals instead of turning them into zeros, and it **fails** on a
+  name it cannot represent rather than shipping a zero. The
+  encryption stage runs the `encrypt` package CLI (the script form
+  could never work — it uses a relative import), and
+  `scripts/build.py` completes the native path and produces a valid
+  ELF object.
+- **Every verifier of an artifact was also a forger.** The artifact
+  sidecar was signed with one shared HMAC key, so any verifier that
+  held the key could mint a sidecar for any farm id. The farm now
+  holds an **Ed25519 private key** and the operator pins the farm's
+  **public** key: a verifier can check an artifact and cannot mint
+  one. A sidecar signed by an unpinned key is rejected at the download
+  gate, and the farm identity is the pinned key rather than a claimed
+  string. The HMAC path is unchanged and still verifies.
+- **The environment snapshot could hang the build.**
+  `platform.processor()` and `platform.machine()` each run an untimed
+  `uname` subprocess; one of them blocked a build for five minutes
+  under load. The snapshot reads `os.uname()` instead.
+
 - **The loader CLI dropped 14 of its own flags.** It built a second
   `argparse.Namespace` and passed that to the build instead of the
   parsed one, so any field the copy forgot fell back to its default.

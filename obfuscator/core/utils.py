@@ -633,12 +633,15 @@ def _verify_download_zip(zip_path, artifact_name, sign_key):
     raises ``ValueError`` fail-closed and the zip is deleted so the
     caller must not extract). No key + sidecars present → loud warning
     + proceed. No key + no sidecars → auditable warning + proceed. Key
-    + no sidecars → info note (farm-runner binaries are unsigned by
-    design: runners never hold the key — ADR-0005).
+    + no sidecars → info note (a farm that holds no key stages
+    unsigned binaries).
 
     The farm identity is pinned when one is configured: a sidecar
     minted by a *different* farm is a mismatch, not a pass.  That closes
     the "no per-farm identity" limit ADR-0005 recorded.
+
+    An Ed25519 public key is enough to enforce the gate: the verifier
+    holds no secret, so it cannot mint a sidecar it would later accept.
     """
     import logging as _logging
     _log = _logging.getLogger("scripts.artifact_sign")
@@ -651,7 +654,8 @@ def _verify_download_zip(zip_path, artifact_name, sign_key):
     _farm = os.environ.get("NIXON_FARM_ID", "").strip()
     if _farm:
         _expected["farm"] = _farm
-    if sign_key is not None:
+    _pinned = _as.resolve_ed25519_public_keys()
+    if sign_key is not None or _pinned:
         if _names:
             try:
                 _n = _as.verify_zip_sidecars(zip_path, sign_key, _expected or None)
@@ -666,14 +670,14 @@ def _verify_download_zip(zip_path, artifact_name, sign_key):
             print("    [+] Signatures verified (%d) for: %s" % (_n, artifact_name))
             return True
         _log.info("ARTIFACT-AUTH: no signature sidecars for %r "
-                  "(farm-runner binaries are unsigned by design).",
-                  artifact_name)
+                  "(the farm holds no signing key).", artifact_name)
         return False
     if _names:
         _log.warning("ARTIFACT-AUTH: %d signature sidecar(s) present for %r "
                      "but no signing key configured (NIXON_ARTIFACT_KEY_HEX / "
-                     "NIXON_SIGN_KEY) — proceeding WITHOUT verification. "
-                     "Set a key to enforce.", len(_names), artifact_name)
+                     "NIXON_SIGN_KEY / %s) — proceeding WITHOUT verification. "
+                     "Set a key to enforce.", len(_names), artifact_name,
+                     _as.ED25519_PUBLIC_KEY_ENV)
         print("    [!] ARTIFACT-AUTH: signatures present for %s but no key "
               "configured — proceeding UNVERIFIED (see log)." % artifact_name)
     else:
@@ -750,32 +754,33 @@ class GitHubBuildFarm:
         # upload can access the env key, so attach a metadata-bound
         # <remote_name>.sig.json sidecar when configured. Best-effort —
         # never fails the upload. Absent key → logged + proceed unsigned.
+        # An Ed25519 private key is preferred: a verifier holding only
+        # the public key can check the artifact but cannot mint one.
         try:
             _skey = _artifact_sign_key()
-            if _skey is not None:
+            try:
+                from scripts.artifact_sign import sign_artifact_auto as _sa, default_metadata as _dm
+                import json as _json
+                _sig = _sa(local_path, _skey, _dm(extra={"file": remote_name}))
+                if _sig is None:
+                    raise RuntimeError("no signing key")
+                _scontent = base64.b64encode(_json.dumps(_sig, sort_keys=True).encode()).decode()
+                _surl = f"{self.base_url}/repos/{self.username}/{self.repo_name}/contents/{remote_name}.sig.json"
                 try:
-                    from scripts.artifact_sign import sign_artifact as _sa, default_metadata as _dm
-                    import json as _json
-                    _sig = _sa(local_path, _skey, _dm(extra={"file": remote_name}))
-                    _scontent = base64.b64encode(_json.dumps(_sig, sort_keys=True).encode()).decode()
-                    _surl = f"{self.base_url}/repos/{self.username}/{self.repo_name}/contents/{remote_name}.sig.json"
-                    try:
-                        _get = requests.get(_surl, headers=self.headers, proxies=self.proxies, verify=True, timeout=30)
-                        _sdata = {"message": f"Upload {remote_name}.sig.json", "content": _scontent}
-                        if _get.status_code == 200:
-                            _sha = _get.json().get("sha")
-                            if _sha: _sdata["sha"] = _sha
-                        _sr = requests.put(_surl, headers=self.headers, json=_sdata, proxies=self.proxies, verify=True, timeout=60)
-                        if _sr.status_code in [200, 201]:
-                            print(f"    [+] Signature sidecar uploaded: {remote_name}.sig.json")
-                        else:
-                            print(f"    [!] Sidecar upload skipped ({_sr.status_code}, non-fatal)")
-                    except Exception as _se:
-                        print(f"    [!] Sidecar upload skipped (non-fatal): {_se}")
+                    _get = requests.get(_surl, headers=self.headers, proxies=self.proxies, verify=True, timeout=30)
+                    _sdata = {"message": f"Upload {remote_name}.sig.json", "content": _scontent}
+                    if _get.status_code == 200:
+                        _sha = _get.json().get("sha")
+                        if _sha: _sdata["sha"] = _sha
+                    _sr = requests.put(_surl, headers=self.headers, json=_sdata, proxies=self.proxies, verify=True, timeout=60)
+                    if _sr.status_code in [200, 201]:
+                        print(f"    [+] Signature sidecar uploaded: {remote_name}.sig.json")
+                    else:
+                        print(f"    [!] Sidecar upload skipped ({_sr.status_code}, non-fatal)")
                 except Exception as _se:
-                    print(f"    [!] Sidecar signing skipped (non-fatal): {_se}")
-            else:
-                print("    [i] No artifact signing key (NIXON_ARTIFACT_KEY_HEX/NIXON_SIGN_KEY); uploading unsigned (auditable).")
+                    print(f"    [!] Sidecar upload skipped (non-fatal): {_se}")
+            except Exception as _se:
+                print(f"    [!] Sidecar signing skipped (non-fatal): {_se}")
         except Exception as _se:
             print(f"    [!] Sidecar step skipped (non-fatal): {_se}")
         return True
@@ -1074,31 +1079,33 @@ class GitHubNuitkaFarm:
                             # Artifact-authenticity (ADR-0005, opportunistic):
                             # attach a metadata-bound sidecar when a key is
                             # configured. Best-effort — never fails the upload.
+                            # An Ed25519 private key is preferred: the
+                            # verifier then holds only a public key and
+                            # cannot forge a sidecar.
                             try:
                                 _skey = _artifact_sign_key()
-                                if _skey is not None:
+                                try:
+                                    from scripts.artifact_sign import sign_artifact_auto as _sa2, default_metadata as _dm2
+                                    import json as _json2
+                                    _sig = _sa2(local_path, _skey, _dm2(extra={"file": remote_name}))
+                                    if _sig is None:
+                                        raise RuntimeError("no signing key")
+                                    _scontent = base64.b64encode(_json2.dumps(_sig, sort_keys=True).encode()).decode()
+                                    _surl = f"{self.base_url}/repos/{self.username}/{self.repo_name}/contents/{remote_name}.sig.json"
+                                    _sdata = {"message": f"Upload {remote_name}.sig.json", "content": _scontent}
                                     try:
-                                        from scripts.artifact_sign import sign_artifact as _sa2, default_metadata as _dm2
-                                        import json as _json2
-                                        _sig = _sa2(local_path, _skey, _dm2(extra={"file": remote_name}))
-                                        _scontent = base64.b64encode(_json2.dumps(_sig, sort_keys=True).encode()).decode()
-                                        _surl = f"{self.base_url}/repos/{self.username}/{self.repo_name}/contents/{remote_name}.sig.json"
-                                        _sdata = {"message": f"Upload {remote_name}.sig.json", "content": _scontent}
-                                        try:
-                                            _get = requests.get(_surl, headers=self.headers, proxies=self.proxies, verify=True, timeout=30)
-                                            if _get.status_code == 200:
-                                                _sha = _get.json().get("sha")
-                                                if _sha: _sdata["sha"] = _sha
-                                        except Exception: pass
-                                        _sr = requests.put(_surl, headers=self.headers, json=_sdata, proxies=self.proxies, verify=True, timeout=60)
-                                        if _sr.status_code in [200, 201]:
-                                            print(f"    [+] Signature sidecar uploaded: {remote_name}.sig.json")
-                                        else:
-                                            print(f"    [!] Sidecar upload skipped ({_sr.status_code}, non-fatal)")
-                                    except Exception as _se:
-                                        print(f"    [!] Sidecar signing skipped (non-fatal): {_se}")
-                                else:
-                                    print("    [i] No artifact signing key (NIXON_ARTIFACT_KEY_HEX/NIXON_SIGN_KEY); uploading unsigned (auditable).")
+                                        _get = requests.get(_surl, headers=self.headers, proxies=self.proxies, verify=True, timeout=30)
+                                        if _get.status_code == 200:
+                                            _sha = _get.json().get("sha")
+                                            if _sha: _sdata["sha"] = _sha
+                                    except Exception: pass
+                                    _sr = requests.put(_surl, headers=self.headers, json=_sdata, proxies=self.proxies, verify=True, timeout=60)
+                                    if _sr.status_code in [200, 201]:
+                                        print(f"    [+] Signature sidecar uploaded: {remote_name}.sig.json")
+                                    else:
+                                        print(f"    [!] Sidecar upload skipped ({_sr.status_code}, non-fatal)")
+                                except Exception as _se:
+                                    print(f"    [!] Sidecar signing skipped (non-fatal): {_se}")
                             except Exception as _se:
                                 print(f"    [!] Sidecar step skipped (non-fatal): {_se}")
                             return True

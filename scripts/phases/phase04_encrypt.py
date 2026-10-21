@@ -41,7 +41,11 @@ def phase_encrypt_binary(input_o, output_enc):
     if not os.path.exists(script):
         log("SKIP", "encrypt/encrypt.py not found, skipping")
         return
-    run([sys.executable, script, "encrypt", input_o, "-o", output_enc])
+    # The package is invoked as a MODULE: encrypt/encrypt.py uses a
+    # relative import ("from . import aes"), which fails when the file
+    # is run as a script ("attempted relative import with no known
+    # parent package").  The package CLI is `python -m encrypt`.
+    run([sys.executable, "-m", "encrypt", "encrypt", input_o, "-o", output_enc])
 
 
 def phase_entropy_flatten(input_bin, output_bin, config):

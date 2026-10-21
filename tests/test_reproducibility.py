@@ -55,6 +55,25 @@ def test_snapshot_environment_os_matches():
     assert platform.platform() in env["os"] or env["os"] == platform.platform()
 
 
+def test_snapshot_environment_does_not_shell_out_for_the_cpu(monkeypatch):
+    """The snapshot must not shell out for the CPU name.
+
+    ``platform.processor()`` and ``platform.machine()`` each run an
+    untimed ``uname`` subprocess.  Under load one of them blocked the
+    build for five minutes.  The snapshot wants the architecture, not a
+    subprocess, so it reads ``os.uname()``.
+    """
+    def _boom(*args, **kwargs):
+        raise AssertionError("snapshot_environment shelled out for the CPU")
+
+    monkeypatch.setattr(platform, "processor", _boom)
+    monkeypatch.setattr(platform, "machine", _boom)
+
+    env = snapshot_environment()
+    assert env["cpu"]
+    assert env["hostname"]
+
+
 def test_environment_fingerprint_is_deterministic():
     env1 = {"a": "1", "b": "2", "timestamp": "t1"}
     env2 = {"a": "1", "b": "2", "timestamp": "t2"}

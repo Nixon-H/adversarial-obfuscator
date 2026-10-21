@@ -146,6 +146,23 @@ Comparisons produce an `i1` boolean value.
 | `nop`         | `nop`         | No operation                |
 | `unreachable` | `unreachable` | Marks unreachable code      |
 
+### 6.7 Opaque handles
+
+The IR has no module or object type. A value that stands for
+something the runtime owns — an imported module, a builtin used as a
+value, a string — is represented by an **opaque handle**: a
+module-level global of type `i32`, loaded where it is used.
+
+```
+global i32 @__nx_mod_hashlib = 0
+...
+%7 = load i32, ptr @__nx_mod_hashlib
+```
+
+The handle is an identity, not a value: what it points to is the
+runtime's business. A name the IR cannot represent at all is an
+error in strict mode (`UnresolvedNameError`), never the integer 0.
+
 ## 7. Text Format Grammar
 
 ```
