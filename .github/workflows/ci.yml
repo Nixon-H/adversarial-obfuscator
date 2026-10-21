@@ -25,7 +25,24 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Install dependencies
         run: pip install --require-hashes -r requirements.lock
+      - name: Build native artefacts
+        # BEFORE the tests.  Nineteen tests need a compiled artefact
+        # (the C shared libraries, the Rust relay, the microjit shared
+        # object) and SKIP themselves when it is absent -- so with the
+        # build after the tests, CI never ran them either.  A test that
+        # skips is a test that proves nothing.
+        run: |
+          make core
+          make wb
+          make py_compile
+          make relay
+          make microjit-so
       - name: Python tests
+        # NIXON_REQUIRE_ARTEFACTS makes the artefact gate fail the
+        # build if a compiled artefact is missing, instead of letting
+        # the nineteen tests that need it skip quietly.
+        env:
+          NIXON_REQUIRE_ARTEFACTS: "1"
         run: python3 -m pytest tests/ -v
       - name: End-to-end artifact check
         # Build a payload on THIS Python version, run the artifact, and
@@ -43,8 +60,6 @@ jobs:
         run: cd relay && cargo check
       - name: Static analysis
         run: python3 -m py_compile obfuscator/*.py irgen/*.py llvmgen/*.py scripts/*.py vm/*.py encrypt/*.py tests/*.py
-      - name: Build C shared libs
-        run: make core
 
   pip-audit:
     # Supply chain HARD gate: pip-audit exits nonzero when any advisory

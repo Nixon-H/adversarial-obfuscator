@@ -42,6 +42,16 @@ checks they agree).
   `tarfile` extraction without an explicit filter (a behaviour change
   in Python 3.14, not just noise), `datetime.utcnow()`, and the
   deprecated `pkg_resources` import.
+- **Nineteen tests skipped in CI.** They need a compiled artefact —
+  the C shared libraries, the Rust relay, the microjit shared object —
+  and each skips itself when the artefact is absent. CI built those
+  artefacts *after* the tests, so CI skipped all nineteen too, and a
+  skipped test proves nothing. The artefacts are now built first, and
+  `NIXON_REQUIRE_ARTEFACTS=1` turns a missing artefact into a failed
+  build rather than a quiet skip. The suite's skips are down to four,
+  all of them deliberate (a retired C simulation, a Cython block that
+  is not Python, the 3.14 goldens that run on the 3.14 CI leg, and a
+  platform-conditional `mprotect` case).
 
 - **The native build path did not build.** It was recorded as an
   environmental limitation because it failed identically on the

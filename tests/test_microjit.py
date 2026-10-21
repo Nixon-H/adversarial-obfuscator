@@ -377,7 +377,7 @@ class TestFragmentPipeline:
 
 _HAVE_MICROJIT_SO = os.path.exists("/tmp/libmicrojit.so")
 
-@pytest.mark.skipif(not _HAVE_MICROJIT_SO, reason="libmicrojit.so not built (run: gcc -shared -fPIC native/microjit.c -o /tmp/libmicrojit.so -lc)")
+@pytest.mark.skipif(not _HAVE_MICROJIT_SO, reason="libmicrojit.so not built (run: make microjit-so)")
 class TestNative:
     """
     TestNative
