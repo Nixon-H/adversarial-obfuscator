@@ -210,9 +210,8 @@ pub fn init_runtime(config: &RuntimeConfig) {
     if config.enable_state_isa {
         let mut table = state_isa::StateIsaTable::with_history_len(0, config.state_isa_history_len);
         // Execute a sample instruction sequence to demonstrate state-dependent mapping
-        let mut state_hash = [0u8; 32];
         for step in 0u8..16 {
-            state_hash = table.update_state(step);
+            let state_hash = table.update_state(step);
             let mapped = table.lookup(step, &state_hash);
             core::hint::black_box(mapped);
         }

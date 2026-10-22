@@ -6,7 +6,7 @@
 
 # ─── Core ────────────────────────────────────────────────────────────────────
 requests==2.33.0         # GitHub API (build farms, repo mgmt, artifact download)
-urllib3==2.7.0           # HTTP retry adapter (used by CloudBuilder with requests)
+urllib3==2.8.0           # HTTP retry adapter (used by CloudBuilder with requests)
 numpy==2.2.4             # Optional — HAS_NUMPY check; used if present for numeric obf
 
 # ─── Build (C extension compilation) ─────────────────────────────────────────
