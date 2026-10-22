@@ -20,20 +20,14 @@ def _load_build_py():
         return f.read()
 
 
-def _load_runtime_lib():
-    with open(os.path.join(ROOT, "runtime", "src", "lib.rs")) as f:
-        return f.read()
-
-
 BUILD_PY = _load_build_py()
-RUNTIME_LIB = _load_runtime_lib()
 
-ALL_TEST_FILES = set()
-for d in [os.path.join(ROOT, "tests"), os.path.join(ROOT, "tests", "advanced_protection")]:
-    if os.path.isdir(d):
-        for f in os.listdir(d):
-            if f.endswith(".py") and f != "__init__.py":
-                ALL_TEST_FILES.add(f.replace(".py", "").replace("test_", "").replace("test_test_", ""))
+import re as _re  # noqa: E402
+
+_ADD_ARG = _re.compile(r"parser\.add_argument\s*\(")
+# build.py with its argument declarations removed: only flag CONSUMERS.
+_BUILD_CONSUMPTION = None
+_CONSUMERS = None
 
 ALL_PHASE_FILES = set()
 pd = os.path.join(ROOT, "scripts", "phases")
@@ -43,38 +37,138 @@ if os.path.isdir(pd):
             ALL_PHASE_FILES.add(f.replace(".py", ""))
 
 
+def _strip_argument_definitions(text):
+    """Remove every ``parser.add_argument(...)`` call from build.py.
+
+    What is left is the code that CONSUMES the flags.  Checking for
+    ``opts.<name>`` alone gives false "not wired" results, because a
+    flag is often consumed through a mapping dict (``--fragment-strings``
+    is used as ``{'fragment_strings': ...}``), and a flag can be
+    declared with a ``dest`` that differs from its name.
+    """
+    out = []
+    i = 0
+    while True:
+        m = _ADD_ARG.search(text, i)
+        if not m:
+            out.append(text[i:])
+            break
+        out.append(text[i:m.start()])
+        depth = 0
+        k = m.end() - 1
+        while k < len(text):
+            if text[k] == "(":
+                depth += 1
+            elif text[k] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        i = k + 1
+    return "".join(out)
+
+
+def _find_argument_call(flag):
+    """The ``parser.add_argument(...)`` call that declares ``flag``."""
+    i = 0
+    while True:
+        m = _ADD_ARG.search(BUILD_PY, i)
+        if not m:
+            return None
+        depth = 0
+        k = m.end() - 1
+        while k < len(BUILD_PY):
+            if BUILD_PY[k] == "(":
+                depth += 1
+            elif BUILD_PY[k] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        call = BUILD_PY[m.start():k + 1]
+        if _re.search(r"[\"']%s[\"']" % _re.escape(flag), call):
+            return call
+        i = k + 1
+
+
+def _dest_of(call, flag):
+    """The argparse dest a flag binds to."""
+    if not call:
+        return flag.lstrip("-").replace("-", "_")
+    m = _re.search(r"dest\s*=\s*[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']", call)
+    if m:
+        return m.group(1)
+    opts = _re.findall(r"[\"'](--[A-Za-z0-9_-]+)[\"']", call)
+    name = flag if flag in opts else (opts[0] if opts else flag)
+    return name.lstrip("-").replace("-", "_")
+
+
 def cli_exists(flag):
     return flag in BUILD_PY
 
 
 def wired(flag):
-    flag_name = flag.lstrip("-").replace("-", "_")
-    return f"opts.{flag_name}" in BUILD_PY
+    """Is the flag's value consumed anywhere outside its declaration?
+
+    Checking for ``opts.<name>`` alone gives false "not wired" results:
+    flags are also consumed through config dicts
+    (``--fragment-strings`` -> ``{'fragment_strings': ...}``) and
+    through helpers named after them
+    (``--advanced-protection`` -> ``load_advanced_protection_config``).
+    So: resolve the real ``dest``, then look for it anywhere in the
+    consumer side of build.py.
+    """
+    return _name_in_use(_dest_of(_find_argument_call(flag), flag))
 
 
-def runtime_mod(name):
-    name = name.lower().replace("-", "_").replace(" ", "_").replace("/", "_")
-    for line in RUNTIME_LIB.splitlines():
-        s = line.strip()
-        if s.startswith("pub mod "):
-            m = s.split("pub mod ")[1].rstrip(";").strip()
-            if name in m or m in name:
-                return True
-    return False
+def _consumer_text():
+    """Everything that could consume a flag's value.
+
+    ``build.py`` minus its argument declarations, plus every phase and
+    package module — because ``opts`` is passed wholesale into the
+    phases, so a flag is often consumed there and never named in
+    build.py.  Checking build.py alone reported eight wired flags as
+    unwired.
+
+    ``feature_map.py`` is excluded: it lists feature names as metadata
+    and consuming nothing.
+    """
+    global _CONSUMERS
+    if _CONSUMERS is not None:
+        return _CONSUMERS
+    parts = [_strip_argument_definitions(BUILD_PY)]
+    skip = {"feature_map.py"}
+    for base in (os.path.join(ROOT, "scripts"), os.path.join(ROOT, "obfuscator")):
+        for dirpath, _dirnames, filenames in os.walk(base):
+            if "__pycache__" in dirpath:
+                continue
+            for fn in filenames:
+                if fn.endswith(".py") and fn not in skip:
+                    parts.append(_read_file_text(os.path.join(dirpath, fn)))
+    _CONSUMERS = "\n".join(parts)
+    return _CONSUMERS
+
+
+def _read_file_text(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _name_in_use(name):
+    # Substring, deliberately: a flag's value is consumed as
+    # opts.<dest>, as cfg['<dest>'], and as part of a helper name
+    # (load_advanced_protection_config). A word-boundary match would
+    # miss the third and report a wired flag as unwired.
+    return name in _consumer_text()
 
 
 def phase_exists(name):
     name = name.lower().replace(" ", "_").replace("-", "_").replace("(", "").replace(")", "")
     for pf in ALL_PHASE_FILES:
         if name in pf or pf in name:
-            return True
-    return False
-
-
-def test_exists(name):
-    name = name.lower().replace(" ", "_").replace("-", "_").replace("(", "").replace(")", "")
-    for tf in ALL_TEST_FILES:
-        if name in tf or tf in name:
             return True
     return False
 
@@ -212,90 +306,157 @@ FEATURES = [
 ]
 
 
+# --- evidence dimensions -------------------------------------------------
+#
+# The old classifier answered one question ("does a file with a similar
+# name exist?") and then returned IMPLEMENTED for everything.  A
+# protection is only real if it is implemented, compiled, REACHABLE
+# from the entry point, ENABLED, and EXERCISED in the artefact.  Each
+# dimension is now separate, and the verdict names the gap.
+
+from scripts.reachability import rust_callgraph as _cg  # noqa: E402
+
+RUST_DECLARED = _cg.module_declarations()
+RUST_REACHABLE = _cg.reachable_modules()
+RUST_FLAG_BLOCKS = _cg.flag_blocks()
+RUST_DEFAULT_TRUE = _cg.default_true_flags()
+RUST_SET_ELSEWHERE = _cg.flags_set_true_elsewhere()
+RUST_FLAGS = _cg.config_flags()
+
+
+def _slug(name):
+    import re as _re
+    return _re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def _rust_flag(name):
+    """The RuntimeConfig flag gating a feature, if it has one."""
+    flag = "enable_" + _slug(name)
+    return flag if flag in RUST_FLAGS else None
+
+
+def _rust_module_missing(flag, slug):
+    """The module files the flag references that do not exist."""
+    import os as _os
+    modules = RUST_FLAG_BLOCKS.get(flag) or ({slug} if slug in RUST_DECLARED else set())
+    missing = []
+    for m in modules:
+        if not _os.path.exists(_os.path.join(ROOT, "runtime", "src", m + ".rs")):
+            missing.append(m)
+    return missing
+
+
 def gather_evidence(f):
-    rid = f["id"]
+    """Five independent dimensions, each mechanically answerable."""
+    name = f["name"]
     flag = f["cli_flag"]
+    slug = _slug(name)
+    internal = flag in ("(internal)", "(phase)", "(phase2)", "(none)")
 
-    internal_flag = flag in ("(internal)", "(phase)", "(phase2)", "(none)")
-
-    ce = internal_flag or cli_exists(flag)
-
-    we = internal_flag or wired(flag)
-
-    re = (
-        runtime_mod(f["name"])
-        or rid in (80, 81, 82, 83, 84, 85, 86, 88, 89)
-        or rid in (120, 121, 122, 123, 124, 125, 126, 127, 128)
-        or flag in ("--oram", "--rop", "--cfg-mutation", "--class-dispatch",
-                     "--rolling-keys", "--ssa-mutation", "--state-isa",
-                     "--per-exec-recompile", "--self-healing", "--code-genome",
-                     "--struct-randomization", "--history-bound-decryption",
-                     "--hpc", "--hpc-key", "--hpc-detect", "--hw-entropy",
-                     "--cache-bound", "--branch-entangle", "--multicore-entangle",
-                     "--tee", "--sgx", "--cpu-port", "--gpu-hybrid")
-    )
-
-    pe = phase_exists(f["name"])
-
-    te = test_exists(f["name"])
-
-    explicit_tests = {
-        1: True, 2: True, 3: True, 4: True, 5: True, 6: True,
-        7: True, 8: True, 9: True, 10: True, 11: True, 12: True,
-        13: True, 14: True, 15: True, 16: True, 17: True, 18: True,
-        19: True, 20: True, 21: True, 22: True, 23: True, 24: True,
-        25: True, 26: True, 27: True, 28: True, 29: True, 30: True,
-        31: True, 32: True, 33: True, 34: True, 35: True, 36: True,
-        37: True, 38: True, 39: True, 40: True, 41: True, 42: True,
-        43: True, 44: True, 45: True, 46: True, 47: True, 48: True,
-        49: True, 50: True, 51: True, 52: True, 53: True, 54: True,
-        55: True, 56: True, 57: True, 58: True, 59: True, 60: True,
-        61: True, 62: True, 63: True, 64: True, 65: True, 66: True,
-        67: True, 68: True, 69: True,
-        70: True, 71: True, 72: True, 73: True, 74: True,
-        75: True, 76: True, 77: True, 78: True, 79: True,
-        80: True, 81: True, 82: True, 83: True, 84: True,
-        85: True, 86: True, 87: True, 88: True, 89: True,
-        90: True, 91: True, 92: True, 93: True, 94: True,
-        95: True, 96: True, 97: True, 98: True, 99: True,
-        100: True, 101: True, 102: True, 103: True, 104: True,
-        105: True, 106: True, 107: True, 108: True, 109: True,
-        110: True, 111: True, 112: True, 113: True, 114: True,
-        115: True, 116: True, 117: True, 118: True, 119: True,
-        120: True, 121: True, 122: True, 123: True, 124: True,
-        125: True, 126: True, 127: True, 128: True, 129: True,
+    ev = {
+        # 1. implemented: a module/phase/flag for it exists
+        "implemented": internal or cli_exists(flag) or phase_exists(name)
+                        or (slug in RUST_DECLARED),
+        # 2. compiled: Python is never compiled; Rust/C must exist as code
+        "compiled": True,
+        # 3. reachable: a call path exists from the entry point
+        "reachable": True,
+        # 4. enabled: nothing gates it off at run time
+        "enabled": True,
+        # 5. exercised: the built artefact shows it ran (None = no build)
+        "exercised": None,
+        "reason": "",
     }
-    te = te or explicit_tests.get(rid, False)
 
-    if rid <= 69:
-        ce = True
-        we = True
+    rust_flag = _rust_flag(name)
+    if rust_flag:
+        missing = _rust_module_missing(rust_flag, slug)
+        ev["compiled"] = not missing
+        # A handler in init_runtime AND the module in the closure.
+        has_handler = rust_flag in RUST_FLAG_BLOCKS
+        in_closure = bool((RUST_FLAG_BLOCKS.get(rust_flag) or {slug}) & RUST_REACHABLE)
+        ev["reachable"] = has_handler and in_closure
+        ev["enabled"] = rust_flag in RUST_DEFAULT_TRUE or rust_flag in RUST_SET_ELSEWHERE
+        if not has_handler:
+            ev["reason"] = "no handler in init_runtime for %s" % rust_flag
+        elif not in_closure:
+            ev["reason"] = "gated by %s but not in init_runtime's call graph" % rust_flag
+        elif not ev["enabled"]:
+            ev["reason"] = "%s is false in RuntimeConfig::default and nothing sets it" % rust_flag
+        elif missing:
+            ev["reason"] = "module missing: %s" % ", ".join(missing)
+    else:
+        # A Python feature: "reachable" means the flag is actually wired.
+        if not internal:
+            ev["reachable"] = wired(flag)
+            if not ev["reachable"] and cli_exists(flag):
+                ev["reason"] = "flag %s exists but is not wired into the build" % flag
 
-    return {"cli_exists": ce, "phase_exists": pe, "test_exists": te,
-            "runtime_exists": re, "wired": we}
+    manifest = _ARTEFACT_MANIFEST
+    if manifest is not None:
+        ev["exercised"] = _manifest_lists(manifest, f, slug, rust_flag)
 
-
-CLASSIFICATION = {
-    103: "PARTIAL",
-    104: "PARTIAL",
-    105: "PARTIAL",
-}
+    return ev
 
 
 def classify(ev):
-    override = CLASSIFICATION.get(ev["id"])
-    if override:
-        return override
-    return "IMPLEMENTED"
+    """Name the gap, do not paper over it."""
+    if not ev["implemented"]:
+        return "DEAD CODE"
+    if not ev["compiled"]:
+        return "DEAD CODE"
+    if not ev["reachable"]:
+        return "COMPILED-UNREACHABLE"
+    if not ev["enabled"]:
+        return "GATED-OFF"
+    if ev["exercised"] is False:
+        return "ENABLED-UNEXERCISED"
+    if ev["exercised"] is None:
+        return "LIVE (unverified)"
+    return "LIVE"
+
+
+_ARTEFACT_MANIFEST = None
+
+
+def _manifest_lists(manifest, feat, slug, rust_flag):
+    """Does the build's artefact manifest show this feature ran?"""
+    names = {str(n).lower() for n in manifest.get("features", [])}
+    if slug in names or feat["name"].lower() in names:
+        return True
+    if rust_flag and rust_flag in names:
+        return True
+    # A manifest that exists but does not list the feature is evidence
+    # that it did not run.
+    return False
+
+
+def load_artefact_manifest(path):
+    """Read the manifest the build emits next to the artefact."""
+    global _ARTEFACT_MANIFEST
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            _ARTEFACT_MANIFEST = data
+            return data
+    except (OSError, ValueError):
+        pass
+    _ARTEFACT_MANIFEST = None
+    return None
+
+
+CLASSES = ["LIVE", "LIVE (unverified)", "ENABLED-UNEXERCISED", "GATED-OFF",
+           "COMPILED-UNREACHABLE", "DEAD CODE"]
 
 
 def build_report():
     results = []
-    counts = {"IMPLEMENTED": 0, "PARTIAL": 0, "EXPERIMENTAL": 0, "SIMULATION": 0, "DEAD CODE": 0}
+    counts = {c: 0 for c in CLASSES}
     for feat in FEATURES:
         ev = gather_evidence(feat)
-        ev["id"] = feat["id"]
         cls = classify(ev)
+        counts.setdefault(cls, 0)
         counts[cls] += 1
         results.append({
             "id": feat["id"],
@@ -303,44 +464,43 @@ def build_report():
             "category": feat["category"],
             "cli_flag": feat["cli_flag"],
             "classification": cls,
-            "evidence": {k: v for k, v in ev.items() if k != "id"},
+            "live_in_artifact": cls == "LIVE",
+            "reason": ev.pop("reason", ""),
+            "evidence": ev,
         })
     return {
-        "report_version": "1.0",
+        "report_version": "2.0",
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "summary": {"total": 129, "implemented": counts["IMPLEMENTED"],
-                     "partial": counts["PARTIAL"], "experimental": counts["EXPERIMENTAL"],
-                     "simulation": counts["SIMULATION"], "dead_code": counts["DEAD CODE"]},
+        "artefact_manifest": bool(_ARTEFACT_MANIFEST),
+        "summary": {"total": len(FEATURES), **{c.lower().replace(" ", "_").replace("(", "").replace(")", ""): n
+                                               for c, n in counts.items()}},
         "features": results,
     }
 
 
 def print_summary(report):
     s = report["summary"]
-    print(f"\n{'=' * 60}")
-    print("  FEATURE CLASSIFICATION REPORT")
-    print(f"{'=' * 60}")
+    print(f"\n{'=' * 68}")
+    print("  FEATURE CLASSIFICATION REPORT (evidence-based)")
+    print(f"{'=' * 68}")
     print(f"  Total features: {s['total']}")
-    key_map = {"IMPLEMENTED": "implemented", "PARTIAL": "partial",
-               "EXPERIMENTAL": "experimental", "SIMULATION": "simulation",
-               "DEAD CODE": "dead_code"}
-    for label, key in key_map.items():
-        print(f"  {label:26s} {s[key]:3d}")
-    print(f"{'=' * 60}")
-    partial = [f for f in report["features"] if f["classification"] == "PARTIAL"]
-    if partial:
-        print("\n  PARTIAL FEATURES:")
-        for f in partial:
-            print(f"    Item {f['id']:3d}  {f['name']:35s}  ({f['category']})")
-            ev = f["evidence"]
-            reasons = [k for k, v in ev.items() if not v]
-            if reasons:
-                print(f"         Missing: {', '.join(reasons)}")
-    dead = [f for f in report["features"] if f["classification"] == "DEAD CODE"]
-    if dead:
-        print("\n  DEAD CODE FEATURES:")
-        for f in dead:
-            print(f"    Item {f['id']:3d}  {f['name']:35s}  ({f['category']})")
+    for c in CLASSES:
+        key = c.lower().replace(" ", "_").replace("(", "").replace(")", "")
+        print(f"  {c:24s} {s.get(key, 0):3d}")
+    if not report.get("artefact_manifest"):
+        print("\n  NOTE: no artefact manifest — 'exercised' is unverified.")
+        print("        Build with --classify-features and pass --from-build.")
+    print(f"{'=' * 68}")
+    for c in CLASSES:
+        rows = [f for f in report["features"] if f["classification"] == c]
+        if not rows or c == "LIVE":
+            continue
+        print(f"\n  {c}:")
+        for f in rows:
+            line = f"    Item {f['id']:3d}  {f['name']:32s} ({f['category']})"
+            print(line)
+            if f.get("reason"):
+                print(f"         {f['reason']}")
     print()
 
 
@@ -352,11 +512,20 @@ def write_json(report, path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Classify all 129 protection/research features")
+    parser = argparse.ArgumentParser(description="Classify all protection/research features")
     parser.add_argument("--json", action="store_true", help="Output JSON to stdout")
     parser.add_argument("--report", action="store_true", help="Output human-readable summary to stdout")
     parser.add_argument("--output", default=None, help="Path for JSON output file")
+    parser.add_argument("--from-build", default=None,
+                        help="Build dir holding artefact_manifest.json (makes 'exercised' checkable)")
+    parser.add_argument("--require-live", default=None, metavar="N",
+                        help="Exit non-zero unless at least N features are LIVE")
     opts = parser.parse_args()
+
+    if opts.from_build:
+        from scripts.artifacts.manifest import manifest_path
+        load_artefact_manifest(manifest_path(opts.from_build))
+
     report = build_report()
     if opts.json:
         print(json.dumps(report, indent=2))
@@ -368,6 +537,18 @@ def main():
     else:
         write_json(report, os.path.join(BUILD_DIR, "feature_classification.json"))
         print_summary(report)
+
+    if opts.require_live is not None:
+        live = report["summary"].get("live", 0)
+        need = int(opts.require_live)
+        if live < need:
+            print(f"FAIL: {live} LIVE feature(s), {need} required", file=sys.stderr)
+            return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
 
 
 if __name__ == "__main__":

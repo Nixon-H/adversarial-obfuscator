@@ -144,6 +144,36 @@ def _typed_operand(operand: str, type_: str) -> str:
     return operand
 
 
+def _reject_string_operand(operand: str) -> str:
+    """A string literal is not a value in the LLVM lowering — reject loudly.
+
+    ``irgen`` emits ``%926 = eq ptr "__main__", %925`` for the very
+    common ``__name__ == "__main__"``, and LLVM has no bare string
+    value, so this reached ``llc`` and died with ``expected value
+    token`` — a message that names neither the string nor the reason.
+
+    The tempting fix is to intern the literal as ``@.str.N`` and compare
+    pointers.  That is silently WRONG here: nothing in the runtime
+    interns strings, and this IR models a string as an i32 handle (not
+    a pointer), so pointer comparison is always false.
+
+    The check lives at EMIT time, not parse time, because the parser is
+    shared with the ROP compiler (`scripts/phases/phase08_rop.py`),
+    which parses the same IR; rejecting in the parser changed a
+    recoverable stage failure into a hard one.  The real fix belongs in
+    ``irgen``: emit a string-comparison runtime call, as string
+    concatenation already does.
+    """
+    s = operand.strip()
+    if len(s) >= 2 and s.startswith('"') and s.endswith('"'):
+        raise ValueError(
+            "string literal %s used as a value: LLVM has no bare string "
+            "value and this IR models strings as i32 handles, so this "
+            "needs a runtime comparison helper, not icmp" % s
+        )
+    return operand
+
+
 def _value_ref(s: str) -> str:
     s = s.strip()
     if s.startswith('"') and s.endswith('"'):
@@ -607,8 +637,9 @@ def _emit_instruction(instr: dict) -> str:
         return "  unreachable"
 
     if opcode in BINARY_OPS:
-        lhs = _typed_operand(_value_ref(instr["operands"][0]), instr["type"])
-        rhs = _value_ref(instr["operands"][1])
+        lhs = _typed_operand(_reject_string_operand(_value_ref(instr["operands"][0])),
+                             instr["type"])
+        rhs = _reject_string_operand(_value_ref(instr["operands"][1]))
         t = instr["type"]
         # The project's IR spells a logical right shift "shr"; LLVM
         # spells it "lshr".  Emitting "shr" verbatim would not
@@ -621,8 +652,8 @@ def _emit_instruction(instr: dict) -> str:
         return f"{result_prefix}{op} {t} {lhs}, {rhs}"
 
     if opcode == "icmp":
-        lhs = _value_ref(instr["operands"][0])
-        rhs = _value_ref(instr["operands"][1])
+        lhs = _reject_string_operand(_value_ref(instr["operands"][0]))
+        rhs = _reject_string_operand(_value_ref(instr["operands"][1]))
         t = instr["type"]
         return f"{result_prefix}icmp {instr['predicate']} {t} {lhs}, {rhs}"
 
@@ -775,6 +806,7 @@ def lower_ir_to_llvm(ir_text: str, module_name: str = "nixon_module") -> str:
 
     defined_funcs = {f["name"] for f in module.get("functions", [])}
     declared_funcs = {d["name"] for d in module.get("declares", [])}
+    lowered_errors: list = []
     called_funcs: dict[str, str] = {}
     call_params: dict[str, list] = {}
     for func in module.get("functions", []):
@@ -822,8 +854,21 @@ def lower_ir_to_llvm(ir_text: str, module_name: str = "nixon_module") -> str:
                 try:
                     lines.append(_emit_instruction(instr))
                 except Exception as e:
-                    lines.append(f"  ; ERROR: {e}")
+                    # A failed instruction used to be emitted as a
+                    # COMMENT while its result stayed in use, so the
+                    # module went on to reference a value that was
+                    # never defined. That is the defect this module
+                    # exists to avoid: an unsupported instruction must
+                    # be a hard error, not a silent gap. Collect every
+                    # failure so one run shows them all.
+                    lowered_errors.append(f"{func['name']}: {e}")
         lines.append("}")
         lines.append("")
 
+    if lowered_errors:
+        raise ValueError(
+            "IR contains %d instruction(s) this lowering cannot express; "
+            "emitting them would produce code referencing undefined "
+            "values:\n  %s" % (len(lowered_errors), "\n  ".join(lowered_errors))
+        )
     return "\n".join(lines)

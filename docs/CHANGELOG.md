@@ -12,7 +12,91 @@ checks they agree).
 
 ## Unreleased
 
+### Changed
+
+- **Archived the dead Rust runtime modules and the native compile-test
+  corpus.** Ten modules (3,286 lines — `branch_entangle`, `cache_bound`,
+  `code_genome`, `hpc_detect`, `hw_entropy`, `hwid_bind`,
+  `multicore_entangle`, `oram`, `rop`, `rop_dispatch`) were declared,
+  compiled and **unreachable from `init_runtime`**: no configuration
+  could run them. Thirteen native sources and their headers (4,834
+  lines) were in the same position — compiled into throwaway objects by
+  `make native-test`, never linked into an artefact. They are in
+  `archive/rust-runtime/` and `archive/native/` with a README each
+  explaining what they did and what replaces them. Nothing was
+  deleted; `tests/test_no_dead_code.py` fails if any of it comes back
+  without being wired.
+
+  `stub_win.cpp` is the notable one: a 1,957-line Windows reflective
+  loader with AMSI/ETW patching. It is archived rather than shipped —
+  its purpose is hiding a payload from the defender's tooling, which is
+  out of scope for a product whose job is protecting its author's IP.
+  The consequence is stated plainly: there is no native Windows loader
+  path until a clean one is written.
+
+  `make microjit-so` is gone from CI, `make native-test` now builds
+  only `core-cpp` and `simd-vm-c`, and `--fragment` logs that the
+  microjit backend is archived instead of compiling an object that
+  nothing loaded.
+
 ### Fixed
+
+- **Every GitHub Actions run failed for three separate reasons.**
+  1. `ci.yml` was **not a valid workflow**: `schedule:` and
+     `workflow_dispatch:` were nested inside the `lint-pin` *job*, where
+     GitHub accepts neither. The whole file was rejected, so the run
+     died in 0s with "This run likely failed because of a workflow file
+     issue" and no jobs. The triggers moved to the top-level `on:`
+     block; the other jobs carry `if: github.event_name != 'schedule'`
+     so only `lint-pin` runs on the weekly cron. `actionlint` clean.
+  2. `validate_dependencies()` ran *before* argparse and demanded `llc`
+     unconditionally, so `--skip-llvmgen` — which never invokes `llc` —
+     failed with "Missing dependency: llc". That is what broke the
+     security-artifact job. The check now runs after parsing and honours
+     the skip (which also means `--help` works on a box with no
+     toolchain).
+  3. The loader's `PT_SELF` anti-debug probe called
+     `ptrace(PTRACE_TRACEME, 0, 0, 0)` **in the calling process**.
+     TRACEME marks *the caller* traceable and makes it stop at its next
+     exec or signal — so a successful probe left the payload, or the
+     process that exec'd the loader, ready to stop later at a random
+     point. It now reads `TracerPid` from `/proc/self/status`, which
+     answers the same question with no side effect. The companion
+     fork-probe also blocked forever when TRACEME failed (its `waitpid`
+     had no `WUNTRACED`, so a real SIGSTOP was never reported); it now
+     uses `WUNTRACED`, kills the child when it cannot resume it, and the
+     child exits instead of stopping when TRACEME is refused.
+- **`test_rop_all_rust_tests_pass` asserted on archived code.** It
+  required five passing `rop::tests` in the Rust crate; `runtime/src/rop.rs`
+  is archived, so its tests went with it. Removed with a note; the live
+  ROP compiler is the Python one, still covered by the tests above it.
+
+- **The feature report said `IMPLEMENTED` for everything.**
+  `scripts/classify_features.py` classified 113 of 116 features with an
+  unconditional `return "IMPLEMENTED"`, and the evidence it gathered
+  was no stronger than "a file with a similar name exists" — a module
+  declared in `runtime/src/lib.rs` and unreachable from `init_runtime`
+  counted the same as one that ran. `explicit_tests` hardcoded `True`
+  for ids 1–129 and `if rid <= 69: ce = we = True` hardcoded 69 more,
+  so the report was a name list with a count on it. It now answers five
+  separate questions per feature — `implemented`, `compiled`,
+  `reachable` (a real call-graph walk, `scripts/reachability/rust_callgraph.py`),
+  `enabled`, and `exercised` (from the artefact manifest the package
+  step now writes, `scripts/artifacts/manifest.py`) — and the verdict
+  names the gap: `GATED-OFF`, `COMPILED-UNREACHABLE`,
+  `ENABLED-UNEXERCISED`, or `LIVE (unverified)`. `LIVE` requires all
+  five. See AUDIT-2026-10-20 §8.2d.
+
+- **A string literal as a comparison operand could not be compiled, and
+  failed with a message that named neither the string nor the cause.**
+  `if __name__ == "__main__":` produces `%926 = eq ptr "__main__", %925`,
+  and LLVM has no bare string value, so `llc` failed with `expected
+  value token`. Interning the literal as `@.str.N` would be silently
+  wrong — nothing interned, and this IR models a string as an i32
+  handle, not a pointer, so pointer comparison is always false. The
+  parser now rejects it where the cause is visible, and names the fix
+  (a runtime comparison helper, emitted from `irgen`). The real fix is
+  **not done** and is recorded in §8.2d.i.
 
 - **Editing the artifact's self-check disabled it.** The check excluded
   the lines it hashes by a MARKER string — and the marker's own line was

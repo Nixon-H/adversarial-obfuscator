@@ -2754,14 +2754,24 @@ HARDENING_SOURCE = r'''class {CLS_HARD}:
         return False
     @staticmethod
     def {METHOD_PTRACE_SELF}():
-        import platform as _p_
-        import ctypes as _c_
-        if _p_.system() == "Linux":
-            try:
-                libc = _c_.CDLL("libc.so.6")
-                if libc.ptrace(0, 0, 0, 0) == -1:
-                    return False 
-            except: pass
+        # "Am I being traced?"  Read TracerPid from /proc/self/status.
+        #
+        # This used to call ptrace(PTRACE_TRACEME, 0, 0, 0) and check for
+        # -1.  TRACEME applies to the CALLING process: on success it marks
+        # the caller traceable and makes it stop on its next exec or
+        # signal.  So a successful probe left the payload -- or the
+        # process that exec'd the loader -- in a state where it stopped
+        # later, at a random point.  That is what stopped the test suite
+        # mid-run (GitHub Actions exit 145) and could stop a real
+        # artifact on its next exec.  TracerPid answers the same question
+        # with no side effect.
+        try:
+            with open("/proc/self/status") as _f_:
+                for _ln_ in _f_:
+                    if _ln_.startswith("TracerPid:"):
+                        return _ln_.split(":", 1)[1].strip() == "0"
+        except Exception:
+            pass
         return True
     @staticmethod
     def {METHOD_CHECK_PARENT}():
@@ -2836,22 +2846,34 @@ def {FUNC_NANOMITE_MAIN}():
             if _pid == 0:
                 try:
                     libc = _c.CDLL(None)
-                    if libc.ptrace(0, 0, 0, 0) != 0: pass
+                    # If TRACEME fails there is nothing to demonstrate:
+                    # leave quietly instead of stopping for a parent that
+                    # may not be our tracer.
+                    if libc.ptrace(0, 0, 0, 0) != 0: _o._exit(0)
                     _o.kill(_o.getpid(), _sig.SIGSTOP)
-                except: pass
+                except: _o._exit(0)
             else:
                 _o.environ['_NX_NANO_PID'] = str(_o.getpid())
                 try:
-                    _, _st = _o.waitpid(_pid, 0)
+                    # WUNTRACED is required: if TRACEME failed in the child
+                    # (already traced, or blocked by seccomp), its SIGSTOP is
+                    # an ordinary stop, and a plain waitpid never reports it
+                    # -- the loader then blocked forever.  That is what hung
+                    # the test suite.
+                    _, _st = _o.waitpid(_pid, _o.WUNTRACED)
                     libc = _c.CDLL(None)
-                    libc.ptrace(7, _pid, 0, 0)
+                    if libc.ptrace(7, _pid, 0, 0) != 0:
+                        # Cannot resume it; do not wait on a corpse.
+                        try:
+                            _o.kill(_pid, 9)
+                        except Exception:
+                            pass
                     while True:
                         _, _st = _o.waitpid(_pid, 0)
                         if _o.WIFEXITED(_st) or _o.WIFSIGNALED(_st):
                             break
-                        libc.ptrace(7, _pid, 0, 0)
-                    _o._exit(0)
-                except: _o._exit(0)
+                except Exception:
+                    pass
         except: return True
     return True
 '''

@@ -119,20 +119,7 @@ class TestROP:
             db = generate_gadget_database(test_binary)
             assert isinstance(db, dict)
 
-    def test_rop_all_rust_tests_pass(self):
-        import subprocess, os
-        result = subprocess.run(
-            ["cargo", "test", "--lib", "--", "rop::tests", "--nocapture"],
-            cwd=os.path.join(os.path.dirname(__file__), "..", "..", "runtime"),
-            capture_output=True, text=True, timeout=120,
-        )
-        assert result.returncode == 0, f"Some rop tests failed:\n{result.stderr}"
-        pass_count = 0
-        fail_count = 0
-        for line in result.stdout.splitlines():
-            if "test rop::tests::" in line and "FAILED" in line:
-                fail_count += 1
-            elif "test rop::tests::" in line and "ok" in line:
-                pass_count += 1
-        assert fail_count == 0, f"{fail_count} rop tests FAILED"
-        assert pass_count >= 5, f"Expected at least 5 passing tests, got {pass_count}"
+    # test_rop_all_rust_tests_pass was removed on 2026-10-23: runtime/src/rop.rs
+    # is archived (it had no call path from init_runtime — see
+    # archive/rust-runtime/README.md), so its unit tests went with it. The
+    # live ROP compiler is scripts/rop/ (Python), covered by the tests above.

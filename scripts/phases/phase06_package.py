@@ -101,6 +101,24 @@ def phase_package(payload, obfuscated_output, obfuscated_name, opts):
         if os.path.isfile(fp) and not f.endswith(".so"):
             log("PACKAGE", f"    {f:40s} {os.path.getsize(fp)/1024:.1f}KB")
 
+    # Emit the artefact manifest: what this build actually put in the
+    # artefact (file hash, loader gates present, exported C symbols,
+    # Rust modules reachable and the flags that are on).
+    # scripts/classify_features.py reads it to answer "exercised", so
+    # the feature report is generated from the build instead of from
+    # filenames.
+    try:
+        from scripts.artifacts.manifest import write_manifest
+        _artefact = os.path.join(BUILD_DIR, obfuscated_name)
+        _mpath = write_manifest(BUILD_DIR, _artefact)
+        with open(_mpath) as _mf:
+            _m = json.load(_mf)
+        log("PACKAGE", "  Manifest: %s (%d loader gates, %d C symbols, %d features)"
+            % (os.path.basename(_mpath), len(_m["loader_gates"]),
+               len(_m["c_symbols"]), len(_m["features"])))
+    except Exception as _me:
+        log("PACKAGE", f"  Manifest skipped (non-fatal): {_me}")
+
 
 def phase_optional_extras(cfg):
     """

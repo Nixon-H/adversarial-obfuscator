@@ -265,7 +265,7 @@ def _warn_all_dangling(opts):
         _warn_dangling(opts, parent, subs)
 
 
-def validate_dependencies() -> bool:
+def validate_dependencies(opts=None) -> bool:
     """
     validate_dependencies
 
@@ -298,7 +298,12 @@ def validate_dependencies() -> bool:
     if not _check_exe("g++", "apt install g++  (or: pacman -S gcc / brew install gcc)"):
         ok = False
 
-    if not _check_exe("llc", "apt install llvm  (or: pacman -S llvm / brew install llvm)"):
+    # llc is only used by the LLVM codegen stage.  Requiring it for a
+    # build that skips that stage rejected a build that could not have
+    # used it -- and the security-artifact CI job runs exactly that.
+    if getattr(opts, "skip_llvmgen", False):
+        print("SKIP: llc not required (--skip-llvmgen)")
+    elif not _check_exe("llc", "apt install llvm  (or: pacman -S llvm / brew install llvm)"):
         ok = False
 
     try:
@@ -341,8 +346,6 @@ def main():
     - Exits with code 0 on success, 1 on failure.
     """
     os.environ.setdefault("NIXON_LOG_REDIRECT", "0")
-    if not validate_dependencies():
-        sys.exit(1)
     parser = argparse.ArgumentParser(
         description="Nixon Build Pipeline — Shadow Compiler Multi-Stage Architecture",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -730,6 +733,8 @@ in config/default.json.
 
     # Feature classification flag (Phase 5)
     parser.add_argument("--classify-features", action="store_true", help="Classify all 129 protection/research features and generate report")
+    parser.add_argument("--require-live-features", type=int, default=None, dest="require_live_features",
+                        metavar="N", help="Fail the build unless at least N features are LIVE in the artefact")
 
     # Security Regression Gates flags (Feature 146)
     parser.add_argument("--security-gates", action="store_true", help="Enable security regression gates (Feature 146)")
@@ -928,6 +933,13 @@ in config/default.json.
                              "whole build reproducible (default: empty = random per build)")
 
     opts = parser.parse_args()
+
+    # Dependency validation runs AFTER parsing so it can honour the skip
+    # flags: --skip-llvmgen never invokes llc, so requiring it there made
+    # a legitimate build fail (and made --help fail on a box without
+    # llc).  See the security-artifact CI job.
+    if not validate_dependencies(opts):
+        sys.exit(1)
 
     # The loader-emission flags do not apply here: this pipeline compiles
     # the payload to a native binary and emits NO hybrid loader, so these
@@ -1945,18 +1957,11 @@ in config/default.json.
         atomic_write(frag_config_path, json.dumps(config, indent=2))
         log("FRAGMENT", f"Fragment config written to {frag_config_path} ({fragment_size} inst/fragment)")
 
-        # Compile native microjit test object
-        microjit_src = os.path.join(ROOT, "native", "microjit.c")
-        microjit_obj = os.path.join(BUILD_DIR, "microjit.o")
-        if os.path.exists(microjit_src):
-            ret = subprocess.run(
-                ["gcc", "-c", microjit_src, "-o", microjit_obj, "-Wall"],
-                capture_output=True, text=True,
-            )
-            if ret.returncode == 0:
-                log("FRAGMENT", f"  Compiled: {microjit_obj}")
-            else:
-                log("ERROR", f"  microjit.c compilation failed:\n{ret.stderr}")
+        # native/microjit.c was archived on 2026-10-23 (see
+        # archive/native/README.md): the object it produced was compiled
+        # into build/ and never linked or loaded.  The fragment config
+        # above is the live part of this feature.
+        log("FRAGMENT", "  microjit native backend archived (was never loaded)")
     else:
         log("SKIP", "Fragment reassembly not enabled (use --fragment)")
 
@@ -4007,13 +4012,30 @@ in config/default.json.
     if opts.classify_features:
         log("CLASSIFY_FEATURES", "Running feature classification...")
         try:
-            from scripts.classify_features import build_report, print_summary
+            from scripts.classify_features import (
+                build_report, print_summary, load_artefact_manifest,
+            )
+            from scripts.artifacts.manifest import manifest_path
+            # The manifest the package step wrote is what makes
+            # "exercised" answerable. Without it every feature is
+            # reported LIVE (unverified) rather than LIVE.
+            _manifest = manifest_path(BUILD_DIR)
+            if os.path.exists(_manifest):
+                load_artefact_manifest(_manifest)
+            else:
+                log("CLASSIFY_FEATURES",
+                    "No artefact manifest — 'exercised' will be unverified")
             report = build_report()
             print_summary(report)
             out_path = os.path.join(BUILD_DIR, "feature_classification.json")
             os.makedirs(BUILD_DIR, exist_ok=True)
             atomic_write(out_path, json.dumps(report, indent=2))
             log("CLASSIFY_FEATURES", f"Report → {out_path}")
+            _need = getattr(opts, "require_live_features", None)
+            if _need is not None and report["summary"].get("live", 0) < int(_need):
+                raise RuntimeError(
+                    "feature liveness gate: %d LIVE feature(s), %d required"
+                    % (report["summary"].get("live", 0), int(_need)))
         except ImportError as e:
             log("ERROR", f"Feature classification not available: {e}")
         except Exception as e:

@@ -1,6 +1,15 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  # Weekly ruff-pin review (see the lint-pin job). A job cannot declare
+  # its own schedule — GitHub only allows `schedule` here — so the other
+  # jobs carry `if: github.event_name != 'schedule'` and only lint-pin
+  # runs on the cron.
+  schedule:
+    - cron: "0 6 * * 1"    # Mondays
+  workflow_dispatch:
 
 # Least privilege: the default GITHUB_TOKEN for this workflow is read-only.
 # Jobs that need more must declare it explicitly per-job.
@@ -9,6 +18,7 @@ permissions:
 
 jobs:
   test:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -27,16 +37,19 @@ jobs:
         run: pip install --require-hashes -r requirements.lock
       - name: Build native artefacts
         # BEFORE the tests.  Nineteen tests need a compiled artefact
-        # (the C shared libraries, the Rust relay, the microjit shared
-        # object) and SKIP themselves when it is absent -- so with the
-        # build after the tests, CI never ran them either.  A test that
-        # skips is a test that proves nothing.
+        # (the C shared libraries, the Rust relay) and SKIP themselves
+        # when it is absent -- so with the build after the tests, CI
+        # never ran them either.  A test that skips is a test that
+        # proves nothing.
+        #
+        # `make microjit-so` was removed on 2026-10-23: native/microjit.c
+        # is archived (nothing loaded the .so it produced — see
+        # archive/native/README.md).
         run: |
           make core
           make wb
           make py_compile
           make relay
-          make microjit-so
       - name: Python tests
         # NIXON_REQUIRE_ARTEFACTS makes the artefact gate fail the
         # build if a compiled artefact is missing, instead of letting
@@ -62,6 +75,7 @@ jobs:
         run: python3 -m py_compile obfuscator/*.py irgen/*.py llvmgen/*.py scripts/*.py vm/*.py encrypt/*.py tests/*.py
 
   pip-audit:
+    if: github.event_name != 'schedule'
     # Supply chain HARD gate: pip-audit exits nonzero when any advisory
     # matches a pinned dependency, and continue-on-error stays false (the
     # default) so a vulnerable pin breaks the build until a human bumps
@@ -89,6 +103,7 @@ jobs:
         run: pip-audit -r requirements.lock --desc
 
   gitleaks:
+    if: github.event_name != 'schedule'
     # Secret scanning on every push/PR: default rule set plus the
     # .gitleaks.toml allowlist (RFC 8439 test vector in
     # tests/test_chacha20_strings.py and gitignored build/ artifacts — both
@@ -105,6 +120,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   dependency-diff:
+    if: github.event_name != 'schedule'
     # Informational only, never gates: surface requirements.txt history for
     # human review. Always exits 0 (|| true); reviewers check the log.
     runs-on: ubuntu-latest
@@ -123,9 +139,6 @@ jobs:
     # reviewed goes stale.  This job reports (it never gates): it says
     # whether a newer ruff exists, so the bump is a reviewed act.
     # `make lint-upgrade` prints the same thing locally.
-    schedule:
-      - cron: "0 6 * * 1"    # Mondays
-    workflow_dispatch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
