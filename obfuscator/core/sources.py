@@ -5391,8 +5391,23 @@ FHE_SOURCE = r'''class {FHE_CLS}:
             self._use_c = True
         except (AttributeError, OSError):
             import warnings as _w
-            _w.warn("FHE C module not available; using pure-Python fallback (no encryption)", RuntimeWarning, stacklevel=2)
+            _w.warn("FHE C module not available; using the pure-Python fallback "
+                    "(same scheme, slower)", RuntimeWarning, stacklevel=2)
         
+    def _fhe_mask(self, index):
+        """The per-slot mask: LE32(SHA-256(key || nonce || LE64(i))) & 0x7fffffff.
+
+        The SAME derivation as the C core, so the two paths are
+        interchangeable.
+        """
+        import hashlib, os
+        if not hasattr(self, "_fhe_key"):
+            self._fhe_key = os.urandom(32)
+            self._fhe_nonce = os.urandom(8)
+        _d = hashlib.sha256(self._fhe_key + self._fhe_nonce +
+                            int(index).to_bytes(8, "little")).digest()
+        return int.from_bytes(_d[:4], "little") & 0x7fffffff
+
     def encrypt_batch(self, value_array):
         import ctypes
         if self._use_c:
@@ -5401,21 +5416,45 @@ FHE_SOURCE = r'''class {FHE_CLS}:
             res = [ptr[i] for i in range(self.batch_size)]
             self.lib.FHE_free_array(ptr)
         else:
-            res = value_array[:]
+            # The same one-time pad as the C core: the value part is
+            # masked, the top bit says "masked".
+            res = []
+            for i in range(self.batch_size):
+                _m = 0
+                if i < len(value_array):
+                    _m = int(value_array[i]) & 0x7fffffff
+                res.append((_m ^ self._fhe_mask(i)) & 0xffffffff)
         return res
-        
+
     def add_batch(self, c1, c2):
         import ctypes
         if self._use_c:
-            a1 = (ctypes.c_uint32 * len(c1))(*c1)
-            a2 = (ctypes.c_uint32 * len(c2))(*c2)
-            ptr = self.lib.FHE_add_batch(self._ptr, a1, a2, self.batch_size)
+            a = (ctypes.c_uint32 * len(c1))(*c1)
+            b = (ctypes.c_uint32 * len(c2))(*c2)
+            ptr = self.lib.FHE_add_batch(self._ptr, a, b, self.batch_size)
             res = [ptr[i] for i in range(self.batch_size)]
             self.lib.FHE_free_array(ptr)
         else:
-            res = [((c1[i] if i < len(c1) else 0) + (c2[i] if i < len(c2) else 0)) & 0xffffffff for i in range(self.batch_size)]
+            # Unmask both sides, combine, re-mask iff exactly one side
+            # was masked.  The top bit carries the level.
+            res = []
+            for i in range(self.batch_size):
+                _mask = self._fhe_mask(i)
+                _av = (c1[i] if i < len(c1) else 0) & 0x7fffffff
+                _bv = (c2[i] if i < len(c2) else 0) & 0x7fffffff
+                _au = bool((c1[i] if i < len(c1) else 0) & 0x80000000)
+                _bu = bool((c2[i] if i < len(c2) else 0) & 0x80000000)
+                if not _au:
+                    _av ^= _mask
+                if not _bu:
+                    _bv ^= _mask
+                _v = (_av ^ _bv) & 0x7fffffff
+                _unmasked = _au and _bu
+                if not _unmasked:
+                    _v ^= _mask
+                res.append((_v | (0x80000000 if _unmasked else 0)) & 0xffffffff)
         return res
-        
+
     def dec_batch(self, c_enc):
         import ctypes
         if self._use_c:
@@ -5424,12 +5463,20 @@ FHE_SOURCE = r'''class {FHE_CLS}:
             res = [ptr[i] for i in range(self.batch_size)]
             self.lib.FHE_free_array(ptr)
         else:
-            res = c_enc[:]
+            res = []
+            for i in range(self.batch_size):
+                _c = (c_enc[i] if i < len(c_enc) else 0)
+                _v = _c & 0x7fffffff
+                if not (_c & 0x80000000):
+                    _v ^= self._fhe_mask(i)
+                res.append(_v & 0x7fffffff)
         return res'''
+
 ORAM_SOURCE = r'''class {ORAM_CLS}:
     def __init__(self, size=1024):
         import ctypes, os
         self._use_c = False
+        self._size = int(size) if size and int(size) > 0 else 1
         self._store = {}
         try:
             self.lib = ctypes.CDLL(os.path.join(os.path.dirname(__file__), "nixon_core.so"))
@@ -5437,11 +5484,12 @@ ORAM_SOURCE = r'''class {ORAM_CLS}:
             self.lib.ORAM_new.argtypes = [ctypes.c_int]
             self.lib.ORAM_access.restype = ctypes.c_uint32
             self.lib.ORAM_access.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_int, ctypes.c_uint32]
-            self._ptr = self.lib.ORAM_new(size)
+            self._ptr = self.lib.ORAM_new(self._size)
             self._use_c = True
         except (AttributeError, OSError):
             import warnings as _w
-            _w.warn("ORAM C module not available; using pure-Python fallback (no obfuscation)", RuntimeWarning, stacklevel=2)
+            _w.warn("ORAM C module not available; using the pure-Python fallback "
+                    "(same layout hiding, slower)", RuntimeWarning, stacklevel=2)
         
     def access(self, op, block_id, data=0):
         if self._use_c:
@@ -5449,11 +5497,27 @@ ORAM_SOURCE = r'''class {ORAM_CLS}:
             val = data if data is not None else 0
             return self.lib.ORAM_access(self._ptr, is_write, block_id, val)
         else:
+            # The same layout-hiding store as the C core: a random
+            # physical slot per logical one, re-randomised after every
+            # write so the memory layout does not reveal which slot was
+            # touched.
+            if not hasattr(self, "_oram_pos"):
+                import random as _r
+                self._oram_pos = list(range(self._size))
+                self._oram_data = [0] * self._size
+                _r.shuffle(self._oram_pos)
             if op == 'write':
-                self._store[block_id] = data
+                self._oram_data[self._oram_pos[block_id]] = data
+                import random as _r
+                other = _r.randrange(self._size)
+                pa = self._oram_pos[block_id]
+                pb = self._oram_pos[other]
+                self._oram_data[pa] = self._oram_data[pb]
+                self._oram_data[pb] = data
+                self._oram_pos[block_id] = pb
+                self._oram_pos[other] = pa
                 return data
-            else:
-                return self._store.get(block_id, 0)'''
+            return self._oram_data[self._oram_pos[block_id]]'''
 SEMANTIC_SYNTH_SOURCE = r'''class {SYNTH_CLS}:
     def __init__(self):
         self.mutation_rounds = 3
@@ -5788,9 +5852,25 @@ try:
     _fhe_ = {VAR_FHE_CLS}(batch_size=_BATCH_SIZE_)
     _oram_ = {VAR_ORAM_CLS}(size=_BATCH_SIZE_)
     {FUNC_LOG}(f"[DEBUG] FHE Type: {{type(_fhe_)}} | ORAM Type: {{type(_oram_)}}")
-    _oram_.access('write', 0x1337, _fhe_.dec_batch(_HMAC_KEY_ENC_))
-    {FUNC_LOG}("[DEBUG] FHE/ORAM bootstrap successful.")
-except Exception:
+    # A REAL round-trip: encrypt the batch, add it to a second encrypted
+    # batch (the homomorphic property), decrypt, and CHECK that the
+    # plaintext came back.  The previous bootstrap decrypted a
+    # PLAINTEXT array and stored the result without checking anything,
+    # so it verified nothing at all.
+    _KEY2_ = [__import__('secrets').randbelow(100) + 1 for _ in range(_BATCH_SIZE_)]
+    _CT1_ = _fhe_.encrypt_batch(_HMAC_KEY_ENC_)
+    _CT2_ = _fhe_.encrypt_batch(_KEY2_)
+    _CTS_ = _fhe_.add_batch(_CT1_, _CT2_)
+    _DEC_ = _fhe_.dec_batch(_CTS_)
+    _EXPECT_ = [_HMAC_KEY_ENC_[i] ^ _KEY2_[i] for i in range(_BATCH_SIZE_)]
+    if [_DEC_[i] & 0x7fffffff for i in range(_BATCH_SIZE_)] != _EXPECT_:
+        raise ValueError("FHE round-trip mismatch")
+    if [_DEC_[i] & 0x7fffffff for i in range(_BATCH_SIZE_)] == _HMAC_KEY_ENC_:
+        raise ValueError("FHE round-trip returned the plaintext unchanged")
+    _oram_.access('write', 0x1337, sum(_fhe_.dec_batch(_CT1_)) & 0xffffffff)
+    {FUNC_LOG}("[DEBUG] FHE/ORAM bootstrap successful (round-trip verified).")
+except Exception as _e:
+    {FUNC_LOG}(f"[WARN] FHE/ORAM bootstrap failed: {{_e}}")
     {VAR_TEMPORAL_DEGRADE_CLS}.{METHOD_TD_INJECT_ANOMALY}(5)
 
 BLOB_KEY = bytes.fromhex("{NATIVE_BLOB_KEY_HEX}")'''

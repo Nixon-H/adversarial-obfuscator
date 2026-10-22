@@ -56,9 +56,8 @@ def test_the_c_core_is_built_next_to_the_artifact(tmp_path):
 def test_the_build_reports_the_loader_symbols_it_is_missing(tmp_path):
     """An unimplemented backend must not be reported as working.
 
-    ``FHE_new``/``ORAM_new`` do not exist in the C sources, so the
-    loader's FHE/ORAM bootstrap always falls back to no-ops.  The build
-    has to say so.
+    When the C core lacks the loader's symbols, the build has to say
+    so -- and when it has them, it says the backend is live.
     """
     from obfuscator.core.c_core_build import missing_loader_symbols
 
@@ -69,13 +68,19 @@ def test_the_build_reports_the_loader_symbols_it_is_missing(tmp_path):
         assert "does NOT export" in out, (
             "the build did not report the missing loader symbols %r" % (missing,))
         assert "no-ops" in out
+    else:
+        assert "C backend is live" in out, (
+            "the build did not report that the FHE/ORAM C backend is live")
 
 
-def test_the_loader_symbols_are_not_in_the_c_sources():
-    """The FHE/ORAM C backend is unimplemented; that is a known gap.
+def test_the_loader_symbols_are_in_the_c_sources():
+    """The FHE/ORAM C backend is implemented.
 
-    This test records the fact rather than asserting a fix: if the
-    symbols ever appear, it fails and points at the stale warning.
+    It used to be a no-op: the loader looked for ``FHE_new`` and
+    ``ORAM_new``, which existed nowhere in ``native/``, so it always
+    fell back to a pure-Python path whose encrypt/decrypt returned
+    their input unchanged.  This test fails if the symbols disappear
+    again without the build's warning being updated.
     """
     from obfuscator.core.c_core_build import LOADER_SYMBOLS
 
@@ -89,6 +94,6 @@ def test_the_loader_symbols_are_not_in_the_c_sources():
         for symbol in LOADER_SYMBOLS:
             if symbol in text:
                 found.add(symbol)
-    assert not found, (
-        "the C core now defines %r -- the build's \"FHE/ORAM fallback is "
-        "a no-op\" warning is stale" % (sorted(found),))
+    assert found == set(LOADER_SYMBOLS), (
+        "the C core no longer defines %r -- the build's warning about the "
+        "FHE/ORAM fallback is stale" % (sorted(set(LOADER_SYMBOLS) - found),))

@@ -3680,6 +3680,9 @@ def main():
                               "the FHE encrypt/decrypt are no-ops.  The FHE/ORAM "
                               "bootstrap is a self-test, not a protection."
                               % ", ".join(_missing))
+                    else:
+                        print("    [+] The FHE/ORAM C backend is live (the "
+                              "bootstrap's round-trip runs against it)")
                 else:
                     print("    [!] C core not built; the loader will use the "
                           "pure-Python fallback (the FHE bootstrap verifies nothing)")

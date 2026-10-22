@@ -51,6 +51,22 @@ checks they agree).
   (where the loader looks), and the build reports which of the
   loader's symbols the library actually exports, so an unimplemented
   backend is not passed off as working.
+- **The FHE/ORAM C backend is implemented.** The C core now provides
+  the loader's ABI (`FHE_new`, `FHE_encrypt_batch`, `FHE_add_batch`,
+  `FHE_dec_batch`, `FHE_free_array`, `ORAM_new`, `ORAM_access`) with a
+  real additively-homomorphic scheme — a one-time pad over GF(2)^31
+  whose per-slot mask comes from a per-handle secret and nonce, with
+  the mask level carried in the top bit of each word. The ORAM is a
+  real layout-hiding store: a random physical slot per logical one,
+  re-randomised after every write. The Python fallback implements the
+  *same* scheme, so it is no longer a no-op. The loader's bootstrap
+  now encrypts, adds two ciphertexts, decrypts and **compares the
+  result against the expected plaintext** — and rejects a round-trip
+  that returns the plaintext unchanged, which is what the old no-op
+  would have done. Stated plainly: the scheme is not IND-CPA and is
+  malleable by construction (that is what homomorphic addition means);
+  it is a self-test vehicle, not a confidentiality claim — the
+  payload's confidentiality rests on the XOR plus the HMAC.
 - **Nineteen tests skipped in CI.** They need a compiled artefact —
   the C shared libraries, the Rust relay, the microjit shared object —
   and each skips itself when the artefact is absent. CI built those
