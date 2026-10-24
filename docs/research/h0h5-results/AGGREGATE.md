@@ -148,3 +148,83 @@ Reproducibility fix (same batch): experiment seeds derived from
 re-seeding every run. Now sha256-based (stable); verified
 bit-identical calc builds across two processes. Reported numbers are
 distributionally stable; exact cell values are seed-regime draws.
+
+## v2.0 endpoint: T_const_split (protocol-v2 amendments 1-2)
+
+Registered arm and instrument: `docs/research/protocol-v2.md`,
+amendment 1 (arm, 2x2 factorial, seeds, scoring) and amendment 2
+(instrument validity: flatten folded sequence constants). Both were
+written before the number they govern. Full report:
+`docs/research/const-split-results/RESULTS.md`
+(corrected hash `a78ca807...`; disclosed pre-amendment hash
+`19a48e75...`).
+
+Design: C0 rename-only control, C1 +`split_vars`, C2
++`unfold_constants`, C3 both; all other transforms isolated OFF;
+3 builds per arm per program, seeds `master_seed*1000+201+i`; all six
+corpus programs; every build through the semantic gate. 72/72 builds
+usable, zero exclusions.
+
+### Gates
+
+- Denominator `S(B_j|P_j)` = 1.00 for every usable build: PASS.
+- Negative control C0->C0 = 1.000 (36 pairs): PASS.
+- String specificity control = 1.000 in every cell: PASS. No arm in
+  this factorial touches string literals, so movement here would have
+  voided the arm; it did not move.
+
+### Result
+
+| mechanism | cross-arm | matched same-arm | delta |
+|---|---|---|---|
+| C0 -> C2 (`unfold_constants`) | 0.989 | C2 -> C2 = 0.989 | -0.000 |
+| C0 -> C3 (both) | 0.995 | C3 -> C3 = 0.995 | -0.000 |
+| C0 -> C1 (`split_vars`) | 1.000 | C1 -> C1 = 1.000 | 0.000 |
+
+`T = S(A->B)/S(B->B)` is `0.989` for the unfold arm, but the matched
+same-arm cell is also `0.989`. The hiding rule is build-invariant: it
+removes the same literals from every build, so it lowers the absolute
+recovery ceiling without making one build's extraction fail on
+another. **No transfer resistance.** The endpoint is recorded as not
+supported, and the result is explicitly underpowered rather than
+falsified:
+
+- The corpus carries 7-11 literal constants per program; the integer
+  subset is 4.0-4.3 distinct values per cell. One hit moves the score
+  by ~0.14-0.25, so the design cannot resolve effects below ~0.05.
+- `split_vars` acts on only 4 assignment sites in the whole corpus
+  (codec 3, sched 1) at 30% probability, so C1 is effectively a no-op
+  here (1.000 everywhere, `n_int` unchanged). The C3 row is therefore
+  C2's effect plus noise, not evidence about splitting.
+- Corrected vs pre-amendment: the folded-sequence fix moved sched from
+  1.000 to 0.970 (its nested tuple now supplies 3 integer literals)
+  and aggregate absolute loss from 0.006 to 0.011; the verdict did not
+  change. Both tables are reported.
+
+### Mechanism finding (reported, not corrected)
+
+`unfold_constants` emits three branches. CPython folds `(v ^ m) ^ m`
+and `(b << s) + r` back to `v` at compile time; only `sum([parts])`
+survives into the bytecode pool. Those two branches still keep `v` out
+of the emitted source text, but do not hide it from the compiled
+constant pool that this endpoint measures. The weak absolute effect
+(1.1%) is consistent with one third of one branch surviving
+compilation on a literal-poor corpus.
+
+### Scope
+
+This instrument measures literal **search**, not value recovery.
+`C` split as `C ^ m` and `m` is algebraically recoverable by an
+analyst who models the rule; a positive result would have supported
+"hides literals from search", never "hides values".
+
+### Consequence for the planner
+
+Constant hiding joins the v1.0 pattern: a build-invariant absolute
+lever, not a transfer lever, for this attack class. A test with power
+to detect a real transfer effect needs a literal-rich calibration
+program and must be pre-registered as a new experiment (v3.0); adding
+a program to the frozen v2.0 corpus after measurement would be
+post-hoc tuning. Likewise, making all three unfold branches emit
+non-foldable arithmetic changes the transform and belongs to the v3.0
+hardening track, not to this endpoint.
