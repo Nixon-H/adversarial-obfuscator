@@ -253,6 +253,20 @@ def emit_kill_snippet():
         "    except Exception:\n"
         "        pass\n"
         "    _nx_os._exit(137)\n"
+        "    # Corrupt-and-continue fallback (A3.4): if _exit itself was\n"
+        "    # monkeypatched, imported away or seccomp-blocked, the gate above\n"
+        "    # returns here and the artifact would keep running with its keys\n"
+        "    # already wiped -- a half-killed process is worse than either\n"
+        "    # outcome.  Both fallbacks are unreachable when _exit works.\n"
+        "    try:\n"
+        "        import signal as _nx_sig\n"
+        "        _nx_sig.raise_signal(_nx_sig.SIGKILL)\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "    try:\n"
+        "        _nx_os.kill(_nx_os.getpid(), 9)\n"
+        "    except Exception:\n"
+        "        pass\n"
     )
     compile(src, "<nx_kill_ladder>", "exec")
     return src

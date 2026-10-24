@@ -3081,6 +3081,23 @@ def _VERIFY_INTEGRITY():
                 if k.endswith('_source') or k.endswith('_code'):
                     build_context[k] = apply_vars(v).replace('{{', '{').replace('}}', '}')
             raw_script = (LOADER_HEAD + "\n" + LOADER_BODY).format(**build_context)
+            # Hardening A2.2/A2.3: strip the fixed runtime vocabulary
+            # (_nx_kill, _NX_AUDIT_*) out of the artifact.  The rename runs
+            # on the assembled source -- after every emitter contributed its
+            # snippet, before the string pass turns literals into table
+            # lookups -- so a gate and the function it calls can never end up
+            # with different spellings.  Both assertions are fail-loud: a
+            # partially renamed loader raises NameError at run time instead
+            # of exiting 137, which is worse than a failed build.
+            from obfuscator.marker_names import (
+                rename_markers as _rename_markers,
+                assert_kill_wired as _assert_kill_wired,
+                assert_markers_renamed as _assert_markers_renamed,
+            )
+            _marker_token = VARS["MARKER_TOKEN"]
+            raw_script = _rename_markers(raw_script, _marker_token)
+            _assert_kill_wired(raw_script, _marker_token)
+            _assert_markers_renamed(raw_script, _marker_token)
             # Debug dump of the FULL PRE-ENCRYPTION loader (plaintext key
             # material): only when explicitly requested via NIXON_DUMP_RAW=1,
             # written via a secure temp file (O_EXCL 0600, random name) —

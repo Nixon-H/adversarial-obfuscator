@@ -1019,6 +1019,11 @@ VARS["STR_KEY"] = secrets.randbelow(255) + 1
 #   * it must be ASCII, because get_random_var_name() returns Unicode Babel
 #     identifiers that are unusable as a literal inside the join f-string.
 VARS["PART_PREFIX"] = "_" + secrets.token_hex(6)
+# Hardening A2.2/A2.3: per-build name token for the loader's fixed runtime
+# markers (_nx_kill, _NX_AUDIT_*).  Applied once on the assembled loader by
+# obfuscator.marker_names.rename_markers(); see that module for why the
+# substitution happens there and not in each emitter.
+VARS["MARKER_TOKEN"] = secrets.token_hex(5)
 VARS.update({
     "FUNC_NEXT_H": FUNC_NEXT_H,
     "FUNC_REM_ENT": FUNC_REM_ENT,
