@@ -126,6 +126,71 @@ def test_allowlist_sentinels_always_plaintext():
     assert is_allowlisted("__NX_STR_KEY_A__", None)
 
 
+def test_allowlist_extra_prefixes_extend_the_contract():
+    """Hardening A2.1: build-specific part tokens stay plaintext.
+
+    The per-build payload-part token is not a module constant, so it is
+    passed in per call instead of mutating shared module state.
+    """
+    token = "_0a1b2c3d4e5f"
+    assert is_allowlisted(token + "0", ["re:.*"], extra_prefixes=(token,))
+    assert not is_allowlisted("plain value", None, extra_prefixes=(token,))
+    assert not is_allowlisted("plain value", None, extra_prefixes=None)
+    # Empty / None entries must never degrade into "allow everything".
+    assert not is_allowlisted("plain value", None, extra_prefixes=("", None))
+
+
+def test_transformer_keeps_custom_part_prefix_plaintext():
+    """The emitted part globals must survive the string pass unsealed.
+
+    The loader reassembles the payload by looking those names up in
+    ``globals()``.  If the pass turned the value into a decoder call the
+    name would still exist but the join template would read the wrong
+    names, and the artifact would die with "[FATAL] Payload corrupted".
+    """
+    from obfuscator.core.transforms import StringLiteralObfuscator
+
+    token = "_c0ffee123456"
+    slo = StringLiteralObfuscator(mode="chacha20", part_prefix=token)
+    tree = ast.parse('a = "%s0"\nb = "real secret value"\n' % (token,))
+    out = slo.visit(tree)
+    ast.fix_missing_locations(out)
+
+    part_assign = out.body[0]
+    assert isinstance(part_assign.value, ast.Constant), (
+        "part global was sealed; reassembly would break")
+    assert part_assign.value.value == token + "0"
+    # Everything else is still protected.
+    assert isinstance(out.body[1].value, ast.Call)
+
+
+def test_transformer_default_part_prefix_is_legacy_sentinel():
+    """Without a build token the frozen "_NX_PART_" contract still holds."""
+    from obfuscator.core.transforms import StringLiteralObfuscator
+
+    assert StringLiteralObfuscator()._part_prefix == "_NX_PART_"
+    tree = ast.parse('a = "_NX_PART_0"\n')
+    out = StringLiteralObfuscator(mode="chacha20").visit(tree)
+    assert isinstance(out.body[0].value, ast.Constant)
+
+
+def test_join_template_and_emission_share_one_build_token():
+    """Wiring guard: emission, skip set and join come from the same key.
+
+    A mismatch here is silent at build time and fatal at run time, so it
+    is asserted statically rather than left to the end-to-end build.
+    """
+    from obfuscator.core import sources as S
+
+    token = S.VARS["PART_PREFIX"]
+    assert isinstance(token, str) and token.startswith("_")
+    assert token.isascii(), "join f-string literal must be ASCII"
+    assert token not in ("_", "__")
+    # The join template interpolates the build token, not a fixed literal.
+    assert 'k = f"{PART_PREFIX}{{i}}"' in S.LOADER_BODY
+    assert "_NX_PART_{i}" not in S.LOADER_BODY
+
+
 def test_encrypt_string_allowlist_returns_none():
     key = bytes(range(32))
     assert encrypt_string("keepme", key, ["keepme"]) is None

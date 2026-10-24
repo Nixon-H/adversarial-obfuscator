@@ -222,6 +222,12 @@ def Nixon_Enc_strings(code):
                     # verdict was discarded.  The anti-tamper control was
                     # inert.)
                     "__SIG_ANCHOR__", "__HMAC_ANCHOR__"]
+    # Hardening A2.1: the per-build payload-part token must stay plaintext
+    # exactly like the legacy "_NX_PART_" sentinel above.  Guarded so an
+    # empty prefix can never degrade into "skip every line".
+    _nx_part_prefix = VARS.get("PART_PREFIX")
+    if _nx_part_prefix:
+        SKIP_MARKERS.insert(0, _nx_part_prefix)
     lines = code.split('\n')
     out_lines = []
     pattern = re.compile(r'(?<![bfruBFRU])(?<!["\'])("[\w\d\s_\./:-]+?"|\'[\w\d\s_\./:-]+?\')(?!["\'])')
@@ -2697,7 +2703,7 @@ def _VERIFY_INTEGRITY():
             chunks = [stage0_safe[i:i+1000] for i in range(0, len(stage0_safe), 1000)]
             from io import StringIO
             parts_buffer = StringIO()
-            for i, c in enumerate(chunks): parts_buffer.write(f'_NX_PART_{i} = "{c}"\n')
+            for i, c in enumerate(chunks): parts_buffer.write(f'{VARS["PART_PREFIX"]}{i} = "{c}"\n')
             parts_code = parts_buffer.getvalue()
             rng_seed = int(hashlib.sha256(watermark_seed).hexdigest(), 16) if watermark_seed else None
             map1 = generate_polymorphic_map(rng_seed)

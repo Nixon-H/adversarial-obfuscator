@@ -626,7 +626,8 @@ def apply_ast_mutation(source_code, options=None):
                 mode=_nx_mode,
                 allowlist=options.get('string_allowlist'),
                 string_key=options.get('string_key'),
-                kek_env=options.get('string_key_env'))
+                kek_env=options.get('string_key_env'),
+                part_prefix=VARS.get('PART_PREFIX'))
             tree = str_obf.visit(tree)
             preamble = str_obf.get_preamble()
         else: preamble = ""
@@ -1006,6 +1007,18 @@ _VARS_MAP = {
 VARS = {k: get_random_var_name(v) for k, v in _VARS_MAP.items()}
 VARS["MAGIC"] = b"NIXON_ENC"
 VARS["STR_KEY"] = secrets.randbelow(255) + 1
+# Hardening A2.1: per-build ASCII token for the payload-part globals.
+# Parts are emitted as "<token><i>" and the loader's join template rebuilds
+# the very same name, so a static reader can no longer locate the assembled
+# payload chunks by grepping the fixed "_NX_PART_" signature.  Two
+# constraints force the shape:
+#   * the token must start with "_" so the renamer's underscore guard
+#     (transforms.get_new_name / visit_Name / Encoder.visit_Name) leaves the
+#     part globals alone -- renaming emission but not the f-string join would
+#     silently break reassembly with "[FATAL] Payload corrupted";
+#   * it must be ASCII, because get_random_var_name() returns Unicode Babel
+#     identifiers that are unusable as a literal inside the join f-string.
+VARS["PART_PREFIX"] = "_" + secrets.token_hex(6)
 VARS.update({
     "FUNC_NEXT_H": FUNC_NEXT_H,
     "FUNC_REM_ENT": FUNC_REM_ENT,
@@ -6290,7 +6303,7 @@ def {FUNC_JOIN}():
     p = []
     g = globals()
     for i in range({VAR_TOTAL_PARTS}):
-        k = f"_NX_PART_{{i}}"
+        k = f"{PART_PREFIX}{{i}}"
         if k in g: p.append(g[k])
         else: 
             {FUNC_LOG}("[FATAL] Payload corrupted"); _nixon_システム시스템.exit(1)

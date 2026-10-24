@@ -86,11 +86,23 @@ def _exact_entries(allowlist):
     return exact
 
 
-def is_allowlisted(value, allowlist=None):
-    # type: (str, object) -> bool
-    """True when *value* must stay plaintext (allowlist or safety sentinel)."""
+def is_allowlisted(value, allowlist=None, extra_prefixes=None):
+    # type: (str, object, object) -> bool
+    """True when *value* must stay plaintext (allowlist or safety sentinel).
+
+    ``extra_prefixes`` carries build-specific sentinel prefixes (hardening
+    A2.1: the per-build payload-part token).  It is checked before the
+    frozen module defaults, so callers can extend the contract without
+    mutating module state that other builds share in-process.
+    """
     if not isinstance(value, str):
         return True
+    for prefix in (extra_prefixes or ()):
+        try:
+            if prefix and value.startswith(prefix):
+                return True
+        except Exception:
+            continue
     for prefix in _SENTINEL_PREFIXES:
         if value.startswith(prefix):
             return True

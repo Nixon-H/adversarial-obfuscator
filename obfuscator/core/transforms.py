@@ -439,13 +439,18 @@ class StringLiteralObfuscator(ast.NodeTransformer):
     # Per-string nonces (secrets.token_bytes) make every build unique;
     # tampered seals raise ValueError at runtime.
     def __init__(self, mode="chacha20", allowlist=None, string_key=None,
-                 kek_env=None):
+                 kek_env=None, part_prefix=None):
         self.string_table = {}
         self.generated_vars = set()
         self.decoder_name = self._generate_babel_name()
         self.xor_key = secrets.randbelow(255) + 1
         self._chacha_key = None
         self._allowlist = list(allowlist) if allowlist else []
+        # Hardening A2.1: the build hands in its per-build payload-part
+        # token so "<token><i>" globals stay plaintext.  Legacy "_NX_PART_"
+        # is still honoured (default + explicit) so the sentinel contract
+        # documented in string_crypto stays valid for external callers.
+        self._part_prefix = part_prefix or "_NX_PART_"
         # Hardening A1c (opt-in): kek_env names an env var holding a hex
         # shard; seals bind to KDF(build_key, shard) and the stub fails
         # closed without it. Build-time read fails loud when absent.
@@ -481,6 +486,7 @@ class StringLiteralObfuscator(ast.NodeTransformer):
         return encoded[::-1]
     def visit_Constant(self, node):
         if isinstance(node.value, str) and len(node.value) >= 2 and len(node.value) <= 200000:
+            if node.value.startswith(self._part_prefix): return node
             if node.value.startswith("_NX_PART_"): return node
             if "PLACEHOLDER" in node.value: return node
             if "SENTINEL" in node.value: return node
@@ -491,7 +497,7 @@ class StringLiteralObfuscator(ast.NodeTransformer):
                 # ChaCha20 path: allowlisted strings stay plaintext (additive).
                 try:
                     from obfuscator.string_crypto import is_allowlisted as _allowed
-                    if _allowed(original, self._allowlist):
+                    if _allowed(original, self._allowlist, extra_prefixes=(self._part_prefix,)):
                         return node
                 except Exception:
                     pass
@@ -539,7 +545,7 @@ class StringLiteralObfuscator(ast.NodeTransformer):
             lines = [stub]
             for original, var_name in self.string_table.items():
                 try:
-                    if _allowed(original, self._allowlist):
+                    if _allowed(original, self._allowlist, extra_prefixes=(self._part_prefix,)):
                         continue
                     seal = self._session["encrypt"](original, self._allowlist)
                     if seal is None:
