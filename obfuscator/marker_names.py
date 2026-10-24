@@ -57,6 +57,15 @@ _RENAMED = (
     ("_NX_AUDIT_SEEN", "AS"),
     ("_NX_AUDIT_T0", "AT"),
     ("_NX_AUDIT_BASE_MEAN", "AM"),
+    # fixed module-level globals that map the runtime (A2.4).  These were
+    # the last `_NX_` names a plain grep of an artifact would surface:
+    # the getattr translation table, its identity sentinel, the
+    # version-gate pair and the anti-emulation poison slot name.
+    ("_NX_ATTR_MAP", "XM"),
+    ("_NX_SENTINEL", "SN"),
+    ("_NX_SKIP_ON", "SO"),
+    ("_NX_CI_ON", "CO"),
+    ("_NX_POISON_KEY", "PK"),
 )
 
 
