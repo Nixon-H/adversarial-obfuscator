@@ -753,7 +753,15 @@ def random_var_name(length=6):
 def get_best_zip_compression():
     if hasattr(zipfile, 'ZIP_LZMA'): return zipfile.ZIP_LZMA
     return zipfile.ZIP_DEFLATED
-def create_initial_layer(source_path, encoding_type):
+def create_initial_layer(source_path, encoding_type, extra_files=None):
+    """Zip the payload as ``__main__.py`` plus any ``extra_files``.
+
+    ``extra_files`` is a list of ``(archive_name, path)`` pairs written
+    into the same archive.  The loader extracts this archive into a
+    fresh temp dir and runs ``__main__.py`` from there, so a file listed
+    here lands beside ``__main__.py`` -- which is where the payload's
+    FHE/ORAM bootstrap looks for ``nixon_core.so``.
+    """
     buffer = io.BytesIO()
     compression = get_best_zip_compression()
     with zipfile.ZipFile(buffer, 'w', compression) as zip_file:
@@ -765,6 +773,9 @@ def create_initial_layer(source_path, encoding_type):
                     zip_file.write(full_path, archive_name)
         else:
             zip_file.write(source_path, "__main__.py")
+        for archive_name, path in (extra_files or ()):
+            if path and os.path.exists(path):
+                zip_file.write(path, archive_name)
     return _finalize_zip_layer(buffer.getvalue(), encoding_type)
 def create_intermediate_zip_layer(input_code_string, encoding_type, bind_files_list=None):
     buffer = io.BytesIO()
@@ -794,7 +805,7 @@ def create_exec_layer(input_code_string, encoding_type):
     encoded_bytes = encode_func(compressed_data)
     encoded_str = encoded_bytes.decode('utf-8').replace('\\', '\\\\').replace('"', '\\"')
     return EXEC_TEMPLATE % {'VAR_PAYLOAD': random_var_name(), 'PAYLOAD_STR': encoded_str,'VAR_CODE': random_var_name(), 'DECODE_FUNC': decode_str}
-def recursive_package(initial_source, final_output, layers=100, zip_count=0, bind_paths_list=None, num_layers=None, num_zips=None):
+def recursive_package(initial_source, final_output, layers=100, zip_count=0, bind_paths_list=None, num_layers=None, num_zips=None, extra_files=None):
     if num_layers is not None: layers = num_layers
     if num_zips is not None: zip_count = num_zips
     try:
@@ -840,7 +851,7 @@ def recursive_package(initial_source, final_output, layers=100, zip_count=0, bin
         elif len(sorted_zip_layers) > 0: layer_payloads[sorted_zip_layers[0]] = bind_data
     last_encoding = None
     first_enc = secrets.choice(list(ENCODINGS.keys()))
-    current_code = create_initial_layer(initial_source, first_enc)
+    current_code = create_initial_layer(initial_source, first_enc, extra_files=extra_files)
     last_encoding = first_enc
     size_kb = len(current_code.encode('utf-8')) / 1024
     print(f"  [+] Layer 1 ({first_enc}) [Disk-Mode]: {size_kb:.2f} KB")
@@ -6039,7 +6050,16 @@ def {FUNC_SELF}():
     except SystemExit:
         raise
     except Exception as e:
-        {FUNC_LOG}(f"[WARN] Self-check error: {{e}}")
+        try:
+            import os as _nx_os_diag
+            _nx_diag = "%s exists=%s cwd=%s dir=%s" % (
+                __file__,
+                _nx_os_diag.path.exists(__file__),
+                _nx_os_diag.getcwd(),
+                sorted(_nx_os_diag.listdir(_nx_os_diag.path.dirname(__file__))))
+        except Exception as _nx_diag_e:
+            _nx_diag = "no diagnostics: %s" % (_nx_diag_e,)
+        {FUNC_LOG}(f"[WARN] Self-check error: {{e}} ({{_nx_diag}})")
         # A self-check that could not RUN is a failed self-check.  It
         # used to log and continue, so editing the check's own code was
         # enough to disable it: the artifact carried on and exited 0.

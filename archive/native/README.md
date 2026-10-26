@@ -65,14 +65,17 @@ stay gone.
 `tests/test_stub_win_contract.py` followed `stub_win.cpp` here on
 2026-10-26. It had stayed behind and failed every CI run with
 `FileNotFoundError` for the archived source; a contract test for a stub
-that does not ship is not a regression signal. Two other groups kept
-their tests in place, skipping while the subject is archived and
-returning the moment it comes back:
+that does not ship is not a regression signal.
 
-- `tests/test_vm_ephemeral_isa.py` — the six `test_vm_stub_*` /
-  `test_c_*` compile-contract tests skip while `vm_stub.c` is absent.
-- `tests/test_crash_suppression.py` — the two `test_stub_*` wiring tests
-  do the same for `stub_linux.cpp` / `stub_win.cpp`.
+`tests/test_crash_suppression.py`'s two textual stub-wiring tests
+(including the `make stub-linux` assertion) are here too, in
+`test_stub_wiring_textual.py`.
+
+Nothing is skipped to make the suite green. The six VM-stub
+compile-contract tests stayed in `tests/test_vm_ephemeral_isa.py` and
+were repointed at `archive/native/vm_stub.c`: they still compile the
+stub and exercise it, building the `.so` into the temp dir instead of
+next to the source.
 
 ## Verification
 

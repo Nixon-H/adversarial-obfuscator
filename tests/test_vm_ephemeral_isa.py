@@ -13,6 +13,7 @@ import ctypes
 import hashlib
 import os
 import subprocess
+import tempfile
 import time
 
 import pytest
@@ -35,19 +36,13 @@ from vm.ephemeral_isa import (
 )
 from vm.interpreter import VMInterpreter, ENCODING_VARIABLE, ENCODING_FIELD_SHUFFLE, ENCODING_NAMES
 
-VM_STUB_C = os.path.join(os.path.dirname(__file__), "..", "native", "vm_stub.c")
-VM_STUB_SO = os.path.join(os.path.dirname(__file__), "..", "native", "vm_stub_test.so")
-
-# native/vm_stub.c is archived (archive/native/README.md): it was a
-# compile-test only and never linked into an artefact.  The six
-# compile-contract tests below remain in place so they come back with
-# the file, but they must not fail a build for a subject that
-# deliberately does not ship.
-VM_STUB_ARCHIVED = not os.path.isfile(VM_STUB_C)
-VM_STUB_REASON = (
-    "native/vm_stub.c is archived (archive/native/README.md: "
-    "compile-test only, never shipped)"
-)
+# vm_stub.c is an archived compile-test only (archive/native/README.md);
+# it was never linked into an artefact.  The six compile-contract tests
+# below still run against the archived source -- they compile it into a
+# temp .so and exercise it -- so nothing is skipped.  The .so is built in
+# the temp dir, not in the archive.
+VM_STUB_C = os.path.join(os.path.dirname(__file__), "..", "archive", "native", "vm_stub.c")
+VM_STUB_SO = os.path.join(tempfile.gettempdir(), "nixon_vm_stub_test.so")
 
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -173,7 +168,6 @@ def make_jmp_bytecode(vm, target):
 
 # ── Compilation test ─────────────────────────────────────────────────
 
-@pytest.mark.skipif(VM_STUB_ARCHIVED, reason=VM_STUB_REASON)
 def test_vm_stub_compiles():
     result = subprocess.run(
         ["gcc", "-c", VM_STUB_C, "-o", "/dev/null"],
@@ -182,7 +176,6 @@ def test_vm_stub_compiles():
     assert result.returncode == 0, f"Compile failed:\n{result.stderr}"
 
 
-@pytest.mark.skipif(VM_STUB_ARCHIVED, reason=VM_STUB_REASON)
 def test_vm_stub_shared_lib():
     _ensure_so()
     assert os.path.isfile(VM_STUB_SO), f"Shared lib not built: {VM_STUB_SO}"
@@ -450,7 +443,6 @@ def test_field_shuffle_actually_shuffles():
 
 # ── C-level dynamic ISA tests ────────────────────────────────────────
 
-@pytest.mark.skipif(VM_STUB_ARCHIVED, reason=VM_STUB_REASON)
 def test_c_different_runs_produce_different_mappings():
     lib = _load_vm()
     bc = bytes([0]) * 10
@@ -466,7 +458,6 @@ def test_c_different_runs_produce_different_mappings():
         )
 
 
-@pytest.mark.skipif(VM_STUB_ARCHIVED, reason=VM_STUB_REASON)
 def test_c_key_determinism():
     lib = _load_vm()
     bc = bytes([0]) * 10
@@ -492,7 +483,6 @@ def test_c_key_determinism():
     assert type(rc1) == type(rc2)
 
 
-@pytest.mark.skipif(VM_STUB_ARCHIVED, reason=VM_STUB_REASON)
 def test_c_vm_produces_correct_result():
     lib = _load_vm()
     bc = bytearray()
@@ -893,7 +883,6 @@ def test_all_instances_produce_same_regs():
 
 # ── Self-Mutating ISA C-API Tests ────────────────────────────────────
 
-@pytest.mark.skipif(VM_STUB_ARCHIVED, reason=VM_STUB_REASON)
 def test_c_dispatches_correctly():
     lib = _load_vm()
     bc = bytearray()

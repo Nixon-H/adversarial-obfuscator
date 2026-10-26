@@ -3559,12 +3559,30 @@ def main():
             if bind_list and num_zips < 1:
                  print("  [!] Binding requires at least 1 ZIP layer. Setting to 1.")
                  num_zips = 1
+            # Build the C core BEFORE the pack, and put it INSIDE the
+            # pack.  The loader extracts the bundle into a fresh temp
+            # dir and runs __main__.py from there; the payload's FHE/ORAM
+            # bootstrap loads "nixon_core.so" from beside __main__.py.
+            # A copy in dist/ alone is never in that directory, so every
+            # artifact used to run the pure-Python fallback (no-op
+            # encrypt/decrypt) and then die in its self-check.  The .so
+            # is still left in dist/ for callers that ship the pair.
+            _dist_dir = os.path.join(os.path.dirname(os.path.abspath(args.source)), "dist")
+            _core_so = None
+            try:
+                from obfuscator.core.c_core_build import build_c_core as _build_c_core
+                _core_so = _build_c_core(_dist_dir)
+            except Exception as _core_exc:
+                print("  [!] C core build failed: %s" % (_core_exc,))
+            _pack_extras = [("nixon_core.so", _core_so)] if _core_so else []
             for suffix in ["Debug", "Silent"]:
                 t = generated_files_map.get(suffix)
                 if t and os.path.exists(t): 
                     if num_layers > 0 or num_zips > 0:
                         packed_path = t.replace(".py", "_Packed.py")
-                        recursive_package(t, packed_path, num_layers, num_zips, bind_paths_list=bind_list)
+                        recursive_package(t, packed_path, num_layers, num_zips,
+                                          bind_paths_list=bind_list,
+                                          extra_files=_pack_extras)
                     else:
                         packed_path = t
                     if (getattr(args, 'compile', False) or (getattr(args, 'auto', False) and 'nk' in getattr(args, 'auto', ''))) and not getattr(args, 'skip_cloud', False):
@@ -3684,16 +3702,14 @@ def main():
             base_name = os.path.splitext(os.path.basename(args.source))[0]
             dist_dir = os.path.join(os.path.dirname(os.path.abspath(args.source)), "dist")
             os.makedirs(dist_dir, exist_ok=True)
-            # The FHE/ORAM bootstrap loads "nixon_core.so" from the
-            # artifact's own directory, so build it there.  Without it
-            # the loader falls back to the pure-Python path, where
-            # encrypt_batch/dec_batch are no-ops.
+            # The core was built before the packer ran (it is embedded in
+            # the bundle, which is the only place the loader can find it).
+            # Report which backend the build actually produced.
             try:
                 from obfuscator.core.c_core_build import (
-                    build_c_core,
                     missing_loader_symbols,
                 )
-                _core = build_c_core(dist_dir)
+                _core = _core_so
                 if _core:
                     print("    [+] C core built: %s" % _core)
                     _missing = missing_loader_symbols(_core)

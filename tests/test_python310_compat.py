@@ -106,16 +106,29 @@ def test_no_nested_quote_fstrings_in_live_tree():
     fstring_start = getattr(tokenize, "FSTRING_START", None)
     fstring_end = getattr(tokenize, "FSTRING_END", None)
     if fstring_start is None:
-        # PEP 701 tokenization landed in 3.12: on 3.10/3.11 an f-string
-        # is one opaque STRING token, so this check cannot see inside it
-        # (and used to die with AttributeError on exactly the runtimes it
-        # is meant to protect).  The ruff gate above targets py310 and
-        # does catch PEP 701 syntax from any interpreter.
-        pytest.skip(
-            "this tokenizer has no FSTRING_START (Python < 3.12), so the "
-            "nesting check is invisible here; ruff --target-version=py310 "
-            "is the gate on this interpreter"
-        )
+        # 3.12 was the first tokenizer to expose f-strings as their own
+        # tokens.  On 3.10/3.11 an f-string is a single opaque STRING
+        # token, so the nesting walk below cannot see inside it -- the
+        # old code died with AttributeError here, on exactly the
+        # interpreters this file protects.
+        #
+        # The parser can see it: PEP 701 syntax is a SyntaxError on these
+        # interpreters.  So parse every live file here instead.  That is
+        # the property the file exists to protect, checked directly, with
+        # nothing skipped.
+        broken = []
+        for path in _live_python_files():
+            src = open(path, encoding="utf-8", errors="replace").read()
+            try:
+                compile(src, path, "exec")
+            except SyntaxError as exc:
+                broken.append("%s:%s %s"
+                              % (os.path.relpath(path, REPO_ROOT),
+                                 exc.lineno, exc.msg))
+        assert not broken, (
+            "files that do not parse on this interpreter (PEP 701 "
+            "f-strings are a SyntaxError before 3.12): %r" % (broken,))
+        return
     offenders = []
     for path in _live_python_files():
         src = open(path, encoding="utf-8", errors="replace").read()
