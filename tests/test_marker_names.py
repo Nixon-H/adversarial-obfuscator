@@ -16,7 +16,6 @@ make a single rename pass safe:
 """
 import ast
 import os
-import re
 import subprocess
 import sys
 
