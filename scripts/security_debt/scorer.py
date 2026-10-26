@@ -131,7 +131,15 @@ class SecurityDebtScorer:
         return round((clamped / _MAX_RAW_DEBT) * 100.0, 2)
 
     def compute_category_breakdown(self) -> dict[str, float]:
-        """Compute percentage contribution of each debt category to the total raw debt."""
+        """Compute percentage contribution of each debt category to the total raw debt.
+
+        The shares are rounded to 2dp for display, and the residual from
+        rounding is given to the largest share so the breakdown totals
+        exactly 100.00.  Rounding each share independently lets the sum
+        land on 99.99 or 100.01: a percentage breakdown that does not add
+        up is a display bug, and it made the "totals 100%" assertions
+        fail on the run where the float values happened to land there.
+        """
         items = self._tracker.get_items()
         breakdown: dict[str, float] = {}
         for item in items:
@@ -141,8 +149,15 @@ class SecurityDebtScorer:
             impact = max(0.0, min(10.0, item.impact_score))
             contribution = severity_weight * category_weight * (1.0 + impact)
             breakdown[key] = breakdown.get(key, 0.0) + contribution
+        if not breakdown:
+            return {}
         total = sum(breakdown.values()) or 1.0
-        return {k: round((v / total) * 100.0, 2) for k, v in sorted(breakdown.items(), key=lambda x: -x[1])}
+        rounded = {k: round((v / total) * 100.0, 2) for k, v in breakdown.items()}
+        residual = round(100.0 - sum(rounded.values()), 2)
+        if residual:
+            top = max(rounded, key=lambda k: (rounded[k], k))
+            rounded[top] = round(rounded[top] + residual, 2)
+        return {k: rounded[k] for k in sorted(rounded, key=lambda k: -rounded[k])}
 
     def get_top_items(self, n: int = 10) -> list[SecurityDebtItem]:
         """Return the n highest-scoring debt items, sorted by composite weight descent."""

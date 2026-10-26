@@ -103,6 +103,19 @@ def test_no_nested_quote_fstrings_in_live_tree():
     """
     import io
     import tokenize
+    fstring_start = getattr(tokenize, "FSTRING_START", None)
+    fstring_end = getattr(tokenize, "FSTRING_END", None)
+    if fstring_start is None:
+        # PEP 701 tokenization landed in 3.12: on 3.10/3.11 an f-string
+        # is one opaque STRING token, so this check cannot see inside it
+        # (and used to die with AttributeError on exactly the runtimes it
+        # is meant to protect).  The ruff gate above targets py310 and
+        # does catch PEP 701 syntax from any interpreter.
+        pytest.skip(
+            "this tokenizer has no FSTRING_START (Python < 3.12), so the "
+            "nesting check is invisible here; ruff --target-version=py310 "
+            "is the gate on this interpreter"
+        )
     offenders = []
     for path in _live_python_files():
         src = open(path, encoding="utf-8", errors="replace").read()
@@ -112,14 +125,14 @@ def test_no_nested_quote_fstrings_in_live_tree():
             continue
         stack = []
         for tok in tokens:
-            if tok.type == tokenize.FSTRING_START:
+            if tok.type == fstring_start:
                 quote = tok.string[-1]
                 if stack and stack[-1] == quote:
                     offenders.append("%s:%d %s"
                                      % (os.path.relpath(path, REPO_ROOT),
                                         tok.start[0], tok.string))
                 stack.append(quote)
-            elif tok.type == tokenize.FSTRING_END:
+            elif tok.type == fstring_end:
                 if stack:
                     stack.pop()
     assert not offenders, ("f-strings nested inside f-string expressions "
