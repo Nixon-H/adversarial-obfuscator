@@ -88,11 +88,26 @@ def _flatten(seq, flatten):
 
 
 def _walk(code, flatten=FLATTEN_SEQUENCES):
-    """Yield every non-code constant in *code*, recursing into nested codes."""
-    for const in code.co_consts:
+    """Yield every non-code constant in *code*, recursing into nested codes.
+
+    On 3.10 the compiler stores a def's qualname as a plain string
+    constant right after the code object (``<code values>, 'values',
+    ...``); 3.11+ moved it to ``co_qualname``.  Emitting it as a literal
+    made the string pool -- and every S() denominator -- version
+    dependent, so the qualname slot is skipped by position: a string that
+    directly follows a code object and repeats its ``co_name`` is the
+    compiler's qualname, not a literal.
+    """
+    consts = code.co_consts
+    for index, const in enumerate(consts):
         if isinstance(const, types.CodeType):
             for inner in _walk(const, flatten):
                 yield inner
+        elif isinstance(const, str) and index:
+            prev = consts[index - 1]
+            if isinstance(prev, types.CodeType) and const == prev.co_name:
+                continue
+            yield const
         elif flatten and isinstance(const, (tuple, frozenset)):
             for inner in _flatten(const, flatten):
                 yield inner

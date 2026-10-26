@@ -484,6 +484,27 @@ class StringLiteralObfuscator(ast.NodeTransformer):
     def _xor_encode(self, s):
         encoded = ''.join(chr(ord(c) ^ self.xor_key) for c in s)
         return encoded[::-1]
+    def visit_Compare(self, node):
+        """Leave `__name__ == "<name>"` a literal comparison.
+
+        The module guard is the one string comparison the IR backend can
+        decide at compile time: irgen compiles ``__name__`` to the same
+        literal, so both operands stay constant and fold.  Sealing the
+        right-hand literal (what this pass does to every other string)
+        turns it into a runtime string handle, and the LLVM lowering has
+        no string comparison at all -- it refused the artifact build with
+        "string literal used as a value".
+        """
+        left = node.left
+        if isinstance(left, ast.Name) and left.id == "__name__":
+            node.comparators = [
+                c if isinstance(c, ast.Constant) and isinstance(c.value, str)
+                else self.visit(c)
+                for c in node.comparators
+            ]
+            node.left = self.visit(left)
+            return node
+        return self.generic_visit(node)
     def visit_Constant(self, node):
         if isinstance(node.value, str) and len(node.value) >= 2 and len(node.value) <= 200000:
             if node.value.startswith(self._part_prefix): return node

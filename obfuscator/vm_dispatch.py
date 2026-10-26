@@ -72,6 +72,21 @@ def _for_range_parts(node):
     return node.target.id, start, end, step
 
 
+#: Nodes the VM cannot compile.  ``ast.TryStar`` (except*, PEP 654) only
+#: exists on 3.11+, so it is appended when available: referencing it
+#: directly raised AttributeError on 3.10, every call to _eligible()
+#: swallowed that as "ineligible", and the whole VM corpus reported zero
+#: eligible functions there.
+_BANNED_NODES = (
+    ast.Yield, ast.YieldFrom, ast.Await, ast.Try, ast.Break, ast.Continue,
+    ast.Import, ast.ImportFrom, ast.Global, ast.Nonlocal, ast.Lambda,
+    ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Starred,
+    ast.Delete,
+)
+if hasattr(ast, "TryStar"):
+    _BANNED_NODES = _BANNED_NODES + (ast.TryStar,)
+
+
 def _check_supported(tree):
     """Raise _Unsupported unless every FunctionDef body is VM-compilable."""
     # range() calls that are direct For headers execute natively via
@@ -93,12 +108,7 @@ def _check_supported(tree):
         if isinstance(node, ast.Call):
             if id(node) not in allowed_calls:
                 raise _Unsupported("call")
-        if isinstance(node, (ast.Yield, ast.YieldFrom, ast.Await,
-                             ast.Try, ast.TryStar, ast.Break, ast.Continue,
-                             ast.Import, ast.ImportFrom,
-                             ast.Global, ast.Nonlocal, ast.Lambda,
-                             ast.FunctionDef, ast.AsyncFunctionDef,
-                             ast.ClassDef, ast.Starred, ast.Delete)):
+        if isinstance(node, _BANNED_NODES):
             # FunctionDef/ClassDef handled at top level; nested ones banned.
             # (Top-level scan below exempts the root function itself.)
             raise _Unsupported(type(node).__name__)

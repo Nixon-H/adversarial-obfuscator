@@ -1340,6 +1340,14 @@ class IrCompiler:
             return self.current_block.xor(IrType.i32(), operand, IrValue.const_int(-1)).result
         return operand
 
+    @staticmethod
+    def _const_string(value: IrValue):
+        """The text of a compile-time string constant, else None."""
+        if (value.ir_inst is None and value.type.kind == 'ptr'
+                and value.name and value.name.startswith('"')):
+            return value.name
+        return None
+
     def _compile_compare(self, node: ast.Compare) -> IrValue:
         """
         Compile a comparison expression.
@@ -1351,6 +1359,21 @@ class IrCompiler:
         for i, (op, comparator) in enumerate(zip(node.ops, node.comparators)):
             right = self._compile_expr(comparator)
             cmp_type = left.type if left.type.kind != 'ptr' else IrType.ptr()
+            # Two compile-time string constants are decidable here.  The
+            # module guard (``__name__ == "__main__"``) is this shape:
+            # __name__ compiles to the same literal, so without folding
+            # the IR carried ``eq ptr "__main__", "__main__"`` and the
+            # LLVM lowering rejected a string literal used as a value.
+            if (self._const_string(left) is not None
+                    and self._const_string(right) is not None):
+                same = self._const_string(left) == self._const_string(right)
+                if isinstance(op, (ast.Eq, ast.Is)):
+                    left = IrValue.const_bool(same)
+                elif isinstance(op, (ast.NotEq, ast.IsNot)):
+                    left = IrValue.const_bool(not same)
+                else:
+                    left = IrValue.const_bool(False)
+                continue
             if isinstance(op, ast.Eq):
                 result = self.current_block.eq(cmp_type, left, right).result
             elif isinstance(op, ast.NotEq):

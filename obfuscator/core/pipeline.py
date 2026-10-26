@@ -1700,6 +1700,12 @@ def _nyser_loads(blob):
         raise ValueError("NYSER1 version mismatch — rebuild required")
     _digest = _bl()
     _body_start = _pos
+    # Verify BEFORE reconstructing.  This check used to run after the
+    # parse, so a tampered body died inside the reader with IndexError
+    # (or worse, produced a code object) -- the integrity gate never
+    # fired.  hashlib is already imported above.
+    if _h.sha256(blob[_body_start:]).digest() != _digest:
+        raise ValueError("NYSER1 integrity failure (SHA-256 mismatch)")
     _tpl = (lambda: None).__code__
     def _const():
         _tag = _u8()
@@ -1739,11 +1745,14 @@ def _nyser_loads(blob):
         if not _kw["co_exceptiontable"] and _sys_nyser.version_info < (3, 11):
             del _kw["co_exceptiontable"]
         return _tpl.replace(**_kw)
-    _code_obj = _const()
+    try:
+        _code_obj = _const()
+    except (IndexError, UnicodeDecodeError, KeyError, TypeError) as _e:
+        # A malformed body must fail closed as ValueError, not escape as
+        # IndexError from the reader.
+        raise ValueError("bad NYSER1 payload: %s" % (_e,))
     if _pos != len(blob):
         raise ValueError("NYSER1 trailing bytes")
-    if _h.sha256(blob[_body_start:]).digest() != _digest:
-        raise ValueError("NYSER1 integrity failure")
     return _code_obj
 def _exec_fallback():
     try:

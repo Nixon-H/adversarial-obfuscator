@@ -14,6 +14,7 @@ bug Nyami had:
    ConstantUnfolder + MBA must preserve index/type semantics
 """
 import ast
+import types
 
 from obfuscator.core.transforms import (
     ConstantUnfolder,
@@ -76,14 +77,21 @@ def test_exception_table_preserved_by_nyser():
     co = compile(src, "<t>", "exec")
     # Module-level co_exceptiontable is empty (handlers live in child
     # code objects) — assert on the child function instead.
-    kids = [c for c in co.co_consts if hasattr(c, "co_exceptiontable")]
+    kids = [c for c in co.co_consts if isinstance(c, types.CodeType)]
     assert kids, "expected nested code objects"
-    assert any(k.co_exceptiontable for k in kids), "expected non-empty table"
+    # co_exceptiontable is 3.11+ (zero-cost exceptions).  On 3.10 the
+    # metadata that must survive the round-trip is the line table; the
+    # test used to require the 3.11 field on every interpreter and died
+    # with "expected nested code objects" there.
+    has_exc = hasattr(kids[0], "co_exceptiontable")
+    if has_exc:
+        assert any(k.co_exceptiontable for k in kids), "expected non-empty table"
     co2 = loads(dumps(co))
-    kids2 = [c for c in co2.co_consts if hasattr(c, "co_exceptiontable")]
+    kids2 = [c for c in co2.co_consts if isinstance(c, types.CodeType)]
     assert len(kids2) == len(kids)
     for a, b in zip(kids, kids2):
-        assert b.co_exceptiontable == a.co_exceptiontable, "table mismatch"
+        if has_exc:
+            assert b.co_exceptiontable == a.co_exceptiontable, "table mismatch"
         assert b.co_linetable == a.co_linetable, "linetable mismatch"
 
 
