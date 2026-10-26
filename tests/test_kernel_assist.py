@@ -229,6 +229,22 @@ class TestTraceMonitor:
         assert isinstance(result, bool)
         monitor.close()
 
+    def test_trace_syscalls_never_make_this_process_traceable(self):
+        """The tracing entry point must not leave the caller under ptrace.
+
+        PTRACE_TRACEME names the CALLING process as the tracee, so the
+        caller stops at its next exec or signal and never resumes.  That
+        froze this suite mid-run; CI reported it as exit 145 (128 + the
+        stop signal).  The invariant is directly observable: TracerPid is
+        unchanged by the call, and the call reports the no-op.
+        """
+        monitor = TraceMonitor()
+        before = monitor.get_process_status().get("TracerPid", "0")
+        assert monitor.trace_syscalls() is False
+        after = monitor.get_process_status().get("TracerPid", "0")
+        assert after == before
+        monitor.close()
+
     def test_trace_monitor_context_manager(self):
         """Context manager works."""
         with TraceMonitor() as tm:

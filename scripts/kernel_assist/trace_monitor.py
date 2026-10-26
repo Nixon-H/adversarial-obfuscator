@@ -20,11 +20,14 @@ if _libc_path:
 
 
 class TraceMonitor:
-    """Execution tracing using kernel facilities.
+    """Process introspection through kernel facilities.
 
-    Uses ptrace for syscall tracing, /proc for memory/process introspection.
-    All methods have graceful fallback when kernel features are unavailable.
-    Context-manager safe.
+    Reads /proc for memory maps, process status and debugger detection.
+    Syscall tracing through ptrace is deliberately not offered in-process:
+    PTRACE_TRACEME would make the *caller* the tracee and freeze it on its
+    next exec or signal (see :meth:`trace_syscalls`).  All methods have a
+    graceful fallback when kernel features are unavailable.  Context-manager
+    safe.
     """
 
     def __init__(self, capabilities: Optional[KernelCapabilities] = None) -> None:
@@ -37,52 +40,39 @@ class TraceMonitor:
         return self._caps
 
     def _check_ptrace_available(self) -> bool:
-        """Check if ptrace syscall is available."""
-        if _libc is None:
-            return False
-        try:
-            ptrace = _libc.ptrace
-            ptrace.restype = ctypes.c_long
-            ptrace.argtypes = (ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
-            PTRACE_TRACEME = 0
-            ret = ptrace(PTRACE_TRACEME, 0, None, None)
-            if ret == 0:
-                return True
-            return False
-        except Exception:
-            return False
+        """Report whether the ptrace entry point exists, without calling it.
+
+        This used to probe with ptrace(PTRACE_TRACEME).  TRACEME names the
+        CALLING process as the tracee: on success the caller stops at its
+        next exec or signal, and with no tracer waiting to resume it the
+        process hangs.  In a test run that froze the interpreter mid-suite
+        (CI reported it as exit 145) -- the same footgun already removed
+        from obfuscator/core/sources.py.  A symbol check answers the
+        question with no side effect.
+        """
+        return _libc is not None and hasattr(_libc, "ptrace")
 
     def trace_syscalls(self) -> bool:
-        """Begin tracing syscalls via ptrace.
+        """Report that in-process syscall tracing is unavailable.
 
-        Only works on Linux with ptrace enabled. If unavailable,
-        falls back to no-op.
+        ptrace cannot trace the process that calls it.  PTRACE_TRACEME
+        makes the CALLER the tracee and leaves it to stop on its next
+        exec or signal; whatever process runs this -- pytest included --
+        then hangs at an arbitrary point instead of being traced.  CI
+        spent weeks red on exactly that (128 + the stop signal, exit
+        145).  Tracing a child needs fork(), TRACEME in the child, then
+        exec, which this in-process monitor does not model, so callers
+        get the documented graceful no-op.
 
         Returns:
-            True if tracing active, False if unavailable.
+            Always False: no tracing is activated and no process state
+            changes.
         """
-        if self._closed:
-            return False
-        if self._tracing:
-            return True
-        if _libc is None:
-            log.info("TraceMonitor: ptrace not available, tracing disabled")
-            return False
-        try:
-            ptrace = _libc.ptrace
-            ptrace.restype = ctypes.c_long
-            ptrace.argtypes = (ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
-            PTRACE_TRACEME = 0
-            ret = ptrace(PTRACE_TRACEME, 0, None, None)
-            if ret == 0:
-                self._tracing = True
-                log.info("TraceMonitor: ptrace tracing active")
-                return True
-            log.info("TraceMonitor: ptrace not available")
-            return False
-        except Exception:
-            log.info("TraceMonitor: ptrace not available")
-            return False
+        log.info(
+            "TraceMonitor: in-process syscall tracing unavailable; "
+            "PTRACE_TRACEME would stop the caller, not trace it"
+        )
+        return False
 
     def stop_tracing(self) -> bool:
         """Stop ptrace tracing.
