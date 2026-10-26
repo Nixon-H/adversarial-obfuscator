@@ -103,6 +103,20 @@ jobs:
           targets: x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu, aarch64-unknown-linux-gnu
       - name: Build Rust relay
         run: make relay
+      - name: Install LLVM (llc for the codegen stage)
+        # Same dependency as the smoke build in the `test` job: the runner
+        # image does not ship llc, and scripts/build.py refuses to run
+        # without it.
+        run: |
+          if ! command -v llc >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq llvm
+          fi
+          if ! command -v llc >/dev/null 2>&1; then
+            LLC="$(ls /usr/lib/llvm-*/bin/llc 2>/dev/null | head -1)"
+            if [ -n "$LLC" ]; then sudo ln -sf "$LLC" /usr/local/bin/llc; fi
+          fi
+          command -v llc && llc --version | head -1
       - name: Run pipeline (full)
         run: python3 scripts/build.py --payload tests/fixtures/test_payload.py --skip-relay
       - name: Upload artifacts
