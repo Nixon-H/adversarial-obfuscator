@@ -34,7 +34,16 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Install dependencies
-        run: pip install --require-hashes -r requirements.lock
+        # requirements.lock is hash-pinned and carries the runtime + test
+        # closure.  requirements-dev.txt adds the pinned linter: six
+        # tests shell out to `ruff` (test_python310_compat.py and
+        # test_lint_cleanup_safety.py) and, without it, failed with
+        # FileNotFoundError on every matrix job while passing on any
+        # developer machine.  A test dependency belongs in the job that
+        # runs the test.
+        run: |
+          pip install --require-hashes -r requirements.lock
+          pip install -r requirements-dev.txt
       - name: Build native artefacts
         # BEFORE the tests.  Nineteen tests need a compiled artefact
         # (the C shared libraries, the Rust relay) and SKIP themselves

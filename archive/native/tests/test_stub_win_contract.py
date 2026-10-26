@@ -1,5 +1,14 @@
 """Textual contract tests for the native Windows stub additions.
 
+ARCHIVED 2026-10-26 with its subject: native/stub_win.cpp moved to
+archive/native/ (see ../README.md -- reflective loading and AMSI/ETW
+patching are out of scope for this product).  This file lived in tests/
+until the archive move, where it failed every CI run with
+FileNotFoundError for the stub.  It is kept next to the source it
+describes and is no longer collected: pytest runs `tests/`, not
+`archive/`.  The Makefile assertions record a linkage that no longer
+exists in the shipped build.
+
 Covers native/stub_win.cpp ITEM 1 (export-table poison-keys path) and
 ITEM 2 (native BYOVD driver gate) plus the Makefile psapi linkage.
 
@@ -26,8 +35,10 @@ import os
 import re
 
 
-ROOT = os.path.join(os.path.dirname(__file__), "..")
-WIN_STUB = os.path.join(ROOT, "native", "stub_win.cpp")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ARCHIVE_NATIVE = os.path.dirname(_HERE)
+ROOT = os.path.abspath(os.path.join(_ARCHIVE_NATIVE, "..", ".."))
+WIN_STUB = os.path.join(_ARCHIVE_NATIVE, "stub_win.cpp")
 MAKEFILE = os.path.join(ROOT, "Makefile")
 BLOCKLIST_PY = os.path.join(ROOT, "obfuscator", "driver_blocklist.py")
 

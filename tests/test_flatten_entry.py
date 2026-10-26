@@ -9,6 +9,7 @@ order so original_idx 0 leads; pairwise chain links preserved.
 import os
 import subprocess
 import sys
+import tempfile
 import textwrap
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -21,10 +22,15 @@ def _run_variant(source, seed, args=()):
         source, 0,
         {"master_seed": seed,
          "pass_sets": [["rename", "dead_code", "mba", "cfg_flatten", "vm"]]})
-    with open("/tmp/opencode/flat_probe.py", "w") as f:
-        f.write(code)
-    return subprocess.run([sys.executable, "/tmp/opencode/flat_probe.py"] + list(args),
-                          capture_output=True, text=True, timeout=120)
+    # The probe is written into a fresh temp dir: the old hardcoded
+    # /tmp/opencode path was a scratch directory from one developer's
+    # machine and did not exist on CI (or anywhere else).
+    with tempfile.TemporaryDirectory(prefix="nixon_flat_") as tmp:
+        probe = os.path.join(tmp, "flat_probe.py")
+        with open(probe, "w") as f:
+            f.write(code)
+        return subprocess.run([sys.executable, probe] + list(args),
+                              capture_output=True, text=True, timeout=120)
 
 
 def test_flattened_fib_across_seeds():

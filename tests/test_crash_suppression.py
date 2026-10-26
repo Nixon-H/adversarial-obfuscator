@@ -19,11 +19,24 @@ import re
 import subprocess
 import sys  # noqa: F401 (this line binds a name used by an embedded template)
 
+import pytest
+
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
 HEADER = os.path.join(ROOT, "native", "crash_suppress.h")
 LINUX_STUB = os.path.join(ROOT, "native", "stub_linux.cpp")
 WIN_STUB = os.path.join(ROOT, "native", "stub_win.cpp")
+
+# The two stubs are archived (archive/native/README.md: the reflective
+# loader / AMSI-EVASION half is out of scope for this product).  Their
+# two wiring tests stay in place so they come back with the files, but
+# they cannot pass in a checkout where the stubs do not ship -- and they
+# must not fail the build for that.
+STUB_ARCHIVED = not (os.path.isfile(LINUX_STUB) and os.path.isfile(WIN_STUB))
+STUB_REASON = (
+    "native/stub_linux.cpp and native/stub_win.cpp are archived "
+    "(archive/native/README.md); the tests return with the files"
+)
 
 _PROBE_C = r"""
 #include <stdio.h>
@@ -92,6 +105,7 @@ def test_header_compiles_cpp(tmp_path):
     assert "KILL-137-OK" in r.stdout
 
 
+@pytest.mark.skipif(STUB_ARCHIVED, reason=STUB_REASON)
 def test_stub_linux_wires_header_and_builds():
     src = open(LINUX_STUB).read()
     assert '#include "crash_suppress.h"' in src
@@ -106,6 +120,7 @@ def test_stub_linux_wires_header_and_builds():
     assert r.returncode == 0, r.stderr[-3000:]
 
 
+@pytest.mark.skipif(STUB_ARCHIVED, reason=STUB_REASON)
 def test_stub_win_wiring_textual():
     src = open(WIN_STUB).read()
     assert '#include "crash_suppress.h"' in src

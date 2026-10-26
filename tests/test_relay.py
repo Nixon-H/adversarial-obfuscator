@@ -90,7 +90,7 @@ else:
 """
     result = subprocess.run(
         [sys.executable, "-c", code],
-        capture_output=True, text=True, cwd="/home/nixon/Projects/adversarial-obfuscator",
+        capture_output=True, text=True, cwd=REPO_ROOT,
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
     assert "OK" in result.stdout

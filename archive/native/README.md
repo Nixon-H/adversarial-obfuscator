@@ -62,6 +62,18 @@ the dead corpus alive. `tests/test_native_compile.py` now covers only
 `core.cpp` and `simd_vm.c`, and asserts the archived Makefile targets
 stay gone.
 
+`tests/test_stub_win_contract.py` followed `stub_win.cpp` here on
+2026-10-26. It had stayed behind and failed every CI run with
+`FileNotFoundError` for the archived source; a contract test for a stub
+that does not ship is not a regression signal. Two other groups kept
+their tests in place, skipping while the subject is archived and
+returning the moment it comes back:
+
+- `tests/test_vm_ephemeral_isa.py` — the six `test_vm_stub_*` /
+  `test_c_*` compile-contract tests skip while `vm_stub.c` is absent.
+- `tests/test_crash_suppression.py` — the two `test_stub_*` wiring tests
+  do the same for `stub_linux.cpp` / `stub_win.cpp`.
+
 ## Verification
 
 `tests/test_no_dead_code.py` fails if a source in `native/` is not
