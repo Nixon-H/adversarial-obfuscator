@@ -65,7 +65,10 @@ jobs:
         # the nineteen tests that need it skip quietly.
         env:
           NIXON_REQUIRE_ARTEFACTS: "1"
-        run: python3 -m pytest tests/ -v
+        # -u: unbuffered, so the log timestamps each test as it starts
+        # instead of in 4 KB chunks; that is what made the 3.13/3.14
+        # slowness impossible to attribute to a test.
+        run: python3 -u -m pytest tests/ -v
       - name: End-to-end artifact check
         # Build a payload on THIS Python version, run the artifact, and
         # assert the output.  The unit suite proves the modules import
