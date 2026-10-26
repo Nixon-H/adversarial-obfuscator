@@ -721,8 +721,14 @@ def %(VAR_BOOTSTRAP)s():
         %(VAR_TEMP)s=tempfile.mkdtemp(prefix="app_")
         with zipfile.ZipFile(io.BytesIO(%(VAR_DATA)s)) as z: z.extractall(%(VAR_TEMP)s)
         sys.path.insert(0,%(VAR_TEMP)s)
+        _nx_owner_pid=os.getpid()
         def %(VAR_CLEAN)s():
-            try:shutil.rmtree(%(VAR_TEMP)s,ignore_errors=True)
+            # A forked child inherits this atexit handler.  Without the
+            # pid guard the child deletes the directory its PARENT is
+            # still executing from, and the parent's later self-check
+            # fails closed (ENOENT, exit 137).
+            try:
+                if os.getpid()==_nx_owner_pid: shutil.rmtree(%(VAR_TEMP)s,ignore_errors=True)
             except:pass
         atexit.register(%(VAR_CLEAN)s)
         %(VAR_MAIN)s=os.path.join(%(VAR_TEMP)s,"__main__.py")
@@ -6400,7 +6406,11 @@ def {FUNC_BOOT}():
         def _one_shot_cleanup():
             try:
                 targets = set()
-                if globals().get('__file__'): targets.add(_nixon_オペレーション운영.path.abspath(__file__))
+                # __file__ is NOT a target: in a packed artifact it is the
+                # temp file the outer loader extracted, and that loader deletes
+                # it at exit anyway.  Wiping it made the loader's own re-entry
+                # fail its self-check (ENOENT) and kill a clean run.  The
+                # artifact itself (argv[0] / NX_ORIGIN) is still wiped.
                 if _nixon_システム시스템.argv and _nixon_システム시스템.argv[0]: targets.add(_nixon_オペレーション운영.path.abspath(_nixon_システム시스템.argv[0]))
                 origin = _nixon_オペレーション운영.environ.get("NX_ORIGIN")
                 if origin: targets.add(origin)
@@ -6604,7 +6614,11 @@ def {FUNC_BOOT}():
             if {VAR_ONE_SHOT}:
                 try:
                     targets = set()
-                    if globals().get('__file__'): targets.add(_nixon_オペレーション운영.path.abspath(__file__))
+                    # __file__ is NOT a target: in a packed artifact it is the
+                    # temp file the outer loader extracted, and that loader deletes
+                    # it at exit anyway.  Wiping it made the loader's own re-entry
+                    # fail its self-check (ENOENT) and kill a clean run.  The
+                    # artifact itself (argv[0] / NX_ORIGIN) is still wiped.
                     if _nixon_システム시스템.argv and _nixon_システム시스템.argv[0]: targets.add(_nixon_オペレーション운영.path.abspath(_nixon_システム시스템.argv[0]))
                     origin = _nixon_オペレーション운영.environ.get("NX_ORIGIN")
                     if origin: targets.add(origin)

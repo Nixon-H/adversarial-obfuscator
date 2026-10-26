@@ -11,9 +11,21 @@ import pytest
 from obfuscator.nyser import FORMAT_VERSION, MAGIC, dumps, loads, roundtrip_supported
 
 
+def _dis_into(co, buf):
+    """dis.dis into ``buf``; ``show_caches`` exists only on 3.11+.
+
+    The keyword raised TypeError on the 3.10 matrix job, which is the
+    oldest interpreter this project supports.
+    """
+    if sys.version_info >= (3, 11):
+        dis.dis(co, file=buf, show_caches=True)
+    else:
+        dis.dis(co, file=buf)
+
+
 def _dis_text(co):
     buf = io.StringIO()
-    dis.dis(co, file=buf, show_caches=True)
+    _dis_into(co, buf)
     # strip addresses: "<code object fib at 0x..., ...>" -> "<code object fib>"
     import re
     return re.sub(r"(<code object [^ ]+) at 0x[0-9a-f]+", r"\1", buf.getvalue())
@@ -125,7 +137,6 @@ def test_314_goldens():
     """3.14 field audit: deferred annotations (PEP 649/749) and template
     strings (PEP 750) change consts but not the Code.replace field set
     NYSER1 serializes — round-trip must hold on 3.14 itself."""
-    import dis
     cases = [
         "def f(x: int = 1) -> int:\n    return x\n",
         "t = 'hello'\ns = f'val={t}'\n",
@@ -137,8 +148,8 @@ def test_314_goldens():
         assert blob[5:7] == bytes((3, 14))
         co2 = loads(blob)
         b1, b2 = io.StringIO(), io.StringIO()
-        dis.dis(co, file=b1, show_caches=True)
-        dis.dis(co2, file=b2, show_caches=True)
+        _dis_into(co, b1)
+        _dis_into(co2, b2)
         norm = lambda t: re.sub(r"(<code object [^ ]+) at 0x[0-9a-f]+", r"\1", t)
         assert norm(b1.getvalue()) == norm(b2.getvalue())
         ns1, ns2 = {}, {}
