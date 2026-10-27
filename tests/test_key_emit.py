@@ -70,6 +70,19 @@ def test_emit_key_loader_reconstructs_key():
     assert ns["_NX_BUILD_ID"] == "bid-emit-01"
 
 
+def test_emitted_loader_applies_the_customer_salt():
+    """Emitted reconstruction must equal the build-side salted derivation."""
+    eff = derive_effective_key(_KEY, "bid-cust", "acme-42")
+    r0, r1 = split_key(_KEY, split_seed_for_build("bid-cust"))
+    snippet = emit_key_loader(r0, r1, "bid-cust", customer_salt="acme-42")
+    ns = {"__name__": "key_emit_cust", "base64": base64}
+    ns["_nx_wipe"] = lambda obj: None
+    exec(compile(snippet, "<key_loader_cust>", "exec"), ns)
+    assert ns["BLOB_KEY"] == eff
+    # A different customer must not reproduce it.
+    assert ns["BLOB_KEY"] != derive_effective_key(_KEY, "bid-cust", "acme-43")
+
+
 def test_no_hex_literal_of_key_in_loader():
     blanks = {"windows": "", "linux": "", "darwin": ""}
     src, _, _ = generate_hybrid_loader_script(
@@ -92,3 +105,36 @@ def test_derive_effective_key_known_vector():
     mask = hashlib.sha256(b"abc").digest()
     assert eff == mask[:4]
     assert derive_effective_key(_KEY, "x") != derive_effective_key(_KEY, "y")
+
+
+# --- customer binding (--customer-salt) ---------------------------------
+
+def test_customer_salt_is_absent_from_the_legacy_derivation():
+    """No salt = byte-identical to the pre-customer derivation."""
+    import hashlib
+
+    mask = hashlib.sha256(b"abc").digest()
+    assert derive_effective_key(b"\x00" * 4, "abc", "") == mask[:4]
+    assert derive_effective_key(b"\x00" * 4, "abc") == mask[:4]
+
+
+def test_customer_salt_domain_separates_the_key():
+    base = derive_effective_key(_KEY, "bid-1")
+    acme = derive_effective_key(_KEY, "bid-1", "acme")
+    other = derive_effective_key(_KEY, "bid-1", "other")
+    assert acme != base and other != base and acme != other
+    # Same customer, same build id: deterministic.
+    assert acme == derive_effective_key(_KEY, "bid-1", "acme")
+
+
+def test_customer_salt_is_emitted_and_matched_by_the_loader():
+    """The emitted loader carries the salt and applies the same mask."""
+    blanks = {"windows": "", "linux": "", "darwin": ""}
+    src, _, _ = generate_hybrid_loader_script(
+        blanks, b"", _KEY.hex(), build_id="bid-9", customer_salt="acme-42")
+    assert '_NX_CUSTOMER_SALT = "acme-42"' in src
+    assert "nx-customer" in src
+    assert "{customer_salt}" not in src
+    plain, _, _ = generate_hybrid_loader_script(
+        blanks, b"", _KEY.hex(), build_id="bid-9")
+    assert '_NX_CUSTOMER_SALT = ""' in plain

@@ -58,15 +58,31 @@ def combine_shares(share0_b64: str, share1_b64: str) -> bytes:
     return bytes(a ^ b for a, b in zip(s0, s1))
 
 
-def derive_effective_key(key: bytes, build_id: str) -> bytes:
+def derive_effective_key(key: bytes, build_id: str,
+                         customer_salt: str = "") -> bytes:
     """Per-build effective key: ``xor(key, sha256(build_id))`` (mask cycled).
 
     For keys <= 32 bytes this equals ``xor(key, sha256(build_id)[:len(key)])``.
+
+    ``customer_salt`` adds a second, domain-separated mask
+    (``sha256(b"nx-customer:" + salt)``).  It is empty by default, so the
+    derivation is byte-identical to the pre-salt one unless a build is
+    explicitly bound to a customer.  With a salt, two builds of the same
+    payload for two customers do not share a payload key: transferring an
+    artefact from one to the other does not decrypt.
     """
     if not isinstance(key, (bytes, bytearray)) or len(key) == 0:
         raise ValueError("key must be non-empty bytes")
     mask = hashlib.sha256(str(build_id).encode()).digest()
-    return bytes(b ^ mask[i % len(mask)] for i, b in enumerate(bytes(key)))
+    derived = bytes(b ^ mask[i % len(mask)] for i, b in enumerate(bytes(key)))
+    salt = str(customer_salt or "")
+    if salt:
+        if '"' in salt or "\\" in salt or "\n" in salt or "\r" in salt:
+            raise ValueError("customer_salt contains unsafe characters")
+        cmask = hashlib.sha256(b"nx-customer:" + salt.encode()).digest()
+        derived = bytes(b ^ cmask[i % len(cmask)]
+                        for i, b in enumerate(derived))
+    return derived
 
 
 def split_seed_for_build(build_id: str) -> bytes:
@@ -75,7 +91,7 @@ def split_seed_for_build(build_id: str) -> bytes:
 
 
 def emit_key_loader(share0_b64: str, share1_b64: str, build_id: str,
-                    varname: str = "BLOB_KEY") -> str:
+                    varname: str = "BLOB_KEY", customer_salt: str = "") -> str:
     """Return the runtime key-reconstruction snippet for the loader template.
 
     Emits base64 share literals plus the ``_NX_BUILD_ID`` salt; the loader
@@ -108,15 +124,26 @@ def emit_key_loader(share0_b64: str, share1_b64: str, build_id: str,
             raise ValueError("share contains unsafe characters")
     if '"' in build_id or "\\" in build_id or "\n" in build_id or "\r" in build_id:
         raise ValueError("build_id contains unsafe characters")
-    return (
+    salt = str(customer_salt or "")
+    out = (
         "_NX_BUILD_ID = \"%s\"\n" % (build_id,)
+        + "_NX_CUSTOMER_SALT = \"%s\"\n" % (salt,)
         + "_BLOB_S0 = bytearray(base64.b64decode(\"%s\"))\n" % (share0_b64,)
         + "_BLOB_S1 = bytearray(base64.b64decode(\"%s\"))\n" % (share1_b64,)
         + "_BLOB_RAW = bytearray(_a ^ _b for _a, _b in zip(_BLOB_S0, _BLOB_S1))\n"
         + "import hashlib as _nx_hk\n"
         + "_BLOB_MASK = _nx_hk.sha256(_NX_BUILD_ID.encode()).digest()\n"
         + "%s = bytes(_b ^ _BLOB_MASK[_i %% len(_BLOB_MASK)] for _i, _b in enumerate(_BLOB_RAW))\n" % (varname,)
-        + "_nx_wipe(_BLOB_S0)\n"
-        + "_nx_wipe(_BLOB_S1)\n"
-        + "_nx_wipe(_BLOB_RAW)\n"
     )
+    if salt:
+        out += (
+            "_BLOB_CMASK = _nx_hk.sha256(b\"nx-customer:\" + _NX_CUSTOMER_SALT.encode()).digest()\n"
+            "%s = bytes(_b ^ _BLOB_CMASK[_i %% len(_BLOB_CMASK)] for _i, _b in enumerate(%s))\n"
+            % (varname, varname)
+        )
+    out += (
+        "_nx_wipe(_BLOB_S0)\n"
+        "_nx_wipe(_BLOB_S1)\n"
+        "_nx_wipe(_BLOB_RAW)\n"
+    )
+    return out

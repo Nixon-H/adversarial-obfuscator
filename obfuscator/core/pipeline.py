@@ -1211,7 +1211,8 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
                                    watermark_key=None, driver_check=False,
                                    split_bootstrap=False, snapshot_off=False,
                                    stdlib_audit_off=False,
-                                   section_split=False, section_count=4):
+                                   section_split=False, section_count=4,
+                                   customer_salt=""):
     # Phase-4 wiring: all new kwargs default to current behavior (no change
     # when absent). vm/secure-temp snippets are always appended (report-only,
     # safe); hostguard only when requested (changes exec semantics).
@@ -1636,6 +1637,9 @@ FALLBACK_BLOB = "{fallback_blob_val}"
 # build id derives a wrong key and decrypt fails. Share/plaintext buffers
 # are bytearrays so _nx_wipe can zero them via ctypes.memset after use.
 _NX_BUILD_ID = "{build_id}"
+# Empty unless the build is bound to one customer: a second,
+# domain-separated mask over the payload key (see key_emit).
+_NX_CUSTOMER_SALT = "{customer_salt}"
 _BLOB_S0 = "{share0}"
 _BLOB_S1 = "{share1}"
 def _nx_wipe(obj):
@@ -1660,6 +1664,15 @@ def _nx_key_reconstruct():
     import hashlib as _nx_hk
     _mask = _nx_hk.sha256(_NX_BUILD_ID.encode()).digest()
     _key = bytes(_b ^ _mask[_i % len(_mask)] for _i, _b in enumerate(_raw))
+    try:
+        if _NX_CUSTOMER_SALT:
+            # Customer binding (build-time --customer-salt): a second,
+            # domain-separated mask, so an artefact built for one
+            # customer does not decrypt for another.
+            _cmask = _nx_hk.sha256(b"nx-customer:" + _NX_CUSTOMER_SALT.encode()).digest()
+            _key = bytes(_b ^ _cmask[_i % len(_cmask)] for _i, _b in enumerate(_key))
+    except Exception:
+        pass
     _nx_wipe(_s0)
     _nx_wipe(_s1)
     _nx_wipe(_raw)
@@ -2011,11 +2024,13 @@ if __name__ == "__main__":
     # (Splitting the derived key with a build-bound seed would cancel the
     # salt at runtime: shares ^ seed-stream twice = raw key. Verified
     # 2026-09-20: that ordering derives the raw key, not the salted one.)
-    _eff_key = _ke_derive(_raw_key, build_id)
+    _customer_salt = str(customer_salt or '')
+    _eff_key = _ke_derive(_raw_key, build_id, _customer_salt)
     _s0, _s1 = _ke_split(_raw_key, _ke_seed(build_id))
     # Sanity: emitted shares must reconstruct the raw key; salt -> eff key.
     assert _ke_combine(_s0, _s1) == _raw_key, "key share roundtrip failed"
-    assert _ke_derive(_ke_combine(_s0, _s1), build_id) == _eff_key
+    assert _ke_derive(_ke_combine(_s0, _s1), build_id,
+                      _customer_salt) == _eff_key
     # Re-encrypt the caller-supplied fallback blob under the effective key
     # so the loader's derived key actually decrypts it. byte-for-byte, the
     # transform is: decrypt(raw_key) -> plaintext -> encrypt(eff_key).
@@ -2074,10 +2089,12 @@ if __name__ == "__main__":
     loader_src = (
         loader_template
         .replace("{build_id}", build_id)
+        .replace("{customer_salt}", _customer_salt)
         .replace("{share0}", _s0)
         .replace("{share1}", _s1)
         .replace("{fallback_blob_val}", fallback_blob_val)
     )
+    assert "{customer_salt}" not in loader_src, "stale customer salt placeholder"
     assert "{share0}" not in loader_src and "{share1}" not in loader_src
     assert "{build_id}" not in loader_src and "{fallback_blob_val}" not in loader_src
     assert "{key_hex}" not in loader_src, "stale {key_hex} placeholder"
@@ -2402,6 +2419,7 @@ def build_project(args):
                 section_split=bool(getattr(args, 'section_split', False)),
                 section_count=int(getattr(args, 'section_count', 4) or 4),
                 watermark=str(getattr(args, 'watermark', '') or '') or None,
+                customer_salt=str(getattr(args, 'customer_salt', '') or ''),
             )
             if getattr(args, 'section_split', False):
                 # The split needs a fallback payload to split, and there
@@ -2846,6 +2864,7 @@ def _VERIFY_INTEGRITY():
                 'STR_SESSION_KEY': STRING_SESSION_KEY,
                 'build_timestamp': build_timestamp,
                 'build_id': build_id,
+                'customer_salt': str(getattr(args, 'customer_salt', '') or ''),
                 'required_python_version': f"({args.python.split('.')[0]}, {args.python.split('.')[1]})" if getattr(args, 'python', None) and '.' in args.python else f"({sys.version_info[0]}, {sys.version_info[1]})",
                 'VAR_PAYLOAD': VARS["PAYLOAD"],
                 'VAR_NONCE': VARS["NONCE"],
@@ -3380,6 +3399,9 @@ def build_parser():
     build.add_argument('--private-key', help='Deployment key')
     build.add_argument('--cf-token', help='Cloudflare API Token (overrides the stored config)')
     build.add_argument('--cf-account', help='Cloudflare Account ID (overrides the stored config)')
+    build.add_argument('--customer-salt', default='',
+                       help='Bind the payload key to one customer (mixed as a '
+                            'domain-separated second mask; empty = no binding)')
     build.add_argument('--skip-cloud', action='store_true', help='Skip the cloud build farm: build the artifact locally even if --compile/--auto would send it to the farm')
     build.add_argument('--resume', help='Resume waiting for a specific GitHub Run ID (skip upload)')
     build.add_argument('--exclude-android', action='store_true', help='Skip Android build in Nuitka cloud compilation')
