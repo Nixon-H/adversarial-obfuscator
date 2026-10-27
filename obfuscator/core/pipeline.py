@@ -1520,8 +1520,22 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
     _phase4_suffix += ("_NX_HWID_LOCK = %r\n" % ("ENABLED" if hwid_lock else "DISABLED",))
     _phase4_suffix += ("_NX_HWID_STATIC = %r\n" % (_static_hwid,))
     _phase4_suffix += (
+        "def _nx_hwid_mac():\n"
+        "    try:\n"
+        "        import os as _o\n"
+        "        for _n in sorted(_o.listdir('/sys/class/net')):\n"
+        "            if _n == 'lo': continue\n"
+        "            try:\n"
+        "                with open('/sys/class/net/' + _n + '/address') as _f:\n"
+        "                    _m = _f.read().strip().lower().replace(':', '')\n"
+        "            except Exception: continue\n"
+        "            if len(_m) == 12 and _m != '0' * 12: return _m\n"
+        "    except Exception: pass\n"
+        "    return '0'\n"
+        "\n"
+        "\n"
         "def _nx_hwid_unlock(blob_bytes):\n"
-        "    import hashlib as _hl_hashlib, json as _hl_json, uuid as _hl_uuid\n"
+        "    import hashlib as _hl_hashlib, json as _hl_json\n"
         "    import hmac as _hl_hmac\n"
         "    if _NX_HWID_LOCK == \"DISABLED\":\n"
         "        return blob_bytes\n"
@@ -1532,7 +1546,9 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         "        _enc = bytes.fromhex(_pack[\"data\"])\n"
         "    except Exception:\n"
         "        raise ValueError(\"bad hwid lock pack\")\n"
-        "    _hwid = _NX_HWID_STATIC if _NX_HWID_STATIC else format(_hl_uuid.getnode(), \"x\")\n"
+        # Not uuid.getnode(): it can shell out to ip/ifconfig/arp and
+        # blocks for minutes inside this threaded loader.
+        "    _hwid = _NX_HWID_STATIC if _NX_HWID_STATIC else _nx_hwid_mac()\n"
         "    _key = _hl_hashlib.pbkdf2_hmac(\"sha256\", _hwid.encode(), _salt, 100000, dklen=32)\n"
         "    def _ks(_k, _n, _ln):\n"
         "        _out = bytearray()\n"

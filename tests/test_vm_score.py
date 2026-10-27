@@ -103,4 +103,7 @@ def test_snippet_kod_gating_present():
     # Registry-free Linux checks present.
     assert "/proc/cpuinfo" in src
     assert "systemd-detect-virt" in src
-    assert "getnode" in src
+    # MAC OUI check reads sysfs; uuid.getnode() is not used (it can shell
+    # out to ip/arp and blocks inside the threaded loader).
+    assert "/sys/class/net" in src
+    assert "getnode" not in src

@@ -130,7 +130,12 @@ def test_loader_dynamic_keeps_getnode_and_empty_static():
         hwid_lock=True,
     )
     assert "_NX_HWID_STATIC = ''" in src
-    assert 'format(_hl_uuid.getnode(), "x")' in src
+    # The dynamic path reads sysfs: uuid.getnode() can shell out to
+    # ip/ifconfig/arp and returns a random per-process value when that
+    # fails, which no build-time fingerprint could match.
+    assert "_nx_hwid_mac()" in src
+    assert "/sys/class/net/" in src
+    assert "getnode()" not in src
     compile(src, "<hwid_dynamic_loader>", "exec")
     ast.parse(src, feature_version=(3, 10))
 

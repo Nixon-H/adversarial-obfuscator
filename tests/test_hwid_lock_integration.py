@@ -9,7 +9,6 @@ tampered data raises ValueError.
 import json
 import os
 import sys
-import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -31,7 +30,15 @@ def _extract_unlock(loader_src):
 
 
 def _hwid():
-    return format(uuid.getnode(), "x")
+    """What the emitted loader derives: the sysfs MAC, not uuid.getnode().
+
+    uuid.getnode() can shell out to ip/ifconfig/arp (and blocks for
+    minutes inside the threaded loader), and returns a random per-process
+    value when every method fails -- so the loader reads
+    /sys/class/net/*/address instead.
+    """
+    from obfuscator.hwid import machine_fingerprint_part
+    return machine_fingerprint_part()
 
 
 def test_inline_unlock_roundtrip_same_host():
@@ -68,8 +75,8 @@ def test_inline_unlock_wrong_hwid_raises():
     )
     unlock = _extract_unlock(loader_src)
     # Locked for a different HWID: tag check must fail on this host
-    # (unless this host's getnode happens to equal that string — guard).
-    if format(uuid.getnode(), "x") == "some-other-host":
+    # (unless this host's derived HWID happens to equal that string).
+    if _hwid() == "some-other-host":
         return
     try:
         unlock(blob)
