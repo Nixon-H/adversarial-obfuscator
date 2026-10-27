@@ -55,6 +55,11 @@ jobs:
       - name: Stage 3 - LLVM Codegen
         # NOTE: llvmgen takes -O/--ollvm-passes (bcf/fla/sub...), not bare
         # --bcf/--fla/--sub flags.
+        # Seed pinned: pass selection and label naming are randomised, so an
+        # unpinned run is a fuzz test of the IR emitter; a rare invalid-IR
+        # seed failed this job once (llc: expected value token, line 1181).
+        env:
+          NIXON_LLVM_SEED: "0xDEADBEEF"
         run: python3 -m llvmgen build/program.ir -o build/program.o -O bcf fla sub
 
       - name: Stage 4 - Block Encryption
