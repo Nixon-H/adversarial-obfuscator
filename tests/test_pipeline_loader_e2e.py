@@ -61,9 +61,8 @@ def test_pipeline_artifact_parses(pipeline_artifact):
 def test_pipeline_artifact_runs(pipeline_artifact):
     env = dict(os.environ)
     env["NIXON_LOG_REDIRECT"] = "0"
-    proc = subprocess.run([sys.executable, pipeline_artifact],
-                          capture_output=True, text=True, timeout=60,
-                          env=env)
+    from tests._artifact_run import run_artifact
+    proc = run_artifact(pipeline_artifact, timeout=60, env=env)
     assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-2000:]
     assert "hello-nixon" in proc.stdout, proc.stdout[-2000:]
 
@@ -81,8 +80,8 @@ def test_pipeline_artifact_writes_no_stray_dump_file(pipeline_artifact):
     env["NIXON_LOG_REDIRECT"] = "0"
     work = os.path.dirname(os.path.dirname(pipeline_artifact))
     before = set(os.listdir(work))
-    subprocess.run([sys.executable, pipeline_artifact], capture_output=True,
-                   text=True, timeout=60, env=env)
+    from tests._artifact_run import run_artifact
+    run_artifact(pipeline_artifact, timeout=60, env=env)
     after = set(os.listdir(work))
     assert after == before, "artifact created stray files: %r" % (
         sorted(after - before),)

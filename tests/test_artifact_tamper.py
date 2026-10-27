@@ -44,8 +44,10 @@ def _run(path):
     env = dict(os.environ)
     env["NIXON_LOG_REDIRECT"] = "0"
     env["PYTHONPATH"] = REPO_ROOT + os.pathsep + env.get("PYTHONPATH", "")
-    return subprocess.run([sys.executable, path], capture_output=True,
-                          text=True, timeout=300, env=env)
+    # Shared helper: dumps the child's stack if the run hangs instead of
+    # just raising TimeoutExpired (3.14 runners do this intermittently).
+    from tests._artifact_run import run_artifact
+    return run_artifact(path, timeout=300, env=env)
 
 
 @pytest.fixture(scope="module")
