@@ -60,9 +60,32 @@ def _packed_artifact(src_dir):
 
 
 def _run(path):
-    return subprocess.run([sys.executable, path], capture_output=True,
-                          text=True, timeout=300,
-                          env=dict(os.environ, NIXON_LOG_REDIRECT="0"))
+    """Run the artifact; on a hang, dump its stack instead of nothing.
+
+    This run timed out after 300 s on the 3.13 runner while the same
+    artifact finishes in under a second here.  A bare TimeoutExpired says
+    nothing about where it sits, so the child runs under faulthandler and
+    gets SIGABRT on timeout.
+    """
+    env = dict(os.environ, NIXON_LOG_REDIRECT="0", PYTHONFAULTHANDLER="1")
+    proc = subprocess.Popen([sys.executable, path], stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, env=env)
+    try:
+        out, err = proc.communicate(timeout=300)
+    except subprocess.TimeoutExpired:
+        try:
+            import signal as _signal
+            proc.send_signal(_signal.SIGABRT)
+        except Exception:
+            pass
+        try:
+            out, err = proc.communicate(timeout=30)
+        except Exception:
+            out, err = "", ""
+        print("[!] artifact run timed out; child stack:")
+        print((err or "")[-4000:])
+        raise
+    return subprocess.CompletedProcess([sys.executable, path], proc.returncode, out, err)
 
 
 def test_section_split_flag_produces_a_working_artifact(tmp_path):
