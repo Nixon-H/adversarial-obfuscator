@@ -3,10 +3,9 @@ name: CI
 on:
   push:
   pull_request:
-  # Weekly ruff-pin review (see the lint-pin job). A job cannot declare
-  # its own schedule — GitHub only allows `schedule` here — so the other
-  # jobs carry `if: github.event_name != 'schedule'` and only lint-pin
-  # runs on the cron.
+  # Weekly run: the full matrix (the `test` job has no schedule guard any
+  # more) plus the ruff-pin review. A green cron now means the suite is
+  # green, not merely that lint-pin ran.
   schedule:
     - cron: "0 6 * * 1"    # Mondays
   workflow_dispatch:
@@ -18,7 +17,9 @@ permissions:
 
 jobs:
   test:
-    if: github.event_name != 'schedule'
+    # Runs on the weekly cron as well: previously every matrix job carried
+    # `if: event != 'schedule'`, so Monday's "success" only meant lint-pin
+    # had run and the suite could rot for weeks unnoticed.
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

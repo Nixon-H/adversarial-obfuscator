@@ -2,9 +2,9 @@ name: Cross-Platform
 
 on:
   push:
-    branches: [main]
+    branches: [master, main]
   pull_request:
-    branches: [main]
+    branches: [master, main]
 
 # Least privilege: read-only default token.
 permissions:
@@ -23,7 +23,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install pytest
+      # requirements.lock, not bare pytest: the suite imports the
+      # lock's dependency closure (cryptography, PyYAML, ...).
+      - run: pip install --require-hashes -r requirements.lock
       - run: cargo check --manifest-path runtime/Cargo.toml
       - run: cargo check --manifest-path relay/Cargo.toml
       - run: cargo test --manifest-path runtime/Cargo.toml
