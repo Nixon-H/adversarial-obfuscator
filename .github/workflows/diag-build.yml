@@ -1,7 +1,6 @@
 name: diag-build
 
-# Temporary: time one pipeline build per interpreter so the 3.13/3.14
-# slowness can be attributed to a phase instead of guessed at.
+# Temporary: locate the 3.13/3.14 slowness precisely.
 on:
   workflow_dispatch:
 
@@ -22,7 +21,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: pip install --require-hashes -r requirements.lock
-      - name: Time one build, line by line
+      - name: Build (timed)
         run: |
           mkdir -p /tmp/diag && cd /tmp/diag
           printf 'print("DIAG-PAYLOAD")\n' > hello.py
@@ -35,18 +34,17 @@ jobs:
             | while IFS= read -r line; do
                 printf '%5d %s\n' "$(( $(date +%s) - start ))" "$line"
               done
-          echo "PIPELINE_EXIT=${PIPESTATUS[0]}"
           echo "TOTAL=$(( $(date +%s) - start ))s"
-      - name: Time the C core build alone
+          ls -la /tmp/diag/dist | head
+      - name: Run the artifact with a stack dump at 90s
         run: |
-          cd "$GITHUB_WORKSPACE"
-          mkdir -p /tmp/core
+          cd /tmp/diag
+          ART=$(ls dist/*_protected*.py 2>/dev/null | head -1)
+          echo "artifact=$ART"
+          export PYTHONPATH="$GITHUB_WORKSPACE"
+          export PYTHONFAULTHANDLER=1
+          export NIXON_LOG_REDIRECT=0
           start=$(date +%s)
-          python3 - <<'PY'
-          import time
-          t = time.time()
-          from obfuscator.core.c_core_build import build_c_core
-          path = build_c_core("/tmp/core")
-          print("core:", path, "%.1fs" % (time.time() - t))
-          PY
-          echo "CORE_TOTAL=$(( $(date +%s) - start ))s"
+          set +e
+          timeout -s ABRT 90 python3 "$ART" 2>&1 | tail -40
+          echo "RUN_RC=$? RUN_SECONDS=$(( $(date +%s) - start ))"
