@@ -47,7 +47,10 @@ jobs:
         run: python3 scripts/build.py --payload examples/hello.py --skip-relay --skip-extras
 
       - name: Stage 2 - IR Compile
-        run: python3 -m irgen build/obfuscated.py -o build/program.ir
+        # scripts/build.py stages .build_tmp_<stem>_obfuscated.py and the
+        # package step renames it to <stem>_obfuscated.py, so the payload
+        # stem (hello) is part of the path the later stages read.
+        run: python3 -m irgen build/hello_obfuscated.py -o build/program.ir
 
       - name: Stage 3 - LLVM Codegen
         # NOTE: llvmgen takes -O/--ollvm-passes (bcf/fla/sub...), not bare

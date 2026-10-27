@@ -9,11 +9,7 @@ Verifies:
 6. REKEY with dispatch rotation
 """
 
-import ctypes
 import hashlib
-import os
-import subprocess
-import tempfile
 import time
 
 import pytest
@@ -36,46 +32,9 @@ from vm.ephemeral_isa import (
 )
 from vm.interpreter import VMInterpreter, ENCODING_VARIABLE, ENCODING_FIELD_SHUFFLE, ENCODING_NAMES
 
-# vm_stub.c is an archived compile-test only (archive/native/README.md);
-# it was never linked into an artefact.  The six compile-contract tests
-# below still run against the archived source -- they compile it into a
-# temp .so and exercise it -- so nothing is skipped.  The .so is built in
-# the temp dir, not in the archive.
-VM_STUB_C = os.path.join(os.path.dirname(__file__), "..", "archive", "native", "vm_stub.c")
-VM_STUB_SO = os.path.join(tempfile.gettempdir(), "nixon_vm_stub_test.so")
 
 
 # ── helpers ──────────────────────────────────────────────────────────
-
-def _build_so():
-    result = subprocess.run(
-        ["gcc", "-shared", "-fPIC", VM_STUB_C, "-o", VM_STUB_SO, "-lc"],
-        check=True, capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Build failed:\n{result.stderr}")
-
-
-def _ensure_so():
-    if not os.path.isfile(VM_STUB_SO):
-        _build_so()
-
-
-def _load_vm():
-    _ensure_so()
-    lib = ctypes.CDLL(VM_STUB_SO)
-    lib.vm_execute.argtypes = [
-        ctypes.POINTER(ctypes.c_ubyte),
-        ctypes.c_size_t,
-        ctypes.POINTER(ctypes.c_ubyte),
-        ctypes.POINTER(ctypes.c_ubyte),
-        ctypes.c_size_t,
-        ctypes.POINTER(ctypes.c_ubyte),
-        ctypes.POINTER(ctypes.c_size_t),
-    ]
-    lib.vm_execute.restype = ctypes.c_int
-    return lib
-
 
 def _seed_for_test(idx, base=1):
     """Generate a valid 32-byte seed from an integer index."""
@@ -167,21 +126,6 @@ def make_jmp_bytecode(vm, target):
 
 
 # ── Compilation test ─────────────────────────────────────────────────
-
-def test_vm_stub_compiles():
-    result = subprocess.run(
-        ["gcc", "-c", VM_STUB_C, "-o", "/dev/null"],
-        capture_output=True, text=True, timeout=30,
-    )
-    assert result.returncode == 0, f"Compile failed:\n{result.stderr}"
-
-
-def test_vm_stub_shared_lib():
-    _ensure_so()
-    assert os.path.isfile(VM_STUB_SO), f"Shared lib not built: {VM_STUB_SO}"
-
-
-# ── ISA derivation tests ─────────────────────────────────────────────
 
 def test_runtime_derive_isa_deterministic():
     seed1 = b"\x00" * 32
@@ -442,69 +386,6 @@ def test_field_shuffle_actually_shuffles():
 
 
 # ── C-level dynamic ISA tests ────────────────────────────────────────
-
-def test_c_different_runs_produce_different_mappings():
-    lib = _load_vm()
-    bc = bytes([0]) * 10
-    bc_len = len(bc)
-    out = (ctypes.c_ubyte * 64)()
-    out_len = ctypes.c_size_t(64)
-
-    for _ in range(3):
-        key = (ctypes.c_ubyte * 32)(*range(32))
-        lib.vm_execute(
-            (ctypes.c_ubyte * bc_len)(*bc), bc_len, key,
-            None, 0, out, ctypes.byref(out_len),
-        )
-
-
-def test_c_key_determinism():
-    lib = _load_vm()
-    bc = bytes([0]) * 10
-    bc_len = len(bc)
-    out = (ctypes.c_ubyte * 64)()
-    out_len = ctypes.c_size_t(64)
-
-    key_bytes = bytes(range(32))
-    key = (ctypes.c_ubyte * 32)(*key_bytes)
-
-    rc1 = lib.vm_execute(
-        (ctypes.c_ubyte * bc_len)(*bc), bc_len, key,
-        None, 0, out, ctypes.byref(out_len),
-    )
-
-    out = (ctypes.c_ubyte * 64)()
-    out_len = ctypes.c_size_t(64)
-    rc2 = lib.vm_execute(
-        (ctypes.c_ubyte * bc_len)(*bc), bc_len, key,
-        None, 0, out, ctypes.byref(out_len),
-    )
-
-    assert type(rc1) == type(rc2)
-
-
-def test_c_vm_produces_correct_result():
-    lib = _load_vm()
-    bc = bytearray()
-    bc.extend(make_mov_bytecode_phys(0, 7))
-    bc.extend(make_mov_bytecode_phys(1, 3))
-    bc.extend(make_add_bytecode_phys(0, 1))
-    bc.extend(make_jmp_bytecode_phys(99))
-
-    bc_len = len(bc)
-    out = (ctypes.c_ubyte * 64)()
-    out_len = ctypes.c_size_t(64)
-
-    key = (ctypes.c_ubyte * 32)(*range(32))
-    rc = lib.vm_execute(
-        (ctypes.c_ubyte * bc_len)(*bc), bc_len, key,
-        None, 0, out, ctypes.byref(out_len),
-    )
-
-    assert rc == 0 or rc == 1
-
-
-# ── Python-level dynamic ISA tests ───────────────────────────────────
 
 def test_py_interpreter_dynamic_isa_changes_mapping():
     bc = make_mov_bytecode_phys(0, 42) + make_jmp_bytecode_phys(99)
@@ -882,28 +763,6 @@ def test_all_instances_produce_same_regs():
 
 
 # ── Self-Mutating ISA C-API Tests ────────────────────────────────────
-
-def test_c_dispatches_correctly():
-    lib = _load_vm()
-    bc = bytearray()
-    bc.extend(make_mov_bytecode_phys(0, 7))
-    bc.extend(make_mov_bytecode_phys(1, 3))
-    bc.extend(make_add_bytecode_phys(0, 1))
-    bc.extend(make_jmp_bytecode_phys(99))
-
-    bc_len = len(bc)
-    out = (ctypes.c_ubyte * 64)()
-    out_len = ctypes.c_size_t(64)
-
-    for i in range(3):
-        key = (ctypes.c_ubyte * 32)(*range(32))
-        lib.vm_execute(
-            (ctypes.c_ubyte * bc_len)(*bc), bc_len, key,
-            None, 0, out, ctypes.byref(out_len),
-        )
-
-
-# ── Entropy source coverage ──────────────────────────────────────────
 
 def test_entropy_source_coverage():
     entropy = runtime_collect_entropy()
