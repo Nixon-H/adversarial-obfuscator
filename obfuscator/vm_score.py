@@ -449,5 +449,48 @@ def emit_loader_snippet(threshold: float = 50.0, armed: bool = False) -> str:
         "    _total = sum(_NX_VM_WEIGHTS.values())\n"
         "    return (_hit / _total * 100.0) if _total else 0.0\n"
     )
+    # Every probe below runs a helper through subprocess.run with a
+    # timeout.  run() can still block forever: on timeout it kills the
+    # direct child and then waits for the output pipe, and a process the
+    # child started (systemctl talks to PID 1 and leaves a helper) keeps
+    # that pipe open.  The 3.14 runner showed exactly this -- the artifact
+    # parked in wait4 with this snippet on the stack for 300 s.  Bound
+    # each probe with a daemon thread: a stuck one is abandoned with the
+    # process instead of hanging the artifact.
+    helper = (
+        "def _nx_run_bounded(_cmd, _timeout=3):\n"
+        "    try:\n"
+        "        import threading as _th\n"
+        "        _box = {}\n"
+        "        def _worker():\n"
+        "            try:\n"
+        "                _box['r'] = _subprocess.run(_cmd, capture_output=True,"
+        " timeout=_timeout)\n"
+        "            except Exception as _e:\n"
+        "                _box['e'] = _e\n"
+        "        _t = _th.Thread(target=_worker, daemon=True)\n"
+        "        _t.start()\n"
+        "        _t.join(_timeout + 1.0)\n"
+        "        return _box.get('r')\n"
+        "    except Exception:\n"
+        "        return None\n"
+        "\n"
+        "\n"
+    )
+    src = src.replace("import subprocess as _subprocess\n",
+                      "import subprocess as _subprocess\n" + helper, 1)
+    src = src.replace(
+        '_subprocess.run(["lsmod"], capture_output=True, timeout=3)',
+        '_nx_run_bounded(["lsmod"])')
+    src = src.replace(
+        '_subprocess.run(["systemctl", "list-units", "--type=service",'
+        ' "--all", "--no-legend", "--no-pager"], capture_output=True,'
+        ' timeout=3)',
+        '_nx_run_bounded(["systemctl", "list-units", "--type=service",'
+        ' "--all", "--no-legend", "--no-pager"])')
+    src = src.replace(
+        '_subprocess.run(["systemd-detect-virt"], capture_output=True,'
+        ' timeout=3)',
+        '_nx_run_bounded(["systemd-detect-virt"])')
     compile(src, "<nx_vm_loader>", "exec")
     return src
