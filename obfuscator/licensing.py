@@ -39,7 +39,9 @@ Not done here:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+
 import os
 import sys
 import time
@@ -68,6 +70,13 @@ class Licence:
     hwid: Optional[str] = None
     watermark: Optional[str] = None
     notes: Optional[str] = None
+    # Per-licence secret.  The payload key is bound to it at build time
+    # (--licence-token) and re-derived from it at run time, so an artefact
+    # without its token decrypts to garbage.  It is a *capability*, not a
+    # claim: forging a token with other material just yields a key that
+    # does not match the ciphertext, so the signature is what stops
+    # re-issuing, not what stops decryption.
+    key_material: Optional[str] = None
 
     def to_payload(self) -> dict:
         payload = {
@@ -84,6 +93,8 @@ class Licence:
             payload["watermark"] = self.watermark
         if self.notes:
             payload["notes"] = self.notes
+        if self.key_material:
+            payload["key_material"] = self.key_material
         return payload
 
     @classmethod
@@ -98,6 +109,7 @@ class Licence:
                 hwid=payload.get("hwid"),
                 watermark=payload.get("watermark"),
                 notes=payload.get("notes"),
+                key_material=payload.get("key_material"),
             )
         except (KeyError, TypeError, ValueError) as e:
             raise LicenceError(f"malformed licence payload: {e}") from e
@@ -171,11 +183,33 @@ def resolve_public_key(explicit: Optional[str] = None):
 # ── issue / verify ───────────────────────────────────────────────────────
 
 def issue(licence: Licence, private_key) -> str:
-    """Sign a licence and return the token."""
-    signed = canonical(licence.to_payload())
+    """Sign a licence and return the token.
+
+    A licence without key material gets a fresh 32-byte secret here, so
+    every issued token can bind a payload key.  Pass an explicit value
+    only when re-issuing the same licence (the key material is what an
+    already-shipped artefact was built against; changing it invalidates
+    that build).
+    """
+    payload = licence.to_payload()
+    if not payload.get("key_material"):
+        # Derived, not random: issuing the same licence twice must produce
+        # the same token (the documented property), and the material has to
+        # stay secret -- both hold when it is a hash of the issuer's seed.
+        # Licence is frozen, so the value lives in the payload we sign.
+        try:
+            seed = private_key.private_bytes_raw()
+        except Exception:  # pragma: no cover - non-cryptography key objects
+            seed = b""
+        if not seed:  # pragma: no cover - keeps the derivation total
+            raise LicenceError("issuer key exposes no raw seed to derive from")
+        payload["key_material"] = hashlib.sha256(
+            b"nx-licence-key:" + licence.licence_id.encode("utf-8")
+            + b":" + licence.customer.encode("utf-8") + b":" + seed).hexdigest()
+    signed = canonical(payload)
     signature = private_key.sign(signed)
     return json.dumps({
-        "payload": licence.to_payload(),
+        "payload": payload,
         "sig": signature.hex(),
     }, separators=(",", ":"))
 

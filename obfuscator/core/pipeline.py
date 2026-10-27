@@ -1212,7 +1212,7 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
                                    split_bootstrap=False, snapshot_off=False,
                                    stdlib_audit_off=False,
                                    section_split=False, section_count=4,
-                                   customer_salt=""):
+                                   customer_salt="", licence_bound=False):
     # Phase-4 wiring: all new kwargs default to current behavior (no change
     # when absent). vm/secure-temp snippets are always appended (report-only,
     # safe); hostguard only when requested (changes exec semantics).
@@ -1640,6 +1640,46 @@ _NX_BUILD_ID = "{build_id}"
 # Empty unless the build is bound to one customer: a second,
 # domain-separated mask over the payload key (see key_emit).
 _NX_CUSTOMER_SALT = "{customer_salt}"
+# True when the payload key is bound to a licence token: the mask
+# comes from the token's key material at run time, not from a
+# literal, so an artefact without its token derives a wrong key.
+_NX_LICENCE_BOUND = "{licence_bound}" == "1"
+
+
+def _nx_licence_key():
+    """Key material from the customer's licence token, or None.
+
+    NIXON_LICENCE names the token; otherwise the usual names are
+    tried next to the artefact and in the working directory.  The
+    signature is deliberately not checked here: the material is a
+    capability (a forged token derives a key that does not match
+    the ciphertext), and the artefact has no Ed25519 without the
+    cryptography wheel.
+    """
+    try:
+        import json as _nx_json, os as _nx_os, sys as _nx_sys
+        _cands = []
+        _named = _nx_os.environ.get("NIXON_LICENCE")
+        if _named:
+            _cands.append(_named)
+        _base = _nx_os.path.dirname(_nx_os.path.abspath(_nx_sys.argv[0] or ""))
+        for _d in (_base, _nx_os.getcwd()):
+            for _n in ("licence.json", "licence.licence", "license.json"):
+                _cands.append(_nx_os.path.join(_d, _n))
+        for _c in _cands:
+            try:
+                with open(_c, "r", encoding="utf-8") as _f:
+                    _doc = _nx_json.load(_f)
+                _km = (_doc.get("payload") or {}).get("key_material")
+                if _km:
+                    return str(_km)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
+
 _BLOB_S0 = "{share0}"
 _BLOB_S1 = "{share1}"
 def _nx_wipe(obj):
@@ -1665,11 +1705,18 @@ def _nx_key_reconstruct():
     _mask = _nx_hk.sha256(_NX_BUILD_ID.encode()).digest()
     _key = bytes(_b ^ _mask[_i % len(_mask)] for _i, _b in enumerate(_raw))
     try:
-        if _NX_CUSTOMER_SALT:
-            # Customer binding (build-time --customer-salt): a second,
-            # domain-separated mask, so an artefact built for one
-            # customer does not decrypt for another.
-            _cmask = _nx_hk.sha256(b"nx-customer:" + _NX_CUSTOMER_SALT.encode()).digest()
+        _salt = _NX_CUSTOMER_SALT
+        if not _salt and _NX_LICENCE_BOUND:
+            # Bound at build time (--licence-token): the mask comes from
+            # the customer's token.  Missing token -> no mask -> wrong
+            # key -> garbage plaintext, which is the intended "inert
+            # without a licence" behaviour.
+            _salt = _nx_licence_key() or ""
+        if _salt:
+            # Customer binding: a second, domain-separated mask, so an
+            # artefact built for one customer does not decrypt for
+            # another.
+            _cmask = _nx_hk.sha256(b"nx-customer:" + _salt.encode()).digest()
             _key = bytes(_b ^ _cmask[_i % len(_cmask)] for _i, _b in enumerate(_key))
     except Exception:
         pass
@@ -2090,11 +2137,13 @@ if __name__ == "__main__":
         loader_template
         .replace("{build_id}", build_id)
         .replace("{customer_salt}", _customer_salt)
+        .replace("{licence_bound}", "1" if licence_bound else "0")
         .replace("{share0}", _s0)
         .replace("{share1}", _s1)
         .replace("{fallback_blob_val}", fallback_blob_val)
     )
     assert "{customer_salt}" not in loader_src, "stale customer salt placeholder"
+    assert "{licence_bound}" not in loader_src, "stale licence_bound placeholder"
     assert "{share0}" not in loader_src and "{share1}" not in loader_src
     assert "{build_id}" not in loader_src and "{fallback_blob_val}" not in loader_src
     assert "{key_hex}" not in loader_src, "stale {key_hex} placeholder"
@@ -2275,6 +2324,34 @@ def load_tls_ca_bundle(path):
 
 def build_project(args):
     source = args.source
+    # Licence binding (--licence-token): the payload key is derived from the
+    # token's secret key material instead of a shipped literal salt, so the
+    # artefact alone cannot decrypt.  Resolved first: the hybrid-loader call
+    # below happens before the rest of the build context exists.
+    _licence_bound = False
+    _customer_salt = str(getattr(args, "customer_salt", "") or "")
+    _licence_path = str(getattr(args, "licence_token", "") or "")
+    if _licence_path:
+        import json as _lic_json
+        with open(_licence_path, "r", encoding="utf-8") as _lic_fh:
+            _lic_doc = _lic_json.load(_lic_fh)
+        _lic_km = ((_lic_doc or {}).get("payload") or {}).get("key_material")
+        if not _lic_km:
+            raise SystemExit(
+                "licence token %s carries no key_material; reissue it with "
+                "this version of obfuscator.licensing" % _licence_path)
+        _customer_salt = str(_lic_km)
+        _licence_bound = True
+    if (_customer_salt or _licence_bound) and not (
+            getattr(args, "native", False) or getattr(args, "native_only", False)):
+        # Both key bindings live in the hybrid (native) loader.  The
+        # source-transform artefact takes its key from LOADER_HEAD/LOADER_
+        # BODY and has no place for the mask, so accept the flag only where
+        # it is enforced instead of silently building without it.
+        UI.fatal("--customer-salt/--licence-token bind the key of the hybrid "
+                 "loader; add --native (or --native-only) so the mask is "
+                 "actually applied")
+        raise SystemExit(2)
     if not os.path.exists(source): 
         UI.fatal(f"Source file not found: {source}")
         return
@@ -2419,7 +2496,8 @@ def build_project(args):
                 section_split=bool(getattr(args, 'section_split', False)),
                 section_count=int(getattr(args, 'section_count', 4) or 4),
                 watermark=str(getattr(args, 'watermark', '') or '') or None,
-                customer_salt=str(getattr(args, 'customer_salt', '') or ''),
+                customer_salt=_customer_salt,
+                licence_bound=_licence_bound,
             )
             if getattr(args, 'section_split', False):
                 # The split needs a fallback payload to split, and there
@@ -2864,7 +2942,8 @@ def _VERIFY_INTEGRITY():
                 'STR_SESSION_KEY': STRING_SESSION_KEY,
                 'build_timestamp': build_timestamp,
                 'build_id': build_id,
-                'customer_salt': str(getattr(args, 'customer_salt', '') or ''),
+                'customer_salt': _customer_salt,
+                'licence_bound': '1' if _licence_bound else '0',
                 'required_python_version': f"({args.python.split('.')[0]}, {args.python.split('.')[1]})" if getattr(args, 'python', None) and '.' in args.python else f"({sys.version_info[0]}, {sys.version_info[1]})",
                 'VAR_PAYLOAD': VARS["PAYLOAD"],
                 'VAR_NONCE': VARS["NONCE"],
@@ -3399,6 +3478,10 @@ def build_parser():
     build.add_argument('--private-key', help='Deployment key')
     build.add_argument('--cf-token', help='Cloudflare API Token (overrides the stored config)')
     build.add_argument('--cf-account', help='Cloudflare Account ID (overrides the stored config)')
+    build.add_argument('--licence-token', default='',
+                       help='Bind the payload key to a licence token (its '
+                            'key_material becomes the customer mask; the '
+                            'artefact then needs that token at run time)')
     build.add_argument('--customer-salt', default='',
                        help='Bind the payload key to one customer (mixed as a '
                             'domain-separated second mask; empty = no binding)')
