@@ -41,6 +41,21 @@ checks they agree).
 
 ### Fixed
 
+- **The protection runtime now runs.** `--init-runtime` was opt-in and
+  nothing passed it — not the build, not the e2e checks, no config or
+  doc — so the entire `nixon-runtime` crate was dead code in every
+  shipped path. It now initialises by default; `--no-init-runtime`
+  opts out for a bare launch. Pinned by three CLI tests in
+  `relay/src/cli.rs`.
+- **Five validation phases became vacuous passes when the Rust modules
+  were archived.** `phase20_hpc_detect`, `phase21_hw_entropy`,
+  `phase22_cache_bound`, `phase23_branch_entangle` and
+  `phase24_multicore_entangle` existed only to run `cargo test`
+  against those modules. With the modules gone their filters matched
+  zero tests, and `cargo test` exits 0 when nothing matches — so each
+  logged "tests passed" while running nothing. The phases are archived,
+  the flags log `ARCHIVED`, and `tests/test_no_dead_code.py` fails if
+  one is imported again.
 - **Every GitHub Actions run failed for three separate reasons.**
   1. `ci.yml` was **not a valid workflow**: `schedule:` and
      `workflow_dispatch:` were nested inside the `lint-pin` *job*, where

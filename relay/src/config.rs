@@ -205,7 +205,7 @@ impl AppConfig {
     pub fn from_cli(cli: &crate::cli::Cli) -> Self {
         Self {
             payload_path: cli.payload.clone(),
-            init_runtime: cli.init_runtime,
+            init_runtime: !cli.no_init_runtime,
             antidebug: cli.antidebug,
         }
     }

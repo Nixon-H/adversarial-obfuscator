@@ -2,7 +2,7 @@ fn main() {
     env_logger::init();
     let cli = <orbital_relay::cli::Cli as clap::Parser>::parse();
 
-    if cli.init_runtime {
+    if !cli.no_init_runtime {
         nixon_runtime::init_runtime(&Default::default());
     }
 
