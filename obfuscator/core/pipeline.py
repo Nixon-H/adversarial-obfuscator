@@ -591,7 +591,7 @@ def get_native_blob_for_build(source_path, force_compile=False):
 def test_protected_file(filepath, original_source):
     results = {}
     try:
-        orig_result = subprocess.run([sys.executable, original_source], capture_output=True, timeout=500, text=True)
+        orig_result = subprocess.run([sys.executable, original_source], capture_output=True, timeout=120, text=True)
         stdout = orig_result.stdout[:1024*1024] if orig_result.stdout else ""
         results['original'] = {'status': 'PASS' if orig_result.returncode == 0 else 'FAIL', 'returncode': orig_result.returncode, 'stdout': stdout}
     except subprocess.TimeoutExpired:
@@ -615,7 +615,7 @@ def test_protected_file(filepath, original_source):
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE, text=True, env=ver_env)
         try:
-            _out, _err = _proc.communicate(timeout=500)
+            _out, _err = _proc.communicate(timeout=120)
         except subprocess.TimeoutExpired:
             try:
                 import signal as _signal
@@ -626,7 +626,7 @@ def test_protected_file(filepath, original_source):
                 _out, _err = _proc.communicate(timeout=30)
             except Exception:
                 _out, _err = "", ""
-            print("[!] verification run timed out after 500s; child stack:")
+            print("[!] verification run timed out after 120s; child stack:")
             print((_err or "")[-4000:])
             raise
         obf_result = subprocess.CompletedProcess(
