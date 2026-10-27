@@ -12,6 +12,19 @@ checks they agree).
 
 ## Unreleased
 
+### Added
+
+- **Offline licence tokens** (`obfuscator/licensing.py`, `docs/LICENSING.md`).
+  An Ed25519-signed JSON payload — licence id, customer, validity
+  window, features, optional HWID binding and watermark id — with an
+  `issue` / `verify` / `pubkey` CLI. Asymmetric on purpose: whoever
+  extracts the public key from an artefact can check a licence but
+  cannot mint one, which is why it does not reuse the artefact HMAC key.
+  Issuing the same licence twice yields the same token (Ed25519 is
+  deterministic). Not yet wired into the emitted loader — that needs a
+  pure-Python Ed25519 verify, since the artefact cannot import
+  `cryptography`. 15 tests, mostly on the refusal paths.
+
 ### Changed
 
 - **Archived the dead Rust runtime modules and the native compile-test
