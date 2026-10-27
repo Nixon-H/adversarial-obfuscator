@@ -2889,6 +2889,13 @@ def {FUNC_NANOMITE_MAIN}():
                     if libc.ptrace(0, 0, 0, 0) != 0: _o._exit(0)
                     _o.kill(_o.getpid(), _sig.SIGSTOP)
                 except: _o._exit(0)
+                # The child's only job was the stop above.  Once the
+                # parent continues it, it MUST die here.  Falling through
+                # ran the rest of the loader in a second copy, which
+                # forked again, and the parent's waitpid loop below never
+                # returned -- the intermittent artifact hang (300 s, any
+                # test that runs an artifact, different one each run).
+                _o._exit(0)
             else:
                 _o.environ['_NX_NANO_PID'] = str(_o.getpid())
                 try:
