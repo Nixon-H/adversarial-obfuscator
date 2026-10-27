@@ -145,6 +145,16 @@ class DistributedDiversityPool:
                 varied_lines = self._split_var_declaration(varied_lines, rng)
                 code = "\n".join(varied_lines)
 
+            if code == base_source:
+                # Guarantee distinct variants.  Renaming (p=0.3 per
+                # assignment), nop insertion (p=0.15 per line) and
+                # reordering are all probabilistic, so a short payload
+                # could yield three identical "variants" -- which is what
+                # test_variants_have_nops_and_reordering caught once on
+                # the 3.13 runner.  The marker is a comment: the variant
+                # stays semantically identical to the base.
+                code = base_source.rstrip("\n") + "\n# nx-variant-%d\n" % vid
+
             cksum = hashlib.sha256(code.encode()).digest()
             vi = VariantInfo(
                 variant_id=vid,
