@@ -1,0 +1,52 @@
+name: diag-build
+
+# Temporary: time one pipeline build per interpreter so the 3.13/3.14
+# slowness can be attributed to a phase instead of guessed at.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: pip install --require-hashes -r requirements.lock
+      - name: Time one build, line by line
+        run: |
+          mkdir -p /tmp/diag && cd /tmp/diag
+          printf 'print("DIAG-PAYLOAD")\n' > hello.py
+          export PYTHONPATH="$GITHUB_WORKSPACE"
+          export NIXON_LOG_REDIRECT=0
+          start=$(date +%s)
+          set +e
+          timeout 900 python3 -u -m obfuscator.core.pipeline build hello.py \
+              --net-url https://127.0.0.1:9443/ 2>&1 \
+            | while IFS= read -r line; do
+                printf '%5d %s\n' "$(( $(date +%s) - start ))" "$line"
+              done
+          echo "PIPELINE_EXIT=${PIPESTATUS[0]}"
+          echo "TOTAL=$(( $(date +%s) - start ))s"
+      - name: Time the C core build alone
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p /tmp/core
+          start=$(date +%s)
+          python3 - <<'PY'
+          import time
+          t = time.time()
+          from obfuscator.core.c_core_build import build_c_core
+          path = build_c_core("/tmp/core")
+          print("core:", path, "%.1fs" % (time.time() - t))
+          PY
+          echo "CORE_TOTAL=$(( $(date +%s) - start ))s"
