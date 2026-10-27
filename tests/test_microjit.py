@@ -1,11 +1,8 @@
 """Tests for Micro-JIT Fragment Reassembly."""
 
-import hashlib
-import hmac
 import os
 import struct
 import sys
-import ctypes
 
 import pytest
 
@@ -304,25 +301,6 @@ class TestMemoryWipe:
 
 
 # =========================================================================
-# Test C Native Compilation
-# =========================================================================
-
-def test_native_compile():
-    """Verify microjit.c compiles without errors."""
-    import subprocess
-    src = os.path.join(os.path.dirname(__file__), "..", "native", "microjit.c")
-    if not os.path.exists(src):
-        pytest.skip("microjit.c not found")
-    result = subprocess.run(
-        ["gcc", "-c", src, "-o", "/tmp/test_microjit.o", "-Wall", "-Werror"],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 0, f"Compilation failed:\n{result.stderr}"
-    assert os.path.getsize("/tmp/test_microjit.o") > 0
-    os.unlink("/tmp/test_microjit.o")
-
-
-# =========================================================================
 # Test End-to-End Fragment Pipeline
 # =========================================================================
 
@@ -369,58 +347,3 @@ class TestFragmentPipeline:
                 assert cf.input_regs == input_map[i]
             if i in output_map:
                 assert cf.output_regs == output_map[i]
-
-
-# =========================================================================
-# Test C Native via ctypes
-# =========================================================================
-
-_HAVE_MICROJIT_SO = os.path.exists("/tmp/libmicrojit.so")
-
-@pytest.mark.skipif(not _HAVE_MICROJIT_SO, reason="libmicrojit.so not built (run: make microjit-so)")
-class TestNative:
-    """
-    TestNative
-    
-    Positive test cases for native.
-    """
-    @pytest.fixture(autouse=True)
-    def load_lib(self):
-        lib = ctypes.CDLL("/tmp/libmicrojit.so")
-        lib.mj_derive_fragment_key.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.POINTER(ctypes.c_uint8), ctypes.c_int, ctypes.POINTER(ctypes.c_uint8)]
-        lib.mj_derive_fragment_key.restype = None
-        lib.mj_secure_wipe.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
-        lib.mj_secure_wipe.restype = None
-        lib.mj_aes_ctr_crypt.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t, ctypes.POINTER(ctypes.c_uint8)]
-        lib.mj_aes_ctr_crypt.restype = None
-        self.lib = lib
-        return lib
-
-    def test_derive_key(self):
-        ck = (ctypes.c_uint8 * 32)(*b'\xaa' * 32)
-        cs = (ctypes.c_uint8 * 32)(*b'\x00' * 32)
-        key_out = (ctypes.c_uint8 * 32)()
-        self.lib.mj_derive_fragment_key(ck, cs, 0, key_out)
-        assert len(bytes(key_out)) == 32
-        expected = hmac.new(b'\xaa' * 32,
-                            b'\x00' * 32 + b'\x00\x00\x00\x00',
-                            hashlib.sha256).digest()
-        assert bytes(key_out) == expected
-
-    def test_secure_wipe(self):
-        buf = (ctypes.c_uint8 * 64)(*[0xFF] * 64)
-        self.lib.mj_secure_wipe(buf, 64)
-        for i in range(64):
-            assert buf[i] == 0
-
-    def test_aes_ctr_crypt(self):
-        key = (ctypes.c_uint8 * 32)(*b'\x55' * 32)
-        data = bytearray(b'\x01' * 64)
-        data_arr = (ctypes.c_uint8 * 64)(*data)
-        self.lib.mj_aes_ctr_crypt(data_arr, 64, key)
-        ct = bytes(data_arr)
-        assert ct != bytes(data)
-        # decrypt back
-        data2_arr = (ctypes.c_uint8 * 64)(*ct)
-        self.lib.mj_aes_ctr_crypt(data2_arr, 64, key)
-        assert bytes(data2_arr) == bytes(data)

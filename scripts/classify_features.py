@@ -420,15 +420,24 @@ _ARTEFACT_MANIFEST = None
 
 
 def _manifest_lists(manifest, feat, slug, rust_flag):
-    """Does the build's artefact manifest show this feature ran?"""
+    """Does the build's artefact manifest show this feature?
+
+    The manifest enumerates the Rust modules that are reachable and
+    enabled, and the C symbols the artefact exports.  For those it can
+    answer both ways: listed means present, absent means absent.
+
+    For a pure-Python pipeline feature it has nothing to say at all, so
+    the answer is None ("unverified"), not False.  Returning False there
+    turned a weak manifest into a false "not in the artefact" verdict.
+    """
     names = {str(n).lower() for n in manifest.get("features", [])}
     if slug in names or feat["name"].lower() in names:
         return True
     if rust_flag and rust_flag in names:
         return True
-    # A manifest that exists but does not list the feature is evidence
-    # that it did not run.
-    return False
+    if rust_flag:
+        return False
+    return None
 
 
 def load_artefact_manifest(path):

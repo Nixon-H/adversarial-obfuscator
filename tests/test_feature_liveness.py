@@ -90,13 +90,29 @@ class TestArtefactManifest:
     def test_manifest_round_trip(self, tmp_path):
         from scripts.artifacts import manifest
         artefact = tmp_path / "obfuscated.py"
-        artefact.write_text("def _nx_trial_gate():\n    pass\n_nx_watermark_gate = 1\n")
+        # The per-build hardening renames the loader's symbols, so the
+        # manifest reports the two things that survive renaming: an HMAC
+        # over the payload and an integrity verification step.
+        artefact.write_text(
+            "import hmac\n"
+            "def _nx_verify():\n"
+            "    pass\n"
+        )
         path = manifest.write_manifest(str(tmp_path), str(artefact))
         data = json.loads(open(path).read())
         assert data["artefact"]["exists"] is True
         assert data["artefact"]["sha256"]
-        assert "trial" in data["loader_gates"]
-        assert "watermark" in data["loader_gates"]
+        assert "payload_mac" in data["loader_gates"]
+        assert "self_integrity" in data["loader_gates"]
+
+    def test_a_gutted_artefact_reports_no_gates(self, tmp_path):
+        """Absence has to be meaningful, or the field is decoration."""
+        from scripts.artifacts import manifest
+        artefact = tmp_path / "obfuscated.py"
+        artefact.write_text("print('no gates here')\n")
+        path = manifest.write_manifest(str(tmp_path), str(artefact))
+        data = json.loads(open(path).read())
+        assert data["loader_gates"] == []
 
     def test_missing_artefact_is_recorded_honestly(self, tmp_path):
         from scripts.artifacts import manifest

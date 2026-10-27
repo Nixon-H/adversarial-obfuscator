@@ -33,6 +33,24 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install LLVM (llc for the lowering tests)
+        # tests/test_native_lowering.py carries ~21 regression tests for
+        # the IR -> LLVM defects (shr dropped, gep losing indices, phi
+        # repair, the string-operand guard, ...). They skip when llc is
+        # absent, which it is on the runner image -- so the whole set was
+        # green by never running. A skipped test is a test CI is not
+        # running.
+        run: |
+          if ! command -v llc >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq llvm
+          fi
+          if ! command -v llc >/dev/null 2>&1; then
+            LLC="$(ls /usr/lib/llvm-*/bin/llc 2>/dev/null | head -1)"
+            if [ -n "$LLC" ]; then sudo ln -sf "$LLC" /usr/local/bin/llc; fi
+          fi
+          command -v llc
+          llc --version | head -1
       - name: Install dependencies
         # requirements.lock is hash-pinned and carries the runtime + test
         # closure.  requirements-dev.txt adds the pinned linter: six

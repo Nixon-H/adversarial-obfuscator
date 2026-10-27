@@ -18,10 +18,28 @@ import pytest
 MAKEFILE_DIR = os.path.join(os.path.dirname(__file__), "..")
 
 
+def _python_includes():
+    """The include dir for THIS interpreter.
+
+    The first version probed `g++ -E -x c++ -` with no -I, so it only
+    found Python.h when the headers happened to be on the default search
+    path — which is never true for a setup-python toolchain. The test
+    then skipped in CI and never compiled core.cpp with the Python
+    bridge. core-cpp itself uses `python3-config --includes`, so probe
+    the same way.
+    """
+    try:
+        import sysconfig
+        inc = sysconfig.get_paths().get("include")
+    except Exception:
+        inc = None
+    return ["-I" + inc] if inc else []
+
+
 def _has_python_h():
     try:
         result = subprocess.run(
-            ["g++", "-E", "-x", "c++", "-"],
+            ["g++", "-E", "-x", "c++", "-", *_python_includes()],
             input=b"#include <Python.h>\n",
             capture_output=True, timeout=5,
         )

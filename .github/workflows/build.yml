@@ -19,6 +19,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Install LLVM (llc for the lowering tests)
+        # Same reason as the CI workflow: ~21 IR->LLVM regression tests
+        # skip without llc, so this job was green while never running
+        # them.
+        run: |
+          if ! command -v llc >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq llvm
+          fi
+          if ! command -v llc >/dev/null 2>&1; then
+            LLC="$(ls /usr/lib/llvm-*/bin/llc 2>/dev/null | head -1)"
+            if [ -n "$LLC" ]; then sudo ln -sf "$LLC" /usr/local/bin/llc; fi
+          fi
+          command -v llc
+          llc --version | head -1
       - name: Install Python deps
         run: |
           # requirements.lock is hash-pinned: --require-hashes makes a
@@ -53,6 +68,22 @@ jobs:
           command -v llc && llc --version | head -1
       - name: Obfuscate test payload
         run: python3 scripts/build.py --payload tests/fixtures/test_payload.py --skip-relay --no-cfg-flatten
+      - name: Feature report generated from the artefact
+        # The build writes build/artefact_manifest.json (artefact hash,
+        # C symbols, Rust modules reachable + enabled, loader gates it
+        # could prove). Feeding it back is what makes "exercised"
+        # answerable instead of "unknown" -- previously the report was
+        # only ever run by hand, against no evidence at all.
+        #
+        # It is expected to print live=0 for now: the manifest's
+        # vocabulary (rust module names, FHE/ORAM symbols) does not line
+        # up with the 129-entry feature list, so most features stay
+        # "unverified". The assertion is that the manifest was actually
+        # read, not that anything is live.
+        run: |
+          python3 -m scripts.classify_features --from-build build \
+            --output build/feature_classification.json
+          python3 -c "import json; r=json.load(open('build/feature_classification.json')); assert r['artefact_manifest'], 'the artefact manifest was not read'; print('report summary:', r['summary'])"
       - name: End-to-end artifact check
         # Build a payload, RUN the artifact it produced, and assert the
         # output.  This is the class of regression the unit suite

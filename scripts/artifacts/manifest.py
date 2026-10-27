@@ -31,26 +31,11 @@ import subprocess
 
 MANIFEST_NAME = "artefact_manifest.json"
 
-# Loader gate markers we expect to find in a built loader.  Absence is
-# meaningful: it means the gate did not make it into the artefact.
-LOADER_GATE_MARKERS = (
-    "payload_mac", "self_integrity", "trial", "watermark", "hostguard",
-    "snapshot", "stdlib", "hwid", "expiry", "kill",
-)
-
 # Exported symbols that mean the C backend is genuinely present.
 C_SYMBOL_MARKERS = (
     "FHE_new", "FHE_encrypt_batch", "FHE_add_batch", "FHE_dec_batch",
     "FHE_free_array", "ORAM_new", "ORAM_access",
 )
-
-_GATE_DEF = re.compile(r"def\s+(_nx_[a-z0-9_]*gate|_[a-z0-9_]*_gate)\s*\(")
-_GATE_STR = re.compile(r"[\"'](_nx_[a-z0-9_]*gate)[\"']")
-# Any mention of the gate identifier: the loader defines gates as
-# functions, but a stripped build may leave the marker as an
-# assignment or a table entry, and all of them mean "the gate is here".
-_GATE_ANY = re.compile(r"\b_nx_([a-z0-9_]*)_gate\b")
-
 
 def manifest_path(build_dir: str) -> str:
     return os.path.join(build_dir, MANIFEST_NAME)
@@ -76,30 +61,26 @@ def _read(path: str) -> str:
 
 
 def loader_gates(loader_path: str) -> list:
-    """Gate names defined in the emitted loader.
+    """Gates we can actually prove are in the artefact.
 
-    Found by looking for the actual function definitions (and the gate
-    markers the loader references by string), so a gate that was
-    stripped or renamed away does not appear.
+    The per-build hardening renames the loader's own symbols each build
+    (Hardening A2.1/A2.2), so the old `_nx_<name>_gate` markers this
+    used to grep for no longer exist — the manifest reported zero gates
+    on a perfectly good artefact.  What survives the renaming is
+    behaviour: an HMAC over the payload, and an integrity verification
+    step.  Only those two are claimed; saying more would be guessing at
+    a symbol name.
+
+    Absence is meaningful for these two, which is why they are worth
+    reporting at all.
     """
     text = _read(loader_path)
     if not text:
         return []
-    found = set()
-    for m in _GATE_DEF.finditer(text):
-        found.add(m.group(1).lstrip("_"))
-    for m in _GATE_STR.finditer(text):
-        found.add(m.group(1).lstrip("_"))
-    for m in _GATE_ANY.finditer(text):
-        found.add(m.group(1).lstrip("_"))
-    # Normalise "_nx_watermark_gate" -> "watermark".
     out = set()
-    for name in found:
-        for marker in LOADER_GATE_MARKERS:
-            if marker in name:
-                out.add(marker)
-    # Self-integrity is a function, not a gate() helper, in the loader.
-    if "_check_interpreter_integrity" in text or "self_integrity" in text:
+    if re.search(r"\bhmac\b", text, re.IGNORECASE):
+        out.add("payload_mac")
+    if re.search(r"\b_nx_verify\b", text) or "INTERP_HASH" in text:
         out.add("self_integrity")
     return sorted(out)
 
