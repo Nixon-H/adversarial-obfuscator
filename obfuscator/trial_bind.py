@@ -52,7 +52,6 @@ import hmac as _hmac
 import os
 import platform
 import time
-import uuid
 
 #: Allowed clock skew before a backwards jump counts as a rollback.
 ROLLBACK_TOLERANCE_S = 300.0
@@ -516,8 +515,7 @@ def emit_trial_snippet(deadline_epoch, token_hex, build_key_hex,
         + "    import platform as _tb_platform\n"
         + "    import sys as _tb_sys\n"
          + "    import time as _tb_time\n"
-         + "    import uuid as _tb_uuid\n"
-         + "    import errno as _tb_errno\n"
+          + "    import errno as _tb_errno\n"
         + "    _tb_deadline = %r\n" % (deadline,)
         + "    _tb_token = %r\n" % (token,)
         + "    _tb_key = bytes.fromhex(%r)\n" % (key_hex,)
