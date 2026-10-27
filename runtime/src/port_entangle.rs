@@ -118,6 +118,11 @@ pub fn expected_timing_signature(seed: u64) -> u64 {
     seed.wrapping_mul(0x6C078965).wrapping_add(0x5DEECE66D)
 }
 
+// The bindings below are read/written only by the x86_64 asm block; on
+// aarch64 the cfg'd-out block leaves them unused (and `mut` unused),
+// which `-D warnings` (set by the rust toolchain action) turns into a
+// hard error in the cross-compile smoke job.
+#[allow(unused_mut, unused_variables)]
 pub fn timing_test_loop(seed: u64, iterations: u32) -> u64 {
     let t0 = crate::timing::rdtsc();
     let mut a: u64 = seed;

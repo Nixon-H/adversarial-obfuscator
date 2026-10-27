@@ -1,3 +1,7 @@
+// Only the x86_64 block emits asm; on aarch64 this import is unused and
+// `-D warnings` (rust toolchain action) makes that fatal in the
+// cross-compile smoke job.
+#[allow(unused_imports)]
 use core::arch::asm;
 
 #[cfg(target_arch = "x86_64")]
