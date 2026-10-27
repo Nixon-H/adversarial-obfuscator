@@ -187,7 +187,12 @@ class ProofSoundnessHarness:
                     node.body, node.orelse = node.orelse, node.body
             return ast.unparse(tree)
         else:
-            return self.mutator.generate_mutations(original, count=1)[0]
+            produced = self.mutator.generate_mutations(original, count=1)
+            # No strategy can change every source ("def f(): pass" has no
+            # operator to swap); returning the original is the honest
+            # "nothing to mutate" answer, and the caller's contract is a
+            # str.  Indexing [0] on an empty list was a latent crash.
+            return produced[0] if produced else original
 
     def run_test(self, test: SoundnessTest) -> SoundnessTest:
         """Execute a single soundness test: run the appropriate proof module and record pass/fail.

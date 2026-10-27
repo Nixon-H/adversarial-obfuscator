@@ -144,7 +144,18 @@ class ProofMutationEngine:
                     mutations.append(mutated)
             except Exception:
                 continue
-        while len(mutations) < count:
+        # Bounded fallback.  This used to be an open `while`: if
+        # _mutate_swap_add_sub cannot change the source (no '+' to swap --
+        # "def f():\n    pass\n" is exactly that) or keeps producing a
+        # value already in `seen`, the condition never advances and the
+        # call spins forever.  That is the intermittent hang the suite hit
+        # after ~3200 tests: whether the fallback is even reached depends
+        # on the RNG picking an effective strategy among the first three
+        # tries, so it looked version- and runner-specific.
+        attempts = 0
+        limit = max(count * 10, 10)
+        while len(mutations) < count and attempts < limit:
+            attempts += 1
             mutated = self._mutate_swap_add_sub(source)
             if mutated != source and mutated not in seen:
                 seen.add(mutated)

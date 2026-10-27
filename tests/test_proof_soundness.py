@@ -177,6 +177,36 @@ class TestProofMutationEngine:
         mutated = engine.mutate_ir(ir)
         assert mutated != ""
 
+    def test_generate_mutations_terminates_when_nothing_can_change_source(
+            self, monkeypatch):
+        """A source no strategy can alter must not spin forever.
+
+        The fallback used to be an open ``while`` around
+        ``_mutate_swap_add_sub``: when that returns the source unchanged
+        (a payload with no "+"), the loop condition never advances and the
+        call hangs.  It is reached only when the RNG picks three
+        ineffective strategies first, so it appeared as an intermittent
+        suite hang after ~3200 tests -- once for 1h44m in CI.  Forcing
+        every strategy to a no-op makes the bug deterministic.
+        """
+        engine = ProofMutationEngine(seed=7)
+        no_op = lambda src: src  # noqa: E731
+        for name in (
+            "_mutate_swap_add_sub", "_mutate_flip_comparison",
+            "_mutate_remove_statement", "_mutate_change_literal",
+            "_mutate_swap_binary_operands", "_mutate_insert_dead_code",
+            "_mutate_negate_condition", "_mutate_swap_assignment_targets",
+            "_mutate_change_function_name", "_mutate_swap_return_value",
+        ):
+            monkeypatch.setattr(engine, name, no_op)
+        assert engine.generate_mutations("def f():\n    pass\n", count=1) == []
+        # The harness contract is still a string: the original comes back.
+        harness = ProofSoundnessHarness()
+        harness.mutator = engine
+        out = harness.generate_incorrect_transform("def f():\n    pass\n",
+                                                   "nonexistent_type")
+        assert out == "def f():\n    pass\n"
+
     def test_generate_mutations_count(self):
         engine = ProofMutationEngine(seed=42)
         source = "def f(x):\n    return x + 1\n"
