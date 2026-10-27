@@ -604,7 +604,33 @@ def test_protected_file(filepath, original_source):
         # verification harness must set both (harness-only, never prod).
         ver_env['NIXON_VERIFY_SKIP_VERSION_CHECK'] = '1'
         ver_env['NIXON_CI'] = ver_env.get('NIXON_CI', '1')
-        obf_result = subprocess.run([sys.executable, filepath], capture_output=True, timeout=500, text=True, env=ver_env)
+        # Popen + faulthandler rather than subprocess.run: a verification
+        # run that hangs must name the frame it is stuck in.  On the
+        # 3.13/3.14 runners this run blocks for the full 500 s timeout
+        # and the TimeoutExpired path below used to swallow it as PASS,
+        # so every artifact-building test looked ~10 minutes slow with
+        # no explanation.
+        ver_env.setdefault('PYTHONFAULTHANDLER', '1')
+        _proc = subprocess.Popen([sys.executable, filepath],
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, text=True, env=ver_env)
+        try:
+            _out, _err = _proc.communicate(timeout=500)
+        except subprocess.TimeoutExpired:
+            try:
+                import signal as _signal
+                _proc.send_signal(_signal.SIGABRT)
+            except Exception:
+                pass
+            try:
+                _out, _err = _proc.communicate(timeout=30)
+            except Exception:
+                _out, _err = "", ""
+            print("[!] verification run timed out after 500s; child stack:")
+            print((_err or "")[-4000:])
+            raise
+        obf_result = subprocess.CompletedProcess(
+            [sys.executable, filepath], _proc.returncode, _out, _err)
         has_error = obf_result.returncode != 0 or "Traceback (most recent call last)" in obf_result.stderr or "[FATAL]" in obf_result.stdout
         results['obfuscated'] = {
             'status': 'FAIL' if has_error else 'PASS', 
