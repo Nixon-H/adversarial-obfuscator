@@ -55,8 +55,30 @@ def _build_and_run(index, extra=()):
         if not packed:
             return False, "no artifact produced"
         artifact = os.path.join(src_dir, packed[0])
-        run = subprocess.run([sys.executable, artifact], capture_output=True,
-                             text=True, timeout=300, env=env)
+        # Same diagnostic as the pipeline's verification step: a run that
+        # hangs must name the frame it is stuck in.  On the 3.14 runner
+        # this run times out at 300 s while finishing in ~4 s here.
+        env["PYTHONFAULTHANDLER"] = "1"
+        proc = subprocess.Popen([sys.executable, artifact],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, env=env)
+        try:
+            out, err = proc.communicate(timeout=300)
+        except subprocess.TimeoutExpired:
+            try:
+                import signal as _signal
+                proc.send_signal(_signal.SIGABRT)
+            except Exception:
+                pass
+            try:
+                out, err = proc.communicate(timeout=30)
+            except Exception:
+                out, err = "", ""
+            print("artifact run timed out; child stack:")
+            print((err or "")[-4000:])
+            raise
+        run = subprocess.CompletedProcess([sys.executable, artifact],
+                                          proc.returncode, out, err)
         if run.returncode != 0:
             return False, "artifact died: %s" % (run.stderr[-500:])
         if "E2E-OK" not in run.stdout:
