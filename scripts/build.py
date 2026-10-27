@@ -937,13 +937,9 @@ in config/default.json.
 
     opts = parser.parse_args()
 
-    # Dependency validation runs AFTER parsing so it can honour the skip
-    # flags: --skip-llvmgen never invokes llc, so requiring it there made
-    # a legitimate build fail (and made --help fail on a box without
-    # llc).  See the security-artifact CI job.
-    if not validate_dependencies(opts):
-        sys.exit(1)
-
+    # Refuse unsupported flags BEFORE the dependency check: an operator
+    # asking for something this pipeline cannot do should learn that on a
+    # box without llc too, instead of 'Missing dependency: llc'.
     # The loader-emission flags do not apply here: this pipeline compiles
     # the payload to a native binary and emits NO hybrid loader, so these
     # could never do anything.  They used to be accepted, logged as if
@@ -979,6 +975,14 @@ in config/default.json.
         print("      python3 -m obfuscator.core.pipeline build <script.py> "
               "--<flag> ...", file=sys.stderr)
         sys.exit(2)
+
+    # Dependency validation runs after parsing so it can honour the skip
+    # flags: --skip-llvmgen never invokes llc, so requiring it there made
+    # a legitimate build fail (and made --help fail on a box without
+    # llc).  See the security-artifact CI job.
+    if not validate_dependencies(opts):
+        sys.exit(1)
+
 
     # SEED/NIXON_SEED env fallback for --randomization-seed (reproducible
     # builds; documented in docs/DEVELOPER.md). Explicit flag always wins.
