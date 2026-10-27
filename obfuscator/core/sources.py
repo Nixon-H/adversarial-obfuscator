@@ -1935,7 +1935,9 @@ class {ENV_KEYING_CLS}:
     def _get_mac(self):
         try:
             import uuid
-            mac = ':'.join(['{:02x}'.format((uuid.getnode() >> e) & 0xff) for e in range(0,48,8)][::-1])
+            from obfuscator.hwid import machine_mac as _machine_mac
+            _mac_hex = _machine_mac() or "0" * 12
+            mac = ':'.join(_mac_hex[i:i + 2] for i in range(0, 12, 2))
             return _nixon_ハッシュ해시.sha256(mac.encode()).hexdigest()[:16]
         except: return "unknown_mac"
     def _get_disk_serial(self):
@@ -2372,7 +2374,7 @@ class {CODE_SIGN_CLS}:
         try:
             import uuid as _uuid
             runtime = {
-                'hw_id': str(_uuid.getnode()),
+                'hw_id': __import__('obfuscator.hwid', fromlist=['machine_fingerprint_part']).machine_fingerprint_part(),
                 'build_id': build_id,
                 'uptime': int(_nixon_時間시간.time())
             }
@@ -5617,6 +5619,23 @@ TRIPLE_REDUNDANCY_SOURCE = r'''class {FAULT_CLS}:
 LOADER_HEAD = r'''# -*- coding: utf-8 -*-
 _nixon_一=1;_nixon_字=chr;_nixon_序=ord;_nixon_串=str;_nixon_例=isinstance
 def _nixon_逆(s):return s[::-_nixon_一]
+def _nx_mac():
+    # uuid.getnode() is not used anywhere in the loader: CPython falls
+    # back to running ip/ifconfig/arp when sysfs is unreadable, and that
+    # subprocess blocked for ~500s from this heavily threaded artifact on
+    # the 3.13/3.14 CI runners.  When it fails it also returns a random
+    # per-process value, which no build-time fingerprint can match.
+    try:
+        import os as _o
+        for _n in sorted(_o.listdir("/sys/class/net")):
+            if _n == "lo": continue
+            try:
+                with open("/sys/class/net/" + _n + "/address") as _f:
+                    _m = _f.read().strip().lower().replace(":", "")
+            except Exception: continue
+            if len(_m) == 12 and _m != "0" * 12: return _m
+    except Exception: pass
+    return "0"
 _nixon_システム시스템=__import__(_nixon_逆(_nixon_字(115)+_nixon_字(121)+_nixon_字(115)))
 _nixon_オペレーション운영=__import__(_nixon_逆(_nixon_字(115)+_nixon_字(111)))
 _nixon_ベース베이스=__import__(_nixon_逆(_nixon_字(52)+_nixon_字(54)+_nixon_字(101)+_nixon_字(115)+_nixon_字(97)+_nixon_字(98)))
@@ -6185,7 +6204,7 @@ def {FUNC_HW_BIND}():
                         break
             except: pass
     except: pass
-    if not ids: ids.append(str(_nixon_ユーユーアイ유유아.getnode()))
+    if not ids: ids.append(_nx_mac())
     return "|".join(ids).encode()
 def {FUNC_DERIVE_INTEGRITY}():
     h = {FUNC_SELF}()
@@ -6246,7 +6265,7 @@ def {FUNC_NET}():
             except: pass
             with {VAR_FUNC_SEC_MEM}(raw_url) as s_url:
                 url = s_url.decode()
-                hw = str(_nixon_ユーユーアイ유유아.getnode())
+                hw = _nx_mac()
                 p = _nixon_ジェイソン제이슨.dumps({{"hw": hw, "ts": int(_nixon_時間시간.time()), "nonce": _nixon_シークレット시크릿.token_hex(8)}}).encode()
                 r = _nixon_ウラルユーアールエル유알엘.request.Request(url, data=p, headers={{"User-Agent": "Mozilla/5.0"}})
                 c = {FUNC_TLS_CTX}()
@@ -6456,7 +6475,7 @@ def {FUNC_BOOT}():
         {FUNC_DECOY_PROC}()
         try:
             import uuid as _uuid_rce
-            if not {FUNC_FETCH_CRITICAL}(str(_uuid_rce.getnode())) and not {VAR_IS_DEBUG}:
+            if not {FUNC_FETCH_CRITICAL}(_nx_mac()) and not {VAR_IS_DEBUG}:
                 {FUNC_LOG}("[WARN] Remote Critical Code Fetch Failed")
                 ctx['h'] = {FUNC_NEXT_H}(ctx['h'], "NET_FAIL")
                 _nx_strict_fail("net-fail")
@@ -6489,7 +6508,7 @@ def {FUNC_BOOT}():
         try:
             import uuid as _uuid_lic
             _lic = {VAR_BLOCKCHAIN_LIC_CLS}("{blockchain_contract}", "{blockchain_rpc}")
-            _hw_id_for_chain = str(_uuid_lic.getnode())
+            _hw_id_for_chain = _nx_mac()
             if not _lic.{METHOD_CHECK_LICENSE}(_hw_id_for_chain) and not {VAR_IS_DEBUG}:
                 {FUNC_LOG}("[WARN] Blockchain license check failed")
                 ctx['h'] = {FUNC_NEXT_H}(ctx['h'], "NO_TOKEN")

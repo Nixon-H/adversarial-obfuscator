@@ -160,7 +160,11 @@ def fallback_fingerprint():
     except Exception:
         node = ""
     try:
-        mac = format(int(uuid.getnode()), "x")
+        # Not uuid.getnode(): CPython may shell out to ip/ifconfig/arp for
+        # it, and when that fails it returns a random per-process value, so
+        # a trial fingerprinted at build time could never verify.
+        from obfuscator.hwid import machine_fingerprint_part as _mac_part
+        mac = _mac_part()
     except Exception:
         mac = "0"
     mid = _read_first("/etc/machine-id") or \
@@ -529,7 +533,15 @@ def emit_trial_snippet(deadline_epoch, token_hex, build_key_hex,
         + "        except Exception:\n"
         + "            _tb_node = \"\"\n"
         + "        try:\n"
-        + "            _tb_mac = format(int(_tb_uuid.getnode()), \"x\")\n"
+        + "            _tb_mac = '0'\n"
+        + "            for _tb_n in sorted(_tb_os.listdir('/sys/class/net')):\n"
+        + "                if _tb_n == 'lo': continue\n"
+        + "                try:\n"
+        + "                    with open('/sys/class/net/' + _tb_n + '/address') as _tb_f2: _tb_m = _tb_f2.read().strip().lower().replace(':', '')\n"
+        + "                except Exception: continue\n"
+        + "                if len(_tb_m) == 12 and _tb_m != '0' * 12:\n"
+        + "                    _tb_mac = _tb_m\n"
+        + "                    break\n"
         + "        except Exception:\n"
         + "            _tb_mac = \"0\"\n"
         + "        try:\n"
