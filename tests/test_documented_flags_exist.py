@@ -76,6 +76,28 @@ def _other_tool_flags():
     return flags
 
 
+def _relay_flags():
+    """Flags of the Rust relay (clap derive).
+
+    Worth scanning: the relay is the launcher the docs talk about, and a
+    flag documented there but absent from cli.rs is the same class of
+    mistake this test exists to catch.
+    """
+    path = os.path.join(ROOT, "relay", "src", "cli.rs")
+    if not os.path.exists(path):
+        return set()
+    src = open(path, encoding="utf-8").read()
+    flags = set()
+    for m in re.finditer(r'long\s*=\s*"(--)?([a-z0-9][a-z0-9\-]*)"', src):
+        flags.add("--" + m.group(2))
+    # `#[arg(short, long)]` derives the flag from the field name.
+    for m in re.finditer(r"#\[arg\(([^\]]*)\)\]\s*\n\s*pub\s+([a-z0-9_]+):", src):
+        opts, field = m.group(1), m.group(2)
+        if "long" in opts and "long =" not in opts:
+            flags.add("--" + field.replace("_", "-"))
+    return flags
+
+
 def _documented_flags():
     found = {}
     for rel in USER_DOCS:
@@ -91,7 +113,7 @@ def _documented_flags():
 
 def test_every_documented_flag_exists():
     known = (_pipeline_flags() | _build_py_flags() | _other_tool_flags()
-             | FOREIGN_FLAGS | FRAGMENTS)
+             | _relay_flags() | FOREIGN_FLAGS | FRAGMENTS)
     unknown = {}
     for flag, docs in _documented_flags().items():
         if flag not in known:

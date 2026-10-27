@@ -41,12 +41,22 @@ checks they agree).
 
 ### Fixed
 
-- **The protection runtime now runs.** `--init-runtime` was opt-in and
-  nothing passed it — not the build, not the e2e checks, no config or
-  doc — so the entire `nixon-runtime` crate was dead code in every
-  shipped path. It now initialises by default; `--no-init-runtime`
-  opts out for a bare launch. Pinned by three CLI tests in
-  `relay/src/cli.rs`.
+- **Archived the seven "Runtime Evolution" features.** `variant_pool`,
+  `cfg_mutation`, `class_dispatch`, `ssa_mutation`, `state_isa`,
+  `per_exec_recompile` and `self_healing` were compiled, reachable, and
+  gated by a flag that `RuntimeConfig::default` left `false` while
+  nothing anywhere set it — so no configuration could run them. They are
+  in `archive/rust-runtime/`, their `RuntimeConfig` fields are gone, and
+  the feature report now calls them `DEAD CODE` with the reason instead
+  of `GATED-OFF`. `GATED-OFF` is now empty, which is the point of the
+  category: it should not persist. The seed they shared is still used by
+  structure randomisation and is renamed `mutation_seed`.
+- **The protection runtime now runs.** The relay only initialised it when
+  explicitly asked to, and nothing ever asked — not the build, not the
+  e2e checks, no config or doc — so the entire `nixon-runtime` crate was
+  dead code in every shipped path. It now initialises by default;
+  `--no-init-runtime` opts out for a bare launch. Pinned by three CLI
+  tests in `relay/src/cli.rs`.
 - **Five validation phases became vacuous passes when the Rust modules
   were archived.** `phase20_hpc_detect`, `phase21_hw_entropy`,
   `phase22_cache_bound`, `phase23_branch_entangle` and

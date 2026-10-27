@@ -97,23 +97,32 @@ class TestClassifyFeatures:
         assert total == 129, f"Sum of categories ({total}) != 129"
 
 
-class TestGatedOffRegressions:
-    """The Runtime Evolution features are compiled, gated by a flag that
-    RuntimeConfig::default leaves false, and set by nothing."""
+class TestArchivedRuntimeFeatures:
+    """The Runtime Evolution features were compiled, gated by a flag that
+    RuntimeConfig::default left false, and set by nothing. They are
+    archived now — no module, no handler, no flag — so the report must
+    call them dead rather than "a flag with that name exists"."""
 
-    EXPECTED_OFF = {53, 80, 81, 83, 84, 85, 86}
+    ARCHIVED = {53, 80, 81, 83, 84, 85, 86}
 
-    def test_runtime_evolution_features_are_gated_off(self):
+    def test_they_are_reported_dead(self):
         report = _report()
-        off = {f["id"] for f in report["features"] if f["classification"] == "GATED-OFF"}
-        assert self.EXPECTED_OFF <= off, \
-            f"expected {sorted(self.EXPECTED_OFF)} gated off, got {sorted(off)}"
+        dead = {f["id"] for f in report["features"] if f["classification"] == "DEAD CODE"}
+        assert self.ARCHIVED <= dead, \
+            f"expected {sorted(self.ARCHIVED)} dead, got {sorted(dead)}"
 
-    def test_gated_off_features_name_their_flag(self):
+    def test_the_reason_names_the_archived_module(self):
         report = _report()
         for f in report["features"]:
-            if f["classification"] == "GATED-OFF":
-                assert "enable_" in f["reason"], f"Item {f['id']}: {f['reason']}"
+            if f["id"] in self.ARCHIVED:
+                assert "archived" in f["reason"], f"Item {f['id']}: {f['reason']}"
+
+    def test_nothing_is_gated_off_any_more(self):
+        """GATED-OFF meant "compiled, flag false, nothing sets it" — the
+        state these seven were in. With them gone the category is empty."""
+        report = _report()
+        off = [f["id"] for f in report["features"] if f["classification"] == "GATED-OFF"]
+        assert off == [], f"still gated off: {off}"
 
 
 class TestWiredDetection:

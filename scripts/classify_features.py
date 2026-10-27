@@ -346,9 +346,34 @@ def _rust_module_missing(flag, slug):
     return missing
 
 
+# Features whose Rust implementation is archived (see
+# archive/rust-runtime/README.md). They have no module, no handler and no
+# flag left — the capability does not exist, so the report must say so
+# rather than falling back to "a CLI flag with that name exists".
+RUST_ARCHIVED_FEATURES = {
+    53: "variant_pool",
+    80: "cfg_mutation",
+    81: "class_dispatch",
+    83: "ssa_mutation",
+    84: "state_isa",
+    85: "per_exec_recompile",
+    86: "self_healing",
+}
+
+
 def gather_evidence(f):
     """Five independent dimensions, each mechanically answerable."""
     name = f["name"]
+    if f["id"] in RUST_ARCHIVED_FEATURES:
+        mod = RUST_ARCHIVED_FEATURES[f["id"]]
+        return {
+            "implemented": False,
+            "compiled": False,
+            "reachable": False,
+            "enabled": False,
+            "exercised": False,
+            "reason": "archived: runtime/src/%s.rs removed (no call path)" % mod,
+        }
     flag = f["cli_flag"]
     slug = _slug(name)
     internal = flag in ("(internal)", "(phase)", "(phase2)", "(none)")

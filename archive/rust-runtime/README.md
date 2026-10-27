@@ -24,6 +24,27 @@ product does not target. Nothing was deleted — restore a file and its
 | `rop` | ROP compilation | no caller | `scripts/rop/` (Python) |
 | `rop_dispatch` | ROP dispatch | no caller | `scripts/rop/` (Python) |
 
+## The seven "Runtime Evolution" features (archived 2026-10-27)
+
+These were compiled, reachable from `init_runtime`, and gated by a flag
+that `RuntimeConfig::default` left `false` while nothing in either crate
+set it — so **no configuration could ever run them**. They are the
+`GATED-OFF` verdict in the feature report, and the report now says
+`DEAD CODE` with the reason instead:
+
+| Module | What it did |
+|---|---|
+| `variant_pool` | picked a pre-built variant at run time |
+| `cfg_mutation` | re-ordered basic blocks per execution |
+| `class_dispatch` | dispatched through a per-class variant cache |
+| `ssa_mutation` | generated SSA-level variants |
+| `state_isa` | state-dependent instruction mapping |
+| `per_exec_recompile` | recompiled per execution |
+| `self_healing` | background checksum repair |
+
+`mutation_seed` (formerly `cfg_mutation_seed`) survives because
+structure randomisation uses it.
+
 ## What is NOT here
 
 `jit` and `hydra` were also named as dead in the audit, but they are

@@ -7,25 +7,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import ast
 
 
-# ── Item 13: Variant pool ─────────────────────────────────────────────
-def test_variant_pool_metadata():
-    # Verify variant_pool.rs has VariantPool struct
-    with open("runtime/src/variant_pool.rs") as f:
-        content = f.read()
-    assert "VariantPool" in content
-    assert "VariantMetadata" in content
-    assert "load" in content
-    assert "get_variant" in content
-
-
-def test_variant_pool_runtime_config_defaults():
-    # Structural check on the Rust source for variant_pool fields
-    with open("runtime/src/lib.rs") as f:
-        content = f.read()
-    assert "enable_variant_pool" in content
-    assert "variant_pool_path" in content
-    assert "variant_pool" in content  # module declaration
-
+# ── Item 13: Variant pool ────────────────────────────────────────────
+# runtime/src/variant_pool.rs is archived (it had no call path from
+# init_runtime — see archive/rust-runtime/README.md), so the two
+# structural checks on that file moved with it to
+# archive/rust-runtime/tests/test_item_fixes_variant_pool.py.
 
 # ── Item 16: JIT templates ────────────────────────────────────────────
 def test_dynamic_code_generator_rust_jit():
