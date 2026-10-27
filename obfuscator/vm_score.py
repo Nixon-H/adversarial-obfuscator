@@ -246,13 +246,15 @@ def emit_loader_snippet(threshold: float = 50.0, armed: bool = False) -> str:
         "\n"
         "def _nx_has_vm_drivers(_modules=\"/proc/modules\"):\n"
         "    try:\n"
+        # Read /proc/modules only.  The `lsmod` fallback used a pipe: on
+        # timeout subprocess kills the direct child, but a grandchild can
+        # keep the pipe open and communicate() then waits forever -- the
+        # artifact hung for 300 s this way on the 3.13/3.14 runners.
         "        try:\n"
         "            with open(_modules, \"r\", errors=\"ignore\") as _f:\n"
         "                _text = _f.read().lower()\n"
         "        except Exception:\n"
-        "            _r = _subprocess.run([\"lsmod\"], capture_output=True,"
-        " timeout=3)\n"
-        "            _text = (_r.stdout or b\"\").decode(errors=\"ignore\").lower()\n"
+        "            _text = \"\"\n"
         "        for _line in _text.splitlines():\n"
         "            _tok = _line.split()[0] if _line.split() else \"\"\n"
         "            for _p in _NX_VM_MOD_PREFIXES:\n"
@@ -308,16 +310,10 @@ def emit_loader_snippet(threshold: float = 50.0, armed: bool = False) -> str:
         "                    return True\n"
         "    except Exception:\n"
         "        pass\n"
-        "    try:\n"
-        "        _r = _subprocess.run([\"systemctl\", \"list-units\","
-        " \"--type=service\", \"--all\", \"--no-legend\", \"--no-pager\"],"
-        " capture_output=True, timeout=3)\n"
-        "        _out = (_r.stdout or b\"\").decode(errors=\"ignore\").lower()\n"
-        "        for _n in _NX_VM_SVC_NAMES:\n"
-        "            if _n in _out:\n"
-        "                return True\n"
-        "    except Exception:\n"
-        "        pass\n"
+        # The `systemctl list-units` probe is gone for the same reason:
+        # its output pipe can outlive the killed child (systemctl talks to
+        # PID 1 and leaves a helper), which hangs the whole artifact.
+        # /run/systemd/system already names every loaded unit.
         "    return False\n"
         "\n"
         "\n"
@@ -352,12 +348,13 @@ def emit_loader_snippet(threshold: float = 50.0, armed: bool = False) -> str:
         "\n"
         "def _nx_has_sysvirt():\n"
         "    try:\n"
+        # DEVNULL, not a pipe: exit 0 means "a VM was detected" (the
+        # tool prints the kind), and no pipe can be inherited by a helper
+        # that outlives the child.
         "        _r = _subprocess.run([\"systemd-detect-virt\"],"
-        " capture_output=True, timeout=3)\n"
+        " stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL, timeout=3)\n"
         "        if _r.returncode == 0:\n"
-        "            _out = (_r.stdout or b\"\").decode(errors=\"ignore\").strip().lower()\n"
-        "            if _out and _out != \"none\":\n"
-        "                return True\n"
+        "            return True\n"
         "    except Exception:\n"
         "        pass\n"
         "    return False\n"
