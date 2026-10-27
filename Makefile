@@ -57,10 +57,16 @@ encrypt: $(BUILD_DIR) llvmgen
 
 relay: $(BUILD_DIR) $(RELAY_BIN)
 
-$(RELAY_BIN): $(wildcard $(RELAY_DIR)/src/*.rs) $(RELAY_DIR)/Cargo.toml $(RELAY_DIR)/build.rs
+$(RELAY_BIN): $(wildcard $(RELAY_DIR)/src/*.rs) $(wildcard $(RELAY_DIR)/../runtime/src/*.rs) $(RELAY_DIR)/Cargo.toml $(RELAY_DIR)/build.rs scripts/runtime_config.py
 	cd $(RELAY_DIR) && $(CARGO) build --release
 	cp $(RELAY_DIR)/target/release/orbital-relay $@
 	-strip $@
+	# The integrity check verifies this binary's own text, so the
+	# expected value has to be produced from the binary that ships --
+	# after strip, because strip changes it. Without this file
+	# integrity_expected_crc stays None and verify_text_section is
+	# never called.
+	python3 -m scripts.runtime_config $@
 
 relay-cross-prereqs:
 	@echo "[*] Checking cross-compilation prerequisites..."

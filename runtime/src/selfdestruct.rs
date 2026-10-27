@@ -1,6 +1,12 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 static ARMED: AtomicBool = AtomicBool::new(false);
+
+/// The exit code, parked in memory so the register-scrubbing below
+/// cannot destroy it. The scrubbing asm zeroes rax..r15 without
+/// declaring the clobber to the compiler, so a value held in a register
+/// across it is garbage -- which is why every tamper exit reported 0.
+static EXIT_CODE: AtomicI32 = AtomicI32::new(1);
 
 extern "C" fn cleanup_handler() {
     if !ARMED.load(Ordering::Relaxed) {
@@ -17,7 +23,7 @@ pub fn arm_self_destruct() {
 }
 
 fn scrub_and_exit_inner(code: i32) -> ! {
-    let _ = code;
+    EXIT_CODE.store(code, Ordering::SeqCst);
 
     unsafe {
         let mut tmp = [0u8; 4096];
@@ -55,7 +61,7 @@ fn scrub_and_exit_inner(code: i32) -> ! {
     }
 
     unsafe {
-        libc::_exit(code);
+        libc::_exit(EXIT_CODE.load(Ordering::SeqCst));
     }
 }
 
