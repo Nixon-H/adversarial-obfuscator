@@ -29,6 +29,26 @@ ROOT = Path(__file__).resolve().parent.parent
 # Sources that are genuinely compiled, linked or tested by the product.
 KEPT_NATIVE = {"core.cpp", "whitebox_feistel.cpp", "simd_vm.c", "simd_vm_test.c"}
 
+# What was removed. The code lives in git history (see
+# archive/rust-runtime/README.md and archive/native/README.md for the
+# recovery commands); the tree must not carry it again.
+ARCHIVED_RUST_MODULES = {
+    "branch_entangle", "cache_bound", "code_genome", "hpc_detect",
+    "hw_entropy", "hwid_bind", "multicore_entangle", "oram", "rop",
+    "rop_dispatch", "variant_pool", "cfg_mutation", "class_dispatch",
+    "ssa_mutation", "state_isa", "per_exec_recompile", "self_healing",
+}
+ARCHIVED_PHASES = {
+    "phase20_hpc_detect", "phase21_hw_entropy", "phase22_cache_bound",
+    "phase23_branch_entangle", "phase24_multicore_entangle",
+}
+ARCHIVED_NATIVE = {
+    "cross_process.c", "crypto_chain.c", "distributed_vm.c",
+    "fragment_migration.c", "gpu_stub.c", "key_evolution.c",
+    "microjit.c", "self_healing.c", "struct_random.c", "vm_stub.c",
+    "stub_linux.cpp", "stub_win.cpp",
+}
+
 # Build files that may reference a kept native source.
 BUILD_REFERERS = (
     "Makefile",
@@ -60,10 +80,14 @@ class TestRustReachability:
     def test_archived_modules_are_not_declared(self):
         from scripts.reachability import rust_callgraph as cg
         declared = cg.module_declarations()
-        archived = {p.stem for p in (ROOT / "archive" / "rust-runtime").glob("*.rs")}
-        assert archived, "archive/rust-runtime is empty — did it get deleted?"
-        overlap = archived & declared
+        overlap = ARCHIVED_RUST_MODULES & declared
         assert not overlap, f"archived modules are still compiled: {sorted(overlap)}"
+
+    def test_archived_modules_are_not_in_the_tree(self):
+        """The tree must not carry dead code; history does."""
+        present = [n for n in ARCHIVED_RUST_MODULES
+                   if (ROOT / "runtime" / "src" / f"{n}.rs").exists()]
+        assert present == [], f"archived modules are back in runtime/src: {sorted(present)}"
 
     def test_archive_has_a_readme(self):
         readme = ROOT / "archive" / "rust-runtime" / "README.md"
@@ -89,18 +113,19 @@ class TestNativeCorpus:
         for name in KEPT_NATIVE:
             assert name in text, f"native/{name} is kept but no build file references it"
 
+    def test_archived_sources_are_not_in_the_tree(self):
+        present = [n for n in ARCHIVED_NATIVE if (ROOT / "native" / n).exists()]
+        assert present == [], f"archived sources are back in native/: {sorted(present)}"
+
     def test_archived_sources_are_not_built(self):
-        archived = {p.name for p in (ROOT / "archive" / "native").glob("*.c")}
-        archived |= {p.name for p in (ROOT / "archive" / "native").glob("*.cpp")}
-        assert archived, "archive/native is empty — did it get deleted?"
         text = "\n".join(
             _without_comments((ROOT / rel).read_text(errors="replace"))
             for rel in BUILD_REFERERS
             if (ROOT / rel).exists()
         )
-        # A real build path, not a mention: the archive READMEs and the
-        # Makefile note deliberately name these files.
-        built = [n for n in archived if f"native/{n}" in text]
+        # A real build path, not a mention: the READMEs deliberately name
+        # these files.
+        built = [n for n in ARCHIVED_NATIVE if f"native/{n}" in text]
         assert not built, f"archived sources are still referenced by the build: {sorted(built)}"
 
     def test_archive_has_a_readme(self):
@@ -118,11 +143,14 @@ class TestArchivedPhases:
     """
 
     def test_archived_phases_are_not_imported(self):
-        archived = {p.stem for p in (ROOT / "archive" / "rust-runtime" / "phases").glob("*.py")}
-        assert archived, "archive/rust-runtime/phases is empty"
         build_py = (ROOT / "scripts" / "build.py").read_text()
-        still = [n for n in archived if n in build_py]
+        still = [n for n in ARCHIVED_PHASES if n in build_py]
         assert not still, f"archived phases still referenced by build.py: {sorted(still)}"
+
+    def test_archived_phases_are_not_in_the_tree(self):
+        present = [n for n in ARCHIVED_PHASES
+                   if (ROOT / "scripts" / "phases" / f"{n}.py").exists()]
+        assert present == [], f"archived phases are back: {sorted(present)}"
 
     def test_their_flags_say_archived(self):
         """A flag that silently does nothing is the failure mode here."""

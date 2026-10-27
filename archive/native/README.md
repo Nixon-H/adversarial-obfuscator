@@ -1,12 +1,22 @@
 # Archived native (C/C++) sources
 
-Moved here on **2026-10-23**. None of these was in the shipped
-artefact: most were compile-tests that `make native-test` built into
-throwaway objects, and the rest were never linked at all. Each one
-either duplicates a live Python/Rust implementation or is the
-payload-evasion category that is out of scope for this product.
+Moved here on **2026-10-23**, and **the source files are no longer in the
+tree**. Dead code in a working tree is not an archive — git history is.
+This directory keeps the rationale and the recovery path.
 
-Nothing was deleted — the files and their git history are intact.
+```bash
+# the Windows/Linux stubs, the compile-test corpus, and the tests that
+# covered them
+git show 589298f:native/stub_win.cpp
+git show 589298f:native/microjit.c
+git show 589298f:tests/test_stub_win_contract.py
+```
+
+None of these was in the shipped artefact: most were compile-tests that
+`make native-test` built into throwaway objects, and the rest were never
+linked at all. Each one either duplicates a live Python/Rust
+implementation or is the payload-evasion category that is out of scope
+for this product.
 
 ## Out of scope by product decision
 

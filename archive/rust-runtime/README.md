@@ -1,15 +1,36 @@
 # Archived Rust runtime modules
 
-Moved here on **2026-10-23**. These ten modules were declared in
-`runtime/src/lib.rs`, compiled into `nixon-runtime`, and **unreachable
-from `init_runtime`** — no configuration could execute them. A module
-that cannot run protects nothing, and in this project it did active
-harm: the feature report counted "a module with this name exists" as
-evidence of a shipped protection.
+Moved here on **2026-10-23**, and **the source files are no longer in the
+tree**. Dead code in a working tree is not an archive — git history is.
+This directory keeps the rationale and the recovery path; the code lives
+one command away.
+
+```bash
+# the ten modules removed on 2026-10-23
+git show 589298f:runtime/src/rop.rs
+
+# the five validation phases
+git show 7976d2f:scripts/phases/phase20_hpc_detect.py
+
+# the seven "Runtime Evolution" modules removed on 2026-10-27
+git show 4d7effe:runtime/src/cfg_mutation.rs
+```
+
+To bring one back you must also wire it — `tests/test_no_dead_code.py`
+fails if a module is declared and unreachable, which is the state all of
+these were in.
+
+## Why they are gone
+
+Each was declared in `runtime/src/lib.rs`, compiled into
+`nixon-runtime`, and **unreachable from `init_runtime`** — no
+configuration could execute it. A module that cannot run protects
+nothing, and in this project it did active harm: the feature report
+counted "a module with this name exists" as evidence of a shipped
+protection.
 
 Each one has a live implementation elsewhere, or needs hardware the
-product does not target. Nothing was deleted — restore a file and its
-`pub mod` line to bring it back.
+product does not target.
 
 | Module | What it did | Why archived | Live equivalent |
 |---|---|---|---|
