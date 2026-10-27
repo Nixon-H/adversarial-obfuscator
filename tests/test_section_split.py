@@ -27,7 +27,11 @@ def test_wrong_key_fails():
 
 def test_tampered_section_fails():
     pack = split_sealed(b"secret-data-here", sections=3, key=b"K" * 32)
-    pack["sections"][1]["data"] = "ff" + pack["sections"][1]["data"][2:]
+    # XOR the first byte instead of overwriting it with "ff": 1 run
+    # in 256 the original byte IS 0xff, the pack is unchanged, and
+    # the test fails with "DID NOT RAISE" (seen on the 3.11 job).
+    _data = pack["sections"][1]["data"]
+    pack["sections"][1]["data"] = ("%02x" % (int(_data[:2], 16) ^ 0xFF)) + _data[2:]
     with pytest.raises(ValueError):
         stream_join(pack, b"K" * 32)
 
