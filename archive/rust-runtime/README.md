@@ -33,6 +33,26 @@ still referenced: `jit` from `decrypt::decrypt_and_jit` (a function
 those call sites first; they are part of the "trim the gated-off set"
 work, not this archive.
 
+## Validation phases that moved with them
+
+Five pipeline phases existed only to run `cargo test` against these
+modules:
+
+| Phase | Ran |
+|---|---|
+| `phase20_hpc_detect` | `hpc_detect::tests::…` |
+| `phase21_hw_entropy` | `hw_entropy::tests::…` |
+| `phase22_cache_bound` | `cache_bound::tests::…` |
+| `phase23_branch_entangle` | `branch_entangle::tests` |
+| `phase24_multicore_entangle` | `multicore_entangle::tests` |
+
+After the archive, each filter matched **zero tests**. `cargo test`
+exits 0 when nothing matches, so the phase logged "tests passed" — a
+vacuous pass, which is the worst kind: green, and proving nothing.
+They are in `phases/`, and the CLI flags now log `ARCHIVED` instead of
+running them. `tests/test_no_dead_code.py` fails if any of them is
+imported again.
+
 ## Verification
 
 `tests/test_no_dead_code.py` fails if a module in `runtime/src/` becomes

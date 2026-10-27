@@ -100,8 +100,6 @@ from scripts.phases import (
     phase_self_healing,
     phase_code_genome,
     phase_struct_randomization,
-    phase_branch_entangle,
-    phase_multicore_entangle,
     phase_tee,
     phase_sgx,
     phase_cpu_port,
@@ -2394,16 +2392,13 @@ in config/default.json.
         phase_hpc_key()
 
     if opts.hpc_detect:
-        from scripts.phases.phase20_hpc_detect import phase_hpc_detect
-        phase_hpc_detect()
+        log("ARCHIVED", "hpc_detect: native backend archived (runtime/src/hpc_detect.rs has no call path; see archive/rust-runtime/README.md)")
 
     if opts.hw_entropy:
-        from scripts.phases.phase21_hw_entropy import phase_hw_entropy
-        phase_hw_entropy()
+        log("ARCHIVED", "hw_entropy: native backend archived (runtime/src/hw_entropy.rs has no call path; see archive/rust-runtime/README.md)")
 
     if opts.cache_bound:
-        from scripts.phases.phase22_cache_bound import phase_cache_bound
-        phase_cache_bound()
+        log("ARCHIVED", "cache_bound: native backend archived (runtime/src/cache_bound.rs has no call path; see archive/rust-runtime/README.md)")
 
     # =========================================================================
     # Item 124: SIMD-VM Pipeline Integration
@@ -3779,12 +3774,12 @@ in config/default.json.
     # =========================================================================
 
     if opts.branch_entangle:
-        phase_branch_entangle()
+        log("ARCHIVED", "branch_entangle: native backend archived (runtime/src/branch_entangle.rs has no call path; see archive/rust-runtime/README.md)")
     else:
         log("SKIP", "Branch entangle not enabled (use --branch-entangle)")
 
     if opts.multicore_entangle:
-        phase_multicore_entangle()
+        log("ARCHIVED", "multicore_entangle: native backend archived (runtime/src/multicore_entangle.rs has no call path; see archive/rust-runtime/README.md)")
     else:
         log("SKIP", "Multicore entangle not enabled (use --multicore-entangle)")
 

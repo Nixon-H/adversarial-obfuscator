@@ -237,35 +237,55 @@ ALL_FEATURES = {
     "hpc_detect": {
         "cli_flag": "--hpc-detect",
         "phase_name": "phase_hpc_detect",
-        "impl_module": "scripts.phases.phase20_hpc_detect",
+        # Archived 2026-10-27: the Rust module has no call path from
+        # init_runtime and the validation phase only ran cargo tests
+        # against it, matching zero tests after the archive.
+        "impl_module": None,
+        "archived": True,
         "runtime_file": "hpc_detect.rs",
         "test_file": "test_hardware.py",
     },
     "hw_entropy": {
         "cli_flag": "--hw-entropy",
         "phase_name": "phase_hw_entropy",
-        "impl_module": "scripts.phases.phase21_hw_entropy",
+        # Archived 2026-10-27: the Rust module has no call path from
+        # init_runtime and the validation phase only ran cargo tests
+        # against it, matching zero tests after the archive.
+        "impl_module": None,
+        "archived": True,
         "runtime_file": "hw_entropy.rs",
         "test_file": "test_hardware.py",
     },
     "cache_bound": {
         "cli_flag": "--cache-bound",
         "phase_name": "phase_cache_bound",
-        "impl_module": "scripts.phases.phase22_cache_bound",
+        # Archived 2026-10-27: the Rust module has no call path from
+        # init_runtime and the validation phase only ran cargo tests
+        # against it, matching zero tests after the archive.
+        "impl_module": None,
+        "archived": True,
         "runtime_file": "cache_bound.rs",
         "test_file": "test_hardware2.py",
     },
     "branch_entangle": {
         "cli_flag": "--branch-entangle",
         "phase_name": "phase_branch_entangle",
-        "impl_module": "scripts.phases.phase23_branch_entangle",
+        # Archived 2026-10-27: the Rust module has no call path from
+        # init_runtime and the validation phase only ran cargo tests
+        # against it, matching zero tests after the archive.
+        "impl_module": None,
+        "archived": True,
         "runtime_file": "branch_entangle.rs",
         "test_file": "test_hardware2.py",
     },
     "multicore_entangle": {
         "cli_flag": "--multicore-entangle",
         "phase_name": "phase_multicore_entangle",
-        "impl_module": "scripts.phases.phase24_multicore_entangle",
+        # Archived 2026-10-27: the Rust module has no call path from
+        # init_runtime and the validation phase only ran cargo tests
+        # against it, matching zero tests after the archive.
+        "impl_module": None,
+        "archived": True,
         "runtime_file": "multicore_entangle.rs",
         "test_file": "test_hardware2.py",
     },

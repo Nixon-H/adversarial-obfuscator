@@ -108,6 +108,31 @@ class TestNativeCorpus:
         assert readme.exists(), "archive without a rationale is just a skip"
 
 
+class TestArchivedPhases:
+    """Five validation phases ran `cargo test` against archived modules.
+
+    After the archive their filters matched zero tests, and `cargo test`
+    exits 0 when nothing matches — so they logged "tests passed" while
+    proving nothing. A green phase that runs nothing is worse than a
+    red one.
+    """
+
+    def test_archived_phases_are_not_imported(self):
+        archived = {p.stem for p in (ROOT / "archive" / "rust-runtime" / "phases").glob("*.py")}
+        assert archived, "archive/rust-runtime/phases is empty"
+        build_py = (ROOT / "scripts" / "build.py").read_text()
+        still = [n for n in archived if n in build_py]
+        assert not still, f"archived phases still referenced by build.py: {sorted(still)}"
+
+    def test_their_flags_say_archived(self):
+        """A flag that silently does nothing is the failure mode here."""
+        build_py = (ROOT / "scripts" / "build.py").read_text()
+        for flag in ("hpc_detect", "hw_entropy", "cache_bound",
+                     "branch_entangle", "multicore_entangle"):
+            assert f'"{flag}: native backend archived' in build_py, \
+                f"--{flag.replace('_', '-')} does not report that its backend is archived"
+
+
 class TestNoOpFallbacks:
     def test_lowering_does_not_emit_errors_as_comments(self):
         """A failed instruction used to become `; ERROR: ...` while its

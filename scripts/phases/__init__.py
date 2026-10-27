@@ -70,11 +70,6 @@ from .phase17_struct_random import phase_struct_randomization
 # ---- Stage 18–28: Hardware Research Integration (Items 120–129) ----
 from .phase18_hpc import phase_hpc
 from .phase19_hpc_key import phase_hpc_key
-from .phase20_hpc_detect import phase_hpc_detect
-from .phase21_hw_entropy import phase_hw_entropy
-from .phase22_cache_bound import phase_cache_bound
-from .phase23_branch_entangle import phase_branch_entangle
-from .phase24_multicore_entangle import phase_multicore_entangle
 from .phase25_tee import phase_tee
 from .phase26_sgx import phase_sgx
 from .phase27_cpu_port import phase_cpu_port

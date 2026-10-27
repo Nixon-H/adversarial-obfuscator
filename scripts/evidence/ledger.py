@@ -241,7 +241,6 @@ class EvidenceLedger:
             ("Semantic preservation pipeline", "source_code", "scripts/preservation/engine.py"),
             ("Proof-carrying equivalence", "source_code", "scripts/proofs/proof_carrying.py"),
             ("Distributed fragment binding", "source_code", "scripts/distributed/cross_process.py"),
-            ("Cache-bound execution isolation", "source_code", "scripts/phases/phase22_cache_bound.py"),
             ("Micro-JIT reassembly correctness", "source_code", "scripts/fragment/__init__.py"),
             ("Temporal key derivation", "source_code", "scripts/binding/temporal_key.py"),
             ("ZK state proof validity", "source_code", "scripts/zk_state/prover.py"),
