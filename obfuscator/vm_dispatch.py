@@ -36,6 +36,8 @@ Soundness conditions (each enforced by construction + tests):
 
 Python 3.10 compatible. Deterministic per seed (no global random).
 """
+import sys
+
 import ast
 import random
 
@@ -433,6 +435,27 @@ def _signature(params, defaults, n_posonly):
     return sig
 
 
+def _match_unpack_text(source):
+    """Match CPython 3.14's unpack error wording.
+
+    3.14 added the count -- "too many values to unpack (expected 2, got
+    3)" -- so a snippet generated on 3.14 with the 3.13 text made the VM
+    and native runs disagree on the message (only the message).  The
+    snippet is generated per build and runs on the same interpreter, so
+    emit that interpreter's wording.
+    """
+    if sys.version_info >= (3, 14):
+        source = source.replace(
+            "raise ValueError('too many values to unpack (expected %d)' % _m)",
+            "raise ValueError('too many values to unpack (expected %d, got %d)' % (_m, _l))",
+        )
+        source = source.replace(
+            "raise ValueError('too many values to unpack (expected %d)' % _n)",
+            "raise ValueError('too many values to unpack (expected %d, got %d)' % (_n, _l))",
+        )
+    return source
+
+
 def emit_vm_a(func_name, params, defaults, n_posonly, slots, code,
               encoding, seed, doc=None):
     """VM-A: switch/table dispatcher (if/elif opcode chain).
@@ -495,13 +518,14 @@ def emit_vm_a(func_name, params, defaults, n_posonly, slots, code,
         "elif _op == %d: pass  # POP" % encoding["POP"],
         "elif _op == %d: _stack.pop();_pc+=1  # POP" % encoding["POP"])
     doc_line = '    """%s"""\n' % doc.replace('"""', '"') if doc else ""
-    return (
+    _vm_src = (
         "def %s(%s):\n%s"
         "    _slots=[None]*%d\n%s\n"
         "    _stack=[]\n    _code=%s\n    _n=len(_code)\n    _pc=0\n    _ret=None\n"
         "    while _pc<_n:\n        _op=_code[_pc][0]\n%s\n    return _ret\n"
     ) % (func_name, _signature(params, defaults, n_posonly), doc_line,
          nslots, inits, _code_table(code), body)
+    return _match_unpack_text(_vm_src)
 
 
 def emit_vm_b(func_name, params, defaults, n_posonly, slots, code,
@@ -612,7 +636,7 @@ def emit_vm_b(func_name, params, defaults, n_posonly, slots, code,
             tlines.append("        %d: (lambda st,_w=%r: _h_bool(st,_w)),"
                           % (encoding[op], w))
     doc_line = '    """%s"""\n' % doc.replace('"""', '"') if doc else ""
-    return (
+    _vm_src = (
         "def %s(%s):\n%s"
         "    _slots=[None]*%d\n%s\n"
         "    _stack=[]\n    _code=%s\n    _ret=[None]\n"
@@ -629,6 +653,7 @@ def emit_vm_b(func_name, params, defaults, n_posonly, slots, code,
     ) % (func_name, _signature(params, defaults, n_posonly), doc_line,
          nslots, inits, _code_table(code), "\n".join(defs),
          "\n".join(tlines))
+    return _match_unpack_text(_vm_src)
 
 
 # ---------------------------------------------------------------------------

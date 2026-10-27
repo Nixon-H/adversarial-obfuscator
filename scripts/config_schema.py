@@ -665,6 +665,28 @@ def validate_config(data, *, strict=False):
     return clean, warnings
 
 
+def _too_deep(obj, limit=MAX_DEPTH):
+    """True when the parsed document nests deeper than *limit*.
+
+    Iterative: the point is to answer this without recursing, because
+    3.14's JSON decoder happily parses a 20k-deep object that used to
+    raise RecursionError on earlier interpreters.  Relying on the parser
+    to fail made the depth-bomb guard version-dependent -- and a bomb
+    hidden under an unknown key was never traversed by the schema walker,
+    so it was not caught either.
+    """
+    stack = [(obj, 1)]
+    while stack:
+        node, depth = stack.pop()
+        if depth > limit:
+            return True
+        if isinstance(node, dict):
+            stack.extend((value, depth + 1) for value in node.values())
+        elif isinstance(node, (list, tuple)):
+            stack.extend((value, depth + 1) for value in node)
+    return False
+
+
 def load_config_file(path, *, strict=False):
     """Load and validate a config file. Returns (clean_dict, warnings).
 
@@ -688,6 +710,11 @@ def load_config_file(path, *, strict=False):
         raise ConfigError("config %s: malformed JSON (%s) -- refusing to "
                           "build with an unreadable protection posture"
                           % (path, exc))
+    if _too_deep(data):
+        raise ConfigError(
+            "config %s: malformed JSON (nesting deeper than %d levels) -- "
+            "refusing to build with a possible depth bomb"
+            % (path, MAX_DEPTH))
     try:
         return validate_config(data, strict=strict)
     except ConfigError as exc:

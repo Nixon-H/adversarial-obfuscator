@@ -115,6 +115,39 @@ def _walk(code, flatten=FLATTEN_SEQUENCES):
             yield const
 
 
+def _inline_small_ints(code):
+    """Yield ints 3.14 keeps in the instruction stream, not in co_consts.
+
+    Python 3.14 encodes 0..255 as ``LOAD_SMALL_INT`` operands, so a
+    literal search over ``co_consts`` alone sees a *subset* of the pool
+    on that interpreter -- measured here as {7} instead of {7, 11} for
+    ``[[[7, 11]]]``.  The value is still a literal in the program, so it
+    belongs in the profile; without this the S() denominator shrinks on
+    3.14 and the arm is not comparable across the matrix.
+    """
+    try:
+        import dis as _dis
+        instructions = _dis.get_instructions(code)
+    except Exception:
+        return
+    for ins in instructions:
+        if ins.opname == "LOAD_SMALL_INT" and isinstance(ins.arg, int):
+            yield ins.arg
+
+
+def _inline_or_const_walk(code, flatten):
+    for value in _walk(code, flatten):
+        yield value
+    # Inline operands live per code object, so walk the nested ones too.
+    stack = [code]
+    while stack:
+        current = stack.pop()
+        for value in _inline_small_ints(current):
+            yield value
+        stack.extend(c for c in current.co_consts
+                     if isinstance(c, types.CodeType))
+
+
 def extract(source, flatten=None):
     """Extract the literal-constant profile of one build.
 
@@ -134,7 +167,7 @@ def extract(source, flatten=None):
         return {"ok": False, "reason": "compile-error: %s" % (exc,)}
     values = set()
     by_tag = {"i": set(), "f": set(), "b": set(), "s": set()}
-    for const in _walk(top, flatten):
+    for const in _inline_or_const_walk(top, flatten):
         tag = _tag(const)
         if tag is None:
             continue
