@@ -929,6 +929,11 @@ in config/default.json.
                              "recorded in the signature sidecar, so two builds with the same "
                              "--build-id lower identically. It does not by itself make the "
                              "whole build reproducible (default: empty = random per build)")
+    parser.add_argument("--customer-salt", dest="customer_salt", type=str, default="",
+                        help="Bind the payload key to one customer (hybrid-loader "
+                             "build only: `python3 -m obfuscator.core.pipeline build`). "
+                             "Refused here rather than silently ignored — this pipeline "
+                             "emits no hybrid loader to carry the mask")
 
     opts = parser.parse_args()
 
@@ -958,6 +963,7 @@ in config/default.json.
         ("split_bootstrap", False, "--split-bootstrap", "the split-bootstrap key"),
         ("snapshot_off", False, "--no-snapshot", "the frozen-stdlib snapshot gate"),
         ("stdlib_audit_off", False, "--no-stdlib-audit", "the stdlib audit gate"),
+        ("customer_salt", "", "--customer-salt", "the customer key binding"),
     )
     _misused = []
     for _dest, _default, _flag, _what in _LOADER_ONLY_FLAGS:

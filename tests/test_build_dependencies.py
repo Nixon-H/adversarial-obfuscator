@@ -61,3 +61,30 @@ class TestDependencyValidation:
         )
         assert result.returncode == 0, result.stderr[-800:]
         assert "usage:" in result.stdout.lower()
+
+
+class TestLoaderOnlyFlags:
+    """Flags this pipeline cannot honour must be refused, not ignored.
+
+    --customer-salt binds the payload key to a customer in the HYBRID
+    LOADER path (`python3 -m obfuscator.core.pipeline build`). The
+    scripts/build.py pipeline emits no hybrid loader, so accepting the
+    flag there and doing nothing would leave an operator believing the
+    build was customer-bound when it was not.
+    """
+
+    def test_customer_salt_is_refused_here(self):
+        import subprocess
+        root = os.path.join(os.path.dirname(__file__), "..")
+        result = subprocess.run(
+            [sys.executable, "scripts/build.py", "--payload",
+             os.path.join(root, "tests", "fixtures", "test_payload.py"),
+             "--customer-salt", "acme"],
+            capture_output=True, text=True, timeout=120, cwd=root,
+        )
+        assert result.returncode == 2, (
+            "expected the loader-only refusal (exit 2), got %d\n%s"
+            % (result.returncode, result.stderr[-500:])
+        )
+        assert "--customer-salt" in result.stderr
+        assert "pipeline build" in result.stderr
