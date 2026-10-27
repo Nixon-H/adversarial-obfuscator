@@ -196,6 +196,9 @@ def test_documented_allowlist_only():
     assert macro_src.count("_os._exit(1)") == 1, "new direct exit in macros?"
     nano_src = open(_repo("obfuscator/core/sources.py")).read()
     nano_exits = re.findall(r"_o\._exit\(0\)|_exit\(0\)", nano_src)
-    assert 1 <= len(nano_exits) <= 4, ("nanomite child exits changed:",
+    # 5th documented exit: after the tracer child is continued out of its
+    # SIGSTOP it must die instead of falling through and re-running the
+    # loader (that fall-through was the intermittent artifact hang).
+    assert 1 <= len(nano_exits) <= 6, ("nanomite child exits changed:",
                                        len(nano_exits))
     assert "kill-ladder allowlist" in nano_src
