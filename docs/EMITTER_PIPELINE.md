@@ -140,11 +140,24 @@ not a seeding patch on top.
   poison is itself in a namespace the decryption does not read -- the
   decrypt happens on the far side of the `exec`, not next to `BLOB_KEY`.
 
-  That is where this item stops until someone traces the actual decrypt
-  call: which module performs it, and which namespace holds the key it
-  uses. Six attempts have now been made on the assumption that the emitted
-  `BLOB_KEY` is that key, and the last one falsified it. Shipping state is
-  the clean exit on detection, which is verified.
+  Round 18 traced the key through the artefact and found a second, genuine
+  ordering bug that any future poison has to handle: the emitted order is
+
+      BLOB_KEY = bytes.fromhex(<table>)      # the key
+      <detection call>
+      BLOB_KEY = bytes(... ^ 0x5A ...)       # the poison, if armed
+      BLOB_KEY = _nx_core_mix(BLOB_KEY)      # the core digest mix
+
+  so the core-digest mix runs **after** the poison and re-derives the key
+  from the poisoned value. A poison placed as the doc previously suggested
+  would be scrambled by the mix rather than applied cleanly. Any future
+  attempt must place the poison after the mix, or fold it into the mix.
+
+  The decrypt itself reads the global `BLOB_KEY` (the XOR helper uses it
+  at call time), so the namespace theory from round 16 is not the whole
+  story either -- the flag remains the unresolved link. Shipping state is
+  the clean exit on detection, verified again here: a traced run prints no
+  payload and exits 0.
 - The Rust runtime is not on the Python artefact's path at all.
 - The loader template is ~66% identical between two builds; the shared
   part is the template itself, which any artefact exposes.
