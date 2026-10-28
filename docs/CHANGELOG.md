@@ -63,6 +63,16 @@ checks they agree).
 - **Windows/arm64 data races in the test suite** — the runtime now
   compiles warning-free on the cross targets.
 
+### Known gaps
+
+- **The anti-debug hardening pass is emitted but never called.** The
+  emitted loader defines the tracer/parent/VM detection class
+  (`HARDENING_SOURCE`) and `{FUNC_HARD}` with it, but nothing invokes it,
+  so every detection inside it is dead code. Wiring it is not a one-line
+  call: the symbol renamer runs over the assembled body and renames those
+  names again, so a call added afterwards references a name that no
+  longer exists. It needs the same treatment the C core just got -- one
+  owner, inserted before the rename.
 ### Changed
 
 - **Offline licence tokens** (`obfuscator/licensing.py`, `docs/LICENSING.md`).
