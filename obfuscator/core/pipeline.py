@@ -2503,6 +2503,14 @@ def build_project(args):
     VARS["MARKER_TOKEN"] = _ent.hex(5)
     VARS["PART_PREFIX"] = "_" + _ent.hex(6)
     VARS["STR_KEY"] = _ent.below(255) + 1
+    # The string session key and the table keys are module globals minted at
+    # import; both are emitted into the artefact, so a pinned build has to
+    # re-draw them (they are the last thing that kept two builds apart).
+    if _ent.pinned:
+        import obfuscator.core.utils as _u
+        # globals() rather than `global`: the module-level import must stay
+        # the symbol other code reads.
+        globals()["STRING_SESSION_KEY"] = _u.STRING_SESSION_KEY = _ent.bytes(32)
     for _cls in ("FHE_CLS", "ORAM_CLS", "SYNTH_CLS", "FAULT_CLS"):
         VARS[_cls] = "_nixon_" + _ent.hex(4)
     # The name/slot helpers draw from the module-level `random`, which is
@@ -2510,6 +2518,18 @@ def build_project(args):
     # matched.
     if _ent.pinned:
         random.seed(_ent.bytes(16))
+        # VARS is built at import time from _VARS_MAP with random names, so
+        # every name in the artefact was fixed per process.  Rebuild it from
+        # the (now seeded) RNG so a pinned build reproduces them.
+        try:
+            from obfuscator.core.sources import _VARS_MAP as _vars_map
+            # Replace only the mapped names: VARS also carries entries
+            # added after the import-time comprehension (MAGIC, the marker
+            # token, ...), and clearing the dict dropped them.
+            for _k, _v in dict(_vars_map).items():
+                VARS[_k] = get_random_var_name(_v)
+        except Exception:
+            pass
     # Licence binding (--licence-token): the payload key is derived from the
     # token's secret key material instead of a shipped literal salt, so the
     # artefact alone cannot decrypt.  Resolved first: the hybrid-loader call
@@ -3687,10 +3707,14 @@ def build_parser():
                             'artefact then needs that token at run time)')
     build.add_argument('--randomization-seed', dest='randomization_seed',
                        type=int, default=None,
-                       help='Seed every random draw in the build (keys, '
-                            'nonces, salts, timestamp) so the artefact is '
-                            'reproducible. Debugging aid: a pinned seed makes '
-                            'every artefact from it identical.')
+                       help='Seed the build so it is deterministic. Partial: '
+                            'every key, nonce, salt, timestamp, name table and '
+                            'the marker/string-session keys are drawn from the '
+                            'seed, but two pinned builds still differ in the '
+                            'string tables (tracked). Debugging aid only -- a '
+                            'pinned seed makes every artefact from it '
+                            'identical, which is the opposite of per-build '
+                            'diversity.')
     build.add_argument('--customer-salt', default='',
                        help='Bind the payload key to one customer (mixed as a '
                             'domain-separated second mask; empty = no binding)')
