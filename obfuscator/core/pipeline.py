@@ -2182,6 +2182,27 @@ if __name__ == "__main__":
             assert _ss_key == _eff_key, "section key must be the loader key"
             _section_pack_val = base64.b85encode(_ss_json).decode('ascii')
             _section_snippet = _ss_emit()
+            # Hostile-host handling at the point of use, with no flag to
+            # propagate: the detection runs here, in the loader's module,
+            # and rewrites the join helper so the key it is handed is
+            # poisoned.  A flag written into globals() never reached this
+            # path (rounds 8-18), so there is no flag.
+            try:
+                _hard_fn = VARS["FUNC_HARD"]
+                from obfuscator.section_split import JOIN_FUNC as _ss_name
+                _section_snippet += (
+                    "\ntry:\n"
+                    "    if %s():\n"
+                    "        _nx_join_real = %s\n"
+                    "        def %s(_p, _k):\n"
+                    "            return _nx_join_real(_p, bytes([_b ^ 0x5A for _b in _k]))\n"
+                    "except Exception:\n"
+                    "    pass\n"
+                ) % (_hard_fn, "JOIN_FUNC_PLACEHOLDER", "JOIN_FUNC_PLACEHOLDER")
+                _section_snippet = _section_snippet.replace(
+                    "JOIN_FUNC_PLACEHOLDER", _ss_name)
+            except Exception as _hard_wrap_exc:
+                print("  [!] hostile-host wrapper skipped: %s" % (_hard_wrap_exc,))
             _section_armed = True
             fallback_blob_val = "SECTIONED"
         except Exception as _ss_exc:
