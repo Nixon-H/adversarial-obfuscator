@@ -3043,6 +3043,22 @@ def _VERIFY_INTEGRITY():
                     'else raw.encode("utf-8"))\n'
                     "    finally:\n"
                     "        _nixon_オペレーション運営.close(_nx_dfd)")
+            # Bind the payload key to the packed core: the emitted key is
+            # the raw key mixed with sha256(nixon_core.so), which the loader
+            # re-mixes from the bytes it extracts.  Patching the core now
+            # yields a wrong key and therefore wrong plaintext, instead of
+            # merely failing a comparison the attacker can NOP out.
+            _key_raw_hex = _key_raw.hex()
+            if _core_so and os.path.exists(_core_so):
+                try:
+                    import hashlib as _hashlib_mix
+                    with open(_core_so, "rb") as _mix_fh:
+                        _mix = _hashlib_mix.sha256(_mix_fh.read()).digest()
+                    _key_raw_hex = bytes(
+                        _b ^ _mix[_i % len(_mix)]
+                        for _i, _b in enumerate(_key_raw)).hex()
+                except Exception as _mix_exc:
+                    print("  [!] Core key binding skipped: %s" % (_mix_exc,))
             build_context = {
                 'NTRU_PUB_KEY': getattr(args, '_ntru_pub', '[]'),
                 'SESSION_TOKEN': session_token_bytes.hex(),
@@ -3213,7 +3229,7 @@ def _VERIFY_INTEGRITY():
                 'HMAC_SECRET_HEX': hmac_secret,
                 'INNER_KEY_HEX': inner_key_hex,
                 'VAR_PAYLOAD_MAC': payload_mac,
-                'NATIVE_BLOB_KEY_HEX': _key_raw.hex(),
+                'NATIVE_BLOB_KEY_HEX': _key_raw_hex,
                 'DECOY_FUNC': VARS['DECOY_FUNC'],
                 'remove_entropy_code': remove_entropy_source(VARS["ENTROPY_MARKER"]),
                 'VAR_ONE_SHOT': var_oneshot,
@@ -3376,6 +3392,18 @@ def _VERIFY_INTEGRITY():
                         "if not _nx_core_verified():\n"
                         "    import os as _o2\n"
                         "    _o2._exit(137)\n"
+                        "def _nx_core_mix(_k):\n"
+                        "    try:\n"
+                        "        import hashlib as _h, os as _o\n"
+                        "        _p = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)),"
+                        ' "nixon_core.so")\n'
+                        "        with open(_p, \"rb\") as _f:\n"
+                        "            _d = _h.sha256(_f.read()).digest()\n"
+                        "        return bytes([_b ^ _d[_i %% len(_d)]"
+                        " for _i, _b in enumerate(_k)])\n"
+                        "    except Exception:\n"
+                        "        return _k\n"
+                        "BLOB_KEY = _nx_core_mix(BLOB_KEY)\n"
                     ) % (_core_sha,)
                     _at = raw_script.find('BLOB_KEY = bytes.fromhex("')
                     if _at >= 0:
@@ -3396,7 +3424,9 @@ def _VERIFY_INTEGRITY():
             # artefact at all, so a missing token must fail loudly rather
             # than decrypt to garbage.
             if _key_raw is not None and (_customer_salt or _licence_bound):
-                _anchor = 'BLOB_KEY = bytes.fromhex("%s")' % _key_raw.hex()
+                # The emitted key is the raw key mixed with the core
+                # digest, so the anchor has to be the mixed hex.
+                _anchor = 'BLOB_KEY = bytes.fromhex("%s")' % _key_raw_hex
                 if _anchor not in raw_script:
                     raise SystemExit(
                         "key binding: the emitted loader has no BLOB_KEY literal")
