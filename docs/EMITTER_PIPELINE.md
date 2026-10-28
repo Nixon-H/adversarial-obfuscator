@@ -132,11 +132,19 @@ not a seeding patch on top.
   explains why `LD_PRELOAD` never appeared to fire: the check runs, sets
   its flag, and nothing downstream can see it.
 
-  The fix is structural, not a literal fix: the detection call and the
-  poison have to be emitted into the module that actually decrypts (the
-  payload side of `exec`), not alongside `BLOB_KEY` in the loader. Until
-  then the shipping state -- a clean exit on detection -- is the correct
-  one, and it is verified.
+  Round 17 tested the namespace fix directly: `{FUNC_HARD}` now *returns*
+  its verdict instead of writing a `globals()` entry (a `globals()` write
+  inside a function lands in the function's own module), and the caller
+  applies the poison in the same statement block. The payload still ran
+  under `strace` and under `LD_PRELOAD`. So the block that applies the
+  poison is itself in a namespace the decryption does not read -- the
+  decrypt happens on the far side of the `exec`, not next to `BLOB_KEY`.
+
+  That is where this item stops until someone traces the actual decrypt
+  call: which module performs it, and which namespace holds the key it
+  uses. Six attempts have now been made on the assumption that the emitted
+  `BLOB_KEY` is that key, and the last one falsified it. Shipping state is
+  the clean exit on detection, which is verified.
 - The Rust runtime is not on the Python artefact's path at all.
 - The loader template is ~66% identical between two builds; the shared
   part is the template itself, which any artefact exposes.
