@@ -13,7 +13,7 @@ NIXON_TYPE_MAP = {
 }
 
 BINARY_OPS = {
-    "add", "sub", "mul", "udiv", "sdiv", "urem", "srem",
+    "add", "sub", "mul", "div", "udiv", "sdiv", "urem", "srem",
     "and", "or", "xor", "shl", "lshr", "ashr",
     # The project's own IR uses "shr" for a logical right shift; the
     # LLVM spelling is "lshr".  Without this the instruction was
@@ -655,7 +655,10 @@ def _emit_instruction(instr: dict) -> str:
         # The project's IR spells a logical right shift "shr"; LLVM
         # spells it "lshr".  Emitting "shr" verbatim would not
         # assemble.
-        op = "lshr" if opcode == "shr" else opcode
+        # The project's IR also spells signed integer division "div";
+        # LLVM has no such opcode and wants "sdiv".  A bare "div" reached
+        # the unlowered guard and failed the whole build.
+        op = {"shr": "lshr", "div": "sdiv"}.get(opcode, opcode)
         # Floating-point arithmetic uses LLVM's f-prefixed opcodes
         # ("fmul double"), not the integer ones.
         if t in ("double", "float"):
