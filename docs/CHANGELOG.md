@@ -97,6 +97,17 @@ checks they agree).
   attempted and reverted: the rewritten detection body stopped the tracer
   case from firing at all (verified with `strace` before/after). It needs
   the same care as round 8, not a bulk rewrite.
+### Documented
+
+- **`docs/EMITTER_PIPELINE.md`** -- the pass order of the two artefact
+  producers, which pass may rename what, where an insertion is allowed,
+  and the entropy inventory with measured counts. Four attempts to change
+  the loader failed for the same reason -- written into a place whose
+  invariants were not established -- and each looked like a code bug
+  rather than a misplacement. This is the document that would have
+  prevented them, and the one to read before touching `sources.py` or the
+  assembly block in `build_project`.
+
 ### Assessed
 
 - **Per-customer loader diversity: measured, and left alone.** Two
