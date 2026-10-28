@@ -61,3 +61,32 @@ def test_returns_mutable_buffer():
     pack = split_sealed(b"wipe-me", sections=2, key=b"K" * 32)
     out = stream_join(pack, b"K" * 32)
     assert isinstance(out, bytearray)
+
+
+def test_unkeyed_tag_forgery_is_rejected():
+    """The section tag must be a MAC, not a bare digest.
+
+    Anyone can recompute sha256(part); the old format accepted that, so an
+    attacker who could touch the ciphertext could re-seal modified bytes
+    with an unkeyed tag.  With the HMAC, the same forgery -- correct
+    keystream, correct unkeyed tag -- must be rejected.
+    """
+    import hashlib
+
+    import pytest
+
+    from obfuscator.section_split import _keystream, split_sealed, stream_join
+
+    key = b"K" * 32
+    pack = split_sealed(b"secret-payload-bytes", sections=2, key=key)
+    # Attacker with the pack (not the key) rewrites section 0 using the OLD
+    # scheme: plaintext, sha256(part) tag, keystream ciphertext.
+    sec = pack["sections"][0]
+    nonce = bytes.fromhex(sec["nonce"])
+    forged_plain = b"FORGED" + b"x" * 8
+    forged_tagged = hashlib.sha256(forged_plain).digest() + forged_plain
+    sec["data"] = bytes(
+        a ^ b for a, b in zip(forged_tagged, _keystream(key, nonce, len(forged_tagged)))
+    ).hex()
+    with pytest.raises(ValueError):
+        stream_join(pack, key)

@@ -43,6 +43,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.util
 import hashlib
+import hmac
 import json
 import mmap
 import os
@@ -82,7 +83,12 @@ def split_sealed(payload: bytes, *, sections: int = DEFAULT_SECTIONS,
     for i in range(n):
         part = data[i * chunk:(i + 1) * chunk]
         nonce = os.urandom(16)
-        tagged = hashlib.sha256(part).digest() + part
+        # Keyed tag, not a bare sha256: an unkeyed digest detects corruption
+        # but is not a MAC, so anyone able to touch the ciphertext could
+        # recompute it.  HMAC with the section key needs no new crypto and
+        # keeps the same 32-byte-prefix layout.
+        _tag = hmac.new(bytes(key) + nonce, part, hashlib.sha256).digest()
+        tagged = _tag + part
         enc = bytes(a ^ b for a, b in zip(tagged, _keystream(key, nonce, len(tagged))))
         out_sections.append({
             "i": i,
@@ -122,7 +128,8 @@ def stream_join(pack: dict, key: bytes) -> bytearray:
         if len(tagged) < 32:
             raise ValueError("section truncated")
         tag, part = tagged[:32], tagged[32:]
-        if hashlib.sha256(part).digest() != tag:
+        if not hmac.compare_digest(
+                hmac.new(bytes(key) + nonce, part, hashlib.sha256).digest(), tag):
             raise ValueError(f"section {sec['i']} integrity failure")
         joined.extend(part)
     if len(joined) != pack["total"]:
@@ -493,6 +500,7 @@ LOADER_JOIN_SOURCE = '''def {FUNC}(pack_b85, key):
     """
     import base64 as _nx_sb64
     import hashlib as _nx_sh
+    import hmac as _nx_hm
     import json as _nx_sj
     try:
         pack = _nx_sj.loads(_nx_sb64.b85decode(pack_b85).decode("utf-8"))
@@ -517,7 +525,8 @@ LOADER_JOIN_SOURCE = '''def {FUNC}(pack_b85, key):
             if len(tagged) < 32:
                 raise ValueError("section truncated")
             tag, part = tagged[:32], tagged[32:]
-            if _nx_sh.sha256(part).digest() != tag:
+            if not _nx_hm.compare_digest(
+                    _nx_hm.new(bytes(key) + nonce, part, _nx_sh.sha256).digest(), tag):
                 raise ValueError("section integrity failure")
             out.extend(part)
         if len(out) != pack["total"]:

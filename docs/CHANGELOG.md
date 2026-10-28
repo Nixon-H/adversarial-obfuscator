@@ -39,6 +39,16 @@ checks they agree).
 
 ### Fixed
 
+- **The sealed-section tag was not a MAC.** Sections were sealed with a
+  SHA-256 keystream and a bare `sha256(part)` tag: the keystream is sound
+  (hash-counter, CSPRNG), but an unkeyed digest only detects corruption --
+  anyone able to touch the ciphertext could re-seal modified bytes with a
+  correctly recomputed tag. The tag is now `HMAC(key||nonce, part)`, in
+  both the pack and the emitted loader, with no new crypto: same layout,
+  same length, same keystream. `compare_digest` on both sides. A test
+  forges a section with the *old* scheme (valid keystream, valid unkeyed
+  tag) and asserts the join now rejects it.
+
 - **The forked ptrace self-test child never exited.** It fell through and
   re-ran the loader in a second copy, forking again, while the parent's
   `waitpid` waited for a descendant that never finished — the 300 s
