@@ -14,6 +14,52 @@ checks they agree).
 
 ### Added
 
+- **Licence-bound payload keys** (`--licence-token`). The payload key is
+  derived from the token's `key_material` at pack time and re-derived by
+  the loader at run time (`NIXON_LICENCE`, or `licence.json` beside the
+  artefact); a forged token derives a key that does not match the
+  ciphertext, so the artefact verifies no signature and needs none. An
+  artefact built this way is inert without its token: it refuses with a
+  message rather than decrypting garbage. Only the packed-loader emitter
+  has a payload key — `scripts/build.py` emits obfuscated source and
+  refuses the flag instead of accepting it silently.
+- **`--customer-salt`** binds a build's payload key to one customer with
+  a second, domain-separated mask. Empty by default, so existing builds
+  are byte-identical. Note it travels inside the artefact: it separates
+  builds, it is not a secret.
+- **Per-build entropy stream** (`--randomization-seed`). Every key,
+  nonce, salt, timestamp, name table and the session/table keys are drawn
+  from one seeded stream, so a pinned build is reproducible. **Partial:**
+  two pinned builds still differ in the string-table ciphertexts.
+
+### Fixed
+
+- **The forked ptrace self-test child never exited.** It fell through and
+  re-ran the loader in a second copy, forking again, while the parent's
+  `waitpid` waited for a descendant that never finished — the 300 s
+  intermittent hang behind a different test failing on each run.
+- **The mutation fallback spun forever** when no strategy could change the
+  source (`_mutate_swap_add_sub` on a payload with no `+`), which stalled
+  a CI job for 1 h 44 m.
+- **`uuid.getnode()` blocked the loader** for ~500 s on runners that shell
+  out to `ip link`; replaced with a sysfs MAC read everywhere it is
+  emitted. The same call also returned a random value per process when
+  every method failed, so HWID fingerprints never matched.
+- **VM probes could hang the artefact**: `subprocess.run(timeout=3)` kills
+  the direct child, but a helper it spawned can hold the output pipe open,
+  so `communicate()` waited forever. Probes now run in a daemon thread
+  with a bounded join.
+- **Implicit string concatenation across lines** was split by the
+  line-oriented string-table rewriter into two lookups with no `+`,
+  producing a `SyntaxError` in the emitted artefact. Merged first.
+- **The ORAM stash test asserted a bound the code never promised**: the
+  final stash ranges 7–51 and crossed 32 in 16% of runs. The RNG is
+  injectable, the test pins it, and the real range is recorded.
+- **Windows/arm64 data races in the test suite** — the runtime now
+  compiles warning-free on the cross targets.
+
+### Changed
+
 - **Offline licence tokens** (`obfuscator/licensing.py`, `docs/LICENSING.md`).
   An Ed25519-signed JSON payload — licence id, customer, validity
   window, features, optional HWID binding and watermark id — with an
