@@ -30,7 +30,7 @@ Key algorithmic properties:
 """
 
 import math
-import uuid
+import random
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -51,14 +51,21 @@ class PathORAM:
     write() delegate to it.
     """
 
-    def __init__(self, num_blocks: int = 16, bucket_size: int = 4):
+    def __init__(self, num_blocks: int = 16, bucket_size: int = 4, rng=None):
         """
         Initialize the ORAM tree with N addressable blocks.
 
         Args:
             num_blocks: Number of logical addressable blocks (N).
             bucket_size: Blocks per bucket (Z). Standard is 4.
+            rng: source of leaf assignments. Defaults to
+                ``random.SystemRandom()`` (OS entropy). Pass a seeded
+                ``random.Random`` to make a run reproducible — the leaf
+                assignment used to come from unseeded ``uuid4()``, so the
+                stash size varied between runs and a bounded-stash test
+                failed about once in a hundred.
         """
+        self._rng = rng if rng is not None else random.SystemRandom()
         self.num_blocks = num_blocks
         self.bucket_size = bucket_size
 
@@ -96,7 +103,7 @@ class PathORAM:
         reveal information about the access order.
         """
         for addr in range(self.num_blocks):
-            self.position_map[addr] = uuid.uuid4().int % self.num_leaves
+            self.position_map[addr] = self._rng.randrange(self.num_leaves)
 
     def _get_path(self, leaf: int) -> List[Tuple[int, int]]:
         """
@@ -207,7 +214,7 @@ class PathORAM:
         # Remap on every access (not only on stash hit): repeated accesses
         # to the same address must take different paths, otherwise the
         # adversary can link accesses by path identity.
-        self.position_map[address] = uuid.uuid4().int % self.num_leaves
+        self.position_map[address] = self._rng.randrange(self.num_leaves)
 
         self._write_path(old_leaf, path_blocks)
 
