@@ -97,7 +97,13 @@ not a seeding patch on top.
 ## Known gaps
 
 - Only the ptrace detection feeds the key poison; the other five still
-  `sys.exit(N)`.
+  `sys.exit(N)`. Extending it is **blocked on debugging the detection
+  path**, not on editing it: wiring `LD_PRELOAD` into the poison was
+  attempted twice, and a run with `LD_PRELOAD` set (verified visible in
+  `os.environ` for that interpreter) still executed the payload while the
+  emitted code contained the branch. Until the pass can say which checks
+  actually ran, further edits are guesswork -- instrument `{FUNC_HARD}` to
+  record what it evaluated first.
 - The Rust runtime is not on the Python artefact's path at all.
 - The loader template is ~66% identical between two builds; the shared
   part is the template itself, which any artefact exposes.
