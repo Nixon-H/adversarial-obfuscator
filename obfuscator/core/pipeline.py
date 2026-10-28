@@ -185,62 +185,6 @@ class ObfuscationTransformer:
 STRING_CACHE = {}
 STRING_TABLES = {'A': [], 'B': [], 'C': [], 'D': []}
 STRING_ROUTER = {}
-# NIXON_ENTROPY_TRACE=1 records the shape of every draw so two pinned
-# builds can be diffed draw-by-draw (the artefacts only show the cascade).
-_ENTROPY_TRACE = bool(os.environ.get("NIXON_ENTROPY_TRACE"))
-_trace = []
-
-
-class _BuildEntropy:
-    """The single source of randomness for one build.
-
-    With ``--randomization-seed`` the stream is deterministic, so two
-    builds of the same payload come out byte-identical -- which is what
-    makes a codegen failure (llc rejecting the .ll) reproducible instead
-    of a lottery.  Without it the stream is the OS entropy every build
-    already used, so per-build diversity is unchanged.
-
-    Reproducibility and diversity are the same knob: a pinned seed makes
-    every artefact from it identical, so it is a debugging aid, not a
-    production flag.
-    """
-
-    def __init__(self, seed=None):
-        self.pinned = seed is not None
-        self.seed = None if seed is None else int(seed)
-        self._r = (random.Random(self.seed) if self.pinned
-                   else secrets.SystemRandom())
-
-    def bytes(self, n):
-        _out = bytes(self._r.getrandbits(8) for _ in range(n))
-        if _ENTROPY_TRACE:
-            _trace.append((n, hashlib.sha256(_out).hexdigest()[:12]))
-        return _out
-
-    def hex(self, n):
-        return self.bytes(n).hex()
-
-    def below(self, k):
-        return self._r.randrange(k)
-
-    def randint(self, a, b):
-        return self._r.randint(a, b)
-
-    def random(self):
-        return self._r.random()
-
-
-def _reseed_string_table_keys(ent):
-    """Per-build string-table keys, drawn from the build's stream.
-
-    These used to be four ``secrets.token_bytes(32)`` at import time, so
-    they differed per process before any argument was parsed -- one of the
-    reasons two otherwise-identical builds never matched.
-    """
-    for _name in ("A", "B", "C", "D"):
-        STRING_TABLE_KEYS[_name] = ent.bytes(32)
-
-
 STRING_TABLE_KEYS = {'A': secrets.token_bytes(32), 'B': secrets.token_bytes(32), 'C': secrets.token_bytes(32), 'D': secrets.token_bytes(32)}
 FRAGMENT_THRESHOLD = 128
 def register_string(s):
@@ -2500,25 +2444,6 @@ def _key_binding_source(mode: str, customer_salt: str) -> str:
 
 def build_project(args):
     source = args.source
-    # One stream for every random draw this build makes (keys, nonces,
-    # salts, timestamps).  Without --randomization-seed it is OS entropy,
-    # exactly as before; with it the build is reproducible.
-    _ent = _BuildEntropy(getattr(args, "randomization_seed", None))
-    _reseed_string_table_keys(_ent)
-    # These are minted at import time in obfuscator/core/sources.py, so
-    # their values are fixed for the life of the process: two builds in
-    # one process share them, two processes never do.  Re-drawing them per
-    # build is what lets a pinned seed reproduce an artefact at all.
-    VARS["MARKER_TOKEN"] = _ent.hex(5)
-    VARS["PART_PREFIX"] = "_" + _ent.hex(6)
-    VARS["STR_KEY"] = _ent.below(255) + 1
-    for _cls in ("FHE_CLS", "ORAM_CLS", "SYNTH_CLS", "FAULT_CLS"):
-        VARS[_cls] = "_nixon_" + _ent.hex(4)
-    # The name/slot helpers draw from the module-level `random`, which is
-    # otherwise unseeded -- one of the reasons two "identical" builds never
-    # matched.
-    if _ent.pinned:
-        random.seed(_ent.bytes(16))
     # Licence binding (--licence-token): the payload key is derived from the
     # token's secret key material instead of a shipped literal salt, so the
     # artefact alone cannot decrypt.  Resolved first: the hybrid-loader call
@@ -2553,7 +2478,7 @@ def build_project(args):
         with UI.Task("Native Build", "Building Native Binary...") as t:
             target_py = sys.executable
             blob_data, blob_name = build_local_cython(open(source, 'r').read(), target_python=target_py)
-            blob_key = _ent.bytes(32)
+            blob_key = secrets.token_bytes(32)
             args._inner_key = blob_key
             blob_key_hex = blob_key.hex()
             blobs = {'windows': '', 'linux': '', 'darwin': '', 'android': ''}
@@ -2661,7 +2586,7 @@ def build_project(args):
                 except Exception as e:
                     if _bc_try < 2:
                         t.update(value=f"Retry {_bc_try+1}/3 (seed reset)...")
-                        random.seed(_ent.bytes(32))
+                        random.seed(secrets.token_bytes(32))
                     else:
                         traceback.print_exc()
                         t.fail(f"Bytecode Compilation Failed: {e}")
@@ -2727,7 +2652,7 @@ def build_project(args):
     deployed_rpc = ""
     deployed_contract = ""
     bytecode_hex = None
-    runtime_key = _ent.hex(16)
+    runtime_key = secrets.token_hex(16)
     project_hash = hashlib.md5(os.path.abspath(source).encode()).hexdigest()[:8]
     canary_url_enc = str(register_string(args.webhook)) if args.webhook else ""
     exp_ts = 0
@@ -2753,7 +2678,7 @@ def build_project(args):
                 args._cf_hmac_key = f.read().strip()
             UI.dot_item("Master Key", "Loaded existing HMAC Key", "OK")
         except FileNotFoundError:
-            args._cf_hmac_key = _ent.hex(32)
+            args._cf_hmac_key = secrets.token_hex(32)
             with open(key_file, "w") as f:
                 f.write(args._cf_hmac_key)
             try:
@@ -2893,8 +2818,8 @@ def _VERIFY_INTEGRITY():
     get_random_var_name('MEMFD')
     var_canary_url = get_random_var_name("WEBHOOK")
     var_func_canary = get_random_var_name("TRIG")
-    i_salt = _ent.bytes(32)
-    morph_seed = _ent.randint(0, 1000000)
+    i_salt = secrets.token_bytes(32)
+    morph_seed = random.randint(0, 1000000)
     morpher = OpcodeMorpher(morph_seed)
     runtime_morph_map = morpher.get_runtime_map()
     enc_map = morpher.enc_map
@@ -2921,11 +2846,6 @@ def _VERIFY_INTEGRITY():
         native_blob = ""
         native_blobs = {'windows': '', 'linux': '', 'darwin': ''}
         VARS["FORCE_NATIVE_EXEC"] = False
-    if _ENTROPY_TRACE:
-        import sys as _sys_tr
-        for _i, (_n, _h) in enumerate(_trace):
-            _sys_tr.stderr.write("ENTROPY %d n=%d %s\n" % (_i, _n, _h))
-        _sys_tr.stderr.flush()
     UI._out(f" {UI.BLUE}├──{UI.RESET} {UI.BOLD}Output Generation{UI.RESET} :")
     variants = [("Debug", True), ("Silent", False)]
     for i, (suffix, is_debug) in enumerate(variants):
@@ -2935,7 +2855,7 @@ def _VERIFY_INTEGRITY():
         t.__enter__()
         generated_files_map[suffix] = out_name
         build_dir = tempfile.mkdtemp()
-        swizzle_key = _ent.bytes(16)
+        swizzle_key = os.urandom(16)
         secure_map_str = "{}"
         try:
             if os.path.isdir(source):
@@ -2989,7 +2909,7 @@ def _VERIFY_INTEGRITY():
                 swizzled_body = swizzle_bytecode(raw_source, bytes(swizzle_key))
                 with open(dest, "wb") as f: f.write(header + swizzled_body)
             buf = io.BytesIO()
-            inner_key = _ent.bytes(32)
+            inner_key = secrets.token_bytes(32)
             inner_key_hex = inner_key.hex()
             with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
                 for root, dirs, files in os.walk(build_dir):
@@ -3016,9 +2936,9 @@ def _VERIFY_INTEGRITY():
             payload_mac = hmac.new(inner_key, zip_bytes,
                                    hashlib.sha256).hexdigest()
             raw = VARS["MAGIC"] + zip_bytes
-            entropy_marker = _ent.bytes(16)
+            entropy_marker = os.urandom(16)
             padded_raw = inject_entropy_tlv(raw, entropy_marker)
-            key = getattr(args, '_inner_key', None) or _ent.bytes(32); nonce = _ent.bytes(16)
+            key = getattr(args, '_inner_key', None) or os.urandom(32); nonce = os.urandom(16)
             # The artefact carries the RAW key; the loader re-applies this
             # mask at run time from the customer salt or the licence token's
             # key_material.  Encryption below uses the masked key, so an
@@ -3028,10 +2948,7 @@ def _VERIFY_INTEGRITY():
                 _bm = hashlib.sha256(b"nx-customer:" + _customer_salt.encode()).digest()
                 key = bytes([_b ^ _bm[_i % len(_bm)] for _i, _b in enumerate(key)])
             recipe_in = generate_recipe(6); recipe_out = generate_recipe(6, True)
-            # Emitted into the artefact (BUILD_TIMESTAMP), so a
-            # reproducible build needs it pinned too.  A pinned build
-            # gets a stable, clearly-synthetic date.
-            build_timestamp = (1700000000 + _ent.below(86400)) if _ent.pinned else int(time.time())
+            build_timestamp = int(time.time())
             time_salt = hashlib.sha256(str(0).encode()).digest()
             sim_h = 0
             for i in range(7): sim_h = next_h(sim_h, i)
@@ -3049,7 +2966,7 @@ def _VERIFY_INTEGRITY():
             outer_encoded = Nixon_Enc_onion(mid_buf.getvalue(), recipe_out)
             try: payload_str = outer_encoded.decode('utf-8')
             except Exception: payload_str = base64.b64encode(outer_encoded).decode('ascii'); recipe_out.append('b64')
-            s0_key = _ent.bytes(32)
+            s0_key = os.urandom(32)
             stage0_safe = base64.b64encode(bytes([ord(c) ^ s0_key[i % len(s0_key)] for i, c in enumerate(payload_str)])).decode('ascii')
             chunks = [stage0_safe[i:i+1000] for i in range(0, len(stage0_safe), 1000)]
             from io import StringIO
@@ -3062,8 +2979,8 @@ def _VERIFY_INTEGRITY():
             map3 = generate_polymorphic_map(rng_seed + 2 if rng_seed else None)
             rng_ctx = random.Random(rng_seed + 3) if rng_seed else secrets
             vm_source = generate_poly_vm(VARS, rng_ctx)
-            vm_seed1 = _ent.below(256)
-            vm_seed2 = _ent.below(256)
+            vm_seed1 = secrets.randbelow(256)
+            vm_seed2 = secrets.randbelow(256)
             bc1 = compile_vm_stage1_decryptor(map1, vm_seed1, rng_seed)
             vm1_key = hashlib.sha256(str(vm_seed1).encode()).digest()
             bc2 = compile_vm_stage1_decryptor(map2, vm_seed2, rng_seed)
@@ -3074,13 +2991,13 @@ def _VERIFY_INTEGRITY():
             bc3_enc = bytearray(bc3)
             for i in range(len(bc3_enc)): bc3_enc[i] ^= vm2_key[i % len(vm2_key)]
             p_hash = hashlib.sha256(payload_str.encode()).digest()
-            part_a = _ent.bytes(32)
+            part_a = os.urandom(32)
             part_b = bytes([a^b^c for a,b,c in zip(part_a, p_hash, key)])
             dummy_checksum = "0" * 64
-            hmac_secret = _ent.hex(32)
-            hmac_key_hex = getattr(args, '_cf_hmac_key', None) or _ent.hex(32)
+            hmac_secret = secrets.token_hex(32)
+            hmac_key_hex = getattr(args, '_cf_hmac_key', None) or secrets.token_hex(32)
             decoy_code = generate_decoy_code(); dead_code = generate_dead_code_paths()
-            magic_str = VARS["MAGIC"].decode('latin1'); build_id = _ent.hex(16)
+            magic_str = VARS["MAGIC"].decode('latin1'); build_id = uuid.uuid4().hex
             canary_final = CANARY_SOURCE.replace(get_random_var_name("CANARY"), var_func_canary)
             # Batch-B #27: audit-hook plant snippet (default ON unless
             # NIXON_AUDITHOOK_PLANT_OFF truthy; --no-audit-hook-plant opts
@@ -3103,7 +3020,7 @@ def _VERIFY_INTEGRITY():
             VARS["METHOD_CHECK_HW_BPS"] = var_hw_bp
             VARS["TOR_CLIENT_CLS"] = var_tor_cls
             VARS["VAR_TOR_CLIENT_CLS"] = var_tor_cls
-            session_token_bytes = _ent.bytes(32)
+            session_token_bytes = secrets.token_bytes(32)
             # The plaintext-dump debug aid.  It used to be a RUNTIME env
             # switch (NIXON_DUMP_RAW=1), which meant every release
             # artifact carried the ability to write its own decrypted
@@ -3699,12 +3616,6 @@ def build_parser():
                        help='Bind the payload key to a licence token (its '
                             'key_material becomes the customer mask; the '
                             'artefact then needs that token at run time)')
-    build.add_argument('--randomization-seed', dest='randomization_seed',
-                       type=int, default=None,
-                       help='Seed every random draw in the build (keys, '
-                            'nonces, salts, timestamp) so the artefact is '
-                            'reproducible. Debugging aid: a pinned seed makes '
-                            'every artefact from it identical.')
     build.add_argument('--customer-salt', default='',
                        help='Bind the payload key to one customer (mixed as a '
                             'domain-separated second mask; empty = no binding)')

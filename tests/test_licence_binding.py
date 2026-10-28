@@ -151,26 +151,3 @@ def _find_artefact(tmp_path):
             if name.endswith("_protected.py"):
                 return os.path.join(root, name)
     return None
-
-
-# --- per-build entropy stream (--randomization-seed) ---------------------
-
-def test_build_entropy_is_deterministic_when_pinned():
-    from obfuscator.core.pipeline import _BuildEntropy
-
-    a = _BuildEntropy(7)
-    b = _BuildEntropy(7)
-    assert a.pinned and b.pinned
-    assert a.bytes(32) == b.bytes(32)
-    assert a.hex(8) == b.hex(8)
-    assert a.below(1000) == b.below(1000)
-
-
-def test_build_entropy_differs_across_seeds_and_is_random_by_default():
-    from obfuscator.core.pipeline import _BuildEntropy
-
-    assert _BuildEntropy(7).bytes(32) != _BuildEntropy(8).bytes(32)
-    unpinned = _BuildEntropy(None)
-    assert unpinned.pinned is False
-    # Default builds keep OS entropy: two streams must not agree.
-    assert unpinned.bytes(32) != unpinned.bytes(32)
