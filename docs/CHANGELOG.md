@@ -27,10 +27,15 @@ checks they agree).
   a second, domain-separated mask. Empty by default, so existing builds
   are byte-identical. Note it travels inside the artefact: it separates
   builds, it is not a secret.
-- **Per-build entropy stream** (`--randomization-seed`). Every key,
-  nonce, salt, timestamp, name table and the session/table keys are drawn
-  from one seeded stream, so a pinned build is reproducible. **Partial:**
-  two pinned builds still differ in the string-table ciphertexts.
+- **Build reproducibility: attempted, reverted.** `--randomization-seed`
+  drew every key, nonce, salt, timestamp and name table from one stream.
+  Two builds still differed, and the seeded builds failed their own magic
+  check: several of those values sit on both sides of the pack/run
+  boundary (the payload is compiled against the names, the loader
+  decrypts with the keys), so pinning them desynchronised the two. The
+  flag is gone. What blocks it is structural: the emitters draw thousands
+  of values straight from `secrets` (measured with `NIXON_ENTROPY_TRACE`),
+  so this needs a design pass rather than a seeding patch.
 
 ### Fixed
 
