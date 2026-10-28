@@ -185,6 +185,12 @@ class ObfuscationTransformer:
 STRING_CACHE = {}
 STRING_TABLES = {'A': [], 'B': [], 'C': [], 'D': []}
 STRING_ROUTER = {}
+# NIXON_ENTROPY_TRACE=1 records the shape of every draw so two pinned
+# builds can be diffed draw-by-draw (the artefacts only show the cascade).
+_ENTROPY_TRACE = bool(os.environ.get("NIXON_ENTROPY_TRACE"))
+_trace = []
+
+
 class _BuildEntropy:
     """The single source of randomness for one build.
 
@@ -206,7 +212,10 @@ class _BuildEntropy:
                    else secrets.SystemRandom())
 
     def bytes(self, n):
-        return bytes(self._r.getrandbits(8) for _ in range(n))
+        _out = bytes(self._r.getrandbits(8) for _ in range(n))
+        if _ENTROPY_TRACE:
+            _trace.append((n, hashlib.sha256(_out).hexdigest()[:12]))
+        return _out
 
     def hex(self, n):
         return self.bytes(n).hex()
@@ -2932,6 +2941,11 @@ def _VERIFY_INTEGRITY():
         native_blob = ""
         native_blobs = {'windows': '', 'linux': '', 'darwin': ''}
         VARS["FORCE_NATIVE_EXEC"] = False
+    if _ENTROPY_TRACE:
+        import sys as _sys_tr
+        for _i, (_n, _h) in enumerate(_trace):
+            _sys_tr.stderr.write("ENTROPY %d n=%d %s\n" % (_i, _n, _h))
+        _sys_tr.stderr.flush()
     UI._out(f" {UI.BLUE}├──{UI.RESET} {UI.BOLD}Output Generation{UI.RESET} :")
     variants = [("Debug", True), ("Silent", False)]
     for i, (suffix, is_debug) in enumerate(variants):
