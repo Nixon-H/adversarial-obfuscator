@@ -123,8 +123,20 @@ not a seeding patch on top.
   sites was inconclusive because the ones inspected belonged to a different
   guard.
 
-  Until that is settled, the safe state is the one that ships today -- a
-  clean exit on detection -- and the item stays open.
+  **Root cause (round 16): the loader and the payload do not share
+  globals.** The loader executes the payload with
+  `exec(code, module.__dict__)` into a fresh namespace, so a flag written
+  to the loader's `globals()` is invisible to the code that decrypts and
+  runs the payload. The detection call and the poison are both emitted in
+  the loader's module -- the right order, the wrong namespace. That also
+  explains why `LD_PRELOAD` never appeared to fire: the check runs, sets
+  its flag, and nothing downstream can see it.
+
+  The fix is structural, not a literal fix: the detection call and the
+  poison have to be emitted into the module that actually decrypts (the
+  payload side of `exec`), not alongside `BLOB_KEY` in the loader. Until
+  then the shipping state -- a clean exit on detection -- is the correct
+  one, and it is verified.
 - The Rust runtime is not on the Python artefact's path at all.
 - The loader template is ~66% identical between two builds; the shared
   part is the template itself, which any artefact exposes.
