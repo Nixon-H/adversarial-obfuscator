@@ -72,6 +72,19 @@ checks they agree).
   `sys.exit` -- a one-byte patch -- but a poisoned payload key, so a
   traced run decrypts to garbage. Verified by `strace`: the plain run
   prints its payload, the traced run does not.
+### Assessed
+
+- **Per-customer loader diversity: measured, and left alone.** Two
+  default builds of the same payload share 2,094 of 4,185 lines (66%),
+  with longest common runs of 55/54/53 lines; 34% differs (names, keys,
+  salts, decoys). The shared part is the loader template itself --
+  comments, small helpers, the fixed skeleton -- which anyone holding one
+  artefact can already read, so randomising it further buys little against
+  an analyst and puts a second reorder pass into the one code path that
+  every artefact runs. The honest position is that per-build diversity is
+  present and sufficient for its purpose (a scripted crack of one build
+  does not apply to the next); "per-customer" adds a salt-based key
+  separation, which is already in place as `--customer-salt`.
 ### Changed
 
 - **Offline licence tokens** (`obfuscator/licensing.py`, `docs/LICENSING.md`).
