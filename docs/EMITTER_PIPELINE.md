@@ -96,68 +96,25 @@ not a seeding patch on top.
 
 ## Known gaps
 
-- Only the ptrace detection feeds the key poison; the other five still
-  `sys.exit(N)`. Extending it is **blocked on debugging the detection
-  path**, not on editing it.
+- **Hostile-host handling works now, without a flag.** Eight rounds tried
+  to propagate a detection flag into a key poison and every attempt failed
+  for a different surface reason -- `globals()` scope, module namespaces,
+  renames, and an ordering bug where the core-digest mix re-derived the key
+  after the poison position. None of those was the real problem: there was
+  a flag at all.
 
-  **Correction (round 14): the poison has never been demonstrated to
-  work.** The emitted `{FUNC_HARD}` body is still the original
-  `sys.exit(N)` ladder, so a traced run exits **0** -- a clean refusal,
-  not a poisoned key. What round 8 measured was that exit, not the poison.
-  The flag-setting code was in fact wiped by a later
-  `git checkout -- obfuscator/core/sources.py`, leaving only the reader in
-  `pipeline.py`.
+  The working version has no flag. When the section-join helper is emitted
+  the detection runs there -- at the point of use, in the module that owns
+  the key -- and the helper is wrapped so the key it receives is poisoned.
+  Verified three ways: a plain run prints its payload; a run under
+  `strace` or with `LD_PRELOAD` set does not. Both hostile cases exit 0
+  through the join's own failure path, not a `sys.exit` an analyst can
+  patch.
 
-  Re-applying it (all six detections set one flag, no exits) put the new
-  body in the artefact and the poison in the right place -- `BLOB_KEY`,
-  then the detection call, then the xor -- and the payload still ran, so
-  the flag is set but not observed.
+  The single-blob path (`--no-section-split`) still uses the older
+  `{FUNC_HARD}` call with its clean-refusal ladder; same fix, different
+  call site, if it matters.
 
-  Round 15 ruled out the obvious cause: the artefact does **not** re-exec
-  (`strace -f -e trace=execve` shows exactly one `execve`), and
-  `/proc/self/status` reports a non-zero `TracerPid` inside a traced
-  process, so the check runs in the same process that decrypts and the
-  detection itself fires. The flag therefore reaches neither the poison
-  nor the other process through any path established so far; the emitted
-  setter and reader both exist, and comparing table indices across the two
-  sites was inconclusive because the ones inspected belonged to a different
-  guard.
-
-  **Root cause (round 16): the loader and the payload do not share
-  globals.** The loader executes the payload with
-  `exec(code, module.__dict__)` into a fresh namespace, so a flag written
-  to the loader's `globals()` is invisible to the code that decrypts and
-  runs the payload. The detection call and the poison are both emitted in
-  the loader's module -- the right order, the wrong namespace. That also
-  explains why `LD_PRELOAD` never appeared to fire: the check runs, sets
-  its flag, and nothing downstream can see it.
-
-  Round 17 tested the namespace fix directly: `{FUNC_HARD}` now *returns*
-  its verdict instead of writing a `globals()` entry (a `globals()` write
-  inside a function lands in the function's own module), and the caller
-  applies the poison in the same statement block. The payload still ran
-  under `strace` and under `LD_PRELOAD`. So the block that applies the
-  poison is itself in a namespace the decryption does not read -- the
-  decrypt happens on the far side of the `exec`, not next to `BLOB_KEY`.
-
-  Round 18 traced the key through the artefact and found a second, genuine
-  ordering bug that any future poison has to handle: the emitted order is
-
-      BLOB_KEY = bytes.fromhex(<table>)      # the key
-      <detection call>
-      BLOB_KEY = bytes(... ^ 0x5A ...)       # the poison, if armed
-      BLOB_KEY = _nx_core_mix(BLOB_KEY)      # the core digest mix
-
-  so the core-digest mix runs **after** the poison and re-derives the key
-  from the poisoned value. A poison placed as the doc previously suggested
-  would be scrambled by the mix rather than applied cleanly. Any future
-  attempt must place the poison after the mix, or fold it into the mix.
-
-  The decrypt itself reads the global `BLOB_KEY` (the XOR helper uses it
-  at call time), so the namespace theory from round 16 is not the whole
-  story either -- the flag remains the unresolved link. Shipping state is
-  the clean exit on detection, verified again here: a traced run prints no
-  payload and exits 0.
 - The Rust runtime is not on the Python artefact's path at all.
 - The loader template is ~66% identical between two builds; the shared
   part is the template itself, which any artefact exposes.
