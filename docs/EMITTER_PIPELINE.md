@@ -111,10 +111,20 @@ not a seeding patch on top.
   Re-applying it (all six detections set one flag, no exits) put the new
   body in the artefact and the poison in the right place -- `BLOB_KEY`,
   then the detection call, then the xor -- and the payload still ran, so
-  the flag is set but not observed. That points at process scope rather
-  than code: the flag lives in `globals()` of whichever module instance
-  ran the check. Until that is settled, the safe state is the one that
-  ships today (clean exit on detection) and the item stays open.
+  the flag is set but not observed.
+
+  Round 15 ruled out the obvious cause: the artefact does **not** re-exec
+  (`strace -f -e trace=execve` shows exactly one `execve`), and
+  `/proc/self/status` reports a non-zero `TracerPid` inside a traced
+  process, so the check runs in the same process that decrypts and the
+  detection itself fires. The flag therefore reaches neither the poison
+  nor the other process through any path established so far; the emitted
+  setter and reader both exist, and comparing table indices across the two
+  sites was inconclusive because the ones inspected belonged to a different
+  guard.
+
+  Until that is settled, the safe state is the one that ships today -- a
+  clean exit on detection -- and the item stays open.
 - The Rust runtime is not on the Python artefact's path at all.
 - The loader template is ~66% identical between two builds; the shared
   part is the template itself, which any artefact exposes.
