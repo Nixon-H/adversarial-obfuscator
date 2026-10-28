@@ -17,6 +17,7 @@ Python 3.10 compatible: stdlib only, no match statements.
 """
 import ast
 import os
+import re
 import subprocess
 
 from obfuscator import lowering
@@ -153,7 +154,11 @@ def test_no_bare_141_claim_in_code():
                 s = line.strip()
                 if s.startswith("#") or s.startswith("//"):
                     continue
-                if "141" in line and "3.14159" not in line:
+                # A DOI can contain the digits by accident: "141" appears
+                # inside 10.3390/app14125056.  That is a citation, not an
+                # op-count claim, so strip DOIs before looking.
+                _nodoiline = re.sub(r"10\.\d{4,}/[^\s)\]}]*", "<DOI>", line)
+                if "141" in _nodoiline and "3.14159" not in line:
                     # Allowed only if framed as vendor/unverified history,
                     # as the verified count, or as a file-path reference
                     # to the parity test module itself.
