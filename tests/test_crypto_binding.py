@@ -85,9 +85,13 @@ class TestCryptoFragmentBinder:
         binder = CryptoFragmentBinder(master_key=b"test-chain-secret-0123456789ab")
         frag = Fragment(fragment_id="0", payload=b"sensitive-data")
         bound = binder.bind(frag, "ctx-1")
+        # Flip the first byte rather than overwriting it with a fixed value:
+        # 1 run in 256 the ciphertext already starts with that byte, nothing
+        # is tampered, and unbind legitimately succeeds.
+        _flip = bytes([bound.payload_ciphertext[0] ^ 0xFF])
         tampered = BoundFragment(
             fragment_id=bound.fragment_id,
-            payload_ciphertext=b"\x01" + bound.payload_ciphertext[1:],
+            payload_ciphertext=_flip + bound.payload_ciphertext[1:],
             binding_identity=bound.binding_identity,
         )
         result = binder.unbind(tampered, "ctx-1")
