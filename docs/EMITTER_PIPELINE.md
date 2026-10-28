@@ -165,6 +165,21 @@ A reproducible build pins the first class and threads the second through
 both sides at once. Round 3 pinned the second class alone, which is why it
 produced artefacts that would not run.
 
+- **The `llvmgen` invalid-IR bug did not reproduce in 12 randomised
+  builds.** Round 8 showed the failure needs the per-build IR rather than
+  a seed, so the hunt was re-run on that axis: 12 full builds, each with
+  its own IR, through `irgen` and `llvmg`. Zero failures. Either the rate
+  is far below one in twelve, or the CI-only path (a different llvm
+  build, `-O bcf fla sub` against the runner's `llc`) is what triggers it.
+  The shadow job still pins `NIXON_LLVM_SEED`, which handles the seed axis
+  but not this one, so the job remains capable of a rare red.
+- **`scripts/build.py` occasionally exits non-zero while printing
+  "Pipeline complete".** Seen twice in 12 sweep runs, then not at all in
+  10 more. Nothing in the log distinguishes the failures from the
+  successes, which means the exit code comes from a phase that reports
+  success in its own output. Uncharacterised; a call that returns
+  non-zero without a message is worth finding before it is trusted in CI.
+
 ## Known gaps
 
 - **Hostile-host handling works now, without a flag.** Eight rounds tried
