@@ -3447,6 +3447,38 @@ def _VERIFY_INTEGRITY():
                 assert_markers_renamed as _assert_markers_renamed,
             )
             _marker_token = VARS["MARKER_TOKEN"]
+            # Anti-debug wiring.  The detection pass is emitted but was
+            # never invoked, so every detection inside it was dead code.
+            # It must be inserted BEFORE the rename above: the renamer
+            # rewrites these symbols, so a call appended afterwards would
+            # name something that no longer exists (and be swallowed by its
+            # own try/except).  A tracer poisons the payload key instead of
+            # exiting, because `sys.exit` is a one-byte patch.
+            try:
+                _hard_name = VARS["FUNC_HARD"]
+                _hard_marker = "\nif __name__" if False else None
+                _hard_hook = (
+                    "\n"
+                    "try:\n"
+                    "    %s()\n"
+                    "except Exception:\n"
+                    "    pass\n"
+                    "try:\n"
+                    "    if globals().get('_NX_TRACED'):\n"
+                    "        BLOB_KEY = bytes([_b ^ 0x5A for _b in BLOB_KEY])\n"
+                    "except Exception:\n"
+                    "    pass\n" % (_hard_name,)
+                )
+                _hard_at = raw_script.find('BLOB_KEY = bytes.fromhex("')
+                if _hard_at >= 0:
+                    _hard_eol = raw_script.find("\n", _hard_at)
+                    if _hard_eol > 0:
+                        raw_script = (raw_script[:_hard_eol + 1] + _hard_hook
+                                      + raw_script[_hard_eol + 1:])
+                else:
+                    print("  [!] anti-debug: no BLOB_KEY anchor")
+            except Exception as _hard_exc:
+                print("  [!] anti-debug wiring skipped: %s" % (_hard_exc,))
             raw_script = _rename_markers(raw_script, _marker_token)
             _assert_kill_wired(raw_script, _marker_token)
             _assert_markers_renamed(raw_script, _marker_token)
