@@ -121,6 +121,15 @@ exactly -- the pinned `PART_PREFIX` names appear identically on both sides
 -- and the divergence had moved to statement level, deep inside the emitted
 payload, where the long tail of per-part and per-string draws lives.
 
+Round 32 converted fourteen structure call sites in `sources.py`
+(`secrets.randbelow`/`choice`/`token_hex` in the packaging and encoding
+paths) to injectable helpers whose default is unchanged, and added the
+flag that sets them. The first structural divergence moved again,
+~154k -> ~172k, and it is now a `BinOp` opcode difference (an `Add` where
+the other build has a `BitOr`) -- the MBA expression chooser in
+`transforms.py`, which is the next site on the list. Still not converged,
+so the flag was reverted again.
+
 That is where it stands: the *names* can be made to agree, the *statements*
 need the whole ~20-site list converted. The flag was reverted rather than
 shipped on a partial claim. Anyone continuing this should keep the cycle
