@@ -2463,6 +2463,31 @@ def _key_binding_source(mode: str, customer_salt: str) -> str:
             .replace("__SALT__", str(customer_salt)))
 
 
+def build_core_once(source_path):
+    """Build the C core beside the artefact; return (path_or_None, sha256_hex_or_None).
+
+    One owner for a value two phases need: main() builds it before
+    build_project() so the loader can bake the hash while the pack still
+    has the same bytes (the duplication that stalled an earlier attempt --
+    the build in one function, the use in another).
+    """
+    dist = os.path.join(os.path.dirname(os.path.abspath(source_path)), "dist")
+    so = None
+    try:
+        from obfuscator.core.c_core_build import build_c_core as _bcc
+        so = _bcc(dist)
+    except Exception as exc:
+        print("  [!] C core build failed: %s" % (exc,))
+    if not so or not os.path.exists(so):
+        return so, None
+    try:
+        import hashlib as _h
+        with open(so, "rb") as fh:
+            return so, _h.sha256(fh.read()).hexdigest()
+    except Exception:
+        return so, None
+
+
 def build_project(args):
     source = args.source
     # Built by main() before this call, so the loader (assembled below) and
@@ -3396,9 +3421,11 @@ def _VERIFY_INTEGRITY():
             # core was the one packed component with no check at all.
             if _core_so and os.path.exists(_core_so):
                 try:
-                    import hashlib as _hashlib_core
-                    with open(_core_so, "rb") as _core_fh:
-                        _core_sha = _hashlib_core.sha256(_core_fh.read()).hexdigest()
+                    _core_sha = getattr(args, "_core_sha", None)
+                    if not _core_sha:
+                        import hashlib as _hashlib_core
+                        with open(_core_so, "rb") as _core_fh:
+                            _core_sha = _hashlib_core.sha256(_core_fh.read()).hexdigest()
                     _core_check = (
                         "\n"
                         "def _nx_core_verified():\n"
@@ -3911,13 +3938,7 @@ def main():
             # The core is packed into the artefact AND its hash is baked
             # into the loader, which is assembled inside build_project.
             # Build it here so both phases own the same bytes.
-            try:
-                from obfuscator.core.c_core_build import build_c_core as _build_c_core
-                args._core_so = _build_c_core(
-                    os.path.join(os.path.dirname(os.path.abspath(args.source)), "dist"))
-            except Exception as _core_exc:
-                args._core_so = None
-                print("  [!] C core build failed: %s" % (_core_exc,))
+            args._core_so, args._core_sha = build_core_once(args.source)
             generated_files_map = build_project(args)
             if not generated_files_map:
                 UI.fail("Build failed - no output generated")
