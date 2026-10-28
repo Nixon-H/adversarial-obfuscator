@@ -966,11 +966,16 @@ in config/default.json.
         if getattr(opts, _dest, _default) != _default:
             _misused.append("%s (%s)" % (_flag, _what))
     if _misused:
-        print("[!] These flags configure the HYBRID LOADER and have no "
-              "effect on this native pipeline:", file=sys.stderr)
+        # This pipeline emits TRANSFORMED SOURCE (decoys, integrity hash,
+        # no marshal/exec/zlib), so there is no encrypted payload and no
+        # payload key for any of these to bind.  Saying "no hybrid loader"
+        # pointed at the wrong fact -- the point is that nothing here has a
+        # key to bind.
+        print("[!] This pipeline emits obfuscated source, not an encrypted "
+              "payload, so these options have nothing to bind:", file=sys.stderr)
         for _m in _misused:
             print("      %s" % _m, file=sys.stderr)
-        print("    The loader build applies them:",
+        print("    The packed-loader build applies them:",
               file=sys.stderr)
         print("      python3 -m obfuscator.core.pipeline build <script.py> "
               "--<flag> ...", file=sys.stderr)
