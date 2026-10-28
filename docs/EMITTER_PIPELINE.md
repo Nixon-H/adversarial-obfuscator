@@ -165,8 +165,22 @@ A reproducible build pins the first class and threads the second through
 both sides at once. Round 3 pinned the second class alone, which is why it
 produced artefacts that would not run.
 
-- **The `llvmgen` invalid-IR bug did not reproduce in 12 randomised
-  builds.** Round 8 showed the failure needs the per-build IR rather than
+- **The intermittent codegen failure is now named, and it is two bugs.**
+  Catching one with the preserved artifacts showed `i32 ""` as a GEP index
+  (guarded at both ends now). Catching another showed a *different*
+  failure, caught by the existing "cannot express" guard:
+
+      @_nixon_DŽЅۮՖ篐ᛆ: unlowered instruction: 'div i32 %14, 6856'
+
+  a division of a register inside a **global initializer**, which is
+  invalid IR (globals must be constant) and which the lowering therefore
+  cannot express. It depends on whether constant-folding produced a
+  register, which is why it comes and goes. The guard catches it loudly,
+  so the build fails with the instruction in hand rather than in llc; the
+  upstream fix is to keep a non-constant expression out of a global
+  initializer at IR-generation time.
+
+- **An earlier sweep found no `llvmgen` failure in 12 builds.** Round 8 showed the failure needs the per-build IR rather than
   a seed, so the hunt was re-run on that axis: 12 full builds, each with
   its own IR, through `irgen` and `llvmg`. Zero failures. Either the rate
   is far below one in twelve, or the CI-only path (a different llvm
