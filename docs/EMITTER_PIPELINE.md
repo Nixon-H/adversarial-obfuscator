@@ -94,6 +94,21 @@ pack/run boundary produced artefacts that failed their own check. A
 reproducible build needs one RNG threaded through `sources.py`'s emitters,
 not a seeding patch on top.
 
+### The classes cannot be separated by a switch
+
+Attempted in round 21: a `--pin-structure` flag that seeded the module RNG
+and the VM op-map, leaving key material alone. The artefact built and ran,
+and the normalised diff between two such builds was **2,228 lines** --
+essentially unchanged from the 2,254 measured without it.
+
+The reason is structural: the bulk of the per-build variation comes from
+`secrets` called at individual sites, and the same sites mint both
+structure (op-map shuffles, encoding choices) and key material (session
+keys, salts). There is no switch that separates them; the separation has to
+be done call by call, which is the ~20-site and ~3,650-draw work list
+above. The flag was removed rather than shipped with a help text it could
+not honour.
+
 ### Which draws are safe to pin
 
 Two classes, and round 3 failed because it treated them as one.
