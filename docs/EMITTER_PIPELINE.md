@@ -94,6 +94,31 @@ pack/run boundary produced artefacts that failed their own check. A
 reproducible build needs one RNG threaded through `sources.py`'s emitters,
 not a seeding patch on top.
 
+### Measuring structure: use the AST, not the bytes
+
+The byte diff is the wrong instrument for structural determinism: the
+artefact is ~66% identical by line count regardless, and the differences
+are dominated by the key-encrypted string table, which no amount of
+structural pinning can change. Two builds can have *identical structure*
+and still differ in thousands of lines.
+
+The right measure is the AST with constants stripped: parse both
+artefacts, replace every `ast.Constant` value with a marker, and compare
+`ast.dump`. That isolates shape -- names, nesting, statement order -- from
+data.
+
+Using it found two structural sources the byte diff could never show:
+
+- the marker token (`VARS["MARKER_TOKEN"]`, minted at import), which names
+  the getattr table and every kill-ladder entry;
+- the whole `VARS` name table, also minted at import, before any seed can
+  exist.
+
+Pinning both under a flag moved the first structural divergence from byte
+offset ~28k to ~39k, i.e. it worked. It did not converge in the time
+available, so the flag was reverted rather than shipped on an unverified
+claim. The instrument and the two findings are the value here.
+
 ### The classes cannot be separated by a switch
 
 Attempted in round 21: a `--pin-structure` flag that seeded the module RNG
