@@ -258,6 +258,17 @@ class IrInstruction:
             r += ", ".join(incs)
             return r
         if self.opcode == 'gep':
+            # An empty operand here produces `i32 ` in the IR, which llc
+            # reports far away as "expected value token" -- the cause of a
+            # two-round hunt.  Fail where the instruction is still in hand.
+            if len(self.operands) < 2 or not str(self.operands[0]).strip() \
+                    or not str(self.operands[1]).strip():
+                raise ValueError(
+                    "irgen emitted a gep with a missing operand: result=%r "
+                    "operands=%r (index %r)" % (
+                        self.result.name if self.result else None,
+                        list(self.operands),
+                        self.result_type))
             r = f"{self.result.name} = gep" if self.result else "gep"
             r += f" ptr {self.operands[0]}, i32 {self.operands[1]}"
             return r
