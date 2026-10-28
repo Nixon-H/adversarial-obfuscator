@@ -82,6 +82,21 @@ checks they agree).
   `sys.exit` -- a one-byte patch -- but a poisoned payload key, so a
   traced run decrypts to garbage. Verified by `strace`: the plain run
   prints its payload, the traced run does not.
+- **The Rust runtime is not on the Python artefact's path.** Neither
+  `sources.py` nor `pipeline.py` references the relay, and
+  `runtime_config.json` is written by the Makefile for native binaries
+  only. Making the runtime load-bearing for the Python artefact is a
+  design decision -- it means packaging a second binary, spawning it, and
+  adding a failure mode -- not a fix. Left alone deliberately; there is no
+  benefit today for a real cost.
+- **Only the tracer detection feeds the key poison.** Round 8 wired the
+  ptrace check to poison the payload key instead of exiting; the other
+  five detections (parent process, host, Windows debugger, thread timing,
+  LD_PRELOAD) still call `sys.exit(N)`, which is a one-byte patch and
+  tells an analyst which check fired. Extending the poison to them was
+  attempted and reverted: the rewritten detection body stopped the tracer
+  case from firing at all (verified with `strace` before/after). It needs
+  the same care as round 8, not a bulk rewrite.
 ### Assessed
 
 - **Per-customer loader diversity: measured, and left alone.** Two
