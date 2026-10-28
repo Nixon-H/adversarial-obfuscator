@@ -353,6 +353,10 @@ Examples:
   python3 build.py --payload myscript.py --skip-obfuscate --skip-relay
   python3 build.py --payload myscript.py --skip-irgen --skip-llvmgen
   python3 build.py --payload myscript.py --cross win,linux,linux-arm
+
+For an encrypted packed artefact with a payload key (licence binding,
+customer salt), use the packed-loader build instead:
+  python3 -m obfuscator.core.pipeline build myscript.py --licence-token f
   python3 build.py --payload myscript.py --phase2
   python3 build.py --payload myscript.py --phase2-only vm,watermark
   python3 build.py --payload myscript.py --classify
