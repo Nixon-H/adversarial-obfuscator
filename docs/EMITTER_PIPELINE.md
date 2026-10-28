@@ -100,15 +100,21 @@ not a seeding patch on top.
   `sys.exit(N)`. Extending it is **blocked on debugging the detection
   path**, not on editing it.
 
-  What IS established: the call in `build_project` really is what blocks
-  a traced run. Disabling that one call and rebuilding makes a `strace`'d
-  artefact execute its payload again (verified: enabled = no payload,
-  disabled = payload). So the wiring works; the open question is why
-  `LD_PRELOAD` does not reach the same flag, since the branch is emitted
-  and the variable is visible to the interpreter. Instrumenting
-  `{FUNC_HARD}` to record what it evaluated produced no output, which is
-  itself the next clue -- the pass runs (the tracer proves it) but its
-  logging did not survive into the artefact.
+  **Correction (round 14): the poison has never been demonstrated to
+  work.** The emitted `{FUNC_HARD}` body is still the original
+  `sys.exit(N)` ladder, so a traced run exits **0** -- a clean refusal,
+  not a poisoned key. What round 8 measured was that exit, not the poison.
+  The flag-setting code was in fact wiped by a later
+  `git checkout -- obfuscator/core/sources.py`, leaving only the reader in
+  `pipeline.py`.
+
+  Re-applying it (all six detections set one flag, no exits) put the new
+  body in the artefact and the poison in the right place -- `BLOB_KEY`,
+  then the detection call, then the xor -- and the payload still ran, so
+  the flag is set but not observed. That points at process scope rather
+  than code: the flag lives in `globals()` of whichever module instance
+  ran the check. Until that is settled, the safe state is the one that
+  ships today (clean exit on detection) and the item stays open.
 - The Rust runtime is not on the Python artefact's path at all.
 - The loader template is ~66% identical between two builds; the shared
   part is the template itself, which any artefact exposes.
