@@ -115,9 +115,17 @@ Using it found two structural sources the byte diff could never show:
   exist.
 
 Pinning both under a flag moved the first structural divergence from byte
-offset ~28k to ~39k, i.e. it worked. It did not converge in the time
-available, so the flag was reverted rather than shipped on an unverified
-claim. The instrument and the two findings are the value here.
+offset ~28k to ~39k, then to ~154k once the structure RNG also covered the
+encoding choices and the VM op-map. At that point the identifiers matched
+exactly -- the pinned `PART_PREFIX` names appear identically on both sides
+-- and the divergence had moved to statement level, deep inside the emitted
+payload, where the long tail of per-part and per-string draws lives.
+
+That is where it stands: the *names* can be made to agree, the *statements*
+need the whole ~20-site list converted. The flag was reverted rather than
+shipped on a partial claim. Anyone continuing this should keep the cycle
+honest: pin, build twice, compare `ast.dump` with constants stripped, and
+only claim progress when the divergence index actually moves.
 
 ### The classes cannot be separated by a switch
 
