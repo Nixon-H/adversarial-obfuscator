@@ -55,9 +55,17 @@ jobs:
       - name: Stage 3 - LLVM Codegen
         # NOTE: llvmgen takes -O/--ollvm-passes (bcf/fla/sub...), not bare
         # --bcf/--fla/--sub flags.
-        # Seed pinned: pass selection and label naming are randomised, so an
-        # unpinned run is a fuzz test of the IR emitter; a rare invalid-IR
-        # seed failed this job once (llc: expected value token, line 1181).
+        # Seed pinned: llvmgen's pass selection and label naming are
+        # randomised, so an unpinned run is a fuzz test of the IR emitter (a
+        # rare invalid-IR seed failed here once: llc "expected value token").
+        #
+        # This pins ONE axis only.  The IR this stage consumes is not
+        # reproducible either: two runs of Stage 1 with the same
+        # --randomization-seed and --build-id still produce different
+        # output (md5 93c0ec9… vs 8116aff…), so the job can still fail on
+        # the content axis.  It fails loudly (llc rejects the .ll and the
+        # build aborts), which is why the pin is worth keeping rather than
+        # treating this job as a guarantee.
         env:
           NIXON_LLVM_SEED: "0xDEADBEEF"
         run: python3 -m llvmgen build/program.ir -o build/program.o -O bcf fla sub
