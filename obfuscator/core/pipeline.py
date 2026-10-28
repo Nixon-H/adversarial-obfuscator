@@ -2322,6 +2322,58 @@ def load_tls_ca_bundle(path):
         raise ValueError("CA bundle %r is empty" % (path,))
     return repr(base64.b64encode(pem).decode("ascii"))
 
+_KEY_BINDING_TEMPLATE = r"""
+def _nx_bind_blob_key(_raw):
+    try:
+        import hashlib as _h, json as _j, os as _o, sys as _s
+        if "__MODE__" == "licence":
+            _mat = None
+            _cands = []
+            _named = _o.environ.get("NIXON_LICENCE")
+            if _named:
+                _cands.append(_named)
+            _base = _o.path.dirname(_o.path.abspath((_s.argv[0] if _s.argv else "") or ""))
+            for _d in (_base, _o.getcwd()):
+                for _n in ("licence.json", "licence.licence", "license.json"):
+                    _cands.append(_o.path.join(_d, _n))
+            for _c in _cands:
+                try:
+                    with open(_c, "r", encoding="utf-8") as _f:
+                        _mat = ((_j.load(_f) or {}).get("payload") or {}).get("key_material")
+                    if _mat:
+                        break
+                except Exception:
+                    continue
+            if not _mat:
+                _s.stderr.write("licence token required: set NIXON_LICENCE or place licence.json beside the artefact\n")
+                raise SystemExit(1)
+        else:
+            _mat = "__SALT__"
+        _m = _h.sha256(b"nx-customer:" + _mat.encode()).digest()
+        return bytes([_b ^ _m[_i % len(_m)] for _i, _b in enumerate(_raw)])
+    except SystemExit:
+        raise
+    except Exception:
+        raise SystemExit(1)
+
+
+BLOB_KEY = _nx_bind_blob_key(BLOB_KEY)"""
+
+
+def _key_binding_source(mode: str, customer_salt: str) -> str:
+    """The run-time binding emit for a key-bound artefact.
+
+    ``mode='salt'`` ships the salt (so this separates builds), ``'licence'``
+    ships nothing and reads the token's key_material at run time (so the
+    artefact alone cannot decrypt).
+    """
+    if '"' in customer_salt or "\\" in customer_salt or "\n" in customer_salt:
+        raise SystemExit("customer_salt contains characters the loader cannot carry")
+    return (_KEY_BINDING_TEMPLATE
+            .replace("__MODE__", str(mode))
+            .replace("__SALT__", str(customer_salt)))
+
+
 def build_project(args):
     source = args.source
     # Licence binding (--licence-token): the payload key is derived from the
@@ -2329,6 +2381,7 @@ def build_project(args):
     # artefact alone cannot decrypt.  Resolved first: the hybrid-loader call
     # below happens before the rest of the build context exists.
     _licence_bound = False
+    _key_raw = None
     _customer_salt = str(getattr(args, "customer_salt", "") or "")
     _licence_path = str(getattr(args, "licence_token", "") or "")
     if _licence_path:
@@ -2342,16 +2395,8 @@ def build_project(args):
                 "this version of obfuscator.licensing" % _licence_path)
         _customer_salt = str(_lic_km)
         _licence_bound = True
-    if (_customer_salt or _licence_bound) and not (
-            getattr(args, "native", False) or getattr(args, "native_only", False)):
-        # Both key bindings live in the hybrid (native) loader.  The
-        # source-transform artefact takes its key from LOADER_HEAD/LOADER_
-        # BODY and has no place for the mask, so accept the flag only where
-        # it is enforced instead of silently building without it.
-        UI.fatal("--customer-salt/--licence-token bind the key of the hybrid "
-                 "loader; add --native (or --native-only) so the mask is "
-                 "actually applied")
-        raise SystemExit(2)
+    # Both key bindings are applied on this path too (see the blob-key
+    # emission below), so the flags no longer require --native.
     if not os.path.exists(source): 
         UI.fatal(f"Source file not found: {source}")
         return
@@ -2826,6 +2871,14 @@ def _VERIFY_INTEGRITY():
             entropy_marker = os.urandom(16)
             padded_raw = inject_entropy_tlv(raw, entropy_marker)
             key = getattr(args, '_inner_key', None) or os.urandom(32); nonce = os.urandom(16)
+            # The artefact carries the RAW key; the loader re-applies this
+            # mask at run time from the customer salt or the licence token's
+            # key_material.  Encryption below uses the masked key, so an
+            # artefact without its token decrypts to garbage.
+            _key_raw = key
+            if _customer_salt or _licence_bound:
+                _bm = hashlib.sha256(b"nx-customer:" + _customer_salt.encode()).digest()
+                key = bytes([_b ^ _bm[_i % len(_bm)] for _i, _b in enumerate(key)])
             recipe_in = generate_recipe(6); recipe_out = generate_recipe(6, True)
             build_timestamp = int(time.time())
             time_salt = hashlib.sha256(str(0).encode()).digest()
@@ -3089,7 +3142,7 @@ def _VERIFY_INTEGRITY():
                 'HMAC_SECRET_HEX': hmac_secret,
                 'INNER_KEY_HEX': inner_key_hex,
                 'VAR_PAYLOAD_MAC': payload_mac,
-                'NATIVE_BLOB_KEY_HEX': key.hex(),
+                'NATIVE_BLOB_KEY_HEX': _key_raw.hex(),
                 'DECOY_FUNC': VARS['DECOY_FUNC'],
                 'remove_entropy_code': remove_entropy_source(VARS["ENTROPY_MARKER"]),
                 'VAR_ONE_SHOT': var_oneshot,
@@ -3230,6 +3283,19 @@ def _VERIFY_INTEGRITY():
                 if k.endswith('_source') or k.endswith('_code'):
                     build_context[k] = apply_vars(v).replace('{{', '{').replace('}}', '}')
             raw_script = (LOADER_HEAD + "\n" + LOADER_BODY).format(**build_context)
+            # Key binding (--customer-salt / --licence-token) on THIS path.
+            # The artefact carries the raw key; the mask is re-applied here
+            # at run time.  In licence mode the material is not in the
+            # artefact at all, so a missing token must fail loudly rather
+            # than decrypt to garbage.
+            if _key_raw is not None and (_customer_salt or _licence_bound):
+                _anchor = 'BLOB_KEY = bytes.fromhex("%s")' % _key_raw.hex()
+                if _anchor not in raw_script:
+                    raise SystemExit(
+                        "key binding: the emitted loader has no BLOB_KEY literal")
+                _mode = "licence" if _licence_bound else "salt"
+                raw_script = raw_script.replace(
+                    _anchor, _anchor + "\n" + _key_binding_source(_mode, _customer_salt))
             # Hardening A2.2/A2.3: strip the fixed runtime vocabulary
             # (_nx_kill, _NX_AUDIT_*) out of the artifact.  The rename runs
             # on the assembled source -- after every emitter contributed its

@@ -104,19 +104,50 @@ def test_loader_reads_the_material_from_the_token(tmp_path, monkeypatch):
     assert lookup() is None
 
 
-def test_bound_build_requires_the_native_loader(tmp_path):
-    """The flags must refuse where the mask cannot be applied."""
+def test_bound_build_marks_the_artefact_and_demands_the_token(tmp_path):
+    """The source path applies the binding now, so this is the real check.
+
+    It used to refuse the flag without --native. That was true when only
+    the hybrid loader carried the mask; the source emitter now carries it
+    too, so the property to test is the one that matters: the artefact
+    runs with its token and refuses without it.
+    """
     import subprocess
     import sys
 
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     _, path, _ = _token(tmp_path)
     src = tmp_path / "payload.py"
-    src.write_text('print("x")\n', encoding="utf-8")
-    proc = subprocess.run(
+    src.write_text('print("BOUND_OK")\n', encoding="utf-8")
+    build = subprocess.run(
         [sys.executable, "-m", "obfuscator.core.pipeline", "build", str(src),
          "--licence-token", str(path)],
-        cwd=tmp_path, capture_output=True, text=True, timeout=180,
+        cwd=tmp_path, capture_output=True, text=True, timeout=300,
         env=dict(os.environ, PYTHONPATH=repo, NIXON_LOG_REDIRECT="0"))
-    assert proc.returncode != 0
-    assert "hybrid loader" in (proc.stdout + proc.stderr)
+    assert build.returncode == 0, build.stderr[-800:]
+
+    artefact = _find_artefact(tmp_path)
+    assert artefact is not None, "no artefact produced"
+
+    without = subprocess.run(
+        [sys.executable, str(artefact)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=120,
+        env={k: v for k, v in os.environ.items() if k != "NIXON_LICENCE"})
+    assert without.returncode != 0, "a bound artefact ran without its licence"
+    assert "licence token required" in (without.stdout + without.stderr)
+
+    with_token = subprocess.run(
+        [sys.executable, str(artefact)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=120,
+        env=dict(os.environ, NIXON_LICENCE=str(path)))
+    assert with_token.returncode == 0, with_token.stderr[-800:]
+    assert "BOUND_OK" in with_token.stdout
+
+
+def _find_artefact(tmp_path):
+    """Where `pipeline build` puts its output (dist/ beside the source)."""
+    for root, _dirs, files in os.walk(tmp_path):
+        for name in files:
+            if name.endswith("_protected.py"):
+                return os.path.join(root, name)
+    return None
