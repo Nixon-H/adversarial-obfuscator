@@ -90,3 +90,31 @@ class TestStringOperandLowering:
     def test_integer_comparison_still_lowers(self):
         out = lower_ir_to_llvm(IR_INTEGER_COMPARE)
         assert "icmp eq i32" in out
+
+
+def test_malformed_gep_is_rejected_at_lowering():
+    """An empty gep operand must fail here, not in llc.
+
+    A build once emitted `i32 ""` as a GEP index; llc reported "expected
+    value token" at a line number that pointed at unrelated IR, and the
+    temp .ll was deleted, so the cause took two rounds to find.
+    """
+    import pytest
+
+    from llvmgen.lower import lower_ir_to_llvm
+
+    import os
+    real = os.path.join(os.path.dirname(__file__), "..", "build", "program.ir")
+    if not os.path.exists(real):
+        pytest.skip("no built IR available")
+    lines = open(real, encoding="utf-8", errors="replace").read().splitlines()
+    patched = False
+    for i, line in enumerate(lines):
+        if "gep ptr" in line and "i32 " in line:
+            lines[i] = line[: line.rfind("i32 ") + 3] + " "
+            patched = True
+            break
+    if not patched:
+        pytest.skip("no gep in the built IR")
+    with pytest.raises(ValueError, match="malformed gep"):
+        lower_ir_to_llvm("\n".join(lines))

@@ -554,6 +554,12 @@ class NixonIRParser:
                 else:
                     indices.append(parts[i].rstrip(","))
                     i += 1
+            for _idx in indices:
+                if not _idx.strip() or _idx.strip() in ("i32", "i64", "i8", "i16", "i1"):
+                    raise ValueError(
+                        "malformed gep: empty or typeless index in %r -- the IR "
+                        "emitted an incomplete operand, which llc reports as "
+                        "'expected value token' far from the cause" % (line,))
             if result:
                 var_types[result] = "ptr"
             return {"result": result, "opcode": "getelementptr",
@@ -575,6 +581,11 @@ class NixonIRParser:
                 else:
                     indices.append(remaining[i].rstrip(","))
                     i += 1
+            for _idx in indices:
+                if not _idx.strip() or _idx.strip() in ("i32", "i64", "i8", "i16", "i1"):
+                    raise ValueError(
+                        "malformed getelementptr: empty or typeless index in %r"
+                        % (line,))
             if result:
                 var_types[result] = "ptr"
             return {"result": result, "opcode": "getelementptr", "type": vtype,

@@ -1,6 +1,8 @@
-import subprocess
-import tempfile
 import os
+import shutil
+import subprocess
+import sys
+import tempfile
 
 
 def assemble(llvm_ir: str, output_path: str) -> str:
@@ -55,6 +57,24 @@ def assemble(llvm_ir: str, output_path: str) -> str:
         raise RuntimeError("Compilation timed out (120s)")
 
     finally:
+        # On failure the .ll is the only thing that says WHICH construct llc
+        # rejected -- and it used to be deleted, so the error named a file
+        # that no longer existed.  Keep it (and the .s) for any non-zero
+        # exit, and say where it went.
+        _failed = sys.exc_info()[0] is not None
+        _kept = []
+        if _failed:
+            try:
+                for _p in (ir_path, ir_path.replace(".ll", ".s")):
+                    if os.path.exists(_p):
+                        _dest = os.path.join(tempfile.gettempdir(),
+                                             "nixon_failed_" + os.path.basename(_p))
+                        shutil.copyfile(_p, _dest)
+                        _kept.append(_dest)
+            except OSError:
+                pass
+            if _kept:
+                sys.stderr.write("preserved IR: %s\n" % ", ".join(_kept))
         for p in [ir_path, ir_path.replace(".ll", ".s")]:
             try:
                 if os.path.exists(p):
