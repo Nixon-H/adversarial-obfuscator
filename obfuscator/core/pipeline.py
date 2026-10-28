@@ -2444,6 +2444,9 @@ def _key_binding_source(mode: str, customer_salt: str) -> str:
 
 def build_project(args):
     source = args.source
+    # Built by main() before this call, so the loader (assembled below) and
+    # the pack (in main) own the same bytes.
+    _core_so = getattr(args, "_core_so", None)
     # Licence binding (--licence-token): the payload key is derived from the
     # token's secret key material instead of a shipped literal salt, so the
     # artefact alone cannot decrypt.  Resolved first: the hybrid-loader call
@@ -3351,6 +3354,42 @@ def _VERIFY_INTEGRITY():
                 if k.endswith('_source') or k.endswith('_code'):
                     build_context[k] = apply_vars(v).replace('{{', '{').replace('}}', '}')
             raw_script = (LOADER_HEAD + "\n" + LOADER_BODY).format(**build_context)
+            # C-core integrity: the packed .so is verified against the hash
+            # of the exact bytes we packed, before anything loads it.  The
+            # core was the one packed component with no check at all.
+            if _core_so and os.path.exists(_core_so):
+                try:
+                    import hashlib as _hashlib_core
+                    with open(_core_so, "rb") as _core_fh:
+                        _core_sha = _hashlib_core.sha256(_core_fh.read()).hexdigest()
+                    _core_check = (
+                        "\n"
+                        "def _nx_core_verified():\n"
+                        "    try:\n"
+                        "        import hashlib as _h, os as _o\n"
+                        "        _p = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)),"
+                        ' "nixon_core.so")\n'
+                        "        with open(_p, \"rb\") as _f:\n"
+                        "            return _h.sha256(_f.read()).hexdigest() == \"%s\"\n"
+                        "    except Exception:\n"
+                        "        return False\n"
+                        "if not _nx_core_verified():\n"
+                        "    import os as _o2\n"
+                        "    _o2._exit(137)\n"
+                    ) % (_core_sha,)
+                    _at = raw_script.find('BLOB_KEY = bytes.fromhex("')
+                    if _at >= 0:
+                        _eol = raw_script.find("\n", _at)
+                        if _eol > 0:
+                            raw_script = (raw_script[:_eol + 1] + _core_check
+                                          + raw_script[_eol + 1:])
+                        else:
+                            print("  [!] C core integrity: no anchor line end")
+                    else:
+                        print("  [!] C core integrity: no BLOB_KEY anchor")
+                except Exception as _core_bind_exc:
+                    print("  [!] C core integrity bind skipped: %s" % (_core_bind_exc,))
+
             # Key binding (--customer-salt / --licence-token) on THIS path.
             # The artefact carries the raw key; the mask is re-applied here
             # at run time.  In licence mode the material is not in the
@@ -3786,6 +3825,16 @@ def main():
             args._cf_hmac_key = hmac_key
             args._ntru_pub = ntru_pub_key
             args.gh_token = gh_token
+            # The core is packed into the artefact AND its hash is baked
+            # into the loader, which is assembled inside build_project.
+            # Build it here so both phases own the same bytes.
+            try:
+                from obfuscator.core.c_core_build import build_c_core as _build_c_core
+                args._core_so = _build_c_core(
+                    os.path.join(os.path.dirname(os.path.abspath(args.source)), "dist"))
+            except Exception as _core_exc:
+                args._core_so = None
+                print("  [!] C core build failed: %s" % (_core_exc,))
             generated_files_map = build_project(args)
             if not generated_files_map:
                 UI.fail("Build failed - no output generated")
@@ -3858,12 +3907,13 @@ def main():
             # encrypt/decrypt) and then die in its self-check.  The .so
             # is still left in dist/ for callers that ship the pair.
             _dist_dir = os.path.join(os.path.dirname(os.path.abspath(args.source)), "dist")
-            _core_so = None
-            try:
-                from obfuscator.core.c_core_build import build_c_core as _build_c_core
-                _core_so = _build_c_core(_dist_dir)
-            except Exception as _core_exc:
-                print("  [!] C core build failed: %s" % (_core_exc,))
+            _core_so = getattr(args, "_core_so", None)
+            if _core_so is None:
+                try:
+                    from obfuscator.core.c_core_build import build_c_core as _build_c_core
+                    _core_so = _build_c_core(_dist_dir)
+                except Exception as _core_exc:
+                    print("  [!] C core build failed: %s" % (_core_exc,))
             _pack_extras = [("nixon_core.so", _core_so)] if _core_so else []
             for suffix in ["Debug", "Silent"]:
                 t = generated_files_map.get(suffix)
