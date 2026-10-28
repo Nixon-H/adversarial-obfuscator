@@ -205,6 +205,74 @@ def register_string(s):
         STRING_ROUTER[global_id] = ('SINGLE', tbl, idx)
     STRING_CACHE[s] = global_id
     return global_id
+def _merge_adjacent_string_literals(code):
+    """Join implicit string concatenation into one literal.
+
+    The rewrite below is line-oriented: it replaces each literal it finds
+    with a string-table lookup.  Two adjacent literals therefore became
+    two lookups with no "+" between them, which is a SyntaxError in the
+    emitted artefact -- and one that named nothing useful, because the
+    build only found it when validate_obfuscated_code tried to compile
+    the file.
+
+    Merging first makes the rewrite see one literal.  The edit is
+    span-based (tokenizer positions), so every byte outside the joined
+    literals is untouched.
+    """
+    import io, tokenize
+    try:
+        toks = list(tokenize.generate_tokens(io.StringIO(code).readline))
+    except Exception:
+        return code
+
+    lines = code.splitlines(keepends=True)
+    starts = [0]
+    for _ln in lines:
+        starts.append(starts[-1] + len(_ln))
+
+    def _off(pos):
+        row, col = pos
+        return starts[row - 1] + col
+
+    edits = []
+    i = 0
+    while i < len(toks):
+        if toks[i].type == tokenize.STRING and toks[i].string[:1] not in "fF":
+            group = [toks[i]]
+            j = i + 1
+            while j < len(toks):
+                # NL/COMMENT sit between the literals of an implicit
+                # concatenation that spans lines inside parentheses.
+                if toks[j].type in (tokenize.NL, tokenize.COMMENT):
+                    j += 1
+                    continue
+                if toks[j].type == tokenize.STRING and toks[j].string[:1] not in "fF":
+                    group.append(toks[j])
+                    j += 1
+                    continue
+                break
+            if len(group) > 1:
+                try:
+                    joined = "".join(ast.literal_eval(t.string) for t in group)
+                    edits.append((_off(group[0].start), _off(group[-1].end), repr(joined)))
+                    i = j
+                    continue
+                except Exception:
+                    pass
+        i += 1
+
+    if not edits:
+        return code
+    out = []
+    last = 0
+    for start, end, text in edits:
+        out.append(code[last:start])
+        out.append(text)
+        last = end
+    out.append(code[last:])
+    return "".join(out)
+
+
 def Nixon_Enc_strings(code):
     EXCLUDED = ["__main__", "__init__", "utf-8", "latin1", "ascii", "ignore",
                 "__NATIVE_BLOBS_PLACEHOLDER__", "__FALLBACK_BLOB_PLACEHOLDER__",
@@ -228,7 +296,7 @@ def Nixon_Enc_strings(code):
     _nx_part_prefix = VARS.get("PART_PREFIX")
     if _nx_part_prefix:
         SKIP_MARKERS.insert(0, _nx_part_prefix)
-    lines = code.split('\n')
+    lines = _merge_adjacent_string_literals(code).split('\n')
     out_lines = []
     pattern = re.compile(r'(?<![bfruBFRU])(?<!["\'])("[\w\d\s_\./:-]+?"|\'[\w\d\s_\./:-]+?\')(?!["\'])')
     # The loader preamble (module aliases, the getattr hook, the string
