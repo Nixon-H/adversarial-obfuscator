@@ -94,6 +94,29 @@ pack/run boundary produced artefacts that failed their own check. A
 reproducible build needs one RNG threaded through `sources.py`'s emitters,
 not a seeding patch on top.
 
+### Which draws are safe to pin
+
+Two classes, and round 3 failed because it treated them as one.
+
+**Emitter-only draws** -- values that are decided at build time and
+travelled *into* the artefact as literal data: the VM op-map shuffle, the
+encoding-layer choices, names, slot picks, decoy placement. Both sides of
+the artefact already carry the result, so pinning them changes nothing
+about how it runs. Verified: `generate_polymorphic_map()` takes an
+optional seed and is already seeded when `--watermark` is used; a
+watermarked build runs its payload and still refuses a tracer, so the
+seeded path is sound.
+
+**Boundary-crossing draws** -- values the payload is encrypted *with* and
+the loader re-derives at run time: the blob key, the nonce, the string
+session key, the table keys. Pinning these is what made two builds differ
+*and* what made the artefact fail its own magic check, because the emission
+and the re-derivation stopped agreeing.
+
+A reproducible build pins the first class and threads the second through
+both sides at once. Round 3 pinned the second class alone, which is why it
+produced artefacts that would not run.
+
 ## Known gaps
 
 - **Hostile-host handling works now, without a flag.** Eight rounds tried
