@@ -58,7 +58,11 @@ def run_program(prog_entry, out_dir, n_per_arm, attack_arms=("static",),
                     "master_seed": seed_i, "pass_sets": psets,
                     "extra_options": extra})
                 with tempfile.TemporaryDirectory(prefix="nxk_h_") as td:
-                    paths = gen.generate(orig_path, 1, td)
+                    # start=i so the pass set for build i is
+                    # pass_sets[i % len(pass_sets)] -- without it every
+                    # build reused variant 0 and the heterogeneous arms
+                    # were silently identical.
+                    paths = gen.generate(orig_path, 1, td, start=i)
                     with open(paths[0], encoding="utf-8") as f:
                         code = f.read()
                 dst = os.path.join(out_dir, "%s_%d.py" % (arm.lower(), i))

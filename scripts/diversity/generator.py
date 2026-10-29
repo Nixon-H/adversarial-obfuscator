@@ -115,8 +115,17 @@ class DiversityGenerator:
         self._master_seed = secrets.randbits(64)
 
     def generate(
-        self, source_path: str, n: int, output_dir: str
+        self, source_path: str, n: int, output_dir: str, start: int = 0
     ) -> List[str]:
+        """Generate ``n`` variants starting at variant index ``start``.
+
+        ``start`` matters: the pass set is chosen as
+        ``pass_sets[variant_id % len(pass_sets)]``, so a caller that wants
+        build ``i`` to use pass set ``i`` must pass ``start=i``.  The
+        transfer runner used to call ``generate(path, 1, dir)``, which
+        always produced variant 0 -- every build in a supposedly
+        heterogeneous arm used the first pass set.
+        """
         os.makedirs(output_dir, exist_ok=True)
         with open(source_path, encoding="utf-8") as f:
             source = f.read()
@@ -125,7 +134,7 @@ class DiversityGenerator:
         config.setdefault("master_seed", self._master_seed)
 
         variant_paths = []
-        for i in range(n):
+        for i in range(start, start + n):
             variant_code = generate_variant(source, i, config)
             valid, error = _validate_syntax(variant_code)
             if not valid:
