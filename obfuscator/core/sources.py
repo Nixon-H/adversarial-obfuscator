@@ -13,6 +13,37 @@ from .transforms import (
     OpaquePredicateInjector, ScopeAnalyzer, StringLiteralObfuscator, SymbolRenamer,
     TypeHintStripper, UnicodeIdentifierEncoder, VariableSplitter, get_random_var_name, stego_encode
 )
+
+# Emitter-only randomness (docs/EMITTER_PIPELINE.md): values decided at
+# build time travel into the artefact as literal data, so pinning them
+# cannot desynchronise pack from run.  None = OS entropy (the default),
+# so routing a call site through these changes nothing unless a seed is
+# supplied by the build.
+_STRUCT_RNG = None
+
+
+def set_structure_rng(rng):
+    global _STRUCT_RNG
+    _STRUCT_RNG = rng
+
+
+def _struct_choice(seq):
+    if _STRUCT_RNG is not None:
+        return seq[_STRUCT_RNG.randrange(len(seq))]
+    return secrets.choice(seq)
+
+
+def _struct_randbelow(k):
+    if _STRUCT_RNG is not None:
+        return _STRUCT_RNG.randrange(k)
+    return secrets.randbelow(k)
+
+
+def _struct_hex(n):
+    if _STRUCT_RNG is not None:
+        return "".join("%02x" % _STRUCT_RNG.randrange(256) for _ in range(n))
+    return secrets.token_hex(n)
+
 MEMORY_PROTECTION_SOURCE = '''def {FUNC_SEC_WIPE}(data):
     try:
         if isinstance(data, (bytes, bytearray)):
@@ -687,10 +718,10 @@ class OpcodeMorpher:
                 base_rng.shuffle(self.enc_map)
             else:
                 for i in range(255, 0, -1):
-                    j = secrets.randbelow(i + 1)
+                    j = _struct_randbelow(i + 1)
                     self.enc_map[i], self.enc_map[j] = self.enc_map[j], self.enc_map[i]
                 for i in range(255, 0, -1):
-                    j = secrets.randbelow(i + 1)
+                    j = _struct_randbelow(i + 1)
                     self.enc_map[i], self.enc_map[j] = self.enc_map[j], self.enc_map[i]
             self.dec_map = {self.enc_map[i]: i for i in range(256)}
     def morph(self, code_obj, depth=0):
@@ -792,7 +823,7 @@ def create_intermediate_zip_layer(input_code_string, encoding_type, bind_files_l
             inject_header = "import threading, runpy, sys\n"
             inject_body = ""
             for original_name, content in bind_files_list:
-                internal_name = f"_sys_{secrets.token_hex(4)}"
+                internal_name = f"_sys_{_struct_hex(4)}"
                 zip_file.writestr(f"{internal_name}.py", content)
                 inject_body += (f"def _run_{internal_name}():\n    try: runpy.run_module('{internal_name}', run_name='__main__')\n    except Exception: pass\ntry: threading.Thread(target=_run_{internal_name}, daemon=True).start()\nexcept Exception: pass\n")
             main_code = inject_header + inject_body + main_code
@@ -841,7 +872,7 @@ def recursive_package(initial_source, final_output, layers=100, zip_count=0, bin
             selected = []
             remaining = available_slots.copy()
             for _ in range(zip_count):
-                idx = secrets.randbelow(len(remaining))
+                idx = _struct_randbelow(len(remaining))
                 selected.append(remaining.pop(idx))
             zip_layer_indices = set(selected)
         else: zip_layer_indices = set(available_slots)
@@ -856,7 +887,7 @@ def recursive_package(initial_source, final_output, layers=100, zip_count=0, bin
                  layer_payloads[target_layer].append((name, content))
         elif len(sorted_zip_layers) > 0: layer_payloads[sorted_zip_layers[0]] = bind_data
     last_encoding = None
-    first_enc = secrets.choice(list(ENCODINGS.keys()))
+    first_enc = _struct_choice(list(ENCODINGS.keys()))
     current_code = create_initial_layer(initial_source, first_enc, extra_files=extra_files)
     last_encoding = first_enc
     size_kb = len(current_code.encode('utf-8')) / 1024
@@ -867,7 +898,7 @@ def recursive_package(initial_source, final_output, layers=100, zip_count=0, bin
             available = list(ENCODINGS.keys())
             if last_encoding in available: available.remove(last_encoding)
             if i == layers - 1 and 'base64' in available: available.remove('base64')
-            enc_choice = secrets.choice(available)
+            enc_choice = _struct_choice(available)
         mode_str = "Mem-Mode"
         if i in zip_layer_indices:
             payloads = layer_payloads.get(i, None)
@@ -1023,7 +1054,7 @@ _VARS_MAP = {
 }
 VARS = {k: get_random_var_name(v) for k, v in _VARS_MAP.items()}
 VARS["MAGIC"] = b"NIXON_ENC"
-VARS["STR_KEY"] = secrets.randbelow(255) + 1
+VARS["STR_KEY"] = _struct_randbelow(255) + 1
 # Hardening A2.1: per-build ASCII token for the payload-part globals.
 # Parts are emitted as "<token><i>" and the loader's join template rebuilds
 # the very same name, so a static reader can no longer locate the assembled
@@ -3936,7 +3967,7 @@ class {CUSTOM_VM_CLS}:
             rng.shuffle(opcodes)
         else:
             for i in range(255, 0, -1):
-                j = secrets.randbelow(i + 1)
+                j = _struct_randbelow(i + 1)
                 opcodes[i], opcodes[j] = opcodes[j], opcodes[i]
         {CUSTOM_VM_CLS}._opcode_map = dict()
         {CUSTOM_VM_CLS}._inverse_map = dict()
@@ -4256,7 +4287,7 @@ class {ROLLING_ISA_CLS}:
             rng.shuffle(opcodes)
         else:
             for i in range(255, 0, -1):
-                j = secrets.randbelow(i + 1)
+                j = _struct_randbelow(i + 1)
                 opcodes[i], opcodes[j] = opcodes[j], opcodes[i]
         {ROLLING_ISA_CLS}._base_map = dict()
         for i in range(16):
@@ -5312,7 +5343,7 @@ def {name4}(payload, signature):
     return True'''
 def generate_recipe(count, force_safe_end=False):
     opts = ['b64', 'b32', 'b16', 'b85', 'rot13']
-    res = [secrets.choice(opts) for _ in range(count)]
+    res = [_struct_choice(opts) for _ in range(count)]
     if force_safe_end: res[-1] = 'b64'
     return res
 def generate_polymorphic_map(seed=None):
@@ -5325,10 +5356,10 @@ def generate_polymorphic_map(seed=None):
         for b in all_bytes: op_map[b] = rng.randrange(11)
     else:
         for i in range(255, 0, -1):
-            j = secrets.randbelow(i + 1)
+            j = _struct_randbelow(i + 1)
             all_bytes[i], all_bytes[j] = all_bytes[j], all_bytes[i]
         for i in range(11): op_map[all_bytes.pop()] = i
-        for b in all_bytes: op_map[b] = secrets.randbelow(11)
+        for b in all_bytes: op_map[b] = _struct_randbelow(11)
     return op_map
 def encode_vm_bytecode(ops_list, op_map, seed=None):
     rev_map = {}

@@ -2490,6 +2490,36 @@ def build_core_once(source_path):
 
 def build_project(args):
     source = args.source
+    if getattr(args, "pin_structure", False):
+        import random as _r
+        random.seed(0x5EED)
+        try:
+            from obfuscator.core.sources import (
+                VARS as _V, _VARS_MAP as _VM, set_structure_rng as _ssr,
+            )
+            _ssr(_r.Random(0x5EED))
+            _V["MARKER_TOKEN"] = "5eede5ee01"
+            _V["PART_PREFIX"] = "_5eede5ee02"
+            _V["STR_KEY"] = 7
+            from .transforms import get_random_var_name as _grvn
+            for _k, _v in dict(_VM).items():
+                _V[_k] = _grvn(_v)
+        except Exception as _pin_exc:
+            print("  [!] structure pin partial: %s" % (_pin_exc,))
+        # The payload keys are EMITTED into the artefact (the loader reads
+        # them, it does not re-derive them), so pinning them changes the
+        # ciphertext without breaking pack/run agreement.  That is what
+        # round 3 got wrong: it pinned the derivation inputs instead.
+        try:
+            import secrets as _sec
+            _kr = _r.Random(0x5EED + 1)
+            _sec.token_bytes = lambda n=32: bytes(_kr.randrange(256) for _ in range(n))
+            _sec.token_hex = lambda n=32: "".join("%02x" % _kr.randrange(256) for _ in range(n))
+            _sec.randbelow = lambda k: _kr.randrange(k)
+            _sec.choice = lambda seq: list(seq)[_kr.randrange(len(list(seq)))]
+            os.urandom = lambda n: bytes(_kr.randrange(256) for _ in range(n))
+        except Exception as _key_pin_exc:
+            print("  [!] key pin partial: %s" % (_key_pin_exc,))
     # Built by main() before this call, so the loader (assembled below) and
     # the pack (in main) own the same bytes.
     _core_so = getattr(args, "_core_so", None)
@@ -3765,6 +3795,11 @@ def build_parser():
                        help='Bind the payload key to a licence token (its '
                             'key_material becomes the customer mask; the '
                             'artefact then needs that token at run time)')
+    build.add_argument('--pin-structure', action='store_true',
+                       help='Pin the EMITTER-ONLY draws (encoding order, slot '
+                            'picks, names, VM op-map) so two builds share a '
+                            'structure. Debugging aid; key material is not '
+                            'pinned, so artefacts are not byte-identical.')
     build.add_argument('--customer-salt', default='',
                        help='Bind the payload key to one customer (mixed as a '
                             'domain-separated second mask; empty = no binding)')

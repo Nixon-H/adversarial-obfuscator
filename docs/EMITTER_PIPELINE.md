@@ -121,6 +121,15 @@ exactly -- the pinned `PART_PREFIX` names appear identically on both sides
 -- and the divergence had moved to statement level, deep inside the emitted
 payload, where the long tail of per-part and per-string draws lives.
 
+Round 37 pinned the **emitted** key material as well -- safe, because the
+loader reads those values from the artefact rather than re-deriving them.
+That was round 3's mistake: it pinned the derivation *inputs* (build id,
+salts), which is what desynchronised pack from run. With the keys pinned
+too, the normalised line diff between two builds fell from 2,254 to **350**
+and the first structural divergence moved 154k -> 214k; the remaining
+difference is a class-method name minted at import. The artefact still
+runs, still refuses a tampered core, and still refuses a tracer.
+
 Round 32 converted fourteen structure call sites in `sources.py`
 (`secrets.randbelow`/`choice`/`token_hex` in the packaging and encoding
 paths) to injectable helpers whose default is unchanged, and added the
