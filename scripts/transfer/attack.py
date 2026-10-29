@@ -195,6 +195,71 @@ def _greedy_map(candidates, gt_feats, weights):
     return mapping
 
 
+
+class ArtifactOnlyAttack:
+    """An attacker that sees only the emitted artefact.
+
+    The static arm develops against the original source and confirms with
+    the target's test vectors: both are evaluator information, so its
+    success measures its own oracle. This arm takes neither. develop()
+    receives the artefact alone; apply() ranks candidate functions by a
+    fixed structural heuristic and returns the ranking, with no semantic
+    confirmation, because a real attacker holding only the artefact has
+    nothing to confirm against.
+
+    The evaluator scores the ranking against ground truth afterwards. The
+    attacker never touches that ground truth: the guard test asserts no
+    read of `ground_truth` or `vectors` occurs in this class.
+    """
+
+    arm = "artifact_only"
+    version = "1.0.0"
+
+    # Fixed weights: chosen once, not tuned on any build.
+    WEIGHTS = {"arity": 0.35, "size": 0.25, "strs": 0.20, "loops": 0.20}
+
+    def develop(self, build, workdir):
+        """Learn nothing from labels; record what the artefact reveals."""
+        t0 = time.monotonic()
+        with open(build["path"], encoding="utf-8") as f:
+            src = f.read()
+        tree = ast.parse(src)
+        funcs = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]
+        return {
+            "arm": self.arm,
+            "version": self.version,
+            "weights": dict(self.WEIGHTS),
+            "n_functions": len(funcs),
+            "developed_from": os.path.basename(build["path"]),
+            "develop_time_s": round(time.monotonic() - t0, 3),
+        }
+
+    def apply(self, artifact, target, workdir):
+        """Rank target candidates; the evaluator checks the ranking."""
+        t0 = time.monotonic()
+        with open(target["path"], encoding="utf-8") as f:
+            src = f.read()
+        feats = {n: structural_features(nd)
+                 for n, nd in module_functions(src) if n != "_demo"}
+        w = artifact["weights"]
+        scored = []
+        for name, f in feats.items():
+            s = (w["arity"] * f.get("arity", 0)
+                 + w["size"] * f.get("n_stmts", 0)
+                 + w["strs"] * f.get("n_str", 0)
+                 + w["loops"] * f.get("n_loops", 0))
+            scored.append((s, name))
+        ranked = [n for _, n in sorted(scored, key=lambda t: (-t[0], t[1]))]
+        return {
+            "arm": self.arm,
+            "ranking": ranked,
+            "n_candidates": len(ranked),
+            "apply_time_s": round(time.monotonic() - t0, 3),
+            "budget": {"cpu_s": round(time.monotonic() - t0, 3),
+                       "executions": 0},
+        }
+
+
 class StaticRecoveryAttack:
     """Deterministic static attack arm (Phase 1 primary-runnable arm).
 
