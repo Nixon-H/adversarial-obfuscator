@@ -160,6 +160,23 @@ be done call by call, which is the ~20-site and ~3,650-draw work list
 above. The flag was removed rather than shipped with a help text it could
 not honour.
 
+### The residue is table ORDER, not table content
+
+Round 45 dumped the plaintext string tables from two pinned builds and
+compared them. The four tables hold **the same strings in a different
+order**:
+
+    table A: 'hw_fingerprint' ... | 'NO_TOKEN' ...
+    table B: 'BAD' ...            | 'NET_FAIL' ...
+    table C: 'net-fail' ...       | '4dbf90625fd436f4024aa61482967f37' ...
+
+So the 102-line residue is not differing values at all -- it is the same
+values indexed differently, because whatever builds the source text that
+the string pass walks inserts them in an order that varies per process
+(set iteration, i.e. `PYTHONHASHSEED`). Making that traversal order
+deterministic is the remaining fix, and it is a smaller job than the
+previous hypotheses implied.
+
 ### The decoy stream is not the residue
 
 Round 44 gave the decoy names their own seeded RNG, on the theory that
