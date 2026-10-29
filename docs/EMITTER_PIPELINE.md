@@ -160,6 +160,22 @@ be done call by call, which is the ~20-site and ~3,650-draw work list
 above. The flag was removed rather than shipped with a help text it could
 not honour.
 
+### The emitted session key is a pre-pin copy
+
+Round 52 restored the pre-string dump (and verified the files existed
+before trusting the diff). The pre-string source already differs, at the
+session-key line, so the residue is in the assembly, not the string pass.
+
+Tracing the pin showed it *does* run -- `[pin] session key:
+2af81ccbe231e2c1` -- but the emitted artefact carries a different value.
+So the emitter renders `build_context['STR_SESSION_KEY']` from a binding
+taken before the pin, exactly the ownership bug the C core had: the value
+exists in one place, is read from another, and the re-draw is invisible.
+
+The fix is the same shape as the core's: one owner, read after the pin.
+That is a concrete, small change -- and it is the first located cause in
+this residue rather than another elimination.
+
 ### Two more things it is not
 
 Round 51 instrumented the pinned stream itself, logging every draw with its
