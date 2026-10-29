@@ -2518,6 +2518,21 @@ def build_project(args):
             _sec.randbelow = lambda k: _kr.randrange(k)
             _sec.choice = lambda seq: list(seq)[_kr.randrange(len(list(seq)))]
             os.urandom = lambda n: bytes(_kr.randrange(256) for _ in range(n))
+            # Module-level keys minted at import, before any seed exists.
+            # They are emitted into the artefact, so re-drawing them here is
+            # safe and keeps the string table deterministic.
+            try:
+                import obfuscator.core.utils as _u
+                globals()["STRING_SESSION_KEY"] = _u.STRING_SESSION_KEY = _kr.randbytes(32) \
+                    if hasattr(_kr, "randbytes") else bytes(_kr.randrange(256) for _ in range(32))
+                # The string-table keys are emitted too (the loader reads
+                # them from the artefact), so re-drawing them is safe and is
+                # what makes the table's ciphertext deterministic.
+                from obfuscator.core.pipeline import STRING_TABLE_KEYS as _STK
+                for _tk in list(_STK):
+                    _STK[_tk] = bytes(_kr.randrange(256) for _ in range(32))
+            except Exception:
+                pass
         except Exception as _key_pin_exc:
             print("  [!] key pin partial: %s" % (_key_pin_exc,))
     # Built by main() before this call, so the loader (assembled below) and
@@ -3027,7 +3042,11 @@ def _VERIFY_INTEGRITY():
                 _bm = hashlib.sha256(b"nx-customer:" + _customer_salt.encode()).digest()
                 key = bytes([_b ^ _bm[_i % len(_bm)] for _i, _b in enumerate(key)])
             recipe_in = generate_recipe(6); recipe_out = generate_recipe(6, True)
-            build_timestamp = int(time.time())
+            # Emitted for the record only: the key derivation uses the
+            # pack-time window constant, not this value, so pinning it
+            # cannot desynchronise pack from run.
+            build_timestamp = (1700000000 if getattr(args, 'pin_structure', False)
+                               else int(time.time()))
             time_salt = hashlib.sha256(str(0).encode()).digest()
             sim_h = 0
             for i in range(7): sim_h = next_h(sim_h, i)
