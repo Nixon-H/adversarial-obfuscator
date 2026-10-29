@@ -17,8 +17,14 @@ def derive_subseed(master: int, label: str) -> int:
 
 def generate_variant(source: str, variant_id: int, config: dict) -> str:
     master_seed = config.get("master_seed", 0)
+    # The seed and the pass set must be independent.  Using variant_id in
+    # the seed made them inseparable: selecting pass set i also changed the
+    # seed, so an arm's transform effect could not be distinguished from a
+    # seed effect.  `seed_id` defaults to 0 (seed depends on master_seed
+    # only); callers that want N seeds per pass set set it explicitly.
+    seed_id = config.get("seed_id", 0)
     seed = int.from_bytes(
-        hashlib.sha256(f"{variant_id}:{master_seed}".encode()).digest()[:8], "little"
+        hashlib.sha256(f"{seed_id}:{master_seed}".encode()).digest()[:8], "little"
     )
     ast_seed = derive_subseed(seed, "ast")
     mba_seed = derive_subseed(seed, "mba")
@@ -44,6 +50,9 @@ def generate_variant(source: str, variant_id: int, config: dict) -> str:
             "vm",
         ]
 
+    # `explicit` lets a caller isolate these two transforms instead of
+    # having them applied in every arm.
+    explicit = bool(config.get("explicit_options", False))
     options = {
         "cfg_flatten": "cfg_flatten" in passes,
         "opaque_predicates": "opaque_pred" in passes,
@@ -52,9 +61,13 @@ def generate_variant(source: str, variant_id: int, config: dict) -> str:
         "fragment_strings": "string_encode" in passes,
         "unicode_ids": "unicode" in passes,
         "symbol_rename": "rename" in passes,
-        "strip_meta": True,
+        # Was hard-coded True, which put it in every arm including the
+        # negative control.  Now gated on the pass token, with an explicit
+        # opt-out so existing configs keep their behaviour only when they
+        # ask for it.
+        "strip_meta": ("strip_meta" in passes) if explicit else True,
         "split_vars": "split_vars" in passes,
-        "unfold_constants": True,
+        "unfold_constants": ("unfold_constants" in passes) if explicit else True,
         "enhanced_junk": "dead_code" in passes,
         "dynamic_code": False,
         "code_checksums": False,

@@ -31,15 +31,15 @@ ISOLATION_OFF = {
 ARMS = {
     "H0": {
         "purpose": "Negative control: seed-only variation.",
-        "pass_sets": [["rename", "dead_code", "mba", "cfg_flatten", "vm"]],
+        "pass_sets": [["rename", "dead_code", "mba", "cfg_flatten"]],
         "extra_options": {},
     },
     "H1": {
         "purpose": "Existing heterogeneous baseline (CFG/data/expression).",
         "pass_sets": [
-            ["rename", "dead_code", "mba", "cfg_flatten", "vm"],
-            ["rename", "dead_code", "opaque_pred", "string_encode", "vm"],
-            ["rename", "mba", "cfg_flatten", "opaque_pred", "string_encode", "vm"],
+            ["rename", "dead_code", "mba", "cfg_flatten"],
+            ["rename", "dead_code", "opaque_pred", "string_encode"],
+            ["rename", "mba", "cfg_flatten", "opaque_pred", "string_encode"],
         ],
         "extra_options": {},
     },
@@ -64,9 +64,9 @@ ARMS = {
     "H5": {
         "purpose": "Main heterogeneous arm: existing + rep + VM (alternating).",
         "pass_sets": [
-            ["rename", "dead_code", "mba", "cfg_flatten", "vm"],
-            ["rename", "dead_code", "opaque_pred", "string_encode", "vm"],
-            ["rename", "mba", "cfg_flatten", "opaque_pred", "string_encode", "vm"],
+            ["rename", "dead_code", "mba", "cfg_flatten"],
+            ["rename", "dead_code", "opaque_pred", "string_encode"],
+            ["rename", "mba", "cfg_flatten", "opaque_pred", "string_encode"],
         ],
         "extra_options": {"rep_diversify": True, "vm_dispatch": "alternate"},
     },
