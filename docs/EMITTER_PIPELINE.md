@@ -160,6 +160,26 @@ be done call by call, which is the ~20-site and ~3,650-draw work list
 above. The flag was removed rather than shipped with a help text it could
 not honour.
 
+### Content-derived string ids: no better
+
+The last ordering theory: string ids were `len(STRING_ROUTER)`, i.e. pure
+insertion order, so any change in the payload reshuffled every id. Made
+them `sha256(s)[:8]` with deterministic collision probing. Residue:
+**102 -> 106 lines**. No better, so it was reverted.
+
+Four attempts have now been made on this residue (decoy streams,
+per-site streams, content-derived ids, plus the two-class split earlier)
+and none of them reduced it. The measurement says the remaining
+difference is not in the values, not in the ids, and not in the streams;
+it is somewhere in how the emitted text is assembled, and it needs a bisect
+of the assembly itself -- dumping `raw_script` and comparing two builds
+pass by pass -- rather than another targeted change.
+
+That is the honest stopping point for this session: the item is 95% solved
+in measurement terms (2,254 -> 102 lines, mechanism enumerated, six
+falsified hypotheses recorded) and the last 4% needs a different kind of
+work than rounds can provide.
+
 ### Per-site streams made it worse too
 
 The obvious fix for the shared-stream coupling: give each draw site its
