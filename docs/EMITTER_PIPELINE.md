@@ -160,7 +160,30 @@ be done call by call, which is the ~20-site and ~3,650-draw work list
 above. The flag was removed rather than shipped with a help text it could
 not honour.
 
-### The emitted session key is a pre-pin copy
+### Parked: six experiments, no gain
+
+Round 54 pinned the two payload-part keys (`s0_key`, `part_a`) from a
+dedicated stream -- the last untried variant. Residue: 100 lines against
+102, i.e. within noise, and reverted.
+
+The item is parked here for this session. Status:
+
+- **measured**: 2,254 -> ~100 lines between two pinned builds;
+- **built**: the AST comparison instrument, the pre-string dump, the
+  caller-tagged draw trace;
+- **eliminated**, each with evidence: values, keys, decoy streams,
+  per-site streams, content-derived ids, the pinned draws, hash
+  randomisation, the session key (twice, the second time correcting my own
+  error);
+- **found**: the payload parts differ, and they are downstream of the
+  payload encryption.
+
+The next real step is not another targeted change. It is a bisect of the
+payload encryption's inputs -- what feeds `s0_key`/`part_a` besides the
+pinned draws -- with the instrument verified before its output is
+believed, which is the mistake that cost rounds 52 and 53.
+
+### (superseded) The emitted session key
 
 Round 52 restored the pre-string dump (and verified the files existed
 before trusting the diff). The pre-string source already differs, at the
