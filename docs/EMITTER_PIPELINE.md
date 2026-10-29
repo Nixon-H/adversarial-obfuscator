@@ -166,15 +166,20 @@ Round 52 restored the pre-string dump (and verified the files existed
 before trusting the diff). The pre-string source already differs, at the
 session-key line, so the residue is in the assembly, not the string pass.
 
-Tracing the pin showed it *does* run -- `[pin] session key:
-2af81ccbe231e2c1` -- but the emitted artefact carries a different value.
-So the emitter renders `build_context['STR_SESSION_KEY']` from a binding
-taken before the pin, exactly the ownership bug the C core had: the value
-exists in one place, is read from another, and the re-draw is invisible.
+**Correction (round 53): that conclusion was wrong.** The context carries
+the pinned value at format time (`[ctx] session key: 2af81ccb... | global:
+2af81ccb...`, both variants), and the pinned bytes ARE in the emitted
+artefact -- `b'*\xf8\x1c\xcb\xe21'`, found by searching for the raw repr
+rather than the hex, which cannot appear because the value is bytes.
 
-The fix is the same shape as the core's: one owner, read after the pin.
-That is a concrete, small change -- and it is the first located cause in
-this residue rather than another elimination.
+The `\xd5(]A...` line that looked like a mismatched session key is a
+different key (a table key or the swizzle), under a renamed symbol. So the
+session key is not the residue either.
+
+What the pre-string dump does show differing is the **payload parts**
+(lines 512-566), which are key-derived ciphertext. That is consistent with
+everything else eliminated: the residue is downstream of the payload
+encryption, not of any individual key.
 
 ### Two more things it is not
 
