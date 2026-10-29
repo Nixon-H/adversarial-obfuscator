@@ -189,6 +189,13 @@ produced artefacts that would not run.
   upstream fix is to keep a non-constant expression out of a global
   initializer at IR-generation time.
 
+  **Resolved:** the `div` half was the project's IR spelling for signed
+  division, which `BINARY_OPS` did not list (it had `udiv`/`sdiv` only), so
+  every such instruction hit the guard. Added and mapped to `sdiv`.
+  Evidence: the previously failing `build/program.ir` now lowers, and
+  **16 consecutive full builds across two samples** exit 0, against a prior
+  failure rate of roughly one in six.
+
 - **An earlier sweep found no `llvmgen` failure in 12 builds.** Round 8 showed the failure needs the per-build IR rather than
   a seed, so the hunt was re-run on that axis: 12 full builds, each with
   its own IR, through `irgen` and `llvmg`. Zero failures. Either the rate
