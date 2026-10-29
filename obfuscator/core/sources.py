@@ -5854,6 +5854,9 @@ if not {VAR_IS_DEBUG}:
 {FUNC_LOG}("[DEBUG] Init start...")
 _STR_SESSION_KEY = {STR_SESSION_KEY}
 BUILD_TIMESTAMP = {build_timestamp}
+# The rotation window at pack time (always 0 for a fresh build).  Emitted
+# so the loader derives the same key whenever it runs.
+_NX_BUILD_WINDOW = 0
 
 _BUILD_ID = "{build_id}"
 MORPH_MAP_A = {morph_map_a}
@@ -6250,9 +6253,11 @@ def {FUNC_DERIVE_INTEGRITY}():
 def {FUNC_DERIVE_ENV}(k_int):
     hw = {FUNC_HW_BIND}()
     lc = {FUNC_LIVE_CHK}()
-    ct = int(_nixon_時間시간.time())
-    w = (ct - BUILD_TIMESTAMP) // (86400 * 30)
-    if w > 12: pass
+    # The pack-time window, emitted as a constant.  Recomputing it from the
+    # wall clock made the derived key change every 30 days, so an artefact
+    # would stop decrypting a month after it was built: at pack the window
+    # is always 0, at run it becomes 1 (and so on), and k_dec differs.
+    w = _NX_BUILD_WINDOW
     msg = k_int + hw + lc + str(w).encode()
     return _nixon_ハッシュ해시.sha256(msg).digest()
 def {FUNC_UNLOCK_VM}(k_env, payload_str, part_a, part_b):
@@ -6616,8 +6621,7 @@ def {FUNC_BOOT}():
         k_int = {FUNC_DERIVE_INTEGRITY}()
         k_env = {FUNC_DERIVE_ENV}(k_int)
         k_final = {FUNC_UNLOCK_VM}(k_env, ctx["full"], {VAR_PART_A}, {VAR_PART_B})
-        current_time = int(_nixon_時間시간.time())
-        time_window = max(0, (current_time - BUILD_TIMESTAMP) // (86400 * 30))
+        time_window = _NX_BUILD_WINDOW
         time_salt = _nixon_ハッシュ해시.sha256(str(time_window).encode()).digest()
         sim_h = 0
         for i in range(7): sim_h = {FUNC_NEXT_H}(sim_h, i)
