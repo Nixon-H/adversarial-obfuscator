@@ -160,6 +160,25 @@ be done call by call, which is the ~20-site and ~3,650-draw work list
 above. The flag was removed rather than shipped with a help text it could
 not honour.
 
+### The build timestamp is boundary-crossing after all
+
+Round 39 tried pinning `BUILD_TIMESTAMP` (an obvious-looking label) and the
+artefact failed its own magic check. Three facts, in order:
+
+- the emitted template sets `BUILD_TIMESTAMP = {build_timestamp}` and the
+  loader uses it in a rotation window:
+  `w = (now - BUILD_TIMESTAMP) // (30 days)`;
+- pinning it to a **future** value made that window negative and the
+  payload did not run at all;
+- pinning it to a **past** value ran but failed decryption
+  ("Magic Mismatch"), so something derived from the window participates in
+  the key path.
+
+The pack-side `time_salt` is `sha256("0")` -- fixed, not time-dependent --
+so the coupling is in the loader's window logic, not in that salt. Until
+it is located, `BUILD_TIMESTAMP` belongs on the boundary-crossing list with
+the keys, not on the list of labels that can be pinned.
+
 ### Which draws are safe to pin
 
 Two classes, and round 3 failed because it treated them as one.
