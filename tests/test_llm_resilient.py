@@ -83,11 +83,15 @@ def test_context_collapse_guard_vars_present():
     obf = ContextCollapseObfuscator(depth=3, dead_vars=5)
     result = obf.obfuscate(tree)
     code = ast.unparse(result)
-    found_guard = any(gv in code for gv in [
-        "_nx_gc_enabled", "_nx_crypto_init", "_nx_vm_ready",
-        "_nx_license_valid", "_nx_hw_bound", "_nx_self_check",
-    ])
-    assert found_guard, "No guard variable found in output"
+    # Assert against the pool the obfuscator actually samples from.  The
+    # list here used to be a hand-copied subset of six, while the pool grew
+    # to ten and the obfuscator samples four: about one run in 210 picked
+    # none of the six and the test failed.  That is the flake that reddened
+    # a docs-only commit in CI.
+    from obfuscator.llm_resilient import _GUARD_VAR_POOL
+
+    found_guard = any(gv in code for gv in _GUARD_VAR_POOL)
+    assert found_guard, "No guard variable from the pool found in output"
 
 
 def test_honey_function_injector_adds_functions():
