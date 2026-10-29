@@ -160,6 +160,26 @@ be done call by call, which is the ~20-site and ~3,650-draw work list
 above. The flag was removed rather than shipped with a help text it could
 not honour.
 
+### Two more things it is not
+
+Round 51 instrumented the pinned stream itself, logging every draw with its
+caller, and diffed two builds:
+
+- **the pinned draws are identical** -- 175 draws each, same callers, same
+  sequence. The stream is not the residue;
+- **the hash seed is not the cause** -- with `PYTHONHASHSEED=0` the residue
+  is 100 lines against 102 without it. Not nothing, but not the answer.
+
+(A third comparison was attempted and is **not** a result: the
+pre-string-pass dump hook had been removed by an earlier revert, so the
+diff compared two nonexistent files and printed 0. Recorded so it is not
+mistaken for evidence.)
+
+So: not the draws, not the ids, not the streams, not the hash seed. What
+remains is the assembly between the format() call and the string pass --
+and finding it needs the dump hook restored first, which is where the next
+attempt should start.
+
 ### Content-derived string ids: no better
 
 The last ordering theory: string ids were `len(STRING_ROUTER)`, i.e. pure
