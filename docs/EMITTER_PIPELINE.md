@@ -160,6 +160,24 @@ be done call by call, which is the ~20-site and ~3,650-draw work list
 above. The flag was removed rather than shipped with a help text it could
 not honour.
 
+### The pinned stream advances by a variable amount
+
+Round 46 dumped the pre-string-pass source and compared the two builds
+line by line. The session key matches exactly; `SWIZZLE_KEY` differs by
+**one byte of offset**:
+
+    SWIZZLE_KEY = b'>JB\xcdT\xe4Y...'   |   b'JB\xcdT\xe4Y...r'
+
+So the pinned stream is shared by calls that do not always happen the same
+number of times -- `os.urandom` is called a variable number of times per
+build, so everything drawn after it is shifted. Giving `os.urandom` its own
+dedicated pinned stream did not change the residue (102 lines), so the
+shift is not the whole story either, and that change was reverted.
+
+What this rules out: the residue is not the swizzle key, and not the
+session key. What it confirms: several independent draw sites share one
+pinned stream, so any variability upstream shifts everything downstream.
+
 ### The residue is table ORDER, not table content
 
 Round 45 dumped the plaintext string tables from two pinned builds and
