@@ -160,6 +160,14 @@ be done call by call, which is the ~20-site and ~3,650-draw work list
 above. The flag was removed rather than shipped with a help text it could
 not honour.
 
+### The decoy stream is not the residue
+
+Round 44 gave the decoy names their own seeded RNG, on the theory that
+their values depended on how many draws earlier passes made. The residue
+between two pinned builds went **up** (102 -> 178 lines), so the theory was
+wrong and the change was reverted. Whatever the remaining 102 lines are,
+they are not the decoy stream position.
+
 ### The build timestamp is boundary-crossing after all
 
 Round 39 tried pinning `BUILD_TIMESTAMP` (an obvious-looking label) and the
