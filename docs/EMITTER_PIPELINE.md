@@ -160,6 +160,21 @@ be done call by call, which is the ~20-site and ~3,650-draw work list
 above. The flag was removed rather than shipped with a help text it could
 not honour.
 
+### Per-site streams made it worse too
+
+The obvious fix for the shared-stream coupling: give each draw site its
+own seeded generator, so a variable call count at one site cannot shift
+another. Implemented for the blob key, swizzle key, `s0_key` and `part_a`.
+The residue went **102 -> 178 lines**, the same direction as round 44's
+decoy change, and was reverted.
+
+Two independent stream-surgery attempts have now increased the residue.
+The likely reason is in the round-45 finding: the residue is table ORDER,
+and order follows the source text the string pass walks, which follows the
+payload parts -- so anything that changes a part's *length* reshuffles
+every index downstream, even when the value is stable. Pinning values is
+not the same as pinning ordering.
+
 ### The pinned stream advances by a variable amount
 
 Round 46 dumped the pre-string-pass source and compared the two builds
