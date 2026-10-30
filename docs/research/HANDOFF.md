@@ -64,7 +64,7 @@ Three times an instrument produced an alarming, specific, wrong answer:
 |---|---|---|
 | 102 | fixture | the input was not valid Python |
 | 132 | grep | the range ended three lines short of the code |
-| 135, 141 | reducers | pruning created the very failure they reported |
+| 135, 14a | reducers | pruning created the very failure they reported |
 
 **Before trusting a failure: prove the instrument works.** Compile the fixture,
 check the range, parse the reduced output.
