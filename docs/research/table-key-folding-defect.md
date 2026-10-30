@@ -230,3 +230,42 @@ definition's spelling shown side by side. That is the next step and it is small.
 
 Four rounds. The last two used the method the whole programme has been
 recommending, and the last two produced the only hard results.
+
+## Round 118: the dump clears both passes
+
+The one dump from round 117's plan:
+
+| stage | table value node type | truly undefined entries |
+|---|---|---|
+| after `obf_calls` | `Name` | 0 |
+| after `symbol_rename` | `Name` | **0** |
+
+**The two passes that the bisect implicated produce a valid table.** Their
+output has no entry naming an undefined function.
+
+So the bisect was reading a **precondition** rather than a cause: both passes are
+**necessary** for the defect to appear, but neither produces it. Something later
+breaks a table that is correct at this point.
+
+## Where that leaves it, honestly
+
+| claim | status |
+|---|---|
+| defect requires `obf_calls` | confirmed by control |
+| defect requires `symbol_rename` | confirmed by control |
+| their combined output is invalid | **refuted by dump** |
+| which pass breaks it afterwards | unknown |
+
+That is the fourth reading of this defect to be corrected. The bisect narrows the
+**preconditions** but not the **cause**, and the two are not the same thing.
+
+## Why the bisect misled
+
+Disabling a pass that is *necessary but early* removes the defect downstream,
+because the defect needs a table to exist at all. So "disabling X fixes it" does
+not mean "X breaks it" — it means "X is upstream of the break". I treated those
+as equivalent for a round.
+
+The right next step is a **forward** bisect rather than a backward one: dump the
+table after **every** pass and find the first stage where an entry stops matching
+its definition. The pass immediately before that stage is the cause.
