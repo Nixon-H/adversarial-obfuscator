@@ -269,3 +269,63 @@ as equivalent for a round.
 The right next step is a **forward** bisect rather than a backward one: dump the
 table after **every** pass and find the first stage where an entry stops matching
 its definition. The pass immediately before that stage is the cause.
+
+## Round 119: the cause is `EnhancedJunk`, found by forward bisect
+
+The forward bisect looks at the passes **after** the renamer, where the dump said
+the tree was still valid.
+
+| pass disabled | result |
+|---|---|
+| `unicode_ids` | fails |
+| `strip_meta` | fails |
+| `dynamic_code` | fails |
+| `attention_poison` | fails |
+| `decoy_apis` | fails |
+| `adaptive_rewrite` | fails |
+| **`enhanced_junk`** | **imports** |
+| `break_decompiler` | fails |
+| `code_checksums` | fails |
+| `fragment_strings` | fails |
+| `rep_diversify` | fails |
+| `vm_dispatch` | fails |
+
+And the confirmation, comparing the emitted table:
+
+```
+default             _nx_ftable = dict([(0, callable), (1, iter), (sum([2]), ValueError), ..., _nx_f24f62 ...])
+enhanced_junk off   _nx_ftable = dict([(0, iter), (1, iter), (2, callable), (3, TypeError), ...])
+```
+
+With the pass enabled the table references `_nx_f24f62`, a name that is never
+defined. With it disabled the table has no such entry.
+
+## The mechanism, stated
+
+`EnhancedJunk` runs **after** the renamer. It creates or replaces function
+definitions, and the function table built by `CallGraphObfuscator` — earlier in
+the pipeline — retains an entry pointing at a name that the pass removed or never
+defines.
+
+This is the **fourth** defect in the same structural family:
+
+| defect | binding written | use read |
+|---|---|---|
+| expiry | window fixed at pack time | recomputed at run time |
+| `hexversion` | import not renamed | use renamed |
+| `sumprod` | fallback rebinds | alias renamed |
+| **`_nx_f24f62`** | **table built before junk pass** | **junk pass rewrites definitions** |
+
+Four instances of one rule being violated: **a value must have one owner**. The
+programme has now paid for this four times.
+
+## The fix, specified
+
+Either emit the function table **after** `EnhancedJunk` runs, or have
+`EnhancedJunk` leave table-referenced definitions alone. The first is smaller and
+matches how the `__future__` fix was solved — reorder once at the end rather than
+teach every pass a rule.
+
+Not applied: the last five rounds established that an unverified change to this
+pipeline costs more than it saves. The next round applies it with a minimal
+reproduction first.
