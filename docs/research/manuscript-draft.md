@@ -205,11 +205,29 @@ The finding replicates on two independent benchmarks with no change in
 direction. That is the strongest form the claim can take without a public
 corpus, and the corpus remains the largest open gap.
 
-### 5.4 The attacker is not unique everywhere
+### 5.4 Identification is a singleton in every cell, and the counter is not blind
 
-`signdiff` returns two candidates at every k. Uniqueness is the evaluator's
-measure (24/24), not the attacker's. Reported separately because merging them
-would overstate the attacker.
+An earlier version of this section reported that `signdiff` returned two
+candidates at every build. The cause was a missing property input: the sibling
+it collided with differs only when the left argument is zero. One property
+fixed it.
+
+The audit now covers both families at all three build indices: **51 cells, zero
+non-singleton.** Every cell has exactly one candidate in the attacker's passing
+set, and the evaluator independently confirms that candidate is the target.
+
+A zero error rate is only informative if the instrument can register an error,
+so the audit is reported alongside a **fault control**. Injecting a boundary
+fault before obfuscation (`lo <= v < hi` → `lo <= v <= hi`) moves the counter
+from 9 to 11 probes. The counter responds to a semantic change, so the zero
+rate is a property of the benchmark rather than of an insensitive instrument.
+
+The fault control also revealed a hazard worth stating: the faulted target
+became behaviourally identical to a sibling, and the property set accepted the
+sibling in place of the target. Siblings must differ from the target under any
+plausible fault, not merely on the tested inputs. That is a task-design
+constraint this benchmark now satisfies — its thinnest separation is one
+property — but a corpus may not.
 
 ### 5.5 Authoring bound
 
@@ -277,12 +295,12 @@ specification an attacker uses is invariant to the transformation.
 |---|---|
 | defensible primary question | ✔ protocol v3 |
 | oracle-free attacker | ✔ guarded |
-| valid benchmark | ✔ 24/24 |
-| cost endpoint measured | ◐ bounded null, retracted and replaced |
+| valid benchmark | ✔ 51/51 cells, singleton identification |
+| cost endpoint measured | ✔ diversity null replicated; size effect monotone |
 | authoring bound | ✔ proxy |
 | negative results reported | ✔ documented |
 | **corpus scale** | ◐ 51 cells, but 5 real modules against a target of 12–15 projects |
-| **systematic novelty review** | ✘ targeted screen only |
+| **systematic novelty review** | ◐ documented screen, not a systematic review |
 | **analyst-minutes** | ✘ proxy only |
 
 **This is not submittable.** It is a skeleton in which every present number is
