@@ -298,3 +298,50 @@ Two rounds, two failures, both from editing without a minimal test. The thing
 that worked was isolation: run one pass on a ten-line source. That is the same
 technique that settled the `llvmgen` defect and the same one I keep reaching for
 too late.
+
+## Round 89: the renamer's import visitor, fixed for the aliased case only
+
+**The bug was one `if`.** The existing `visit_ImportFrom` read:
+
+```python
+for alias in node.names:
+    if alias.asname:                      # only aliased imports
+        alias.asname = self.get_new_name(alias.asname)
+```
+
+An unaliased `from sys import hexversion` therefore kept its original binding
+while every use of `hexversion` was renamed.
+
+**Fixed** by renaming the unaliased case too, via an explicit `asname`, and
+skipping `*` and reserved names. **Verified minimally**: a ten-line source that
+failed with `NameError` now runs and returns the right value.
+
+## Not fully fixed
+
+On the external module, `hexversion` is now resolved and a **different** name
+fails:
+
+```
+NameError: name 'isqrt' is not defined
+```
+
+The emitted import is `from math import prod as ..., comb as ..., isqrt as
+_nx_cda3e5, ...` — so the binding **was** renamed — but one use survives as bare
+`isqrt` inside `stop=isqrt(n)`. So a second inconsistency exists: `visit_Name`
+skips that use through an early return (protected-function or local-parameter
+handling), while the import was renamed anyway.
+
+So the fix moves the defect rather than removing it, on this module. It is kept
+because it is a strict improvement — one class of unbound name is gone — and
+because the residual is a *second* bug with its own cause, not a regression.
+
+## Status
+
+| name | binding renamed | uses renamed | result |
+|---|---|---|---|
+| `hexversion` | yes (after fix) | yes | **resolved** |
+| `isqrt` | yes | **no, one use** | **open** |
+
+The next step is the same technique that found this one: isolate
+`SymbolRenamer` on a call with a keyword argument whose value is an imported
+name, and see which branch of `visit_Name` returns early.

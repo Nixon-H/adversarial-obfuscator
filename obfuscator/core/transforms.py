@@ -427,9 +427,17 @@ class SymbolRenamer(ast.NodeTransformer):
                 alias.asname = self.get_new_name(alias.asname)
         return node
     def visit_ImportFrom(self, node):
+        # An import binds `asname` if present, otherwise `name`. Renaming only
+        # the aliased case left `from sys import hexversion` bound to the
+        # original name while every USE of it was renamed -- syntactically
+        # valid, compiles, NameError at import. Found with an external module.
         for alias in node.names:
             if alias.asname:
                 alias.asname = self.get_new_name(alias.asname)
+            elif alias.name != "*" and alias.name not in self.reserved:
+                new = self.get_new_name(alias.name)
+                if new != alias.name:
+                    alias.asname = new
         return node
     def visit_AsyncFunctionDef(self, node):
         # Same policy as FunctionDef (async methods preserve by default,
