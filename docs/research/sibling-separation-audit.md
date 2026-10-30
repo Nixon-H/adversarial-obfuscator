@@ -163,3 +163,43 @@ both families.
 
 Recorded so that "singleton" is not over-claimed: it is a property of these
 seventeen tasks at one build index each, verified on both benchmark families.
+
+## Round 66: complete across build indices — 51 cells, zero failures
+
+The previous round audited one build index per task and said so. Checking all
+three (k = 0, 2, 4) across both families:
+
+| benchmark | tasks | build indices | cells | non-singleton |
+|---|---|---|---|---|
+| synthetic | 9 | 3 | 27 | **0** |
+| real corpus | 8 | 3 | 24 | **0** |
+| **total** | **17** | **3** | **51** | **0** |
+
+Every cell has exactly one candidate in the attacker's passing set.
+
+## What the benchmark now claims, and with what support
+
+> On seventeen tasks across two families and three build indices each, a
+> specification-derived property set identifies exactly one candidate, and it is
+> the target, in all fifty-one cells.
+
+Support:
+
+- the **evaluator** decides identity independently of the attacker, on inputs
+  the attacker never sees;
+- the **attacker's** set is checked separately and is a singleton;
+- the **siblings** differ from the target by a median of two properties, with
+  the thinnest case now at one, after the `signdiff` fix;
+- the **counter** was shown to respond to a semantic change (9 → 11 probes on
+  an injected fault), so an all-zero error rate is not an insensitive counter.
+
+## What is still not claimed
+
+- **Understanding.** Identification is not comprehension; nothing here measures
+  whether an analyst could explain or modify the recovered function.
+- **Generality.** Seventeen tasks, one author, one obfuscation configuration.
+- **Independence.** The corpus tasks come from this repository, so their
+  specifications were written by the same person who chose them.
+
+The benchmark is internally consistent and externally limited, and the document
+separates those two statements.
