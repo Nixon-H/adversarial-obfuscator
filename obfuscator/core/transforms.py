@@ -53,9 +53,12 @@ class TypeHintStripper(ast.NodeTransformer):
             node.body = [ast.Pass()]
         return node
     def visit_Import(self, node):
-        new_names = [n for n in node.names if n.name != 'typing']
-        if not new_names: return None
-        node.names = new_names
+        # `import typing` is NOT stripped. Unlike `from typing import X`, where
+        # the name can be an annotation the stripper removes, the MODULE form
+        # binds `typing` and its uses are attribute accesses (`typing.Generic`)
+        # that nothing removes. Dropping the import left seventeen references to
+        # `typing` in urllib3/_collections.py, and the whole module raised
+        # NameError. Ugly-but-correct beats tidy-but-broken.
         return node
     def visit_ImportFrom(self, node):
         if node.module == 'typing':

@@ -91,3 +91,56 @@ unchanged. One command distinguishes the three: print the emitted line 3 and whe
 
 `requests` still fails on `urllib3` not being importable, and the gate still writes one
 package into one temp root. Neither is addressed.
+
+## Round 208: the cause was the annotation stripper, not the renamer
+
+The one command:
+
+```
+T import 'typing' reserved_at_visit=...      <- never printed
+T 'import typing' in output: False
+T line 3: _nx_ftable = dict([(0, _nx_bi_NotImplementedError)])
+```
+
+**`visit_Import` never saw `import typing`** — the statement was already gone by the time
+the renamer ran. `TypeHintStripper.visit_Import` removed it:
+
+```python
+new_names = [n for n in node.names if n.name != 'typing']
+```
+
+That is right for `from typing import List`, where the name is an annotation the stripper
+also removes. It is wrong for the **module** form: `import typing` binds the module, its
+uses are attribute accesses nothing removes, and seventeen of them remained in
+`_collections.py`.
+
+## The fix
+
+`import typing` is no longer stripped. Twenty minutes of round 207 went into the renamer
+for a statement that never reached it.
+
+## Result
+
+| package | before | after |
+|---|---|---|
+| `urllib3/_collections` | `NameError: _nx_6a5df9` | **`NameError: _nixon_ǪৼĺႭᛎ`** — a new layer |
+| `attr/_make` | imports | imports |
+| `more_itertools/recipes` | imports | imports |
+
+The `typing` defect is closed and the module moves to a different undefined name — this
+one **unicode**, which is `get_random_var_name`'s output rather than the md5 form. A
+different producer, so a different mechanism.
+
+## What round 207 got wrong
+
+Round 207 extended the renamer's pre-pass to reserve import bindings, which was **correct
+and irrelevant**: the import was already deleted. The instrumentation would have shown
+that in one command, and it did — in this round, not the last.
+
+That is the fifth time in this programme that a fix addressed the component the last
+experiment had implicated rather than the component the artefact showed.
+
+## Status
+
+`typing` closed. `urllib3/_collections` has a second layer, unicode-named, not reduced.
+`requests` still blocked on packaging. Neither is in the gate.
