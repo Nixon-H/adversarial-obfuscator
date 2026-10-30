@@ -42,9 +42,19 @@ from scripts.transfer.real_tasks import module_source as real_source  # noqa: E4
 from scripts.transfer.tasks import TASKS as SYNTH_TASKS  # noqa: E402
 
 
+STRESS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "stress.py")
+
+# Properties for the stress module: the constructs it exercises have no
+# task-level specification, so the gate only requires that the artefact
+# compiles and imports.
+STRESS_PROPS = [lambda f: True]
+
+
 def _modules():
     """(label, source, task_props_or_None) for every corpus module."""
     out = []
+    with open(STRESS, encoding="utf-8") as f:
+        out.append(("stress/constructs", f.read(), STRESS_PROPS))
     for name, t in SYNTH_TASKS.items():
         out.append(("synthetic/%s" % name, t["target"] + "\n" + "\n".join(t["siblings"]), t["props"]))
     for name in REAL_TASKS:
@@ -102,9 +112,27 @@ def main():
     args = ap.parse_args()
 
     failures = []
+    invalid_inputs = []
     checked = 0
+    modules = _modules()
+
+    # Check the fixtures first. An input that does not compile is not a test of
+    # the obfuscator, and blaming the tool for it is the error that produced a
+    # false defect report in round 102.
+    for label, src, _props in modules:
+        try:
+            compile(src, "<fixture %s>" % label, "exec")
+        except SyntaxError as exc:
+            invalid_inputs.append("%s: fixture is not valid Python: line %s: %s"
+                                  % (label, exc.lineno, exc.msg))
+    if invalid_inputs:
+        print("INVALID FIXTURES (fix these before reading the results):")
+        for msg in invalid_inputs:
+            print("  ", msg)
+        print()
+
     with tempfile.TemporaryDirectory(prefix="nxk_gate_") as workdir:
-        for label, src, props in _modules():
+        for label, src, props in modules:
             for k in range(args.variants):
                 try:
                     code = generate_variant(src, k, {"master_seed": 4242})
@@ -116,10 +144,11 @@ def main():
                 failures.extend(check_one(label, code, props, k, workdir))
 
     print("artefacts checked: %d" % checked)
+    print("invalid fixtures: %d" % len(invalid_inputs))
     print("failures: %d" % len(failures))
     for f in failures:
         print("  FAIL", f)
-    return 1 if failures else 0
+    return 1 if (failures or invalid_inputs) else 0
 
 
 if __name__ == "__main__":
