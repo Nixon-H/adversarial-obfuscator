@@ -63,3 +63,48 @@ reverted over, so it needs the same care: three renamer tests plus `_make.py`.
 
 Five layers, four fixed, and the fifth is a different family again — ordinary
 expression scoping rather than class attributes.
+
+## Round 189: the narrow fix is not narrow
+
+Attempted the change round 188 described — visit the default value while still
+skipping the parameter name:
+
+```python
+if node.default is not None:
+    node.default = self.visit(node.default)
+return node
+```
+
+Result: **8 failed, 53 passed** across the renamer, preserve and diversity tests.
+
+**Reverted.** The recursion re-enters `visit_arg` for nested defaults and re-visits
+nodes the traversal has already handled, and the renamer's mapping is not idempotent --
+a second visit of an already-renamed `Name` renames it again.
+
+## What that establishes
+
+The fix is not "call visit on the default". It needs the default visited **exactly
+once**, in the enclosing scope, with the mapping applied once — which is the same
+**one owner per value** constraint that four earlier defects turned on, now applying to
+traversal order rather than to rename consistency.
+
+The precise shape would be to collect `arg.default` nodes during `visit_FunctionDef`'s
+own pass, or to mark them as visited. Both are larger than the two-line change round
+188 proposed, and round 188's caution was right for the wrong reason: not that the
+change is risky to contract tests, but that it double-visits.
+
+## Status
+
+Open. One attempt, eight failures, reverted. `_make.py` remains blocked on this layer
+and the other five modules are unaffected.
+
+## The count across the programme
+
+| kind | count |
+|---|---|
+| fixes that worked first try | 12 |
+| fixes reverted | 4 |
+| causes identified without a fix | 2 |
+
+The reverted four are all in the rename machinery, and each was reverted because a
+guard or traversal assumption was invisible from the call site being changed.
