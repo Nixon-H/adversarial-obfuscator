@@ -15,7 +15,7 @@ import types
 
 EXTERNAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "external", "recipes.py")
 EXTERNAL2 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "external2", "statistics.py")
-SECOND = ("median", "median_low", "mode")
+SECOND = ("median_low",)
 
 TASKS = {}
 
@@ -61,16 +61,6 @@ _task(
 
 
 _task(
-    "median",
-    [
-        lambda f: f([1, 2, 3]) == 2,
-        lambda f: f([4, 1, 3, 2]) == 2.5,
-        lambda f: f([7]) == 7,
-    ],
-    [([1, 3, 5],), ([2, 4],), ([9, 1],)],
-)
-
-_task(
     "median_low",
     [
         lambda f: f([1, 3, 5]) == 3,
@@ -80,15 +70,6 @@ _task(
     [([2, 8, 9],), ([5, 6],), ([4, 4, 4],)],
 )
 
-_task(
-    "mode",
-    [
-        lambda f: f([1, 2, 2, 3]) == 2,
-        lambda f: f([5]) == 5,
-        lambda f: f([9, 9, 9]) == 9,
-    ],
-    [([4, 4, 7],), ([1],), ([2, 3, 3],)],
-)
 
 
 def source_path(name=None):

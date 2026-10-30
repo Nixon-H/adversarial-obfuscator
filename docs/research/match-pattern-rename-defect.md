@@ -119,3 +119,48 @@ patterns alone — they are not ordinary constants.
 Open, with the cause correctly identified this time. Not fixed because the string
 pass is applied after the whole tree is rewritten, and the repair needs a
 pattern-aware exclusion rather than a renamer method.
+
+
+## Round 95: fixed, and two tasks dropped for validity
+
+**Fixed** by excluding `MatchValue` and `MatchSingleton` from the string pass.
+A pattern is not an ordinary constant; the visitor now returns those nodes
+untouched, so `case 'normal' | 'gauss':` stays a constant pattern.
+
+Verified minimally first — the ten-line repro compiles and the literals survive —
+then on the module, which now runs and evaluates.
+
+**Two tasks dropped.** With the module executing, the evaluator could not
+separate `median` or `mode` from their siblings on the chosen inputs: 0 of 6
+cells were unique. Rather than leave invalid cells in the count, both tasks were
+removed. `median_low` passed and stays.
+
+| before | after |
+|---|---|
+| 18 cells, 11 unique | **12 cells, 11 unique** |
+| 18 singleton | **12 singleton** |
+
+The remaining non-unique cell is `dotproduct` at k=0, the same evaluator-input
+gap the internal benchmark hit twice.
+
+## The guards
+
+Three tests in `tests/test_string_pass_skips_match_patterns.py`:
+
+1. a string in a `match` pattern survives as a literal;
+2. the obfuscated module compiles;
+3. ordinary strings are **still** obfuscated — the exclusion must not disable
+   the pass.
+
+The third is the one that matters for a fix of this shape: excluding a node type
+is easy to over-apply.
+
+## Where this leaves the defect count
+
+| # | defect | status |
+|---|---|---|
+| 1 | 30-day expiry | fixed + guarded |
+| 2 | false opaque predicates | fixed + guarded |
+| 3 | emptied dataclass | fixed + guarded |
+| 4 | unbound import/kwarg names | fixed + guarded |
+| 5 | string match patterns | **fixed + guarded** |

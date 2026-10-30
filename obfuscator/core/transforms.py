@@ -537,6 +537,23 @@ class StringLiteralObfuscator(ast.NodeTransformer):
             node.left = self.visit(left)
             return node
         return self.generic_visit(node)
+    def visit_MatchValue(self, node):
+        """Never rewrite a string that is a match PATTERN.
+
+        A constant pattern matches a value; replace the constant with an encoded
+        lookup and the pattern becomes a CAPTURE, binding a name instead. Two
+        alternatives then bind different names and CPython rejects the module:
+
+            case 'normal' | 'gauss':     ->  case _n(A) | _n(B):  SyntaxError
+
+        match patterns are not ordinary constants, so they are excluded here
+        rather than repaired later.
+        """
+        return node
+
+    def visit_MatchSingleton(self, node):
+        return node
+
     def visit_Constant(self, node):
         if isinstance(node.value, str) and len(node.value) >= 2 and len(node.value) <= 200000:
             if node.value.startswith(self._part_prefix): return node
