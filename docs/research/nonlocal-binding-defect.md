@@ -61,3 +61,53 @@ source that uses `nonlocal` at all.
 The four modules that pass are in the gate; the two that fail are not, because a
 fixture that cannot compile inside the gate would report a failure unrelated to the
 obfuscator until the cause is understood — the same judgement as round 149.
+
+## Round 175: reduced to one line, and the cause is a builtin again
+
+The structure-preserving reducer (parse after every step, candidate must parse **and**
+fail with `nonlocal`) reduced `_make.py` from 88 top-level statements to **one**,
+156 lines, still failing. The offending line:
+
+```python
+        nonlocal hash
+```
+
+**`hash` is a builtin.** `nonlocal hash` is legal only because an enclosing scope
+shadows it. The renamer rewrote the declaration but not the shadowing assignment, so
+the declaration named a binding no scope provides.
+
+## The fix
+
+`visit_Nonlocal` and `visit_Global` now leave builtin names alone and reserve them.
+That is the conservative half of the repair: it stops the declaration from being
+broken without needing to know whether the shadowing assignment was renamed.
+
+Third instance of the same family — a builtin treated as a renameable bindable:
+
+| round | site | symptom |
+|---|---|---|
+| 143 | function table values | `NameError` at import |
+| 174 | `nonlocal` declaration | `SyntaxError` |
+| — | (the fix for 143 = emit builtins as attribute access) | |
+
+## What the fix did, and did not, achieve
+
+| module | before | after |
+|---|---|---|
+| `_cmp` | imports | imports |
+| `_funcs` | imports | imports |
+| `_make` | `SyntaxError: nonlocal` | **`NameError: NamedTuple`** |
+| `_next_gen` | `SyntaxError: nonlocal` | **`SyntaxError: nonlocal`** |
+
+`_make` moved to a **different** failure — `NamedTuple` undefined, which is the
+import-reservation family again, not the same defect. `_next_gen` is unchanged,
+so its `nonlocal` failure has another cause.
+
+**Both are new information and neither is a fix.** The defect is not closed; it is
+narrowed, and two of its four modules now pass.
+
+## Status
+
+Open. The specific `nonlocal hash` cause is fixed and should not recur. What remains
+in `_next_gen` is a different `nonlocal` desync not yet reduced, and `_make` now
+exposes an undefined import that was previously masked.

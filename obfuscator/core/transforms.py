@@ -317,6 +317,7 @@ class SymbolRenamer(ast.NodeTransformer):
         self.generic_visit(node)
         self._class_depth = _prev_depth
         return node
+
     def visit_Name(self, node):
         if self.current_function in self.protected_functions:
             return node
@@ -420,12 +421,28 @@ class SymbolRenamer(ast.NodeTransformer):
     def visit_Nonlocal(self, node):
         if self.current_function in self.protected_functions:
             return node
-        node.names = [self.get_new_name(n) for n in node.names]
+        # A `nonlocal` naming a BUILTIN must keep its spelling. `nonlocal hash`
+        # is legal only because an enclosing scope shadows `hash`; renaming the
+        # declaration without renaming that shadowing binding produces
+        # "no binding for nonlocal '_nx_...'" and the module will not compile.
+        # Same family as the builtin names in the function table (round 143): a
+        # builtin is not a binding a renamer may invent one for.
+        kept = set()
+        for n in node.names:
+            if hasattr(builtins, n):
+                kept.add(n)
+                self.reserved.add(n)
+        node.names = [n if n in kept else self.get_new_name(n) for n in node.names]
         return node
     def visit_Global(self, node):
         if self.current_function in self.protected_functions:
             return node
-        node.names = [self.get_new_name(n) for n in node.names]
+        kept = set()
+        for n in node.names:
+            if hasattr(builtins, n):
+                kept.add(n)
+                self.reserved.add(n)
+        node.names = [n if n in kept else self.get_new_name(n) for n in node.names]
         return node
     def visit_Import(self, node):
         """Reserve plain imports the same way as `from` imports.
