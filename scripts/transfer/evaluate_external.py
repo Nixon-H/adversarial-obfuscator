@@ -30,8 +30,21 @@ def _candidates(code, seed):
     spec = importlib.util.spec_from_file_location("ext_%d" % seed, path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    # Exclude CLASSES. `IndexError([1, 2], [3, 4])` constructs successfully and
+    # returns an exception instance, which compared equal to nothing but also did
+    # not raise -- so every exception class in an obfuscated module counted as a
+    # candidate that "matched" the target's evaluator inputs, and the uniqueness
+    # gate reported false duplicates. A function is what the task asks for.
     return {n: getattr(mod, n) for n in dir(mod)
-            if callable(getattr(mod, n)) and not n.startswith("__")}
+            if callable(getattr(mod, n)) and not n.startswith("__")
+            and not isinstance(getattr(mod, n), type)
+            # And exclude PRIVATE helpers. `_sumprod` is bound to the same
+            # implementation as the public `dotproduct`, so it matched the
+            # target's evaluator inputs exactly and the uniqueness gate reported
+            # a duplicate -- correctly, but for a task that cannot be unique
+            # while an underscore alias counts as a candidate. Private names are
+            # implementation detail, not API a caller could pick.
+            and not n.startswith("_")}
 
 
 def main():

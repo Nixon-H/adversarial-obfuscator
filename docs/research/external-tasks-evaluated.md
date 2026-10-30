@@ -52,3 +52,36 @@ The paper's §4.1 says the benchmark is 17 hand-built tasks. It can now say that
 a third-party module passes the same gates at 8 of 9 cells, which is the
 difference between "a benchmark we built" and "a benchmark that has been
 exercised on code we did not write".
+
+## Round 171: 12 of 12, and the evaluator bug that was hiding behind the one bad cell
+
+`dotproduct` at build index 0 had failed the uniqueness gate since round 91. It is
+now unique, and the fix was **not** a separating input.
+
+**Two evaluator defects, found by looking at the candidate list:**
+
+1. **Classes counted as candidates.** `IndexError([1, 2], [3, 4])` constructs
+   successfully and returns an exception instance — it does not raise, so every
+   exception class in the obfuscated module "matched" the target's inputs.
+2. **Private aliases counted as candidates.** `_sumprod` is bound to the *same
+   implementation* as the public `dotproduct`, so it matched exactly. The gate was
+   right to report a duplicate and wrong to be asked the question: a task cannot be
+   unique while an underscore alias is a candidate a caller could pick.
+
+Excluding classes and underscore-prefixed names:
+
+```
+cells 12  evaluator-unique 12  attacker-singleton 12
+```
+
+## What this says about the gate
+
+The uniqueness gate was doing its job for twelve rounds: it reported a cell it could
+not score, and every attempt to "fix" it by widening the evaluator inputs was
+treating a **measurement** bug as a **task** bug. The output was wrong, not the
+inputs.
+
+The lesson is the programme's own: **when a check reports a problem, inspect the
+check's own assumptions before changing the thing it is measuring.** Round 135's
+invalid reducer, round 141's deleted `def`, and this round's class candidates are
+three instances of the instrument being wrong rather than the object.
