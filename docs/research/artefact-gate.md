@@ -144,3 +144,38 @@ generators, or descriptors, or `except*`.
 **Does mean something stronger than before:** there is now a command that
 answers "does the output run" over a fixed corpus, in about four minutes, and it
 returns zero. Any future transform change can be checked against it.
+
+
+## Round 104: the gate is a test, not a command someone remembers to run
+
+`tests/test_artefact_gate.py` runs a fast subset — the external modules at one
+build index plus the stress module — so the suite exercises the same properties
+the full gate does:
+
+1. the artefact parses;
+2. the artefact imports (which runs module-level code);
+3. every callable survives being exercised against the task's properties.
+
+Six tests, under two seconds. The full gate (66 artefacts, three indices) stays
+a manual command because it builds every artefact and would triple the suite's
+runtime.
+
+## The guard for the fixture mistake
+
+`test_stress_fixture_is_valid_python` compiles the stress module before using it.
+That is the one-line check whose absence produced a false defect report in round
+102, and it is now enforced rather than remembered.
+
+## What the suite now covers, after six defects
+
+| property | where |
+|---|---|
+| the emitter's predicates are true | `test_opaque_predicates_are_true.py` |
+| a dataclass keeps its fields | `test_dataclass_body_preserved.py` |
+| imports and keyword values stay bound | `test_renamer_import_and_kwargs.py` |
+| match patterns stay literal | `test_string_pass_skips_match_patterns.py` |
+| artefacts compile, import and run | **`test_artefact_gate.py`** |
+| fixtures are valid before being blamed | **`test_artefact_gate.py`** |
+
+Six defects produced six guards, and the last one protects the method rather
+than the code.

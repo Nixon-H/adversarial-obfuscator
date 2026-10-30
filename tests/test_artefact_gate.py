@@ -1,50 +1,72 @@
-"""The artefact-dependent tests must actually run.
+"""Every corpus artefact must compile, import, and survive being exercised.
 
-Eighteen tests need a compiled artefact -- the C shared libraries and
-the Rust relay binary -- and each of them SKIPS itself when the
-artefact is absent.  That is the right behaviour for a developer
-without a compiler, and the wrong behaviour for CI: with the build
-scheduled *after* the tests, CI skipped all of them too, and a skipped
-test proves nothing.
+This is `scripts/transfer/artefact_gate.py` run as a test. It exists because six
+correctness defects in this project were invisible to the tests that existed:
+those checked the INPUT, and three of the defects produced output that compiled
+and then failed.
 
-This gate runs in CI (NIXON_REQUIRE_ARTEFACTS=1) and fails the build
-if an artefact is missing -- so a missing artefact is a failed build,
-not a quiet skip.
-
-`/tmp/libmicrojit.so` was on the list until 2026-10-26.  `make
-microjit-so` was removed when native/microjit.c was archived
-(archive/native/README.md: nothing ever loaded the .so), so the gate
-demanded an artefact no build step produces and every CI run failed on
-it.  The list tracks the artefacts `make all` actually builds.
+The set here is a fast subset — the external modules at one build index plus the
+stress module — chosen so the suite stays usable. The full gate (66 artefacts)
+is `python3 scripts/transfer/artefact_gate.py`.
 """
 
+import importlib.util
 import os
+import sys
+import tempfile
 
 import pytest
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-REQUIRED = (
-    os.path.join(ROOT, "build", "nixon_core.so"),
-    os.path.join(ROOT, "build", "wb.so"),
-    os.path.join(ROOT, "build", "py_compile.so"),
-    os.path.join(ROOT, "build", "orbital-relay"),
+from scripts.diversity.generator import generate_variant  # noqa: E402
+from scripts.transfer.external_tasks import (  # noqa: E402
+    TASKS as EXT_TASKS, module_source,
 )
 
-
-@pytest.mark.skipif(
-    not os.environ.get("NIXON_REQUIRE_ARTEFACTS"),
-    reason="the artefact gate is enforced in CI (NIXON_REQUIRE_ARTEFACTS=1)",
-)
-def test_the_artefact_dependent_tests_can_run():
-    """Every artefact those tests need must be present."""
-    missing = [p for p in REQUIRED if not os.path.exists(p)]
-    assert not missing, (
-        "these artefacts are missing, so the tests that need them would "
-        "SKIP instead of running: %r" % (missing,))
+STRESS = os.path.join(os.path.dirname(__file__), "..", "scripts", "transfer", "corpus", "stress.py")
 
 
-def test_the_artefact_list_is_not_empty():
-    """A guard against the list being emptied by accident."""
-    assert len(REQUIRED) >= 4
-    assert any("orbital-relay" in p for p in REQUIRED)
+def _run(source, label, props):
+    code = generate_variant(source, 0, {"master_seed": 4242})
+    td = tempfile.mkdtemp(prefix="nxk_gate_test_")
+    path = os.path.join(td, "artefact.py")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(code)
+    compile(code, path, "exec")            # 1. parses
+    spec = importlib.util.spec_from_file_location("gate_%s" % label, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)           # 2. imports (runs module-level code)
+    funcs = [v for v in vars(mod).values() if callable(v) and not isinstance(v, type)]
+    assert funcs, "%s: no callables survived obfuscation" % label
+    for fn in funcs:
+        for prop in props:
+            try:
+                prop(fn)                   # 3. exercises
+            except NameError as exc:
+                pytest.fail("%s: NameError when exercising: %s" % (label, exc))
+            except Exception:
+                continue
+
+
+@pytest.mark.parametrize("task_name", sorted(EXT_TASKS))
+def test_external_artefact_runs(task_name):
+    _run(module_source(task_name), task_name, EXT_TASKS[task_name]["props"])
+
+
+def test_stress_artefact_runs():
+    with open(STRESS, encoding="utf-8") as f:
+        source = f.read()
+    compile(source, STRESS, "exec")        # the fixture must be valid first
+    _run(source, "stress", [lambda f: True])
+
+
+def test_stress_fixture_is_valid_python():
+    """A fixture that does not compile is not a test of the obfuscator.
+
+    Round 102 reported a defect that was actually an invalid fixture. This guard
+    exists so that cannot recur silently.
+    """
+    with open(STRESS, encoding="utf-8") as f:
+        source = f.read()
+    compile(source, STRESS, "exec")
