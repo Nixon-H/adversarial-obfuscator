@@ -64,7 +64,7 @@ def _modules():
         out.append(("external3/strutils", f.read(), STRESS_PROPS))
     with open(ITERUTILS, encoding="utf-8") as f:
         out.append(("bulk/iterutils", f.read(), STRESS_PROPS))
-    for pkg_name in ("more_itertools",):
+    for pkg_name in ("more_itertools", "attr"):
         pkg_path = os.path.join(PKG_DIR, pkg_name)
         for fn in sorted(os.listdir(pkg_path)):
             if fn.endswith(".py") and fn != "__init__.py":
