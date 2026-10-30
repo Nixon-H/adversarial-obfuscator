@@ -427,22 +427,29 @@ class SymbolRenamer(ast.NodeTransformer):
         # "no binding for nonlocal '_nx_...'" and the module will not compile.
         # Same family as the builtin names in the function table (round 143): a
         # builtin is not a binding a renamer may invent one for.
+        # A `nonlocal` target must match a binding in an ENCLOSING scope, and
+        # this renamer does not rename parameters -- so renaming the declaration
+        # alone desynchronises the pair ("no binding for nonlocal"). Leaving the
+        # declaration alone is correct, but reserving the name here is too late:
+        # `visit_Name` may already have renamed a USE inside the same function.
+        # That ordering dependency is why this is a partial fix and why
+        # `_next_gen` still fails in the gate.
         kept = set()
         for n in node.names:
-            if hasattr(builtins, n):
+            if hasattr(builtins, n) or n in self.reserved:
                 kept.add(n)
-                self.reserved.add(n)
         node.names = [n if n in kept else self.get_new_name(n) for n in node.names]
         return node
     def visit_Global(self, node):
         if self.current_function in self.protected_functions:
             return node
-        kept = set()
-        for n in node.names:
-            if hasattr(builtins, n):
-                kept.add(n)
-                self.reserved.add(n)
-        node.names = [n if n in kept else self.get_new_name(n) for n in node.names]
+        # Global targets MUST be renamed: module-level names are renamed, so the
+        # declaration has to follow or `global COUNT` stops matching `COUNT = 0`.
+        # That is the opposite of `nonlocal`, whose targets are parameters and
+        # class attributes that this renamer deliberately leaves alone.
+        import builtins
+        node.names = [
+            n if hasattr(builtins, n) else self.get_new_name(n) for n in node.names]
         return node
     def visit_Import(self, node):
         """Reserve plain imports the same way as `from` imports.

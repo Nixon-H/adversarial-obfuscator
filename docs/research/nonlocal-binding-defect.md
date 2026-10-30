@@ -111,3 +111,50 @@ narrowed, and two of its four modules now pass.
 Open. The specific `nonlocal hash` cause is fixed and should not recur. What remains
 in `_next_gen` is a different `nonlocal` desync not yet reduced, and `_make` now
 exposes an undefined import that was previously masked.
+
+## Round 176: the second residual is an ordering dependency, not a missing rule
+
+Reduced `_next_gen.py` to one statement, 344 lines, still failing. The line:
+
+```python
+nonlocal frozen, on_setattr
+```
+
+Neither is a builtin, so round 175's fix does not apply. They are **parameters of an
+enclosing function**, and this renamer never renames parameters. The declaration was
+renamed and its target was not — the general case of the same desync.
+
+**A fix was attempted and reverted.** Leaving `nonlocal` targets alone entirely:
+
+```
+_next_gen   imports     <- the fix worked here
+test_closure   SyntaxError: no binding for nonlocal 'n'
+```
+
+The declaration was preserved but `n += 1` inside the same function had **already
+been renamed** by `visit_Name`, because the traversal reaches the use before the
+declaration. Reserving the name inside `visit_Nonlocal` is too late.
+
+Reverted to the round 175 behaviour. All 54 renamer and preservation tests pass.
+
+## What this establishes
+
+The rule is not "don't rename `nonlocal` targets" — that is necessary and
+insufficient. It is **"know every name a scope declares before renaming any use
+inside it"**, which is a pre-pass over each function's `nonlocal`/`global`
+declarations, and that is a larger change than a round can verify.
+
+That also explains why `_make.py`'s `nonlocal hash` was fixable: a builtin needs no
+pre-pass, because its answer is always "leave it alone".
+
+## Where the defect stands
+
+| module | status |
+|---|---|
+| `_cmp`, `_funcs`, `_config`, `_compat`, `_next_gen` (after 175) | import |
+| `_make` | fails differently — `NamedTuple` undefined, the import family |
+| `_next_gen` (reverted) | fails — `no binding for nonlocal` |
+
+The estimate in round 175 that `_next_gen` "has another cause" was right, and the
+cause is structural: renaming happens in one pass, scope declarations are not known
+until it has already started.
