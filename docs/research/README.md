@@ -120,7 +120,7 @@ corrected rather than deleted:
 Five of the eight were my own instrument failing, not the system under test.
 That is the ratio this programme should be judged on: **the checks caught the
 checker more often than they caught the product**, and the product still yielded
-seven defects.
+nine defects.
 
 ---
 

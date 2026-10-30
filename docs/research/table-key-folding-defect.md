@@ -1135,7 +1135,7 @@ Two seeds, two build indices, all four corpus families.
 
 | check | result |
 |---|---|
-| artefact gate (2 seeds × 2 indices) | **96 artefacts, 0 failures** |
+| artefact gate (2 seeds × 2 indices) | **96 artefacts, 0 failures** (round 144; the corpus has since grown to 104) |
 | renamer semantics, diversity, golden, gate tests | **48 passed** |
 
 ## The three attempts, and what each taught

@@ -48,8 +48,12 @@ Option 1 is correct and was not done here.
 
 ## The honest status of the corpus
 
-The gate covers **three external sources, all single-file**, plus the stress
-fixture. It has found four defects in them. It is a **real** corpus and a **narrow**
+**Later:** round 148 vendored a package and round 150 taught the gate to check it,
+so the count below was superseded within three rounds. It is kept because it records
+what was true when measured, and the section after it records the fix.
+
+At the time of writing the gate covered **three external sources, all single-file**,
+plus the stress fixture. It has found four defects in them. It is a **real** corpus and a **narrow**
 one, and the narrowness is structural rather than incidental: the sources that are
 easiest to ingest are also the least like application code.
 
