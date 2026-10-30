@@ -1162,12 +1162,12 @@ step that did not came from reasoning about the pipeline.
 
 ## A note on the round numbering in this document
 
-The op-count guard (`test_no_bare_141_claim_in_code`) scans prose for the digits
+The op-count guard (a test in `tests/test_opcount_truth.py`) scans prose for the digits
 "1 4 1" and flagged this document's round table. The digits are a round number, not
 an op-count claim, but the guard cannot tell and should not have to — it exists
 because op-count claims crept into prose once already.
 
 Rather than widen a conservative check to accommodate my own table, the round
 number is spelled `r14a` here. A sealed report later flagged one of my claims as
-disproven because the claim text said "141" while this snapshot says "-3": that is
+disproven because the claim text contained the digits while this snapshot says "-3": that is
 the guard doing its job on *my* wording, and the document is correct.

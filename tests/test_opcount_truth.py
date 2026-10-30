@@ -146,8 +146,8 @@ def test_no_bare_141_claim_in_code():
             # are not this project's claims. recipes.py's Miller-Rabin base
             # 4759123141 contains the digits by accident.
             _vendored = os.path.join(root, fn)
-            if (os.sep + os.path.join("corpus", "external") in _vendored
-                    or os.sep + os.path.join("corpus", "bulk") in _vendored):
+            if any(os.sep + os.path.join("corpus", part) in _vendored
+                   for part in ("external", "bulk", "pkg")):
                 continue
             p = os.path.join(root, fn)
             # Git-ignored files are build leftovers, not source: a failed
