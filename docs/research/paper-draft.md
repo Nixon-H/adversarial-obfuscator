@@ -307,10 +307,18 @@ own rules, and `attr/__init__.py`'s `from ._cmp import cmp_using` then fails.
 
 Every other defect could be repaired inside the module being transformed. This one cannot:
 the export contract exists **only in another file**, which a per-module transform never
-sees. The three possible exits are all product decisions rather than fixes — stop renaming
-public module-level functions (giving up most identifier obfuscation), add a whole-program
-pass over every module in a package, or require `__all__` and refuse to obfuscate without
-it.
+sees. The three possible exits are all product decisions rather than fixes, and each was
+measured against the existing suite:
+
+| exit | what it costs |
+|---|---|
+| preserve public names when `__all__` is absent | **breaks the documented contract** that a module without `__all__` is left alone — `test_no_all_unchanged_behavior` fails |
+| rewrite the importer too | a whole-program pass over every module in a package; a redesign of the transform, not a repair |
+| require `__all__` and refuse without it | unusable: most packages declare none |
+
+The first was implemented and reverted; the other two are bounded by the architecture and by
+usability respectively. **No test wants any of them**, which is the operational definition of
+a decision rather than a bug.
 
 **This is worth stating because the current behaviour picks none of them.** A module with
 public functions and no `__all__` is obfuscated into something that cannot be imported by
