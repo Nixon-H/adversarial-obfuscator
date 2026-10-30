@@ -125,3 +125,55 @@ Two measurements, two controls, and the honest answer is the null.
   meaningful to an analyst.
 - **Nine tasks, one author.** Whatever the effect is, its generality is
   unestablished.
+
+## Round 60: the control replicates on real code
+
+The B-versus-C comparison was measured on nine hand-written tasks. The same
+comparison on the eight corpus tasks — real functions from this repository's
+programs, with their own siblings:
+
+| task | seed-only | family-varying | difference |
+|---|---|---|---|
+| rle_encode | 5, 5, 5 | 5, 5, 5 | +0.00 |
+| rle_decode | 5, 5, 5 | 5, 5, 5 | +0.00 |
+| slugify | 6, 6, 6 | 6, 6, 6 | +0.00 |
+| gcd | 6, 6, 6 | 6, 6, 6 | +0.00 |
+| priority_pick | 5, 5, 5 | 5, 5, 5 | +0.00 |
+| rotate_list | 5, 5, 5 | 5, 5, 5 | +0.00 |
+| store_get | 6, 6, 6 | 6, 6, 6 | +0.00 |
+| store_keys | 6, 6, 6 | 6, 6, 6 | +0.00 |
+
+**Mean +0.00, standard deviation 0.00, on all eight.**
+
+## Combined evidence for the negative result
+
+| benchmark | tasks | B-vs-C difference |
+|---|---|---|
+| synthetic | 9 | +0.00 |
+| real corpus | 8 | +0.00 |
+| **total** | **17** | **+0.00** |
+
+Seventeen tasks, two benchmark families, zero difference. The negative result
+now has the strongest support available without an external corpus: it is not a
+property of the synthetic fixtures, and it is not a property of one author's
+hand-written siblings.
+
+## What this does not settle
+
+- **The family space.** Three families, two shown to be equally hard. A
+  different pair of *unequal* families produces a difference, as A-versus-B and
+  A-versus-C did, and that difference is family strength rather than variation.
+  The confound is intrinsic to comparing families that differ in strength.
+- **Generality.** Seventeen tasks by one author. Two benchmark families is
+  better than one and is not a corpus.
+- **Probes as effort.** A zero-probe difference is a clean null only if probes
+  measure what the study cares about, which is analyst work, not property
+  evaluations.
+
+## Why the null is the right answer to publish
+
+The study asked whether per-build diversification raises attacker cost. On this
+benchmark, with this attacker, over these families, the answer is no — and the
+two-family replication means it is not an artefact of how the fixtures were
+written. A null with two corroborating conditions is a result; a favourable
+difference with one condition was not.
