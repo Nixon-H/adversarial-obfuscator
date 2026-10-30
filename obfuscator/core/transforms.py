@@ -354,6 +354,12 @@ class SymbolRenamer(ast.NodeTransformer):
         # runtime — renaming them breaks binding exactly like renaming
         # visit_arg definitions. NEVER rename keyword.arg (None = **kwargs
         # splash, nothing to rename).
+        #
+        # But the VALUE must still be visited: returning early left every use
+        # inside a keyword argument unrenamed while its import binding was
+        # renamed, so `stop=isqrt(n)` referenced an unbound `isqrt`. arg is a
+        # plain string, not a Name, so generic_visit cannot touch it.
+        self.generic_visit(node)
         return node
     def visit_ExceptHandler(self, node):
         # Binding/use consistency: `except E as name` binds `name`, and

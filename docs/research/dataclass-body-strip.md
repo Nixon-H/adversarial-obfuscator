@@ -345,3 +345,47 @@ because the residual is a *second* bug with its own cause, not a regression.
 The next step is the same technique that found this one: isolate
 `SymbolRenamer` on a call with a keyword argument whose value is an imported
 name, and see which branch of `visit_Name` returns early.
+
+
+## Round 90: the residual was `visit_keyword`, and both renamer defects are fixed
+
+Isolating the shapes found it in three tests:
+
+| shape | unrenamed uses |
+|---|---|
+| bare call `isqrt(n)` | 0 |
+| **keyword value `g(1, stop=isqrt(n))`** | **1** |
+| keyword value inside a `for` | 1 |
+
+`visit_keyword` returned without visiting the value:
+
+```python
+def visit_keyword(self, node):
+    # never rename keyword.arg -- correct
+    return node          # but the VALUE was never visited either
+```
+
+The comment above it is right about `arg`: renaming a keyword's name breaks
+call-site binding. What it missed is that `node.value` must still be visited,
+and `arg` is a plain string so `generic_visit` cannot touch it.
+
+**Fixed** with `self.generic_visit(node)` before returning. All three shapes now
+rename consistently, and the external module **imports and runs at every build
+index**.
+
+Guards: six tests in `tests/test_renamer_import_and_kwargs.py` execute the
+renamed module rather than only inspecting it, because the failure is a
+`NameError` at import, not a syntax error.
+
+## The two defects, side by side
+
+| # | pass | bug | symptom |
+|---|---|---|---|
+| 1 | `visit_ImportFrom` | only aliased imports renamed | unbound name at import |
+| 2 | `visit_keyword` | value never visited | unbound name at import |
+
+Both were one-line fixes. Both took an external module to surface, because
+internal fixtures imported nothing and used no keyword arguments. Both were
+invisible to compilation and visible immediately to `exec_module`.
+
+That is the case for the recommendation in the previous section, made twice.
