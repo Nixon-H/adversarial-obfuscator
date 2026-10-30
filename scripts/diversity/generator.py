@@ -95,7 +95,38 @@ def generate_variant(source: str, variant_id: int, config: dict) -> str:
         result = transformer.transform(source, options=options)
     finally:
         _unpatch_secrets_for_variant()
-    return result
+    return _repair_empty_bodies(result)
+
+
+def _repair_empty_bodies(code: str) -> str:
+    """Give any emptied class or function body a `pass`.
+
+    Several passes strip statements (annotations, docstrings, metadata) and each
+    can leave a block empty, which is not valid Python. A dataclass whose fields
+    are bare annotations hit this: the class became `class X:` followed by the
+    next def, and the artefact did not compile. The annotation case is handled
+    where it happens (the fields are load-bearing), but a docstring-only class
+    empties later and needs this pass.
+
+    This is the cheap guard the corpus work argued for: compile what you emit.
+    """
+    import ast as _ast
+
+    try:
+        tree = _ast.parse(code)
+    except SyntaxError:
+        return code
+    changed = False
+    for node in _ast.walk(tree):
+        if isinstance(node, (_ast.ClassDef, _ast.FunctionDef, _ast.AsyncFunctionDef,
+                             _ast.With, _ast.For, _ast.While, _ast.If, _ast.Try)):
+            body = getattr(node, "body", None)
+            if body is not None and not body:
+                node.body = [_ast.Pass()]
+                changed = True
+    if not changed:
+        return code
+    return _ast.unparse(tree)
 
 
 _SAVED_SECRETS = {}

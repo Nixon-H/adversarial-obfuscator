@@ -34,6 +34,24 @@ class TypeHintStripper(ast.NodeTransformer):
         if node.value is None:
             return None
         return ast.Assign(targets=[node.target], value=node.value, type_comment=None)
+
+    def visit_ClassDef(self, node):
+        # A dataclass whose fields are bare annotations has a body made only
+        # of AnnAssign statements. Those annotations are LOAD-BEARING: they
+        # define the fields, so stripping them changes the class's behaviour
+        # even when the output still compiles. Keep them when they are all
+        # the class has, and only fall back to `pass` if the body would
+        # otherwise be empty (an empty class body is not valid Python).
+        only_annotations = bool(node.body) and all(
+            isinstance(stmt, ast.AnnAssign) for stmt in node.body
+        )
+        if only_annotations:
+            # Bare annotations ARE the dataclass fields. Leave them alone.
+            return node
+        self.generic_visit(node)
+        if not node.body:
+            node.body = [ast.Pass()]
+        return node
     def visit_Import(self, node):
         new_names = [n for n in node.names if n.name != 'typing']
         if not new_names: return None
@@ -1403,12 +1421,18 @@ class MetadataStripper(ast.NodeTransformer):
         if node.body and isinstance(node.body[0], ast.Expr):
             if isinstance(node.body[0].value, ast.Constant) and isinstance(node.body[0].value.value, str):
                 node.body = node.body[1:]
+        # A function whose only statement was its docstring is now empty, and
+        # an empty body is not valid Python.
+        if not node.body:
+            node.body = [ast.Pass()]
         return node
     def visit_ClassDef(self, node):
         self.generic_visit(node)
         if node.body and isinstance(node.body[0], ast.Expr):
             if isinstance(node.body[0].value, ast.Constant) and isinstance(node.body[0].value.value, str):
                 node.body = node.body[1:]
+        if not node.body:
+            node.body = [ast.Pass()]
         return node
     def visit_Module(self, node):
         self.generic_visit(node)
