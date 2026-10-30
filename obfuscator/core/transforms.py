@@ -363,7 +363,15 @@ class SymbolRenamer(ast.NodeTransformer):
         return self._visit_comp(node)
 
     def visit_ClassDef(self, node):
-        if node.name not in self.reserved and not node.name.startswith("__") and not node.name.startswith("_"):
+        # A NESTED class keeps its name. Its only access path is as an attribute
+        # of the enclosing class (`ClassProps.Hashability`), and visit_Attribute
+        # never renames attribute names -- so renaming the nested definition
+        # alone makes every access miss. Found on attrs/_make.py, where
+        # `class Hashability(enum.Enum)` sits inside `class ClassProps` and is
+        # read as `ClassProps.Hashability.HASHABLE`.
+        _nested = getattr(self, "_class_depth", 0) > 0
+        if (not _nested and node.name not in self.reserved
+                and not node.name.startswith("__") and not node.name.startswith("_")):
             node.name = self.get_new_name(node.name)
         # Reserve every name the class body binds. A class-body Store is already
         # left unrenamed (instance attributes are read via `self.kind`, which

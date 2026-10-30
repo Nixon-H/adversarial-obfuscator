@@ -195,3 +195,60 @@ Open. The direction of the failure is now known: the **declaration** is renamed 
 step is to find how `ClassProps.Hashability` is declared in the source — one grep of
 `ClassProps`'s body for `Hashability` returned nothing, so it is inherited or created
 outside a plain assignment.
+
+## Round 187: a NESTED class, renamed while every access goes through an attribute
+
+The declaration is at line 2971:
+
+```python
+class ClassProps:
+    ...
+    class Hashability(enum.Enum):        # nested class
+        HASHABLE = ...
+```
+
+`visit_ClassDef` renamed **every** class, including nested ones. But a nested class is
+reached only as an attribute of its parent — `ClassProps.Hashability.HASHABLE` — and
+`visit_Attribute` never renames attribute names. So the definition became `_nx_...` and
+every access still said `Hashability`.
+
+**The failing direction is now explained**: the declaration was renamed by
+`visit_ClassDef`, not by a `Store` path or an `Assign` path. Round 186's list of
+candidate bypasses was directionally wrong and the real path was the class visitor
+itself.
+
+## The fix
+
+```python
+_nested = getattr(self, "_class_depth", 0) > 0
+if (not _nested and node.name not in self.reserved ...):
+    node.name = self.get_new_name(node.name)
+```
+
+A nested class keeps its name, because its only access path is an attribute and
+attributes are not renamed. Top-level classes are unaffected.
+
+## Result
+
+| check | result |
+|---|---|
+| renamer / preserve / diversity / dataclass | **61 passed** |
+| `_next_gen`, `_cmp`, `_funcs`, `_config`, `_compat` | import |
+| **`_make`** | **`NameError: name 'i' is not defined`** |
+
+**The `Hashability` defect is closed.** `_make` moves to a fifth layer: a bare loop
+variable `i` undefined somewhere. A different family — ordinary local scoping, not
+class attributes.
+
+## The five layers in `_make.py`
+
+| # | defect | fixed |
+|---|---|---|
+| 1 | `nonlocal hash` | 175 |
+| 2 | `typing` runtime imports | 178 |
+| 3 | comprehension target vs class-body Store | 182 |
+| 4 | nested class renamed, attribute not | **187** |
+| 5 | `i` undefined | open |
+
+Four fixed, one open. The module has produced more defects than the other five external
+sources combined, and each was invisible until the previous one stopped failing.
