@@ -479,3 +479,53 @@ Cause now precise enough to fix: one invented name, produced by the md5 branch,
 with its definition missed. Not fixed this round — the change is to how renaming
 is applied across the whole tree, and the last six rounds established that
 attempting that without a reproduction is how this defect survived six rounds.
+
+## Round 123: fixed by applying the final mapping once more
+
+The fix is a post-pass after the renamer, `_apply_final_rename`, which rewrites
+every `Name`, `FunctionDef` and `ClassDef` binding through the renamer's **final**
+mapping. It does not touch `arg` or `keyword.arg`, because parameter and keyword
+names are call-site contracts.
+
+The reason it works is the one round 122 identified: the mapping is now applied
+**on lookup at the end**, so a mapping created late still reaches a binding
+visited early, and the result no longer depends on traversal order.
+
+## Verification
+
+| sweep | artefacts | failures |
+|---|---|---|
+| 1 index × 3 seeds | 72 | **0** |
+| 2 indices × 2 seeds | 96 | **0** |
+| 1 index, single seed (before) | 69 | 3 |
+
+The 3 failures that made the gate red in round 121 are gone at every seed tried,
+including the two seeds where build index 2 previously imported and the one where
+it did not.
+
+## What this defect cost, in rounds
+
+| round | action | result |
+|---|---|---|
+| 113 | gate a large module | found it |
+| 114 | guessed folding, wrote a fix | reverted |
+| 115 | reasoned from pass order | corrected |
+| 116 | one control | refuted the reading |
+| 117 | control per pass | located two passes |
+| 118 | dump after each | cleared both |
+| 119 | forward bisect | found a trigger, not the cause |
+| 120 | seed sweep | found the nondeterminism |
+| 121 | seed sweep in the gate | split it into two defects |
+| 122 | read the emitted text | found the invented name |
+| **123** | **apply mapping on lookup** | **fixed** |
+
+Eleven rounds. Six of them were caused by reasoning instead of measuring. The
+five that moved — 116, 119, 121, 122, 123 — each began with an observation of
+the **output**, not a hypothesis about a pass.
+
+## The rule, now paid for four times
+
+**A value must have one owner.** Expiry, `hexversion`, `_sumprod` and this table
+entry are four instances in four subsystems. Every fix that worked made a single
+authority responsible for the final spelling or value; every fix that failed
+tried to make two places agree.

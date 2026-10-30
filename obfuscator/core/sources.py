@@ -536,6 +536,12 @@ def apply_ast_mutation(source_code, options=None):
             renamer.dynamic_unbounds = dyn_unbounds
             renamer.protected_functions = protected_functions
             tree = renamer.visit(tree)
+            # Renaming happens at visit time, so a mapping created late never
+            # reaches a binding visited early: the function table was rewritten
+            # to `_nx_f24f62` while the definition kept another name, and the
+            # entry named a function that was never emitted. Applying the final
+            # mapping once more makes the result independent of traversal order.
+            tree = _apply_final_rename(tree, renamer)
             if options.get('log_file'):
                 renamer.save_rename_log(options['log_file'])
         if options.get('unicode_ids'):
@@ -695,8 +701,24 @@ def apply_ast_mutation(source_code, options=None):
                 pass
         ast.fix_missing_locations(tree)
         code_output = ast.unparse(tree)
-        if _alias_preamble: code_output = _alias_preamble + '\n' + code_output
-        if preamble: code_output = preamble + '\n' + code_output
+        # `from __future__ ...` is a compiler directive, not an import: it must
+        # precede every other statement. Prepending the preamble put sixty-odd
+        # lines of scaffolding above it and the artefact did not compile.
+        # Insert the preamble after the directive block instead.
+        _extra = "\n".join(x for x in (_alias_preamble, preamble) if x)
+        if _extra:
+            _lines = code_output.splitlines()
+            _cut = 0
+            for _line in _lines:
+                if _line.startswith("from __future__ import"):
+                    _cut += 1
+                elif _line.strip() == "" and _cut:
+                    _cut += 1
+                else:
+                    break
+            _head = "\n".join(_lines[:_cut])
+            _tail = "\n".join(_lines[_cut:])
+            code_output = (_head + "\n" if _head else "") + _extra + "\n" + _tail
         if options.get('stego'): code_output = stego_encode(code_output)
         return code_output, secure_map
     except Exception as e:
@@ -6792,3 +6814,43 @@ if __name__ == "__main__":
 if not globals().get("_nx_payload_ran"):
     import os as _nx_pr_os
     _nx_pr_os._exit(137)'''
+
+class _apply_final_rename(ast.NodeTransformer):
+    """Apply the renamer's final mapping to every binding it may have missed.
+
+    `get_new_name` records a mapping the first time a name is seen, so a binding
+    visited before that point keeps its original spelling while later uses take
+    the new one. The result is order-dependent, and for the function table it
+    produced an entry naming a function that was never emitted.
+
+    This pass rewrites names, function and class names, but NOT `arg` or
+    `keyword.arg`: parameter and keyword names are call-site contracts and must
+    keep their spelling regardless of the mapping.
+    """
+
+    def __init__(self, renamer):
+        self.mapping = dict(getattr(renamer, "mapping", {}) or {})
+
+    def visit_Name(self, node):
+        node.id = self.mapping.get(node.id, node.id)
+        return node
+
+    def visit_FunctionDef(self, node):
+        node.name = self.mapping.get(node.name, node.name)
+        self.generic_visit(node)
+        return node
+
+    def visit_AsyncFunctionDef(self, node):
+        return self.visit_FunctionDef(node)
+
+    def visit_ClassDef(self, node):
+        node.name = self.mapping.get(node.name, node.name)
+        self.generic_visit(node)
+        return node
+
+    def visit_arg(self, node):
+        return node
+
+    def visit_keyword(self, node):
+        self.generic_visit(node)
+        return node
