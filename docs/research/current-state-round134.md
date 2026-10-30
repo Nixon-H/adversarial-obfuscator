@@ -63,3 +63,37 @@ derived from a hypothesis; every fix that held came from a measurement.
 The eighth defect is still open because the last three attempts to fix it were
 derived from hypotheses rather than from the reduction its document says is
 missing.
+
+## Round 157: one commit is unpushed, and why
+
+Round 157 added a Research programme section to the root `README.md` so the work is
+discoverable from the repository root rather than only from `docs/research/`. The
+commit succeeded locally:
+
+```
+490d7ee Root README: point at the research programme and the four checks
+```
+
+`git push` fails:
+
+```
+git@github.com: Permission denied (publickey).
+~/.ssh/id_ed25519.pub exists; ssh-add -l -> The agent has no identities.
+```
+
+The key is present but not loaded into the agent, and this session cannot add it
+without a passphrase prompt. Every earlier push in this programme succeeded, so the
+agent has lost its identities rather than the key having changed.
+
+**Status: one commit ahead of origin.** Nothing is lost — the work is committed, the
+tests pass against it, and the next session with a loaded key can push it.
+
+## What this means for the record
+
+The repository state and the published state have diverged by one commit. That is
+worth recording explicitly rather than silently, because every other claim in this
+directory has been verified against the **local** tree, and one commit's worth of
+changes is not yet visible to anyone who clones.
+
+The affected change is documentation only: a README section naming the four checks
+and linking `docs/research/README.md`. No code, no test, no claim depends on it.
