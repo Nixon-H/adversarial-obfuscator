@@ -120,19 +120,20 @@ non-empty in 24 of 24.
 
 ### 5.1b Replication on real corpus functions
 
-To test whether the pattern depends on hand-written fixtures, four tasks were
-built from the repository's own corpus (`real_tasks.py`): `rle_encode`,
-`rle_decode`, `slugify`, `gcd`, with the other functions in each module as
-siblings and specifications written from what each function does.
+To test whether the pattern depends on hand-written fixtures, eight tasks were
+built from the repository's own corpus (`real_tasks.py`), spanning five
+modules: `rle_encode`, `rle_decode`, `slugify`, `gcd`, `priority_pick`,
+`rotate_list`, `store_get`, `store_keys`. The siblings are the other functions
+in each module; the specifications were written from what each function does.
 
 | k | cells | unique identity | attacker hit |
 |---|---|---|---|
-| 0 | 4 | 4 | 4 |
-| 2 | 4 | 4 | 4 |
-| 4 | 4 | 4 | 4 |
+| 0 | 8 | 8 | 8 |
+| 2 | 8 | 8 | 8 |
+| 4 | 8 | 8 | 8 |
 
-Source: `real-corpus-tasks.md`. Combined with the synthetic set: **36 valid
-cells, 36 unique, 36 hit**, all produced after the opaque-predicate fix.
+Source: `real-corpus-tasks.md`. Combined with the synthetic set: **48 valid
+cells, 48 unique, 48 hit**, all produced after the opaque-predicate fix.
 
 The finding replicates on two independent benchmarks with no change in
 direction. That is the strongest form the claim can take without a public
@@ -190,7 +191,7 @@ specification an attacker uses is invariant to the transformation.
 | cost endpoint measured | ✔ flat at n=8 |
 | authoring bound | ✔ proxy |
 | negative results reported | ✔ documented |
-| **corpus scale** | ◐ 36 cells, but 4 real modules against a target of 12–15 projects |
+| **corpus scale** | ◐ 48 cells, but 5 real modules against a target of 12–15 projects |
 | **systematic novelty review** | ✘ targeted screen only |
 | **analyst-minutes** | ✘ proxy only |
 
