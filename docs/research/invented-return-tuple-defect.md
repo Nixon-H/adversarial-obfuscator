@@ -1,0 +1,58 @@
+# Two Invented Names in a Return Tuple
+
+**Date:** 2026-10-30, round 196.
+**Found by:** `attrs/_make.py`, unmasked by round 195's default-argument fix.
+
+## Symptom
+
+```
+NameError: name '_nx_ec3de3' is not defined
+  at line 1069:  return (_nx_ec3de3, _nx_e8fc6a)
+```
+
+## What is established
+
+Both names appear **exactly once** in the entire emitted module — on line 1069, in the
+`return`. Nothing binds either of them. They are **invented**.
+
+That is the same signature as round 122's defect, where `_nx_f24f62` appeared once in a
+function table and nowhere else: `get_new_name` was called for a name, produced a
+spelling, and the corresponding binding was never emitted or never patched.
+
+## What the source probably says
+
+Nine lines above, the function builds `state` from `self.__slots__` and writes hashes
+through `__bound_setattr`. The source's final statement is most likely
+`return (state, hashes)` — two **locals**, which the renamer would not rename if they
+are parameters, or would rename **consistently** if they are assignments.
+
+Inventing both suggests the `return` was rewritten against a mapping that contained
+entries for two names whose **definitions** were in a scope the traversal never reached.
+
+## What is not established
+
+**Which two source names.** The mapping is not printed, and the emitted file has no
+other occurrence to compare against. One command would settle it — print
+`renamer.mapping` for the function containing line 1069 — which is the technique that
+solved round 195 after five rounds of not doing it.
+
+## Status
+
+Open, with the signature identified: **invented names, each appearing once**. That is
+the third instance in this programme of the round-122 pattern, and the lesson attached
+to it is the same — *a name that appears exactly once in the output is a rename that
+lost its target*.
+
+## The six layers in `_make.py`
+
+| # | defect | fixed |
+|---|---|---|
+| 1 | `nonlocal hash` | 175 |
+| 2 | `typing` runtime imports | 178 |
+| 3 | comprehension vs class-body Store | 182 |
+| 4 | nested class renamed, attribute not | 187 |
+| 5 | default argument kept old loop-var spelling | **195** |
+| 6 | two invented names in a return tuple | open |
+
+Five fixed, one open. Layer 6 has the **cleanest signature yet** — two names, one line,
+zero bindings — which makes it the most tractable of the six.
