@@ -250,3 +250,35 @@ _task(
         lambda f: f([0, -1]) == 1,   # zero is not negative
     ],
 )
+
+_task(
+    "count_above",
+    "def count_above(values, limit):\n"
+    "    n = 0\n"
+    "    for v in values:\n"
+    "        if v > limit:\n"
+    "            n += 1\n"
+    "    return n\n",
+    [
+        "def ca1(values, limit):\n"
+        "    n = 0\n"
+        "    for v in values:\n"
+        "        if v >= limit:\n"
+        "            n += 1\n"
+        "    return n\n",
+        "def ca2(values, limit):\n"
+        "    n = 0\n"
+        "    for v in values:\n"
+        "        if v < limit:\n"
+        "            n += 1\n"
+        "    return n\n",
+        "def ca3(values, limit):\n"
+        "    return len(values)\n",
+    ],
+    [
+        lambda f: f([1, 2, 3], 1) == 2,
+        lambda f: f([], 5) == 0,
+        lambda f: f([5], 5) == 0,      # strict comparison
+        lambda f: f([6], 5) == 1,
+    ],
+)

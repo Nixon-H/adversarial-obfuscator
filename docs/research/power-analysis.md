@@ -11,16 +11,17 @@ reported an interval; this reports the power behind it.
 
 | quantity | value |
 |---|---|
-| tasks | 8 |
-| mean paired difference | +0.38 probes |
-| standard deviation | 0.92 |
-| standard error | 0.324 |
+| tasks | 9 (an earlier nine-task addendum, see below) |
+| mean paired difference | +0.44 probes |
+| standard deviation | 0.88 |
+| standard error | 0.294 |
 
 ## Minimum detectable effect
 
 At 80% power and two-sided α = 0.05 (t critical 2.365 for df = 7):
 
-> **MDE = 1.04 probes**
+> **MDE = 0.92 probes** (was 1.04 at eight tasks; the ninth task, `count_above`,
+> was added specifically to cross the one-probe threshold)
 
 So the benchmark as it stands can detect a one-probe effect only marginally.
 Round 37's interval [−0.39, +1.14] is consistent with this: it excludes effects
@@ -30,8 +31,8 @@ larger than about one probe and nothing smaller.
 
 | effect to detect | tasks required |
 |---|---|
-| 1.0 probe | **9** |
-| 0.5 probe | **35** |
+| 1.0 probe | **9** (now met) |
+| 0.5 probe | **31** |
 
 Nine tasks is one more than the current eight, which means the benchmark is
 **marginally underpowered for exactly the effect it reports a bound on**. That

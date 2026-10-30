@@ -51,6 +51,9 @@ EVAL_INPUTS = {
     # evaluator inputs the task is ambiguous by construction.
     "signdiff": [(2, -3), (-2, -3), (2, 3), (0, -1)],
     "first_negative": [([1, 2, -3],), ([4, 5],), ([0, -1],)],
+    # (5, 5) is required: sibling ca1 uses >= where the target uses >, so the
+    # two differ only when a value equals the limit.
+    "count_above": [([1, 2, 3], 1), ([], 5), ([5], 5)],
 }
 
 
