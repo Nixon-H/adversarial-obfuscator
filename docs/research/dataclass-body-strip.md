@@ -254,3 +254,47 @@ guessing before one round of dumping the intermediate artefact found the cause.
 Open. Mechanism identified to the line (`from sys import hexversion` unrenamed,
 use renamed), pass not identified. The reverted tree is green; the defect remains
 and is documented with its reproduction.
+
+## Round 88: the instrument found the cause, and my first attempt at a fix was misplaced
+
+Instrumenting instead of guessing paid off twice in one round.
+
+**1. `SymbolRenamer` is the culprit, confirmed by isolation.** Running it alone
+on a minimal source reproduces the defect exactly:
+
+```python
+# input
+from sys import hexversion
+def f():
+    if hexversion >= 0x30D00A2: ...
+```
+
+```python
+# after SymbolRenamer alone
+from sys import hexversion
+def f():
+    if _nixon_सȴƅǮϦ >= 51183778: ...
+```
+
+So the pass, the line, and the mechanism are all confirmed: the import binding
+is left alone while the use is renamed.
+
+**2. My patch went into the wrong class.** The fix was inserted before the
+*first* `def visit_Name` in the file, which belongs to `TypeHintStripper`, not
+to `SymbolRenamer`. The renamer's own `visit_Name` is at a different line. So
+the fix was never applied to the pass it targeted, which is why the module still
+failed and why the minimal repro still failed after "applying" it.
+
+That is a self-inflicted repeat of the same error class: a global text match
+applied to a file with several classes defining the same method name.
+
+**Status.** Mechanism confirmed; fix not landed. The correct edit is three lines
+inserted immediately before `SymbolRenamer.visit_Name`, and it must be verified
+against the minimal repro before the external module.
+
+## The method note this adds
+
+Two rounds, two failures, both from editing without a minimal test. The thing
+that worked was isolation: run one pass on a ten-line source. That is the same
+technique that settled the `llvmgen` defect and the same one I keep reaching for
+too late.
