@@ -864,3 +864,55 @@ What is known:
 
 That is a description of a race in the rename/fold interaction, and the next step
 is to make it reproducible, not to reduce it.
+
+## Round 140: it is deterministic per input, which reframes the bisect problem
+
+Round 139 concluded that a reduction is impossible while the defect is
+nondeterministic. That conclusion was wrong in an important way.
+
+Three runs with the same input and seed:
+
+```
+trial 0: hash 47384fb9f1d6  imports=False
+trial 1: hash 47384fb9f1d6  imports=False
+trial 2: hash 47384fb9f1d6  imports=False
+identical across trials: True
+```
+
+**The obfuscator is deterministic.** The same source and seed always produce the
+same output, and that output always fails. There is no race, no thread, no clock.
+
+## What the nondeterminism actually is
+
+The **choice point** is deterministic for a given input, but **which** choice point
+a run reaches depends on the input:
+
+- the defect appears at seed 4242 index 0 and not at seed 7 index 2;
+- any edit to the source changes how many random draws precede the table
+  construction, so a different branch is taken.
+
+So the defect is a **deterministic function of the input**, and a bisect changes
+the input. That is why 31 of 42 body replacements "removed" it: each replacement is
+a different input, not a different code path with the same input.
+
+## What a working reduction needs
+
+**Edits that do not change RNG consumption.** Two possibilities:
+
+1. **Reduce the output, not the input.** Take the emitted failing artefact and cut
+   it down while it still runs — that is a reduction over the thing that is broken,
+   and it never re-runs the generator.
+2. **Reseed at the choice point.** Make the pass that builds the table draw from a
+   dedicated RNG seeded from the function's identity, so its behaviour is
+   independent of everything before it. That would make the defect input-invariant
+   and bisectable — and it is also a plausible **fix**, because it removes the
+   coupling between unrelated passes.
+
+## Why this is progress
+
+The previous section said "make it deterministic first". It already is. The
+mistake was conflating **input-dependence** with **nondeterminism**, and it cost
+rounds 139 and part of 138 pursuing a reduction that could not work by
+construction.
+
+Option 1 is one command: take the emitted failing file, and reduce **that**.
