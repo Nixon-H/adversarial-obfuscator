@@ -11,11 +11,11 @@ traceable to one of those documents, it does not appear.
 ## Abstract (draft, bounded)
 
 We study whether per-build diversification of Python source obfuscation raises
-the cost for an attacker to identify a function. Using eight synthetic tasks
-with same-arity siblings, an attacker that receives only an emitted artefact
-plus the task specification, and a cost instrumented in CPU-seconds, probes
-and executions, we measure identification cost as a function of *k*
-previously analysed builds of the same program. An earlier version of this
+the cost for an attacker to identify a function. Using seventeen tasks across
+two benchmark families -- nine hand-written and eight drawn from real programs
+-- an attacker that receives only an emitted artefact plus the task
+specification, and a cost instrumented in probes, we measure identification
+cost as a function of the build the attacker is given. An earlier version of this
 endpoint was withdrawn: the attacker it measured was memoryless in *k*, so a
 flat curve was a property of the harness rather than of the defence
 (`retraction-cost-curve.md`). The replacement measures identification cost in
@@ -184,7 +184,7 @@ It also explains an earlier reading: one pair (A vs B) alone gives +0.33 with
 zero variance, and reporting it would have claimed a diversity benefit that the
 B-versus-C control removes.
 
-### 5.1b Replication on real corpus functions
+### 5.3 Replication on real corpus functions
 
 To test whether the pattern depends on hand-written fixtures, eight tasks were
 built from the repository's own corpus (`real_tasks.py`), spanning five
@@ -205,13 +205,13 @@ The finding replicates on two independent benchmarks with no change in
 direction. That is the strongest form the claim can take without a public
 corpus, and the corpus remains the largest open gap.
 
-### 5.2 The attacker is not unique everywhere
+### 5.4 The attacker is not unique everywhere
 
 `signdiff` returns two candidates at every k. Uniqueness is the evaluator's
 measure (24/24), not the attacker's. Reported separately because merging them
 would overstate the attacker.
 
-### 5.3 Authoring bound
+### 5.5 Authoring bound
 
 33 properties across eight tasks; 1–2 needed to separate. Paid once per task,
 not per build — a reason the old curve could not have detected a build
