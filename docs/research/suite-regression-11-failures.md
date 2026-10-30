@@ -70,3 +70,52 @@ was run for the first time today, in the wrong direction — to check a fix rath
 than to check the baseline.
 
 **Check the baseline before attributing a failure to your change.** Every time.
+
+## Round 126: the renamer is fine, the pipeline is not
+
+Testing the hypothesis directly.
+
+**`SymbolRenamer` in isolation works:**
+
+```
+reserved contains 'helper': False
+mapping: {'helper': '_nixon_Λڙɱכま', 'caller': '_nixon_მѪჂৠႼ'}
+output has 'def helper': False
+```
+
+**Through the pipeline it does not:**
+
+```
+src:  __all__ = ["foo", "Bar"]  +  def helper(): ...
+out:  'def helper(' present: True
+```
+
+`helper` is not in `__all__`, so nothing should reserve it, and yet the pipeline
+leaves it alone while the renamer on its own renames it.
+
+So the reservation happens **somewhere in the pipeline**, not in the renamer
+class. The candidates are the code in `sources.py` that populates
+`renamer.reserved` from `_all_names` and from the `_NX_*` marker lists — one of
+those is adding a name it should not, or `_all_names` is being computed more
+broadly than the module's `__all__`.
+
+## What this round establishes
+
+| claim | status |
+|---|---|
+| the renamer class renames an ordinary function | **confirmed** |
+| the pipeline leaves it unrenamed | **confirmed** |
+| the round 99–100 import reservations cause it | **not established** — no imports in this source |
+| the eleven failures predate round 125's fix | **confirmed by control** |
+
+That last row is the one that matters for the reverts: the failures are not mine
+from round 125, and my earlier statement that "something committed since round
+111 introduced them" remains a hypothesis, not a finding.
+
+## The next step
+
+Instrument `renamer.reserved` immediately before `renamer.visit(tree)` inside the
+pipeline for this source, and diff it against the renamer's default set. The extra
+entry is the bug, and it is one line to find — the same "look at the value"
+technique that eventually settled the table defect, applied for the first time
+here before rather than after two wrong fixes.
