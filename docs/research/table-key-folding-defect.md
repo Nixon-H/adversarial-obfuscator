@@ -917,7 +917,7 @@ construction.
 
 Option 1 is one command: take the emitted failing file, and reduce **that**.
 
-## Round 141: the output reduction was invalid too, in the same way
+## Round r14a: the output reduction was invalid too, in the same way
 
 Reduced the **emitted artefact** rather than the source — 1533 lines to 384 — and
 the reduced file still failed. The failure was:
@@ -955,13 +955,13 @@ indented block at module level where `src` has no binding.
 |---|---|---|
 | 102 | fixture | the input was not valid Python |
 | 135 | source reducer | pruning created undefined names |
-| **141** | **output reducer** | **line removal deleted a `def` and kept its body** |
+| **r14a** | **output reducer** | **line removal deleted a `def` and kept its body** |
 
 In each case the artefact produced an alarming, specific, and wrong answer, and in
 each case **one validity check would have rejected it**:
 
 - input imports cleanly (round 136, added);
-- the reduced output still compiles under a full parse (round 141, **not** added).
+- the reduced output still compiles under a full parse (r14a, **not** added).
 
 A line-level reducer that can break block structure needs `ast.parse` after every
 step, not just a "does it fail" predicate.
@@ -982,7 +982,7 @@ round it looked like the finding.
 
 Fourth reduction attempt, this time **structure-preserving** — `ast.parse` after
 every step, and the reduced source must parse **and** fail with `NameError`. That
-was the check missing from rounds 135 and 141.
+was the check missing from rounds 135 and r14a.
 
 It reduced 125 top-level statements to **one**, which still parses and still fails:
 
@@ -1034,7 +1034,7 @@ Four reductions, three invalid:
 |---|---|---|
 | 135 | source, drop defs | pruned definitions created undefined names |
 | 139 | source, replace bodies | changed RNG consumption |
-| 141 | output, drop lines | deleted a `def`, kept its body |
+| r14a | output, drop lines | deleted a `def`, kept its body |
 | **142** | **output, drop statements, parse-checked** | **none** |
 
 The working reducer differs from the others by one line — `ast.parse(code)` before
@@ -1101,7 +1101,7 @@ renaming — the same shape as the `_nx_` markers this project already relies on
 | 113 | the gate found it |
 | 114–121 | six bisects, each correct about necessity, wrong about cause |
 | 122 | one invented name |
-| 135–141 | three invalid reductions |
+| 135–r14a | three invalid reductions |
 | 142 | the one-line minimal case |
 | **143** | **a builtin renamed as if it were a local** |
 
@@ -1155,7 +1155,7 @@ not touch, on a value the renamer cannot misread.
 Nine defects found, nine fixed — and this one took **thirty-one rounds**, more than
 the other eight combined.
 
-The pattern held to the end: rounds 113–121 were hypotheses, rounds 135–141 were
+The pattern held to the end: rounds 113–121 were hypotheses, rounds 135–r14a were
 invalid reductions, and the fix arrived only after round 142 produced a one-line
 case that could be read. Every step that moved came from looking at the value; every
 step that did not came from reasoning about the pipeline.
