@@ -33,8 +33,10 @@ to separate is **1–2** (median 1.5, max 2).
   The surplus is not waste: it is what makes the set robust to a build that
   perturbs a boundary, which is exactly the case the sibling fixtures test.
 - **The cost scales with tasks, not builds.** The same property set applies
-  unchanged across build indices, which is why the cost curve is flat: the
-  labour is paid once per task.
+  unchanged across build indices. That is one reason the earlier cost curve
+  could not have detected a build effect even if one existed: the labour is
+  paid once per task, so it cannot enter a per-build measurement. The endpoint
+  itself was later withdrawn and replaced (see `retraction-cost-curve.md`).
 
 ## What it does not say
 

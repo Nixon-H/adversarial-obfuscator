@@ -80,7 +80,7 @@ the manuscript. All three were mine, and all three were shipped:
 | claimed | actual |
 |---|---|
 | title said "12/12 Cells" | the table has 24 cells |
-| "this is four modules" | five modules are used |
+| "module count of 4" | five modules are used |
 | "All 36 cells" | the combined total is 48 |
 
 The cause is simple and worth recording: when this file was doubled from four
