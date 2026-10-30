@@ -63,3 +63,52 @@ reported with a wrong cause first.
 Three defects in three rounds from one 4900-line module, each revealed by fixing the
 last. The module is the most productive artefact in the corpus and the only one that
 has produced more than two.
+
+## Round 180: the line, and the shape that explains it
+
+The traceback names it:
+
+```
+File ".../attr/_make.py", line 2534, in <module>
+File ".../attr/_make.py", line 2536, in _CountingAttr
+File ".../attr/_make.py", line 2536, in <genexpr>
+NameError: name '_nx_b06893' is not defined
+```
+
+Line 2536 is inside `class _CountingAttr`, immediately after `__slots__`:
+
+```python
+class _CountingAttr:
+    __slots__ = ('_converter', ..., 'eq_key', ...)
+    __attrs_attrs__ = (*tuple((_nx_f2bbdf(name=_nx_b06893, alias=_default_init_alias_for(_nx_b06893), ...
+```
+
+The source has the same shape at line 2758, with `Attribute(...)` in place of the
+renamed `_nx_f2bbdf` and `name` in place of `_nx_b06893`.
+
+## What this rules out
+
+The name **is** bound by that comprehension's own `for name in (...)` — so mechanism 1
+from round 179 (a body reading a name nothing binds) is **not** it. The binding exists
+on the same line.
+
+## What it suggests
+
+A **class-body generator expression** cannot see names bound elsewhere in the class
+scope. It can see its own `for` target, so the shape above is legal — *as long as the
+`for` target and the body use the same spelling*. They do.
+
+Which leaves the two mechanisms that a line-level view cannot distinguish:
+
+- the `for` clause and the body were given **different** spellings by the rename
+  (visible only by reading the full 400-character line, not the printed prefix);
+- the `for` iterable refers to a **class-level** name, and moving that reference
+  inside a generator broke the lookup.
+
+Both are one grep of the full line away, and neither is a guess I am willing to write
+down as a cause without it.
+
+## Status
+
+Open. Line located, one mechanism ruled out, two remain, next step is to read line
+2536 in full and compare the `for` target with the body's spelling.
