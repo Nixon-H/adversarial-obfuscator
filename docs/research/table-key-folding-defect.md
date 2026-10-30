@@ -102,3 +102,33 @@ its entries in step — the same "one owner per value" shape that solved the cor
 digest and the licence key.
 
 The dict-key change was reverted: it addressed a problem that does not exist.
+
+## Round 115: the order is confirmed, the mechanism is not
+
+The pipeline applies the table insertion before renaming — `sources.py` line 422
+calls `CallGraphObfuscator().visit(tree)`, line 538 calls `renamer.visit(tree)`.
+That is the order round 114 predicted.
+
+But the mechanism does not follow from it as cleanly as I wrote. The table's
+values are `ast.Name` nodes, and the renamer's `visit_Name` renames every Name
+by id, so a Name in the table should get the same new spelling as the function
+definition. Something else is needed to explain an entry that no definition
+matches, and I have not found what.
+
+**So the corrected status is: order confirmed, mechanism unknown.** The previous
+section presented the order as the cause; it is a precondition, not a
+demonstration.
+
+## What the next attempt should do
+
+Instrument rather than reason, for the third time:
+
+1. run the pipeline with `call_obf` disabled and see whether the defect
+   disappears — that separates "the table" from "everything else";
+2. if it disappears, dump the tree immediately after `call_obf.visit` and
+   compare the table's Name ids against the module's actual definitions;
+3. only then decide whether to move the pass or to rename its entries.
+
+The three defects in this class (`hexversion`, `_sumprod`, `_nx_f24f62`) each
+took a minimal reproduction to fix. This one does not have one yet, and the last
+two rounds have shown what happens when I skip that step.
