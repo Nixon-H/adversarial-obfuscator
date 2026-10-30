@@ -145,7 +145,9 @@ def test_no_bare_141_claim_in_code():
             # Vendored third-party code for the external corpus: its constants
             # are not this project's claims. recipes.py's Miller-Rabin base
             # 4759123141 contains the digits by accident.
-            if os.sep + os.path.join("corpus", "external") in os.path.join(root, fn):
+            _vendored = os.path.join(root, fn)
+            if (os.sep + os.path.join("corpus", "external") in _vendored
+                    or os.sep + os.path.join("corpus", "bulk") in _vendored):
                 continue
             p = os.path.join(root, fn)
             # Git-ignored files are build leftovers, not source: a failed
