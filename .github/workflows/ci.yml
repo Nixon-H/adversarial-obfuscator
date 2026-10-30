@@ -15,6 +15,14 @@ on:
 permissions:
   contents: read
 
+# Superseded runs are cancelled. Without this, every push queued a fresh
+# five-version matrix and the queue grew to 24 runs on one branch -- so the
+# newest commit waited behind stale ones and the red/green verdict for HEAD
+# was effectively unavailable. A queue is not feedback.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     # Runs on the weekly cron as well: previously every matrix job carried
