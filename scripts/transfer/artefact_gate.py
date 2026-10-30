@@ -26,6 +26,7 @@ the build index and the exception.
 
 import argparse
 import importlib.util
+import shutil
 import os
 import sys
 import tempfile
@@ -43,6 +44,7 @@ from scripts.transfer.tasks import TASKS as SYNTH_TASKS  # noqa: E402
 
 
 STRESS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "fixtures", "stress.py")
+PKG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "pkg")
 STRUTILS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "external3", "strutils.py")
 REQUESTS_UTILS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "external4", "utils.py")
 ITERUTILS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "bulk", "iterutils.py")
@@ -62,6 +64,12 @@ def _modules():
         out.append(("external3/strutils", f.read(), STRESS_PROPS))
     with open(ITERUTILS, encoding="utf-8") as f:
         out.append(("bulk/iterutils", f.read(), STRESS_PROPS))
+    for pkg_name in ("more_itertools",):
+        pkg_path = os.path.join(PKG_DIR, pkg_name)
+        for fn in sorted(os.listdir(pkg_path)):
+            if fn.endswith(".py") and fn != "__init__.py":
+                with open(os.path.join(pkg_path, fn), encoding="utf-8") as f:
+                    out.append(("pkg/%s/%s" % (pkg_name, fn[:-3]), f.read(), STRESS_PROPS))
     # requests/utils.py is kept as the __future__ regression fixture but is not
     # gated: it uses relative imports ("from .exceptions import ...") and cannot
     # be imported standalone, so the import check measures the fixture's shape
@@ -92,14 +100,46 @@ def check_one(label, code, props, k, workdir, seed=4242):
 
     # 2. import (executes module-level code)
     try:
-        spec = importlib.util.spec_from_file_location("gate_%s_%d" % (label.replace("/", "_"), k), path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
+        if label.startswith("pkg/"):
+            # A module inside a vendored package: relative imports resolve only
+            # with the package present. Write the artefact as the package's
+            # module, the other modules unmodified, and import it by dotted name
+            # in a subprocess so no gate state leaks between artefacts.
+            _, pkg_name, mod_name = label.split("/")
+            tmppkg = os.path.join(workdir, "pkgroot")
+            if os.path.isdir(tmppkg):
+                shutil.rmtree(tmppkg)
+            dest = os.path.join(tmppkg, pkg_name)
+            os.makedirs(dest)
+            with open(os.path.join(dest, "__init__.py"), "w", encoding="utf-8") as f:
+                f.write("")
+            src_pkg = os.path.join(PKG_DIR, pkg_name)
+            for fn in os.listdir(src_pkg):
+                if not fn.endswith(".py") or fn == "__init__.py":
+                    continue
+                target = os.path.join(dest, fn)
+                with open(target, "w", encoding="utf-8") as f:
+                    f.write(code if fn == mod_name + ".py"
+                            else open(os.path.join(src_pkg, fn), encoding="utf-8").read())
+            import subprocess
+            proc = subprocess.run(
+                [sys.executable, "-c", "import %s.%s" % (pkg_name, mod_name)],
+                cwd=tmppkg, capture_output=True, text=True)
+            if proc.returncode != 0:
+                raise ImportError(proc.stderr.strip().splitlines()[-1][:200])
+            mod = None
+        else:
+            spec = importlib.util.spec_from_file_location(
+                "gate_%s_%d" % (label.replace("/", "_"), k), path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
     except Exception as exc:
         return ["%s seed=%d k=%d: fails at import: %s: %s"
                 % (label, seed, k, type(exc).__name__, exc)]
 
     # 3. exercise: every property over every callable must not raise
+    if mod is None:
+        return fails          # package mode: import is the check
     funcs = [v for v in vars(mod).values() if callable(v) and not isinstance(v, type)]
     if not funcs:
         return ["%s seed=%d k=%d: no callables survived" % (label, seed, k)]

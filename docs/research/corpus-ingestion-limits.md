@@ -145,3 +145,48 @@ obfuscator.
 
 The corpus grew this round in evidence but not in automation, and saying so is more
 useful than a gate that reports a failure it does not understand.
+
+## Round 150: the gate checks packages
+
+`check_one` now has a package path. When a label is `pkg/<pkg>/<module>`:
+
+1. it writes the artefact as `<tmp>/<pkg>/<module>.py`;
+2. writes the package's other modules **unmodified**;
+3. writes an empty `__init__.py`;
+4. imports by dotted name in a **subprocess**, with `<tmp>` as the working
+   directory, so no gate state leaks between artefacts.
+
+```
+seeds: 4242,7
+artefacts checked: 104
+invalid fixtures: 0
+failures: 0
+```
+
+The two `more_itertools` modules are now in the gate alongside the three
+single-file sources, and the total went from 96 to **104** artefacts.
+
+## What the corpus now covers
+
+| source | shape | in the gate |
+|---|---|---|
+| more_itertools.recipes | single file, MIT | yes |
+| cpython statistics.py 3.13 | single file, PSF | yes |
+| boltons.strutils | single file, BSD-3 | yes |
+| **more_itertools (package)** | **package, MIT** | **yes** |
+| stress fixture | own | yes |
+| requests/utils, attrs/validators | packages | no — need vendoring |
+
+Largest gated module: **175 KB, 117 functions**. The corpus is no longer
+single-file-only, and the one-off script from round 148 is now unnecessary.
+
+## The remaining gap, unchanged
+
+Two sources remain un-gated because their packages are not vendored. That is
+mechanical work: fetch the package, write it under `corpus/pkg/`, add it to the
+module list. Nothing about it is uncertain.
+
+What is still not done, and cannot be done from here: an **independent
+specification** — properties written by someone other than the author of the
+benchmark. Vendoring more code does not address it, which is why the paper names it
+as the primary limitation.
