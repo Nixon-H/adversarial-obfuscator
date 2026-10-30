@@ -14,6 +14,8 @@ import os
 import types
 
 EXTERNAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "external", "recipes.py")
+EXTERNAL2 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "external2", "statistics.py")
+SECOND = ("median", "median_low", "mode")
 
 TASKS = {}
 
@@ -57,12 +59,49 @@ _task(
 )
 
 
-def module_source():
-    with open(EXTERNAL, encoding="utf-8") as f:
+
+_task(
+    "median",
+    [
+        lambda f: f([1, 2, 3]) == 2,
+        lambda f: f([4, 1, 3, 2]) == 2.5,
+        lambda f: f([7]) == 7,
+    ],
+    [([1, 3, 5],), ([2, 4],), ([9, 1],)],
+)
+
+_task(
+    "median_low",
+    [
+        lambda f: f([1, 3, 5]) == 3,
+        lambda f: f([1, 2, 3, 4]) == 2,
+        lambda f: f([7]) == 7,
+    ],
+    [([2, 8, 9],), ([5, 6],), ([4, 4, 4],)],
+)
+
+_task(
+    "mode",
+    [
+        lambda f: f([1, 2, 2, 3]) == 2,
+        lambda f: f([5]) == 5,
+        lambda f: f([9, 9, 9]) == 9,
+    ],
+    [([4, 4, 7],), ([1],), ([2, 3, 3],)],
+)
+
+
+def source_path(name=None):
+    """The file a task's module lives in, so it can be compiled with a real name."""
+    return EXTERNAL2 if name in SECOND else EXTERNAL
+
+
+def module_source(name=None):
+    with open(source_path(name), encoding="utf-8") as f:
         return f.read()
 
 
-def functions(src):
+def functions(src, path=None):
     ns = {}
-    exec(compile(src, EXTERNAL, "exec"), ns)
+    exec(compile(src, path or EXTERNAL, "exec"), ns)
     return {n: v for n, v in ns.items() if isinstance(v, types.FunctionType)}

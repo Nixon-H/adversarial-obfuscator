@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from scripts.diversity.generator import generate_variant  # noqa: E402
 from scripts.transfer.accumulating_attack import AccumulatingAttack  # noqa: E402
-from scripts.transfer.external_tasks import TASKS, functions, module_source  # noqa: E402
+from scripts.transfer.external_tasks import TASKS, functions, module_source, source_path  # noqa: E402
 
 
 def _candidates(code, seed):
@@ -35,10 +35,12 @@ def _candidates(code, seed):
 
 
 def main():
-    src = module_source()
-    ref = functions(src)
+    ref = None
     rows = []
     for name, task in TASKS.items():
+        src = module_source(name)
+        path = source_path(name)
+        ref = functions(src, path)
         truth = [ref[name](*args) for args in task["eval_inputs"]]
         for k in (0, 2, 4):
             code = generate_variant(src, k, {"master_seed": 4242})
