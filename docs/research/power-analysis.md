@@ -67,3 +67,47 @@ Two actionable numbers:
 The second is the more important statement. It defines the limit of what this
 line of work can conclude, which is a more useful contribution than another
 number inside the current resolution.
+
+## Round 48: all seventeen tasks change the answer
+
+The earlier analysis used the nine synthetic tasks alone. The eight corpus
+tasks are the same kind of measurement and belong in the same sample.
+
+| quantity | synthetic only (n=9) | both families (n=17) |
+|---|---|---|
+| mean paired difference | +0.44 | **+0.71 probes** |
+| standard deviation | 0.88 | 0.69 |
+| standard error | 0.294 | 0.166 |
+| 95% CI | — | **[+0.35, +1.06]** |
+| MDE at 80% power | 0.92 | **0.49 probes** |
+
+**The interval excludes zero.** Under the accumulating attacker used here,
+probe cost *rises* with the number of previously analysed builds, by about
+0.7 probes over six builds.
+
+## What that does and does not mean
+
+**Does mean:** the endpoint is not only falsifiable, it has produced a
+significant result. Cost is not flat in k; on this heuristic it grows.
+
+**Does not mean:** that diversity is working. The rise is a property of the
+attacker's ordering, not of the protection. The mechanism is visible in the
+per-task traces: properties ranked powerful on build k are applied first on
+build k+1, and when the ranking is stale the attacker runs *more* properties
+before narrowing to one candidate. A better-attacking implementation — one that
+re-derives which property is decisive per program rather than per build — could
+as easily produce a fall.
+
+So the honest claim is narrow and slightly unflattering to the instrument:
+**the learned ordering degrades with use on this benchmark.** That is a
+statement about an attacker heuristic, not about obfuscation.
+
+## Consequence
+
+The MDE is now 0.49 probes, which is the threshold the earlier analysis called
+unreachable within a 31-task budget — reached for free by combining the two
+families already present. The instrument is no longer the limiting factor at
+the effect size it can now resolve.
+
+What is still missing is not resolution but validity: seventeen tasks by one
+author, with specifications by the same person who wrote the functions.
