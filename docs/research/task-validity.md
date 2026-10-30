@@ -95,3 +95,41 @@ all in the module — not to score the cell.
 This is recorded rather than fixed because a wrong answer here would be a
 false claim about the product in either direction: "obfuscation drops
 functions" if it does not, or "tasks are merely ambiguous" if it does.
+
+## Round 18: the target is dropped, and it is seed-dependent
+
+Round 17 left the k=4 cells as an open defect with two candidate
+explanations. This round decides between them.
+
+**The target's behaviour is absent from the module.** Every candidate was
+tested against the original on 200 randomly generated argument tuples; zero
+candidates matched. So it is not a changed behaviour that the evaluator's
+three inputs happened to miss -- the function is gone.
+
+**It requires several functions to reproduce.** Same seed, same build index:
+
+| source | candidates matching the original |
+|---|---|
+| target + 1 sibling | 1 |
+| target + all 3 siblings | **0** |
+
+**It is seed-dependent.** With all three siblings and the same build index,
+`master_seed` 1–10 all preserve the target; in the range 5500–5510 exactly
+one seed (5505) loses it — **1 of 11**.
+
+### Why this matters beyond the pilot
+
+A build that silently drops a function is a correctness defect, not a
+measurement artefact. In the study it would appear as an attacker failure,
+or as an ambiguous task, and both readings would be wrong. That is how it
+first appeared: as nine "zero-hit cells" that survived three rounds of
+misdiagnosis.
+
+**Status: open product defect, reproducible at seed 5505.**
+
+### What is needed next
+
+A minimal reproduction at the source level (the 4-function input above is
+already minimal for this case) and a bisect over build options to find which
+transform drops the function. That is product debugging, not research
+instrumentation, and it should be filed separately from the study.
