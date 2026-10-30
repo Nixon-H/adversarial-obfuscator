@@ -77,3 +77,32 @@ This is the fourth conclusion in this programme retracted after re-reading the
 instrument rather than the result, and the largest: three of the earlier
 retractions were harness bugs, this one is a design error in the endpoint
 itself.
+
+## Round 35: a first step toward the redesign, and why it is not enough
+
+`scripts/transfer/accumulating_attack.py` now carries state across builds:
+it records a per-build transform fingerprint and which properties were
+informative, and it exposes `observe()` and `apply()` as separate steps so the
+state exists between builds.
+
+It does **not** yet close the retraction. Measured on six builds it discovers
+that all four properties are "useful" and therefore skips none, so the cost
+remains what it was: a frozen set applied repeatedly. The mechanism that would
+make cost depend on k — skipping properties that carry no information —
+exists in code but has nothing to skip on this task.
+
+So the endpoint stays withdrawn. What now exists is the scaffold the real
+design needs: persistent state, a separate observation phase, and a place for
+utilisation to be measured once the state actually discriminates.
+
+## What the next attempt must show
+
+1. State that **discriminates**: an attacker that, after build k, runs fewer
+   probes on build k+1 than a from-scratch attacker at k=0, with both reaching
+   the same identification.
+2. Cost measured in a currency with no startup floor, because interpreter
+   startup (0.002 s) dominates at this scale.
+3. A pre-registered equivalence bound, so a null is a result rather than a
+   failure to detect.
+
+Until all three hold, no claim about diversity and attacker cost is supported.
