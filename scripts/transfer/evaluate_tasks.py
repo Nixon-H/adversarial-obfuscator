@@ -46,7 +46,10 @@ EVAL_INPUTS = {
     "is_even": [(10,), (7,), (0,)],
     "maxlen": [(["aa", "b"],), ([],), ([""],)],
     "running_total": [([2, 3],), ([],), ([5],)],
-    "signdiff": [(2, -3), (-2, -3), (2, 3)],
+    # (0, -1) is required: sibling s3 uses (a >= 0) where the target uses
+    # (a > 0), so the two differ only when a is zero. Without a zero in the
+    # evaluator inputs the task is ambiguous by construction.
+    "signdiff": [(2, -3), (-2, -3), (2, 3), (0, -1)],
     "first_negative": [([1, 2, -3],), ([4, 5],), ([0, -1],)],
 }
 
