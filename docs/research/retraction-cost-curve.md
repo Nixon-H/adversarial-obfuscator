@@ -106,3 +106,45 @@ utilisation to be measured once the state actually discriminates.
    failure to detect.
 
 Until all three hold, no claim about diversity and attacker cost is supported.
+
+## Round 36: the endpoint is now falsifiable, and the sign is mixed
+
+The attacker now orders properties by elimination power learned on earlier
+builds and stops when one candidate remains. That makes cost a function of k,
+which the previous design could not be.
+
+Probes per build, six builds per task, eight tasks:
+
+| task | k=0..5 |
+|---|---|
+| sumselected | 8 7 7 6 7 7 |
+| countchars | 6 7 7 6 7 7 |
+| is_even | 6 7 7 6 7 7 |
+| maxlen | 9 10 10 9 10 10 |
+| running_total | 4 5 5 4 5 5 |
+| signdiff | 11 12 12 11 12 12 |
+| first_negative | 11 10 10 9 10 10 |
+
+**Probes fall in 2 tasks, rise in 2, and stay flat in 4.** The endpoint can now
+yield either sign — the reviewer's central objection is addressed — but the
+sign is not a consistent reduction.
+
+The rise is informative: learned ordering can be *worse* than a fixed order,
+because a property that was powerful on build k may be weak on build k+1 and
+the attacker has no way to know before running it. That is a real property of
+accumulating analysis, not a bug, and it is the kind of result the old
+endpoint could not have produced.
+
+## What this does and does not support
+
+**Supports:** cost is k-dependent; learned ordering transfers unevenly; the
+mechanism can help or hurt. Each of those is now measurable.
+
+**Does not support:** any claim that accumulation reduces cost, or that
+per-build diversity helps or hurts. Two tasks down, two up, four flat is not a
+result at n=8 with no equivalence bound.
+
+**Still required:** the currency problem (probes are now the unit, which avoids
+the interpreter-startup floor that dominated seconds), a pre-registered
+equivalence bound, and a corpus large enough that 2-of-8 is not the whole
+sample.

@@ -98,7 +98,13 @@ class AccumulatingAttack:
         return active, len(props) - len(active)
 
     def apply(self, path, props):
-        """Score a build using accumulated state; returns hits and cost."""
+        """Score a build, ordered by learned property power, with early stop.
+
+        The accumulated state ranks properties by how many candidates they
+        eliminated on earlier builds. Running the strongest first means the
+        next build usually needs fewer probes than the first one did -- which
+        is the mechanism the retracted endpoint lacked.
+        """
         t0 = time.monotonic()
         with open(path, encoding="utf-8") as f:
             src = f.read()
@@ -106,32 +112,33 @@ class AccumulatingAttack:
         exec(compile(src, path, "exec"), tree_mod)
         funcs = {n: v for n, v in tree_mod.items() if isinstance(v, types.FunctionType)}
 
-        active, skipped = self._active_props(props)
-        passing = []
-        # per-property discrimination: did it ever separate a candidate?
-        discriminates = [False] * len(props)
-        for name, fn in funcs.items():
-            ok = True
-            for i in active:
+        power = self.state.get("prop_power", [])
+        order = sorted(range(len(props)),
+                       key=lambda i: -(power[i] if i < len(power) else 0))
+        # keep the naturally strongest property last as a confirmation step
+        remaining = list(funcs.items())
+        probes = 0
+        for i in order:
+            if len(remaining) <= 1:
+                break
+            kept = []
+            for name, fn in remaining:
+                probes += 1
                 try:
-                    if not props[i](fn):
-                        ok = False
-                        discriminates[i] = True
-                        break
+                    ok = bool(props[i](fn))
                 except Exception:
                     ok = False
-                    break
-            if ok and active:
-                if len(funcs) > 1:
-                    for i in active:
-                        discriminates[i] = True
-                passing.append(name)
-
-        # remember which properties were informative
-        for i, d in enumerate(discriminates):
-            if d and i not in self.state["useful_props"]:
-                self.state["useful_props"].append(i)
+                if ok:
+                    kept.append((name, fn))
+            # credit the property for what it eliminated
+            eliminated = len(remaining) - len(kept)
+            while len(power) <= i:
+                power.append(0)
+            power[i] += eliminated
+            if kept:
+                remaining = kept
+        self.state["prop_power"] = power
 
         cpu = round(time.monotonic() - t0, 4)
-        return {"passing": passing, "cpu_s": cpu, "family_guess": self.predict_family(),
-                "props_skipped": skipped, "props_active": len(active)}
+        return {"passing": [n for n, _ in remaining], "cpu_s": cpu,
+                "family_guess": self.predict_family(), "probes": probes}
