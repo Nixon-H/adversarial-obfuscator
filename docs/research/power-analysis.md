@@ -159,3 +159,63 @@ control was run: three harness bugs, one endpoint design error, one stale
 document claim, and now one interpretation that a single control reversed. The
 pattern is consistent enough to state plainly: **a direction without a control
 is a story, not a result.**
+
+## Round 50: separating experience from build variation
+
+Rounds 48 and 49 both varied build *and* experience together, so neither could
+attribute the effect. This holds the build fixed and varies only experience:
+the attacker observes k other builds, then is scored on the **same** target
+build every time.
+
+| experience k | probes on the fixed build |
+|---|---|
+| 0 | 9 |
+| 1 | 9 |
+| 2 | 9 |
+| 4 | 9 |
+| 6 | 9 |
+
+**Constant.** Experience does not change probe cost on a fixed build.
+
+## So what was the +0.44?
+
+Build variation. Rounds 48 and 49 advanced the variant index along with the
+experience, and different builds need different numbers of probes. Averaged
+over seventeen tasks that produces a small positive difference that has nothing
+to do with k.
+
+This also explains round 49's clean control: with the ranking reset, the
+difference was exactly +1.00 with zero variance, which is what a pure
+build-order artefact looks like.
+
+## The corrected statement
+
+> On this benchmark, an accumulating attacker's probe cost is **independent of
+> its experience** and depends on the build it is applied to. Diversity across
+> builds changes the cost; learning across builds does not.
+
+That is the first version of this claim that survives a control. It took three
+attempts: a retracted memoryless endpoint (round 34), a direction claim refuted
+by a reset control (round 49), and now a confound resolved by holding the build
+fixed.
+
+## What it means for the study
+
+The question "does accumulated analysis help or hurt across diversified builds"
+**cannot be answered by this design**, because the design never held the build
+fixed while varying experience until now. With the build fixed the answer is
+"no effect", which makes the interesting question the *other* one:
+
+> Does a specification derived from one build identify a different build at the
+> same cost as one derived from it? That is what the 51-cell benchmark already
+> measures, and the honest answer is yes, at every cell.
+
+The accumulating-attacker line of work has therefore run its course. It
+produced one clean negative: experience does not transfer as a cost saving,
+because there is no cost to save — the property set is build-independent.
+
+## Correction record
+
+Seventh correction. Three of the seven concern this endpoint alone, which is a
+fair summary of how hard it is to ask a question that can be answered rather
+than merely measured.
