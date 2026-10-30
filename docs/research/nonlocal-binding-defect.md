@@ -158,3 +158,42 @@ pre-pass, because its answer is always "leave it alone".
 The estimate in round 175 that `_next_gen` "has another cause" was right, and the
 cause is structural: renaming happens in one pass, scope declarations are not known
 until it has already started.
+
+## Round 177: the pre-pass works
+
+Round 176 identified the residual as an ordering dependency: the walker can meet a
+use inside a function before it reaches that function's `nonlocal` declaration.
+
+The fix is the pre-pass it described. Before `renamer.visit(tree)`, walk the tree
+once, collect every `ast.Nonlocal` name, and add them to `renamer.reserved`. The
+declaration and its uses then keep the same spelling regardless of traversal order.
+
+| module | before 177 | after 177 |
+|---|---|---|
+| `_cmp` | imports | imports |
+| `_funcs` | imports | imports |
+| `_config` | imports | imports |
+| `_compat` | imports | imports |
+| **`_next_gen`** | **`no binding for nonlocal`** | **imports** |
+| `_make` | `NamedTuple` undefined | `NamedTuple` undefined |
+
+**Five of six.** All 54 renamer and preservation tests pass, so the pre-pass does not
+disturb `global` handling, parameters or exports.
+
+## What `_make` now shows
+
+`NameError: name 'NamedTuple' is not defined` — an import that survives as a
+reference but not as a binding, which is the **round 99–100 family**, not the
+`nonlocal` one. It was previously masked by the compile error, exactly as `_make`'s
+`nonlocal` was masked by the earlier defect.
+
+That is worth recording as a pattern: **fixing one defect in a module often reveals
+the next one**, and the module that reports `NamedTuple` is now reporting the same
+class of bug that the `hexversion` fix addressed in 2023's terms — an import
+reservation that does not cover this name.
+
+## Status
+
+`nonlocal` defect: **closed for builtins (175) and for parameter targets (177)**.
+Two fixes, both verified against six real modules. `_make` is blocked on a
+different, already-known family.

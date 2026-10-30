@@ -535,6 +535,16 @@ def apply_ast_mutation(source_code, options=None):
                     dyn_unbounds.update(u_vars)
             renamer.dynamic_unbounds = dyn_unbounds
             renamer.protected_functions = protected_functions
+            # Pre-pass: a `nonlocal` target must not be renamed, and the walker
+            # can meet a use inside the function before it reaches the
+            # declaration (round 176: `nonlocal n` preserved while `n += 1` was
+            # already renamed, giving "no binding for nonlocal"). Reserving the
+            # names first removes the ordering dependency.
+            _pre = set()
+            for _n in ast.walk(tree):
+                if isinstance(_n, ast.Nonlocal):
+                    _pre.update(_n.names)
+            renamer.reserved.update(_pre)
             tree = renamer.visit(tree)
             # Renaming happens at visit time, so a mapping created late never
             # reaches a binding visited early: the function table was rewritten
