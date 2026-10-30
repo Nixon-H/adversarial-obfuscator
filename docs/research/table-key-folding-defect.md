@@ -916,3 +916,64 @@ rounds 139 and part of 138 pursuing a reduction that could not work by
 construction.
 
 Option 1 is one command: take the emitted failing file, and reduce **that**.
+
+## Round 141: the output reduction was invalid too, in the same way
+
+Reduced the **emitted artefact** rather than the source — 1533 lines to 384 — and
+the reduced file still failed. The failure was:
+
+```
+NameError: name 'src' is not defined
+  at line 194: if not _nx_182349(src):
+```
+
+That looked like a real find, and it is not. Reading the context:
+
+```python
+try:
+        sys.exit()
+except Exception:
+    if not _nx_182349(src):      # <- line removed above this
+```
+
+The line-level reducer had deleted the enclosing `def` but kept its body. The
+`src` reference belongs to `CodeChecksummer`'s template:
+
+```python
+def _nx_verify():
+    for fn, expected in ...:
+        src = inspect.getsource(f)        # bound right here
+        if _h.sha256(src.encode())...
+```
+
+`src` is a local in that function. My reducer removed the `def`, leaving an
+indented block at module level where `src` has no binding.
+
+## Third time, same failure mode
+
+| round | instrument | how it lied |
+|---|---|---|
+| 102 | fixture | the input was not valid Python |
+| 135 | source reducer | pruning created undefined names |
+| **141** | **output reducer** | **line removal deleted a `def` and kept its body** |
+
+In each case the artefact produced an alarming, specific, and wrong answer, and in
+each case **one validity check would have rejected it**:
+
+- input imports cleanly (round 136, added);
+- the reduced output still compiles under a full parse (round 141, **not** added).
+
+A line-level reducer that can break block structure needs `ast.parse` after every
+step, not just a "does it fail" predicate.
+
+## What is unchanged
+
+The eighth defect is still open, the source reduction is still blocked by RNG
+consumption, and the output reduction needs a structure-preserving cut. Neither of
+the three failures weakens those facts.
+
+## What is worth keeping
+
+`CodeChecksummer` is **not** a defect. The template is correct, `src` is bound, and
+the integrity check is scoped to a function. That is worth stating because for one
+round it looked like the finding.
