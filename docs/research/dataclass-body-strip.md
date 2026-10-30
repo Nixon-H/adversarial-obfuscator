@@ -160,3 +160,56 @@ would have caught 3 and 4 immediately and 2 the first time a function was
 called. That is a smaller piece of engineering than the research apparatus
 around it, and it is the thing this programme should recommend to the project
 regardless of what the study concludes.
+
+## Round 86: the cause is a rename that misses the import binding
+
+The source is:
+
+```python
+from sys import hexversion          # line 40
+...
+if hexversion >= 0x30D00A2:         # line 952
+```
+
+The generated code is:
+
+```python
+from sys import hexversion          # binding NOT renamed
+if _nixon_ぐ疧Ꮃゕџ >= 51183778:     # use IS renamed
+```
+
+**The renamer renames the use and not the import.** `hexversion` is bound, the
+comparison references a different, unbound name, and the module fails at import.
+
+`51183778` decodes to `(3, 13)` — the build's own version, so the constant is
+the build-time value of the comparison, consistent with the right-hand side
+being resolved while the left-hand name was rewritten incorrectly.
+
+## Why this is precise and reportable
+
+It is not a mystery: one pass renames a name at its use site and another leaves
+the `ImportFrom` alias alone. The fix is to rename the binding too, or to skip
+renaming names bound by imports. Both are local to the renamer.
+
+It is also the clearest instance of the failure class this whole programme has
+been circling: **transformed code that is syntactically valid, compiles, and
+does not run.** A compile check would not catch it; an import check would.
+
+## What this changes about the recommendation
+
+The earlier recommendation was "compile every generated artefact". This defect
+shows that is not enough — the code compiles. The recommendation has to be:
+
+> **Compile and import every generated artefact, over a corpus of real modules.**
+
+Importing executes module-level code, which is where this fails and where two of
+the four defects would have been caught. It is still far cheaper than the
+research apparatus, and it is the single most useful thing this programme can
+hand back to the project.
+
+## Status
+
+Open, with the mechanism identified and a one-line description of the fix.
+Not fixed here because the renamer's import handling was not traced in the
+remaining time, and a speculative edit to a transform is how the first three
+defects were made.
