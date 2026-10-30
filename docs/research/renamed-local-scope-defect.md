@@ -163,3 +163,49 @@ belongs in a round with the time to run both.
 **Cause identified.** Not "a renamed local is undefined" but "a class-body guard
 renames Loads and not Stores for comprehension targets". The wording change matters:
 the first is a symptom, the second names the line to change.
+
+## Round 182: fixed, and `_make` moves to a fourth layer
+
+The fix is the comprehension-depth counter round 181 described: `visit_ListComp`,
+`visit_SetComp`, `visit_DictComp` and `visit_GeneratorExp` increment `_comp_depth`,
+and the class-body Store guard now requires `_comp_depth == 0`.
+
+```python
+if (isinstance(node.ctx, (ast.Store, ast.Del))
+        and _class_depth > 0
+        and _func_depth == 0
+        and _comp_depth == 0):
+    return node          # class attribute: correctly left alone
+# comprehension target: renamed with its uses
+```
+
+| check | result |
+|---|---|
+| renamer / preserve / diversity / dataclass tests | **61 passed** |
+| `_next_gen`, `_cmp`, `_funcs`, `_config`, `_compat` | import |
+| `_make` | **`AttributeError`, not `NameError`** |
+
+**The `NameError` is gone.** `_make.py` stops at a different, later failure: an
+`AttributeError` naming a renamed class. That is the fourth distinct defect in this
+module and the fourth to surface only once the one above it was fixed.
+
+## The pattern in `_make.py`, complete
+
+| round | defect | surfaced as | fixed |
+|---|---|---|---|
+| 174 | `nonlocal hash` | compile error | 175 |
+| 178 | `typing` runtime imports | import error | 178 |
+| 179–181 | comprehension target vs class-body guard | import error | **182** |
+| 181+ | renamed class attribute | `AttributeError` | open |
+
+Four layers, three fixed. The module has produced more defects than the other five
+external sources combined, and each was invisible until the one above it stopped
+failing.
+
+## Why this one was worth three rounds
+
+Rounds 179 and 180 produced no fix and no claim. Round 181 named the guard. Round 182
+changed five lines and passed all 61 contract tests plus six real modules.
+
+The alternative — guessing at the guard in round 179 — is what rounds 123 and 124 did,
+and both were reverted.

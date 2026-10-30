@@ -340,6 +340,28 @@ class SymbolRenamer(ast.NodeTransformer):
         self._local_params = _prev_params
         self.current_function = old_function
         return node
+    def _visit_comp(self, node):
+        """Track comprehension nesting so the class-body Store guard ignores it."""
+        prev = getattr(self, '_comp_depth', 0)
+        self._comp_depth = prev + 1
+        try:
+            self.generic_visit(node)
+        finally:
+            self._comp_depth = prev
+        return node
+
+    def visit_ListComp(self, node):
+        return self._visit_comp(node)
+
+    def visit_SetComp(self, node):
+        return self._visit_comp(node)
+
+    def visit_DictComp(self, node):
+        return self._visit_comp(node)
+
+    def visit_GeneratorExp(self, node):
+        return self._visit_comp(node)
+
     def visit_ClassDef(self, node):
         if node.name not in self.reserved and not node.name.startswith("__") and not node.name.startswith("_"):
             node.name = self.get_new_name(node.name)
@@ -366,8 +388,19 @@ class SymbolRenamer(ast.NodeTransformer):
         # method locals still rename). Bare loads in methods that would
         # only resolve via class attrs raise NameError identically
         # before/after (no behavior change).
-        if isinstance(node.ctx, (ast.Store, ast.Del)) and getattr(self, '_class_depth', 0) > 0 and getattr(self, '_func_depth', 0) == 0:
+        if (isinstance(node.ctx, (ast.Store, ast.Del))
+                and getattr(self, '_class_depth', 0) > 0
+                and getattr(self, '_func_depth', 0) == 0
+                # A comprehension gives its target its OWN scope. `{name for
+                # name in ...}` inside a class body is not a class attribute, and
+                # the guard was skipping the Store while renaming the Load in the
+                # element expression -- the exact desync it exists to prevent.
+                # Found on attrs/_make.py line 2536, where the target stayed
+                # `name` and the body used `_nx_b06893`.
+                and getattr(self, '_comp_depth', 0) == 0):
             return node
+        if isinstance(node.ctx, (ast.Store, ast.Del)) and getattr(self, '_comp_depth', 0) > 0:
+            pass  # comprehension target: rename it with its uses
         if isinstance(node.ctx, (ast.Load, ast.Store, ast.Del)) and not node.id.startswith("__") and not node.id.startswith("_") and node.id not in self.reserved:
             node.id = self.get_new_name(node.id)
         return node
