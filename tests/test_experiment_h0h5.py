@@ -21,10 +21,17 @@ def test_arm_order_and_purposes():
         assert arms_mod.ARMS[aid]["pass_sets"]
 
 
-def test_h0_matches_legacy_seed_control():
+def test_h0_is_the_single_fixed_family_control():
+    """H0 is the seed-only control: one pass set, no extra options.
+
+    The set used to end with "vm", which no option in the generator reads --
+    it was a label with no effect (see `docs/research/task-validity.md`), and
+    it was removed so the arm definition does not overstate what it applies.
+    """
     psets, extra = arms_mod.resolve_options("H0", 0)
-    assert psets == [["rename", "dead_code", "mba", "cfg_flatten", "vm"]]
+    assert psets == [["rename", "dead_code", "mba", "cfg_flatten"]]
     assert extra == {}
+    assert len(psets) == 1, "H0 must stay a single-family control"
 
 
 def test_h5_alternates_vm_family():
