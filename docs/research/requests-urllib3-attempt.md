@@ -429,3 +429,30 @@ scope change, and it is one line — but it needs a round that runs both the fla
 | fixed and kept | 9 |
 | open, cause known | 2 (class-body alias, cross-module exports) |
 | regressions caught by the suite | 1 |
+
+## Round 216: the conditional fix has nothing to attach to
+
+Round 215's plan was one line: reserve class-body method names **only when
+`internal_rename` is not active**. Applied to the tree, the patch's target text was not
+found — because **round 215 reverted the code it was conditioning**.
+
+That is a bookkeeping failure, not a technical one: the plan describes a modification to a
+reservation that no longer exists. The tree is the clean reverted state and 47 tests pass.
+
+## What this means for the plan
+
+The conditional can only be written **together with** the reservation it guards, in one
+edit:
+
+1. re-add the class-body reservation from round 210;
+2. add `if not getattr(self, 'allow_internal_rename', None):` around it;
+3. run `test_internal_rename` **and** `urllib3/_collections` in the same command.
+
+Step 3 is the part rounds 210 and 214 both skipped, and it is why they cost three rounds
+between them.
+
+## Status
+
+Unchanged from round 215: `typing` fixed, class-body alias open, cross-module exports open,
+nine of eleven defects fixed and kept. The three-step edit is written down so the next
+attempt does not begin from a plan whose subject was already reverted.
