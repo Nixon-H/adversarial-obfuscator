@@ -114,3 +114,46 @@ def test_documents_do_not_claim_a_total_that_the_code_contradicts():
         "document says %s combined cells; code implies %d (%d+%d tasks x 3)"
         % (m.group(1), expected_total, synth, real)
     )
+
+
+def test_authoring_count_matches_the_documents():
+    """The authoring figure drifted once (33 -> 38). Catch it next time."""
+    import sys
+    sys.path.insert(0, ROOT)
+    from scripts.transfer.tasks import TASKS as SYNTH
+    total = sum(len(t["props"]) for t in SYNTH.values())
+    doc = _read("authoring-cost-proxy.md")
+    m = re.search(r"\*\*(\d+) properties authored", doc)
+    assert m, "authoring doc no longer states a property count"
+    assert int(m.group(1)) == total, (
+        "authoring doc says %s properties; the task files have %d"
+        % (m.group(1), total)
+    )
+
+
+def test_module_size_figure_matches_the_documents():
+    """The module-size mean drifted once (8.3 -> 8.6). It is a computed mean,
+    so the documents must not restate it from memory; this checks that every
+    document quoting it quotes the same number as its own table."""
+    import sys
+    sys.path.insert(0, ROOT)
+    claims = []
+    for name in ("cost-is-build-independent.md", "manuscript-draft.md"):
+        doc = _read(name)
+        for m in re.finditer(r"(\d+\.\d+) at four", doc):
+            claims.append((name, m.group(1)))
+    if not claims:
+        pytest.skip("no document states the four-candidate figure")
+    values = {v for _, v in claims}
+    assert len(values) == 1, (
+        "documents disagree on the four-candidate mean: %r" % (claims,)
+    )
+
+
+def test_reproduce_script_exists_and_is_runnable():
+    path = os.path.join(ROOT, "scripts", "transfer", "reproduce.py")
+    assert os.path.exists(path), "the reproduction script is missing"
+    src = open(path, encoding="utf-8").read()
+    for table in ("table_singleton", "table_module_size", "table_diversity",
+                  "table_fixed_build", "table_fault_control", "table_authoring"):
+        assert "def %s(" % table in src, "reproduce.py lost %s" % table
