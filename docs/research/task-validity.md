@@ -213,11 +213,20 @@ The **entire body** is inside the predicate. Evaluating it:
 
 | side | value |
 |---|---|
-| `_nx_ftable[0](1, 2, 65537)` = `1 * 2 % 65537` | **2** |
+| `_nx_ftable[0](1, 2, 65537)` | see the correction below |
 | `(pow(3, (0 << 4) + 3, 65537) + 7) % 65537` | **34** |
 
-`2 == 34` is **False**, so the body never runs, the `else: pass` executes,
-and the function returns `None`.
+**Correction (round 21).** The left-hand value was written above as `2`,
+computed on the assumption that `_nx_ftable[0]` was multiplication. It is
+not: the emitted table is `_nx_ftable = dict([(0, pow)])`, so the call is
+`pow(1, 2, 65537)`, which is 1. The predicate is unsatisfiable either way --
+1 is not 34 -- but the arithmetic in the first version of this section was an
+assumption rather than a reading, and that is exactly the class of error this
+document exists to catch.
+
+What is verified is the outcome, not the left-hand constant: the body is
+wrapped in the predicate, the predicate is false, the `else: pass` runs, and
+the function returns `None`.
 
 **Every result from the suspect builds was `None`.** That is one `if`
 statement with an unsatisfiable condition, emitted as an "always true" opaque
