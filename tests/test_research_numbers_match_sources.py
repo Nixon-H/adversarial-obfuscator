@@ -211,3 +211,47 @@ def test_every_retracted_defect_document_is_cited_by_the_paper():
         "defect documents not cited anywhere in the paper: %r. Round 220 found two "
         "fixes with documents and no table row; the count guards could not see it."
         % (missing,))
+
+
+def test_documented_artefact_count_matches_the_gate_record():
+    """Documents quoting an artefact count must match the gate's own record.
+
+    Round 226 found three documents quoting 104 artefacts twenty rounds after the gate
+    narrowed to 38. Round 227 tried to derive the count from the gate's AST and reported
+    21 against a real 38 -- the count depends on --variants and on conditionals, so it is
+    a measurement, not a source property.
+
+    The fix is this: the gate writes `gate-count.json` each run, and this guard compares
+    documents to that record. Skipped when the file is absent, because the guard must not
+    fail merely because the gate has not been run in this checkout.
+    """
+    import json
+    import re
+    rec_path = os.path.join(DOCS, "gate-count.json")
+    if not os.path.exists(rec_path):
+        return
+    with open(rec_path, encoding="utf-8") as f:
+        rec = json.load(f)
+    actual = rec.get("artefacts")
+    if not isinstance(actual, int) or actual <= 0:
+        return
+    wrong = {}
+    # Only the two documents that speak for the programme as a whole. Every other
+    # document is either historical or about one measurement, and scoping this to
+    # all 61 files made the guard fire on numbers that were correct when written.
+    for fn in ("paper-draft.md", "README.md"):
+        text = _read(os.path.join(DOCS, fn))
+        for m in re.finditer(r"\*{0,2}(\d{1,3})\*{0,2} artefacts", text):
+            claimed = int(m.group(1))
+            if claimed == actual:
+                continue
+            snippet = text[max(0, m.start() - 40):m.end() + 20]
+            if "measured at" in snippet or "at the time" in snippet:
+                continue
+            # A file whose header declares itself historical is skipped entirely.
+            if "Historical." in text[:400] or "RETRACTED" in text[:200]:
+                continue
+            wrong.setdefault("%s: %s" % (fn, m.group(0)), claimed)
+    assert not wrong, (
+        "documents quote artefact counts the gate does not produce "
+        "(gate-count.json says %d): %r" % (actual, wrong))

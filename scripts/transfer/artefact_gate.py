@@ -199,6 +199,22 @@ def main():
                     checked += 1
                     failures.extend(check_one(label, code, props, k, workdir, seed))
 
+    # Write the count so the document guards can check it without re-running the
+    # gate. A static read of this file cannot derive the number (it depends on
+    # --variants and on conditionals), which is why round 227's AST-based guard
+    # reported 21 against a real 38.
+    try:
+        import json
+        _out = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "..", "..", "docs", "research", "gate-count.json")
+        with open(os.path.normpath(_out), "w", encoding="utf-8") as _f:
+            json.dump({"artefacts": checked, "failures": len(failures),
+                       "variants": args.variants,
+                       "seeds": [int(x) for x in args.seeds.split(",") if x.strip()]},
+                      _f, indent=2)
+            _f.write("\n")
+    except Exception:
+        pass
     print("seeds: %s" % ",".join(str(x) for x in seeds))
     print("artefacts checked: %d" % checked)
     print("invalid fixtures: %d" % len(invalid_inputs))

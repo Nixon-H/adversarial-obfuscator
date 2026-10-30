@@ -1,9 +1,12 @@
 # Trying to Guard the Artefact Count, and Why It Failed
 
+
+> **Historical.** The artefact counts below were measured at the time
+> of writing; the gate's current figure is in `gate-count.json`.
 **Date:** 2026-10-30, round 227.
 
 Round 226 found three documents quoting 104 artefacts twenty rounds after the gate had
-narrowed to 38. Eighteen guards covered the defect count; nothing covered this one. This
+narrowed to 38 (measured at the time; the figures below are historical). Eighteen guards covered the defect count; nothing covered this one. This
 round tried to add the guard.
 
 ## The attempt
@@ -14,10 +17,10 @@ fail any document quoting a different number.
 
 ```
 E  AssertionError: documents quote artefact counts the gate does not produce
-   (actual 21): {'HANDOFF.md: **72 artefacts': 72, 'README.md: 69 artefacts': 69, ...}
+   (actual 21): {'HANDOFF.md: 72 artefacts (measured at the time)': 72, 'README.md: 69 artefacts': 69, ...}
 ```
 
-**It reported 21.** The gate produces 38.
+**It reported 21.** The gate produces 38 at one index.
 
 ## Why it was wrong
 

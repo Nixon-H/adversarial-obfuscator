@@ -1,5 +1,8 @@
 # The Artefact Gate: Compile, Import, Exercise
 
+
+> **Historical.** The artefact counts below were measured at the time
+> of writing; the gate's current figure is in `gate-count.json`.
 **Date:** 2026-10-30
 **Script:** `scripts/transfer/artefact_gate.py`
 

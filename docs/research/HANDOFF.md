@@ -10,7 +10,7 @@
 |---|---|
 | defects found | **thirteen found, twelve fixed** |
 | test suite | **4521 passed, 4 skipped, 0 failed** |
-| artefact gate | **72 artefacts, 0 failures** (2 indices; 38 at one) |
+| artefact gate | **38 artefacts at one index, 72 at two**, 0 failures |
 | reproduction | **8 of 8 tables match** |
 | paper | 422 lines, instrument-validity note, internally consistent |
 | research documents | 51 |

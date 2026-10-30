@@ -13,7 +13,7 @@ claims, and what it does not.
 | If you want to | read |
 |---|---|
 | the paper | `paper-draft.md` — instrument-validity note with a seven-defect section |
-| whether the artefact runs | `python3 scripts/transfer/artefact_gate.py` — 69 artefacts, 0 failures |
+| whether the artefact runs | `python3 scripts/transfer/artefact_gate.py` — 69 artefacts (measured at the time), 0 failures |
 | the defects | `paper-draft.md` §6, or the individual files below |
 | the benchmark | `task-validity.md`, `real-corpus-tasks.md`, `external-tasks-evaluated.md` |
 | what went wrong | `retraction-cost-curve.md`, `fourth-review-reframing.md`, and the eight retractions |
