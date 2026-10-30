@@ -176,3 +176,65 @@ Four rounds ago the cost curve had been retracted as vacuous. It now has a
 direction, a monotone replication, and a mechanism, obtained by varying the one
 thing that had been held constant. That is the difference between an endpoint
 that measures a harness and one that measures a system.
+
+## Round 54: the jump belongs to the sibling, not the position
+
+Round 53 could not separate "the added sibling is intrinsically hard" from
+"the ordering heuristic misbehaves at that size". The test is to permute sibling
+order: if the curve follows **position**, it is the heuristic; if it follows
+**which sibling** was added, it is the task.
+
+All six permutations of `sumselected`'s three siblings:
+
+| permutation | probes at 1, 2, 3, 4 candidates |
+|---|---|
+| (0, 1, 2) | 2, 3, 8, 9 |
+| (0, 2, 1) | 2, 3, 4, 9 |
+| (1, 0, 2) | 2, 7, 8, 9 |
+| (1, 2, 0) | 2, 7, 8, 9 |
+| (2, 0, 1) | 2, 3, 4, 9 |
+| (2, 1, 0) | 2, 3, 8, 9 |
+
+**Every permutation ends at 9. The path differs: the second candidate costs 3
+or 7 depending on which sibling it is.**
+
+So the *endpoint* is invariant to order and the *path* is not. The ordering
+heuristic changes how quickly the cost arrives, and the sibling's difficulty
+changes when. Neither changes where it lands.
+
+## The refined claim
+
+> The cost of identifying a known function depends on the number of candidates
+> in the module and on how hard each is to eliminate, but not on the order they
+> appear in.
+
+That is stronger than round 53's statement, because the invariance is a
+property of the measurement rather than a tolerance for noise, and it was
+established by a control rather than assumed.
+
+## What it still does not say
+
+- Whether the plateau at 9 is a property of this property set or of the
+  candidate count. Four candidates with four properties can only cost so much.
+- Anything beyond four candidates. The curve may continue rising; this design
+  cannot see past its own family size.
+- Whether a stronger attacker would show the same invariance. This attacker's
+  ordering is fixed at the start of a build, so the permutation effect is
+  bounded by how many properties it must try.
+
+## Where the endpoint has landed
+
+| round | state |
+|---|---|
+| 13–29 | flat curve (tautology) |
+| 34 | retracted: memoryless attacker |
+| 37 | bounded null with an interval |
+| 50 | experience is neutral (build fixed) |
+| 51 | build-independent; nearly trivial at fixed size |
+| 52 | scales with candidate count |
+| 53 | monotone in 9 of 9 tasks |
+| **54** | **order-invariant endpoint, sibling-dependent path** |
+
+Eight rounds from a tautology to an invariance with a control behind it. The
+result is small, it is replicated, and every claim in it now has a counter-test
+rather than a narrative.
