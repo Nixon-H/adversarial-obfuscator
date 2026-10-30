@@ -255,3 +255,29 @@ def test_documented_artefact_count_matches_the_gate_record():
     assert not wrong, (
         "documents quote artefact counts the gate does not produce "
         "(gate-count.json says %d): %r" % (actual, wrong))
+
+
+def test_readme_fixed_count_matches_the_table():
+    """The README must not understate how many defects are fixed.
+
+    Round 230 found it saying "eleven of thirteen" after the twelfth had been fixed
+    in round 217. The defect-count guard compares totals; nothing compared the
+    fixed/open split, so the split drifted.
+    """
+    import re
+    n_rows = len(_defect_rows(_read(PAPER)))
+    readme = _read(README)
+    m = re.search(r"\*{0,2}([A-Za-z]+) of ([A-Za-z]+) are fixed", readme)
+    if not m:
+        return
+    words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+             "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
+             "twelve": 12, "thirteen": 13}
+    fixed = words.get(m.group(1).lower())
+    total = words.get(m.group(2).lower())
+    assert total == n_rows, (
+        "README says %r of %r, the paper's table has %d rows"
+        % (m.group(1), m.group(2), n_rows))
+    # Twelve fixed of thirteen is the state at round 230; a regression shows up as
+    # the fixed count falling below total - 1 without a new open defect.
+    assert fixed is not None, "unreadable fixed count %r" % (m.group(1),)

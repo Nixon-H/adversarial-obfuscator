@@ -60,7 +60,7 @@ Thirteen, of which ten could not have been found by the project's own tests.
 | 12 | class-body alias value renamed | fails at import | `requests-urllib3-attempt.md` |
 | 13 | public exports renamed, importer not | fails to import from its own package | `requests-urllib3-attempt.md` |
 
-Eleven of thirteen are fixed; one is a design question, one is open (see below). The guards live in `tests/test_*` and are named
+Twelve of thirteen are fixed; the thirteenth is a design question, measured in the paper's section 6.4. The guards live in `tests/test_*` and are named
 in `artefact-gate.md`.
 
 ---
