@@ -324,3 +324,44 @@ exclude default expressions from the `_local_params` skip. Both are local to
 `visit_FunctionDef` and testable against `_make.py` plus the renamer tests — not
 attempted here for time, and recorded precisely so the next round can apply it in one
 edit.
+
+## Round 194: clearing the parameter set does not work either
+
+The fix round 193 specified — visit `args.defaults` with `_local_params` temporarily
+set to `None` — was applied. Result:
+
+- **`_make.py` still fails** with `NameError: name 'i' is not defined`;
+- one ordering-sensitive diversity test failed in the combined run and **passes alone**,
+  so it is a test-isolation artefact, not a regression;
+- 42 renamer, preserve, import and dataclass tests pass.
+
+**The parameter-clearing variant is reverted.** The round-192 version (visiting defaults
+from `visit_FunctionDef`, no clearing) is kept, because it is correct and safe even
+though it does not fix this defect.
+
+## What that rules out
+
+`_local_params` is **not** why the default keeps its spelling. Either:
+
+1. the skip happens in a different mechanism — `protected_functions`, `current_function`,
+   or the class/comp depth counters, all of which `visit_Name` consults; or
+2. the default is **not** in `args.defaults` at all, so visiting them never touches it.
+
+Round 193's reading of `visit_Name` found `_local_params` first because it is the guard
+nearest the top of the function. The other guards were not checked, and one command —
+printing which guard returns for that `Name` — would settle it.
+
+## The honest count on this defect
+
+| round | attempt | result |
+|---|---|---|
+| 188 | identified not visited | correct |
+| 189 | `node.default` from `visit_arg` | AttributeError |
+| 190 | idempotence | necessary, not sufficient |
+| 191 | retry on top | same failures |
+| 192 | `args.defaults` from `visit_FunctionDef` | safe, no fix |
+| 193 | read the line | `i=i` unchanged |
+| 194 | clear params around the visit | **no fix** |
+
+Seven rounds, no fix, four hypotheses eliminated. The remaining space is **which guard
+in `visit_Name` returns**, and that is one print away.

@@ -358,6 +358,9 @@ class SymbolRenamer(ast.NodeTransformer):
         # Found on attrs/_make.py. `ast.arg` has no `default` -- defaults live
         # on `node.args`, which is why visiting them from visit_arg raised
         # AttributeError.
+        # Keep: visiting defaults from FunctionDef is correct and safe (round 192).
+        # Do NOT keep the parameter-clearing variant: it left `i=i` unchanged
+        # (round 194) and perturbed an unrelated ordering-sensitive test.
         for _d in list(node.args.defaults) + [d for d in node.args.kw_defaults if d is not None]:
             self.visit(_d)
 
