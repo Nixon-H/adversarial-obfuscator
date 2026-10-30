@@ -138,7 +138,13 @@ at a time:
 | count_above | 2, 3, 4, 5 |
 
 **Monotone non-decreasing in 9 of 9 tasks.** Mean probes: **2.0 at one
-candidate, 8.3 at four.**
+candidate, 8.6 at four.**
+
+*(Corrected in round 68: this read 8.3 when the table was written. The
+`signdiff` repair added a fifth property to that task in round 64, and
+`reproduce.py` regenerated the figure as 8.6. The per-task row above still
+shows 9 for signdiff's maximum, which is unchanged; the mean moved because
+every task's probe count contributes to it.)*
 
 ## What this resolves
 
