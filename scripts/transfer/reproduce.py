@@ -164,9 +164,54 @@ def table_authoring():
     return "authoring", {"properties": total}, None, "38 properties across 9 tasks"
 
 
+
+def table_calibration():
+    """Documents claim 9, 11, 20, 20 probes for zero to three faults."""
+    t = SYNTH["sumselected"]
+    src = t["target"] + "\n" + "\n".join(t["siblings"])
+    ladders = [
+        [],
+        [("lo <= v < hi", "lo <= v <= hi")],
+        [("lo <= v < hi", "lo <= v <= hi"), ("total = 0", "total = 1")],
+        [("lo <= v < hi", "lo <= v <= hi"), ("total = 0", "total = 1"),
+         ("total += v", "total += v * 2")],
+    ]
+    out = []
+    for edits in ladders:
+        s2 = src
+        for a, b in edits:
+            s2 = s2.replace(a, b)
+        code = generate_variant(s2, 4, {"master_seed": 4242})
+        td = tempfile.mkdtemp(prefix="nxk_rep_")
+        pth = os.path.join(td, "b.py")
+        with open(pth, "w", encoding="utf-8") as f:
+            f.write(code)
+        out.append(AccumulatingAttack().apply(pth, t["props"])["probes"])
+    return "calibration", out, None, "9, 11, 20, 20 probes"
+
+
+def table_blind_baseline():
+    """Documents claim 8.0/12.0/16.0/20.0 for blind properties."""
+    out = {}
+    for n_sib in range(0, 4):
+        vals = []
+        for name, t in SYNTH.items():
+            src = t["target"] + "\n" + "\n".join(t["siblings"][:n_sib])
+            code = generate_variant(src, 4, {"master_seed": 4242})
+            td = tempfile.mkdtemp(prefix="nxk_rep_")
+            pth = os.path.join(td, "b.py")
+            with open(pth, "w", encoding="utf-8") as f:
+                f.write(code)
+            blind = [(lambda f: True) for _ in range(4)]
+            vals.append(AccumulatingAttack().apply(pth, blind)["probes"])
+        out[n_sib + 1] = round(statistics.mean(vals), 1)
+    return "blind-baseline", out, None, "8.0 / 12.0 / 16.0 / 20.0"
+
+
 def main():
     rows = [table_singleton(), table_module_size(), table_diversity(),
-            table_fixed_build(), table_fault_control(), table_authoring()]
+            table_fixed_build(), table_fault_control(), table_authoring(),
+            table_calibration(), table_blind_baseline()]
     width = max(len(r[0]) for r in rows)
     print("%-*s | %-58s | documents claim" % (width, "measurement", "regenerated"))
     print("-" * (width + 62 + 40))
