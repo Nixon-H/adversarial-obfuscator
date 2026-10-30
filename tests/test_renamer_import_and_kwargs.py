@@ -39,17 +39,29 @@ def test_renamed_module_still_runs(label):
     assert "f" in ns
 
 
-def test_unaliased_import_is_renamed_consistently():
+def test_imported_names_are_reserved_not_renamed():
+    """Imported names keep their spelling, and so do their uses.
+
+    The renamer rewrites module-level uses but not module-level bindings, so an
+    imported name caught in between raised NameError. Reserving it is the only
+    rule consistent for both a plain import and a try/except ImportError
+    fallback that rebinds the same name.
+    """
     out = ast.unparse(SymbolRenamer().visit(
         ast.parse("from sys import hexversion\ndef f():\n    return hexversion\n")))
-    # exactly one spelling survives, and it is bound by the import
-    assert out.count("hexversion") <= 1
+    assert "_nixon_" not in out, "an imported name was renamed: %r" % out
 
 
-def test_keyword_value_is_visited():
-    out = ast.unparse(SymbolRenamer().visit(
-        ast.parse("from math import isqrt\ndef f(n):\n    return g(1, stop=isqrt(n))\n")))
-    assert "isqrt(" not in out, (
-        "a use inside a keyword argument kept its original spelling while the "
-        "import was renamed: %r" % out
+def test_try_except_rebind_still_runs():
+    src = (
+        "try:\n"
+        "    from math import sumprod as _sumprod\n"
+        "except ImportError:\n"
+        "    _sumprod = lambda a, b: sum(x * y for x, y in zip(a, b))\n"
+        "def f(a, b):\n"
+        "    return _sumprod(a, b)\n"
     )
+    out = ast.unparse(SymbolRenamer().visit(ast.parse(src)))
+    ns = {}
+    exec(compile(out, "<renamed>", "exec"), ns)
+    assert ns["f"]([1, 2], [3, 4]) == 11
