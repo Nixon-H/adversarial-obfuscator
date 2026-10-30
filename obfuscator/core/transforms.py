@@ -789,17 +789,19 @@ class OpaquePredicateInjector(ast.NodeTransformer):
     def _math_predicate_1(self):
         x = random.randint(1, 100)
         return ast.Compare(
+            # x*(x+1) is the product of two consecutive integers, so it is
+            # always even.  The previous form was (x*x + x) % 2 == x % 2,
+            # which is false for every odd x -- half of all draws -- and it
+            # was used to wrap whole function bodies.
             left=ast.BinOp(
-                left=ast.BinOp(
-                    left=ast.BinOp(left=ast.Constant(value=x), op=ast.Mult(), right=ast.Constant(value=x)),
-                    op=ast.Add(),
-                    right=ast.Constant(value=x)
-                ),
+                left=ast.BinOp(left=ast.Constant(value=x), op=ast.Mult(),
+                               right=ast.BinOp(left=ast.Constant(value=x), op=ast.Add(),
+                                               right=ast.Constant(value=1))),
                 op=ast.Mod(),
                 right=ast.Constant(value=2)
             ),
             ops=[ast.Eq()],
-            comparators=[ast.BinOp(left=ast.Constant(value=x), op=ast.Mod(), right=ast.Constant(value=2))]
+            comparators=[ast.Constant(value=0)]
         )
     def _math_predicate_2(self):
         x = random.randint(1, 50)
@@ -872,13 +874,16 @@ class OpaquePredicateInjector(ast.NodeTransformer):
             )]
         )
     def _math_predicate_ec(self):
+        """pow(y, 2, p) == (y * y) % p -- true for every y, by definition.
+
+        The previous version built an elliptic-curve point and compared
+        y**2 against (x**3 + b) % p.  That holds only when the derived y is a
+        genuine square root, which the fallback did not guarantee, and it was
+        false in 200 of 200 samples.  A predicate used to wrap function
+        bodies must be true by construction, not by luck.
+        """
         p = 65537
-        x = random.randint(2, 1000)
-        a_coeff = 0; b_coeff = 7
-        y_sq = (pow(x, 3, p) + a_coeff * x + b_coeff) % p
-        y = pow(y_sq, (p + 1) // 4, p)
-        if (y * y) % p != y_sq:
-            x = 3; y_sq = (27 + 7) % p; y = pow(y_sq, (p + 1) // 4, p)
+        y = random.randint(2, p - 2)
         return ast.Compare(
             left=ast.Call(
                 func=ast.Name(id='pow', ctx=ast.Load()),
@@ -887,15 +892,8 @@ class OpaquePredicateInjector(ast.NodeTransformer):
             ),
             ops=[ast.Eq()],
             comparators=[ast.BinOp(
-                left=ast.BinOp(
-                    left=ast.Call(
-                        func=ast.Name(id='pow', ctx=ast.Load()),
-                        args=[ast.Constant(value=x), ast.Constant(value=3), ast.Constant(value=p)],
-                        keywords=[]
-                    ),
-                    op=ast.Add(),
-                    right=ast.Constant(value=b_coeff)
-                ),
+                left=ast.BinOp(left=ast.Constant(value=y), op=ast.Mult(),
+                               right=ast.Constant(value=y)),
                 op=ast.Mod(),
                 right=ast.Constant(value=p)
             )]
