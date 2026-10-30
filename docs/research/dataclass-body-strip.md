@@ -110,3 +110,53 @@ Two defects in two rounds, on one module, from code this project did not write.
 The internal corpus produced none in eighty rounds. That ratio is the argument
 for the corpus, and it is stronger than any of the statistics this programme was
 built to gather.
+
+## Round 85: the second defect is a version guard with an unbound name
+
+The `NameError` occurs once, at module level:
+
+```python
+if _nixon_ぐ疧Ꮃゕџ >= 51183778:
+    from itertools import batched as _nx_f882a6
+```
+
+- `51183778` decodes to `(3, 13)` shifted — the **build's own** Python version.
+- `_nixon_ぐ疧Ꮃゕџ` is never assigned anywhere in the module.
+
+So the pass resolved a version guard at build time, kept the comparison, and
+left its left-hand operand as a renamed name with no binding. The code parses,
+compiles, and fails at import.
+
+## What kind of bug this is
+
+A **name-resolution failure introduced by renaming**: a symbol was renamed but
+its definition was dropped or never emitted. It is the same class as the
+opaque-predicate defect — code that looks transformed and does not run — and it
+is the third such defect in this project.
+
+Unlike the dataclass one, the fix is not local: it requires finding which pass
+emits the guard and either folding the comparison away entirely or ensuring the
+name is bound. That is product debugging on a 1,000-line input and it is not done
+here.
+
+## The pattern across four defects
+
+| # | defect | symptom | found by |
+|---|---|---|---|
+| 1 | 30-day expiry | stops decrypting after a month | reading the key derivation |
+| 2 | false opaque predicates | functions return `None` | behavioural gate |
+| 3 | dataclass body emptied | does not compile | external module |
+| 4 | unbound name in version guard | fails at import | external module |
+
+Two of four came from the external module, in two rounds, after eighty rounds of
+internal fixtures produced none. The common thread is that each defect is
+**invisible to a test that only checks the code runs** — and two of them produce
+code that does not run at all.
+
+## The guard this argues for
+
+Compiling and importing every generated artefact, on a corpus of real modules,
+would have caught 3 and 4 immediately and 2 the first time a function was
+called. That is a smaller piece of engineering than the research apparatus
+around it, and it is the thing this programme should recommend to the project
+regardless of what the study concludes.
