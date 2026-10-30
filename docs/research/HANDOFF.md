@@ -8,7 +8,7 @@
 
 | | |
 |---|---|
-| defects found and fixed | **ten** |
+| defects found | **eleven found, ten fixed** |
 | test suite | **4521 passed, 4 skipped, 0 failed** |
 | artefact gate | **72 artefacts, 0 failures** (2 indices; 38 at one) |
 | reproduction | **8 of 8 tables match** |
@@ -34,7 +34,7 @@ machinery for this:
 3. run `python3 scripts/transfer/artefact_gate.py --variants 2 --seeds 4242,7`.
 
 This is mechanical. It adds no new claim. It does widen the corpus, which is the
-only thing that has ever found defects in this programme — five of the ten came
+only thing that has ever found defects in this programme — six of the eleven came
 from code the project did not write.
 
 ---
@@ -139,7 +139,7 @@ The research question was answered **negatively**, and the answer is about the
 semantic, so transform-family variation has no channel to it, and any null it
 produces is predicted by its own construction.
 
-What the work produced that outlives the question: **ten silent failure modes in
+What the work produced that outlives the question: **eleven silent failure modes in
 the obfuscator**, six of which the project's own tests could not have found, and
 five instruments that fail in different directions.
 

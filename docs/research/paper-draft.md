@@ -36,7 +36,7 @@ predicted by its own construction.
 
 We report that plainly, and we report what survives: a benchmark whose gates
 and reproduction are reusable, a calibration showing what the counter does
-respond to, and **ten correctness defects** in the obfuscator, found by gates
+respond to, and **eleven correctness defects** in the obfuscator, found by gates
 and by code the benchmark did not write. We do **not** claim that diversification fails to raise attacker cost. We
 claim that this instrument cannot tell, and we explain why so that the next
 attempt does not repeat it.
@@ -47,7 +47,7 @@ monotonically in nine of nine tasks and invariant to the order the functions
 appear in.
 
 We also report an earlier version of this endpoint that was withdrawn because
-it could not fail, and **ten correctness defects** in the obfuscator that the
+it could not fail, and **eleven correctness defects** in the obfuscator that the
 benchmark found — four of which produce artefacts that compile and then fail,
 and one of which silently disabled every artefact thirty days after it was
 built.
@@ -233,7 +233,7 @@ Across both families at three build indices: **51 cells, zero non-singleton.**
 Every cell has exactly one candidate in the attacker's passing set, and the
 evaluator independently confirms it is the target.
 
-## 6. Ten correctness defects found by building this benchmark
+## 6. Eleven correctness defects found by building this benchmark
 
 None of the following was the object of study. All five were found because the
 benchmark demanded something the project's own tests did not: behavioural
@@ -251,6 +251,7 @@ identity per build, then execution of the artefact rather than inspection of it.
 | 8 | builtin names in the function table | fails at import | artefact gate |
 | 9 | an except that returns the input | silently returns unobfuscated source | suite |
 | 10 | names preserved in one place, renamed in another | fails at import | external module 5 |
+| 11 | public exports renamed, importer not | fails to import from its own package | external module 6 |
 
 ### 6.1 The defects that produce code that does not run
 
@@ -291,12 +292,32 @@ Every one is invisible to a test that checks **the input** runs. Three are
 invisible to a test that checks **the output** compiles. All five are visible to
 one that compiles **and imports** the output over real modules.
 
-The internal fixtures could not have found seven of them: they used no
+The internal fixtures could not have found eight of them: they used no
 dataclasses with plain fields, imported nothing, and used no `match`. The
 external modules — `more_itertools.recipes` and `cpython 3.13 statistics.py` —
 used all three within minutes.
 
-### 6.4 What this argues
+### 6.4 The one defect that cannot be fixed inside a module
+
+The twelfth defect found (round 212) is different in kind. `attr/_cmp.py` declares a
+public function `cmp_using` and **no `__all__`**. The renamer renames it, correctly by its
+own rules, and `attr/__init__.py`'s `from ._cmp import cmp_using` then fails.
+
+Every other defect could be repaired inside the module being transformed. This one cannot:
+the export contract exists **only in another file**, which a per-module transform never
+sees. The three possible exits are all product decisions rather than fixes — stop renaming
+public module-level functions (giving up most identifier obfuscation), add a whole-program
+pass over every module in a package, or require `__all__` and refuse to obfuscate without
+it.
+
+**This is worth stating because the current behaviour picks none of them.** A module with
+public functions and no `__all__` is obfuscated into something that cannot be imported by
+its own package — silently, with no warning.
+
+It is also why the two largest external sources remain un-gated, and the reason is not the
+corpus: `urllib3` and `requests` are blocked by this design question, not by packaging.
+
+### 6.5 What this argues
 
 For a tool whose output is executed, the cheapest assurance with the highest
 yield is: **compile and import every emitted artefact, over a corpus that
@@ -305,7 +326,7 @@ engineering than the research apparatus in the rest of this paper, and it would
 have caught every defect above.
 
 This section is included because it is the concrete empirical result of the
-work: ten silent failure modes, none of them the subject of the study, all
+work: eleven silent failure modes, none of them the subject of the study, all
 found by the instrumentation the study required.
 
 ## 7. Limitations

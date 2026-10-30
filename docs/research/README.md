@@ -2,7 +2,7 @@
 
 **Last updated:** round 201 (2026-10-31)
 
-This directory holds a research programme that produced **ten product defects
+This directory holds a research programme that produced **eleven product defects
 and one negative result**. This file is the entry point: what exists, what it
 claims, and what it does not.
 
@@ -42,7 +42,7 @@ That claim survived three independent reviews that each broke a larger one:
 
 ## The defects
 
-Ten, of which seven could not have been found by the project's own tests.
+Eleven, of which eight could not have been found by the project's own tests.
 
 | # | defect | symptom | document |
 |---|---|---|---|
@@ -56,8 +56,9 @@ Ten, of which seven could not have been found by the project's own tests.
 | 8 | builtin names in the function table | fails at import | `table-key-folding-defect.md` |
 | 9 | an `except` that returns the input | silently returns unobfuscated source | `swallowed-exception-returns-original.md` |
 | 10 | names preserved in one place, renamed in another | fails at import | `invented-return-tuple-defect.md` |
+| 11 | public exports renamed, importer not | fails to import from its own package | `requests-urllib3-attempt.md` |
 
-All ten are fixed and guarded. The guards live in `tests/test_*` and are named
+Ten of eleven are fixed; one is a design question (see below). The guards live in `tests/test_*` and are named
 in `artefact-gate.md`.
 
 ---
