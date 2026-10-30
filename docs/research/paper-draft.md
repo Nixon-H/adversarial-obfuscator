@@ -22,7 +22,7 @@ Python source.
 We build 17 tasks — nine hand-written and eight drawn from real programs — each
 a target function among same-arity siblings, and give an attacker only an
 emitted artefact and the task's specification. A further five external sources
-(three single-file libraries and one vendored package, 104 artefacts) are gated
+(three single-file libraries and two vendored packages, 38 artefacts) are gated
 for execution, which validates that the artefacts run without providing an
 independent specification. The attacker's asset is a set of
 executable properties derived from that specification, applied unchanged to
@@ -343,7 +343,7 @@ found by the instrumentation the study required.
 
 - **Corpus.** Seventeen internal tasks by one author, plus five external
   sources gated for execution (three single-file libraries and one vendored
-  package, 104 artefacts). The external sources validate that the artefacts run;
+  packages, 38 artefacts). The external sources validate that the artefacts run;
   they do **not** provide an independent **specification**, because the
   properties are still written by this paper's author. That is the primary
   limitation: twelve-plus projects specified by someone else would be, and this

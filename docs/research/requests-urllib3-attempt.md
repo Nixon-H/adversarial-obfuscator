@@ -454,7 +454,7 @@ between them.
 ## Status
 
 Unchanged from round 215: `typing` fixed, class-body alias open, cross-module exports open,
-nine of eleven defects fixed and kept. The three-step edit is written down so the next
+twelve of thirteen defects fixed and kept (two more were closed after this section was written). The three-step edit is written down so the next
 attempt does not begin from a plan whose subject was already reverted.
 
 ## Round 217: the conditional reservation works — both checks, one round

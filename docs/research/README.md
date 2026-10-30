@@ -87,7 +87,7 @@ singleton attacker set. `sibling-separation-audit.md` records the audit.
 
 | instrument | what it answers | how to run |
 |---|---|---|
-| artefact gate | does the output compile, import and run — **104 artefacts, 4 corpus families, seed sweep** | `python3 scripts/transfer/artefact_gate.py --variants 2 --seeds 4242,7` |
+| artefact gate | does the output compile, import and run — **38 artefacts, 4 corpus families, seed sweep** | `python3 scripts/transfer/artefact_gate.py --variants 2 --seeds 4242,7` |
 | reproduction | are the paper's numbers still true | `python3 scripts/transfer/reproduce.py` |
 | validity | is the task scoreable | `python3 scripts/transfer/evaluate_tasks.py` |
 | external validity | do third-party tasks pass | `python3 scripts/transfer/evaluate_external.py` |

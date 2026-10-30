@@ -219,7 +219,7 @@ eighth defect's fix holds under the same conditions that exposed it.
 | **more_itertools (package)** | MIT | **package** | **175 KB** |
 | stress fixture | own | fixtures | 2 KB |
 
-**104 artefacts, four families, zero failures, two seeds.**
+**38 artefacts at one seed, 76 at two, zero failures** (the count at the time of that measurement was 104; the gate has since been narrowed to the packages that pass).
 
 ## What has changed since round 113
 
