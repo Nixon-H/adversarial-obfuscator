@@ -85,7 +85,7 @@ humans and must be labelled as such.
 | step | basis |
 |---|---|
 | select and pin 12–15 projects | one day, mostly licence review |
-| extract eligible functions | ~10 per 1,000 lines, mechanical |
+| extract eligible functions | ~10 per 1,000 lines **for application code**; measured at 0 for a utility library (`six.py`, see `external-fetch-attempt.md`) |
 | write 2–5 properties per task | measured here: 4 per task, 1–2 essential (`authoring-cost-proxy.md`) |
 | dual authoring | doubles the property work |
 | generate 12 seeds × 2 families | the existing runner, unchanged |
