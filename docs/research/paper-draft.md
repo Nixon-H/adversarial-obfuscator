@@ -72,11 +72,25 @@ statement — no prior study measures cross-build identification cost in Python
 source with an oracle-free attacker at matched budget — and supports nothing
 stronger.
 
-Closest prior work and why each differs is tabulated in that log. The nearest
-conceptual threat is CoDiver's partition diversity, which denies analysis
-knowledge transfer in **virtualised** code where a stale opcode map fails
-structurally. No source-level analogue exists, which is why this paper reports a
-measurement rather than a mechanism.
+Closest prior work and why each differs is tabulated in that log. Two threats
+matter:
+
+**On the outcome, OFCI** (NDSS 2022) identifies functions in obfuscated
+binaries, including VM-obfuscated code, using execution traces and binary
+similarity. Function identification under obfuscation is therefore not novel,
+and this paper does not claim it. What differs: artefact class (Python source),
+question (whether *per-build variation* changes cost, not whether
+identification is possible), and method (a specification-derived property set
+authored once and applied frozen).
+
+**On the framing, CoDiver's partition diversity** denies analysis-knowledge
+transfer in virtualised code, where a stale opcode map fails structurally. No
+source-level analogue exists, which is why this paper reports a measurement
+rather than a mechanism claim.
+
+The nearest benchmark is JsDeObsBench (36,260 obfuscated JavaScript programs);
+it differs in language, attacker (LLM), and the absence of a cross-build
+transfer question.
 
 ## 3. Definitions and threat model
 

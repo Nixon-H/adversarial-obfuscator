@@ -76,3 +76,42 @@ That is the methodological premise of this work stated by a SoK: cost is the
 goal, proxies are unavoidable, so the contribution is a **better-instrumented
 proxy** — not a new theory of diversity. It also means the study must be
 explicit that it measures a proxy, which the manuscript does.
+
+## Round 77: a broader screen found a closer prior
+
+Four more queries were run. They surfaced three works the earlier screen missed,
+one of which is the closest thing to a direct threat:
+
+| source | what it is | relation to this work |
+|---|---|---|
+| **OFCI** (NDSS 2022), "Detecting Obfuscated Function Clones in Binaries" | function clone identification under obfuscation, including VM-obfuscated code, using binary similarity and machine learning | **closest prior on the outcome.** It identifies functions in obfuscated artefacts, as this work does. Differs in artefact class (binaries, real-world), method (execution traces + ML similarity), and question (clone matching, not specification-derived identification at a measured cost) |
+| **JsDeObsBench** (arXiv 2506.20170) | benchmark for LLM JavaScript deobfuscation, 36,260 programs with ground truth | nearest benchmark in spirit and scale. Different language, different attacker (LLM), and no cross-build transfer question |
+| **ISSTA 2023**, "Effects of Obfuscation on Static Machine Learning Detectors" | empirical study of obfuscation against ML detectors | different outcome (malware detection), same empirical tradition |
+
+## What this changes about the novelty claim
+
+The previous wording — "no prior study measures cross-build identification cost
+in Python source with an oracle-free attacker at matched budget" — was already
+hedged. It survives, but only because it is that specific. **Function
+identification under obfuscation is not novel**, and OFCI is the paper that
+shows it.
+
+What remains distinct:
+
+1. **Artefact class**: Python source, not binaries.
+2. **Question**: does *per-build variation* change identification cost, not
+   whether identification is possible.
+3. **Method**: a specification-derived property set, authored once and applied
+   frozen, rather than similarity search over traces.
+4. **Result**: a bounded null on the variation question.
+
+## What the paper's §2 must now say
+
+It must cite OFCI as the closest prior on the outcome and state the
+differentiators above, rather than resting on the VM-diversity line. A reviewer
+who knows OFCI would otherwise read the related-work section as unaware of it.
+
+## Still not a systematic review
+
+Eight queries over two sessions, fifteen sources screened. That supports a
+bounded claim and does not support priority. The distinction stays in the paper.
