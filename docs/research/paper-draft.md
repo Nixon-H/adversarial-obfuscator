@@ -90,8 +90,10 @@ authored once and applied frozen).
 
 **On the framing, CoDiver's partition diversity** denies analysis-knowledge
 transfer in virtualised code, where a stale opcode map fails structurally. No
-source-level analogue exists, which is why this paper reports a measurement
-rather than a mechanism claim.
+source-level analogue exists. This paper does **not** report such a mechanism: it
+reports that the instrument it built cannot measure the question, and why — which
+is a narrower claim than a measurement of cost, and a different one from a
+mechanism.
 
 The nearest benchmark is JsDeObsBench (36,260 obfuscated JavaScript programs);
 it differs in language, attacker (LLM), and the absence of a cross-build
