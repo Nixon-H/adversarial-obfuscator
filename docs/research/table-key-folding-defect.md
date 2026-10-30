@@ -329,3 +329,52 @@ teach every pass a rule.
 Not applied: the last five rounds established that an unverified change to this
 pipeline costs more than it saves. The next round applies it with a minimal
 reproduction first.
+
+## Round 120: the defect is nondeterministic
+
+`EnhancedJunk.visit_Module` only **adds** statements — it never removes or
+replaces a definition. So it cannot be the cause of an unbound name in the way
+round 119 stated. What it can do is **shift the random stream**.
+
+Testing that:
+
+| seed | build index | result |
+|---|---|---|
+| 4242 | 0 | fails |
+| 4242 | 2 | fails |
+| 7 | 0 | fails |
+| **7** | **2** | **imports** |
+| 1234 | 0 | fails |
+| **1234** | **2** | **imports** |
+
+**The same module imports or fails depending on the seed and build index.** The
+defect is nondeterministic.
+
+## What that means
+
+`EnhancedJunk` was a red herring of the same kind as `symbol_rename` and
+`obf_calls`: **toggling it changes the random stream**, and the defect appears
+when the stream happens to reach a particular state. The bisect in round 119
+located a **trigger**, not a cause — the third time a control has separated a
+precondition from a cause on this defect.
+
+The real cause is that **a rename is not consistent across its call sites** for
+some random states. `get_new_name` has two branches — the `dynamic_unbounds`
+md5 branch and the random branch — and if the same original name reaches them at
+different times, the two call sites receive **different new names**.
+
+## Severity
+
+This is worse than a broken build. An obfuscator that is **nondeterministic in
+correctness** produces artefacts that pass a test run and fail in the field, with
+no change to the input. Every release is a dice roll on whether a given function
+table resolves.
+
+The guard that would catch it is cheap: **run the gate across several seeds**,
+not one. The current gate uses `master_seed=4242` only.
+
+## Status
+
+Cause narrowed to an inconsistent rename across call sites, dependent on random
+state. Not fixed. The immediate action this justifies is in the gate, not the
+transform: widen the seed sweep so the flakiness cannot hide.
