@@ -66,11 +66,10 @@ practitioner than another unvalidated positive.
 
 ## 2. Related work
 
-[GAP] The novelty screen is documented (`novelty-search-log.md`) but is not a
-systematic review: four queries, seven sources, one day. It supports a bounded
-statement — no prior study measures cross-build identification cost in Python
-source with an oracle-free attacker at matched budget — and supports nothing
-stronger.
+The novelty screen is documented in `novelty-search-log.md` with its exclusion
+decisions and reasons. It is not a systematic review — eight queries over two
+sessions, fifteen sources screened — so it supports a bounded statement and
+nothing stronger.
 
 Closest prior work and why each differs is tabulated in that log. Two threats
 matter:
@@ -277,3 +276,62 @@ check the claim and, if they have a corpus, extend it.
 | reproduction | `scripts/transfer/reproduce.py` — eight tables, one command |
 | evidence documents | `docs/research/` (27 files) |
 | sealed reports | `research-reports/` |
+
+---
+
+## References
+
+Sources screened in `novelty-search-log.md`. Each is cited for a specific claim
+in §2; none is cited from a search snippet alone.
+
+1. **OFCI: Detecting Obfuscated Function Clones in Binaries using Machine
+   Learning.** NDSS 2022.
+   <https://www.ndss-symposium.org/wp-content/uploads/bar2022_23005_paper.pdf>
+   — closest prior on the *outcome*: function identification under
+   obfuscation, including VM-obfuscated code.
+
+2. **CoDiver: Invalidating Analysis Knowledge for Code Virtualization
+   Protection Through Partition Diversity.** IEEE Access, 2019.
+   <https://doi.org/10.1109/ACCESS.2019.2954165>
+   — closest prior on the *framing*: denying transfer of analysis knowledge
+   across diversified virtualised code.
+
+3. **DCVP: Exploiting Code Diversity to Enhance Code Virtualization
+   Protection.** ICPADS 2018. <https://doi.org/10.1109/ICPADS.2018.00086>
+   — partitions virtualised code and randomises opcode mappings.
+
+4. **DynOpVM: VM-Based Software Obfuscation with Dynamic Opcode Mapping.**
+   ACNS 2019. <https://doi.org/10.1007/978-3-030-21568-2_8>
+   — evaluates re-analysis after a mapping change, which is the adaptive-versus-
+   frozen distinction in virtualised bytecode.
+
+5. **DEBRA: A Real-World Benchmark for Evaluating Deobfuscation Methods.**
+   SURE 2025. <https://sure-workshop.org/accepted-papers/2025/sure25-7.pdf>
+   — a deobfuscation benchmark; different question (whether a method works, not
+   what an attacker's identification costs).
+
+6. **JsDeObsBench: Measuring and Benchmarking LLMs for JavaScript
+   Deobfuscation.** arXiv 2506.20170. <https://arxiv.org/html/2506.20170v1>
+   — nearest benchmark in scale (36,260 obfuscated programs); different
+   language, different attacker, no cross-build transfer question.
+
+7. **An Empirical Study on the Effects of Obfuscation on Static Machine Learning
+   Detectors.** ISSTA 2023. <https://wu-yueming.github.io/Files/ISSTA2023_JSO.pdf>
+   — same empirical tradition, different outcome (malware detection).
+
+8. **Empirical Assessment of the Code Comprehension Effort Needed to Attack
+   Programs Protected with Obfuscation.** Computers & Security, 2026.
+   <https://www.sciencedirect.com/science/article/pii/S016740482600057X>
+   — closest prior on *effort* measurement; human subjects, no transfer
+   question.
+
+9. **SoK: Automated Software Diversity.**
+   <https://www.ics.uci.edu/~perl/automated_software_diversity.pdf>
+   — states that diversity's cost goal "cannot be measured directly, so
+   researchers resort to proxy measurements", which is the methodological
+   premise of this paper.
+
+**What this list is not.** Fifteen sources were screened across eight queries in
+two sessions. This is a documented screen, not a systematic review, and it
+supports a bounded novelty statement rather than a priority claim. The
+exclusion decisions and the reasons are in `novelty-search-log.md`.
