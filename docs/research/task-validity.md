@@ -186,3 +186,59 @@ step and it is product work.
 
 Until then, any build using both transforms is suspect, and the study must
 either exclude the pair or verify every build behaviourally before use.
+
+## Round 20: the mechanism — an opaque predicate that is false, not opaque
+
+The four function definitions are all present in the failing build, so the
+function was never dropped. It is **behaviourally broken**, and the body
+shows why:
+
+```python
+def sumselected(values, lo, hi):
+    if _nx_ftable[0](1, 2, 65537) == (pow(3, (0 << 4) + 3, 65537) + 7) % 65537:
+        if 16 == 22 ^ 6:
+            pass
+        else:
+            print('SIG_10_OK')
+        total = 0
+        for v in values:
+            if lo <= v < hi:
+                total += v
+        return total
+    else:
+        pass
+```
+
+The **entire body** is inside the predicate. Evaluating it:
+
+| side | value |
+|---|---|
+| `_nx_ftable[0](1, 2, 65537)` = `1 * 2 % 65537` | **2** |
+| `(pow(3, (0 << 4) + 3, 65537) + 7) % 65537` | **34** |
+
+`2 == 34` is **False**, so the body never runs, the `else: pass` executes,
+and the function returns `None`.
+
+**Every result from the suspect builds was `None`.** That is one `if`
+statement with an unsatisfiable condition, emitted as an "always true" opaque
+predicate.
+
+### What this is
+
+A semantic corruption bug in the opaque-predicate transform: the predicate is
+not opaque, it is simply false. It is silent -- the code compiles, imports,
+and returns `None` -- and it affects every function it wraps, at a rate of
+about one seed in twelve when combined with dead-code insertion.
+
+### Why the combination matters
+
+`opaque_pred` alone did not reproduce it at these seeds, and `dead_code` alone
+never did. The pair changes the constants the predicate is built from, which
+is why the interaction is the trigger rather than either transform alone.
+
+### Correct framing
+
+Earlier rounds called this "the target is dropped" (round 18) and "the target
+behaviour is absent" (round 17). Both were descriptions of the symptom. The
+defect is **a false opaque predicate wrapping a function body**, and with the
+mechanism visible the fix is obvious where the diagnosis was not.
