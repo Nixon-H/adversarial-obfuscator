@@ -112,7 +112,7 @@ Round 123 reverted a file and left a call to the removed helper. The resulting
 
 | item | severity | note |
 |---|---|---|
-| `apply_ast_mutation` returns `(source_code, {})` on any exception | **high** | The generic failure mode that hid defect #9. Should re-raise or return a failure flag. Touches every call site; needs its own round with a measurement. |
+| `apply_ast_mutation` returns `(source_code, {})` on any exception | **medium** (was high) | **Round 169: it now emits a `RuntimeWarning` naming the exception and saying the caller receives unobfuscated source.** The return is unchanged for compatibility with 34 test and 8 production call sites, but the failure is no longer silent, and `python -W error::RuntimeWarning` turns it into a raise. A full re-raise is still the correct end state. |
 | `dotproduct` at build index 0 is not evaluator-unique | low | Reported, not pooled. Fix is a separating input. |
 | Two packages un-gated | low | Mechanical; see above. |
 | `MAX_PROFILES`/other `_511` ORs | none known | Lower bound only; nothing above it is claimed. |

@@ -727,6 +727,20 @@ def apply_ast_mutation(source_code, options=None):
         if options.get('stego'): code_output = stego_encode(code_output)
         return code_output, secure_map
     except Exception as e:
+        # Returning the caller's own source with a success-shaped tuple is how
+        # defect #9 hid for eight rounds: a stale call raised TypeError inside
+        # here, the except swallowed it, and every caller received unobfuscated
+        # code with no error. The return is kept for compatibility with 34 test
+        # call sites and 8 production ones, but the failure is now WARNED, so a
+        # caller that checks warnings or runs with -W error cannot miss it, and
+        # a log reader sees it without scraping stdout.
+        import warnings
+        warnings.warn(
+            "apply_ast_mutation failed and is returning the INPUT UNCHANGED: "
+            "%s: %s. The caller receives unobfuscated source." % (type(e).__name__, e),
+            RuntimeWarning,
+            stacklevel=2,
+        )
         print(f"Error during AST mutation: {e}")
         traceback.print_exc()
         return source_code, {}
