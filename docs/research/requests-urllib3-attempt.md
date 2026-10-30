@@ -456,3 +456,50 @@ between them.
 Unchanged from round 215: `typing` fixed, class-body alias open, cross-module exports open,
 nine of eleven defects fixed and kept. The three-step edit is written down so the next
 attempt does not begin from a plan whose subject was already reverted.
+
+## Round 217: the conditional reservation works — both checks, one round
+
+The three-step edit round 216 specified, done together:
+
+1. re-added the class-body reservation from round 210;
+2. wrapped it in `if not getattr(self, 'allow_internal_rename', None):`;
+3. ran **both** checks in the same round.
+
+```
+47 tests passed          (internal-rename, renamer semantics, preserve, import)
+urllib3/_collections  rc=0
+attr/_make            rc=0
+more_itertools/recipes rc=0
+```
+
+**Both sides green.** The class-body alias is fixed, and `internal_rename` still renames
+what it was built to rename.
+
+## Why this took four rounds instead of one
+
+| round | what was done | both checks? |
+|---|---|---|
+| 210 | reservation, unconditional | no — `urllib3` only |
+| 214 | found the regression | no |
+| 215 | scoped it, failed, reverted | no — flag tests only |
+| **216** | plan written | — |
+| **217** | reservation **+ condition**, executed together | **yes** |
+
+Rounds 210 and 214 each ran **one** of the two checks and concluded they were done. The
+conflict was only visible when both ran.
+
+That is the same lesson as round 195, where the guard instrumentation settled in one command
+what five rounds of reasoning had not — and as round 133, where the passing gate hid a
+failing suite. **A fix is not verified until every check that can contradict it has run.**
+
+## Status
+
+| defect | status |
+|---|---|
+| `typing` module import | fixed, kept (208) |
+| class-body alias | **fixed, kept (217)** |
+| cross-module exports | open, design question (212) |
+
+Two of three closed. `urllib3/_collections` imports. `requests` remains blocked on
+cross-module exports and on the gate's package layout — both still open, neither a renamer
+bug.

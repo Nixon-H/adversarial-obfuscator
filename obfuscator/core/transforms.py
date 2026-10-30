@@ -429,6 +429,28 @@ class SymbolRenamer(ast.NodeTransformer):
                             self.reserved.add(_n.id)
             elif isinstance(_stmt, ast.AnnAssign) and isinstance(_stmt.target, ast.Name):
                 self.reserved.add(_stmt.target.id)
+        # Reserve class-body names so a Load that refers to a class-level alias
+        # (`getheaders = getlist`) keeps its spelling -- BUT ONLY when the opt-in
+        # internal rename is inactive. `internal_rename` exists precisely to
+        # rename proven-internal methods, so an unconditional reservation makes
+        # that flag a no-op for its own target (round 214/215: 3 tests failed,
+        # round 210's fix was reverted for exactly that).
+        if not getattr(self, 'allow_internal_rename', None):
+            _class_bound = set()
+            for _stmt in node.body:
+                if isinstance(_stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    _class_bound.add(_stmt.name)
+            if _class_bound:
+                _saved = self.reserved
+                self.reserved = set(_saved) | _class_bound
+                try:
+                    _prev_depth = getattr(self, '_class_depth', 0)
+                    self._class_depth = _prev_depth + 1
+                    self.generic_visit(node)
+                    self._class_depth = _prev_depth
+                finally:
+                    self.reserved = _saved
+                return node
         _prev_depth = getattr(self, '_class_depth', 0)
         self._class_depth = _prev_depth + 1
         self.generic_visit(node)
