@@ -144,3 +144,53 @@ experiment had implicated rather than the component the artefact showed.
 
 `typing` closed. `urllib3/_collections` has a second layer, unicode-named, not reduced.
 `requests` still blocked on packaging. Neither is in the gate.
+
+## Round 209: the class-body alias, and a fix that is too broad
+
+The unicode name is a **class-body alias**:
+
+```python
+    getheaders = _nixon_ǪৼĺႭᛎ        # source: getheaders = getlist
+    getallmatchingheaders = _nixon_ǪৼĺႭᛎ
+```
+
+The **Store** (`getheaders`) is skipped by the class-body guard; the **Load** on the right
+is renamed. Five such aliases in a row, all pointing at nothing.
+
+## The attempt
+
+Skip **every** `Load` inside a class body, on the theory that class-body names are class
+attributes and the guard already protects their Stores.
+
+```
+urllib3/_collections   rc=0   <- fixed
+attr/_make             rc=1   NameError: name 'Attribute' is not defined
+more_itertools/recipes rc=0
+```
+
+**It broke `attrs`.** `Attribute` is a **module-level class** used inside a class body;
+skipping all class-body Loads stopped it being renamed there while its definition at
+module level still was.
+
+**Reverted.** 42 renamer and preserve tests pass.
+
+## What that establishes
+
+The distinction is not "Store vs Load" or "class body vs module". It is **which scope
+binds the name**:
+
+| name | bound where | used where | correct |
+|---|---|---|---|
+| `getheaders` | class body | class body | keep |
+| `getlist` | class body (a method) | class body | keep |
+| `Attribute` | module level | class body | **rename** |
+
+A single `_class_depth` counter cannot tell the last row from the first two. That needs a
+per-class set of the names the class body binds — built before the class body is visited,
+which is the same pre-pass shape as round 177's nonlocal fix and round 195's defaults.
+
+## Status
+
+`urllib3/_collections` is back to the unicode-name failure. The fix is now **stated
+precisely** — a per-class binding set — rather than attempted with a counter that cannot
+express it. `requests` remains blocked on packaging.
