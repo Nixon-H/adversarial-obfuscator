@@ -46,9 +46,12 @@ knowledge; DSVMP and DynOpVM already evaluate re-analysis after a mapping
 change. What is offered is a *measurement* in a different artefact class
 (Python source), with a cost endpoint and an oracle-free attacker.
 
-[GAP] A systematic review with search dates and screening criteria. The
-current screen was targeted, not PRISMA-style, and cannot support a "first"
-claim.
+**Documented screen, not a systematic review.** `novelty-search-log.md`
+records the four queries, the seven sources returned, the inclusion decision
+for each, and the closest prior work with reasons it differs. It supports a
+bounded statement — no prior study measures cross-build identification cost in
+Python source with an oracle-free attacker — and explicitly does not support
+"nobody has done this" or any priority claim.
 
 ## 3. Definitions and threat model
 
