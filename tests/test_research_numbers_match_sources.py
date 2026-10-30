@@ -148,3 +148,31 @@ def test_no_document_claims_a_defect_count_the_paper_does_not_support():
                 raise AssertionError(
                     "%s claims %r defects but the paper's table lists %d"
                     % (fn, m.group(1), n_rows))
+
+
+def test_handoff_defect_count_matches_the_paper_table():
+    """The handoff must not understate the defect count either.
+
+    Round 203 found HANDOFF.md still saying nine a round after the paper said ten.
+    The existing guards checked the paper's table and the research README; the
+    handoff is a third document that describes state, and state drifts fastest of
+    all because it is written once and read later.
+
+    A handoff that understates the record is worse than a stale table: it is the
+    file a successor reads first.
+    """
+    n_rows = len(_defect_rows(_read(PAPER)))
+    handoff = _read(os.path.join(DOCS, "HANDOFF.md"))
+    words = {5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine",
+             10: "ten", 11: "eleven", 12: "twelve"}
+    word = words.get(n_rows)
+    if word is None:
+        return
+    assert word in handoff, (
+        "the paper lists %d defects but HANDOFF.md never says %r" % (n_rows, word))
+    for n, smaller in words.items():
+        if n >= n_rows:
+            continue
+        assert ("| defects found and fixed | **%s**" % smaller) not in handoff, (
+            "HANDOFF.md's defect count says %r but the paper's table lists %d"
+            % (smaller, n_rows))
