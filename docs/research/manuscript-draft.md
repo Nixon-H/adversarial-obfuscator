@@ -15,12 +15,14 @@ the cost for an attacker to identify a function. Using eight synthetic tasks
 with same-arity siblings, an attacker that receives only an emitted artefact
 plus the task specification, and a cost instrumented in CPU-seconds, probes
 and executions, we measure identification cost as a function of *k*
-previously analysed builds of the same program. The cost curve is flat:
-identification succeeds at every *k* with 7–12 probes per cell, and mean CPU
-per cell does not rise with *k* (0.033 s at k=0, 0.010 s at k=2, 0.008 s at
-k=4). We attribute this to the specification being invariant under the
-transformation: the attacker's asset is a property set, and a property set
-does not change when the source does.
+previously analysed builds of the same program. An earlier version of this
+endpoint was withdrawn: the attacker it measured was memoryless in *k*, so a
+flat curve was a property of the harness rather than of the defence
+(`retraction-cost-curve.md`). The replacement attacker accumulates state across
+builds. Measured over eight tasks, the paired change in probes between the last
+and first build is +0.38 with a 95% interval of [-0.39, +1.14]: no consistent
+effect, and effects larger than about one probe are excluded. We therefore
+report a bounded null rather than a finding.
 
 **Scope limit, stated in the abstract rather than the limitations:** eight
 synthetic tasks, one obfuscation configuration, identification only.
@@ -107,16 +109,22 @@ that was really a build defect.
 
 ## 5. Results
 
-### 5.1 Identification cost is flat in k
+### 5.1 Identification cost and k: a bounded null
 
-| k | mean CPU (s) | probes (min–max) |
-|---|---|---|
-| 0 | 0.033 | 7–12 |
-| 2 | 0.010 | 8–11 |
-| 4 | 0.008 | 8–12 |
+**The first version of this endpoint was withdrawn.** It measured an attacker
+whose `develop()` took one build and whose guards forbade carrying state
+forward, so cost could not depend on *k* and a flat curve was guaranteed
+(`retraction-cost-curve.md`). It also used CPU-seconds, which at this scale are
+dominated by interpreter startup (median 0.007 s).
 
-Source: `cost-curve-n8.md`. Eight tasks, 24 cells, all valid, attacker's set
-non-empty in 24 of 24.
+The replacement attacker accumulates state and orders properties by learned
+elimination power, and the currency is probes. The paired difference between
+the last and first build across eight tasks is a mean of +0.38 probes with a
+95% interval of [-0.39, +1.14], which includes zero; effects larger than about
+one probe are excluded.
+
+So the honest result is a bounded null: at this scale, accumulated state does
+not reliably change identification cost in either direction.
 
 ### 5.1b Replication on real corpus functions
 
@@ -148,16 +156,22 @@ would overstate the attacker.
 ### 5.3 Authoring bound
 
 33 properties across eight tasks; 1–2 needed to separate. Paid once per task,
-not per build — the mechanism behind the flat curve.
+not per build — a reason the old curve could not have detected a build
+effect even if one existed.
 
 [GAP] Analyst-minutes. The proxy is not a time measurement.
 
 ## 6. Discussion
 
-The specification is invariant under the transformation. Instruction-level
-obfuscation changes how a function looks; it does not change which observable
-behaviour matches the specification, and the specification is what the
-attacker has.
+The specification is invariant under the transformation: instruction-level
+obfuscation changes how a function looks, not which observable behaviour
+matches the specification.
+
+**This is now a hypothesis, not a result.** The earlier flat curve was cited as
+evidence for it, and that curve could not have shown otherwise. What the data
+supports is weaker: on eight tasks, an accumulating attacker's probe cost is
+unchanged within about one probe. Whether that reflects invariance or the
+insensitivity of the instrument is not decided here.
 
 **When the invariance breaks.** It breaks exactly when the transformation
 changes observable behaviour in a way the specification does not pin down.
@@ -206,7 +220,7 @@ specification an attacker uses is invariant to the transformation.
 | defensible primary question | ✔ protocol v3 |
 | oracle-free attacker | ✔ guarded |
 | valid benchmark | ✔ 24/24 |
-| cost endpoint measured | ✔ flat at n=8 |
+| cost endpoint measured | ◐ bounded null, retracted and replaced |
 | authoring bound | ✔ proxy |
 | negative results reported | ✔ documented |
 | **corpus scale** | ◐ 48 cells, but 5 real modules against a target of 12–15 projects |
