@@ -159,9 +159,27 @@ obfuscation changes how a function looks; it does not change which observable
 behaviour matches the specification, and the specification is what the
 attacker has.
 
-[GAP] A mechanism argument for when this would *not* hold — for example if the
-transformation changed observable behaviour in a way the specification does
-not pin down. Not investigated.
+**When the invariance breaks.** It breaks exactly when the transformation
+changes observable behaviour in a way the specification does not pin down.
+This study has one direct observation of that, and it was accidental: two
+opaque-predicate builders emitted false conditions, the injector wrapped whole
+function bodies in them, and affected functions silently returned `None`
+(§4.4). In those builds the property set failed — not because the attacker was
+weak or the protection strong, but because **the artefact no longer
+implemented the function**. The specification and the program had diverged.
+
+That gives the mechanism a precise form: per-build diversity is
+attacker-cost-neutral only while every build is semantically equivalent to the
+original. The moment a build is not, every downstream measurement attributes a
+correctness failure to a security effect. This is why the study requires a
+behavioural equivalence gate per build before any cell is scored, and why the
+opaque-predicate guard exists.
+
+**Still open:** whether a *deliberate* semantic-preserving perturbation could
+make the specification ambiguous — for example by changing which boundary case
+the function treats as inclusive without changing any behaviour the spec
+mentions. That is a research question about specification completeness, not a
+bug, and it is not investigated here.
 
 ## 7. Validity, ethics, limitations
 
