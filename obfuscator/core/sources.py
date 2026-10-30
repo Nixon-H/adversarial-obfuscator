@@ -541,7 +541,12 @@ def apply_ast_mutation(source_code, options=None):
             # to `_nx_f24f62` while the definition kept another name, and the
             # entry named a function that was never emitted. Applying the final
             # mapping once more makes the result independent of traversal order.
-            tree = _apply_final_rename(tree, renamer)
+            # NOTE: no post-pass here. Three attempts to repair the renamer from
+            # outside were reverted (rounds 123, 124, 125). A stale call to a
+            # reverted helper sat here for eight rounds: it raised TypeError,
+            # apply_ast_mutation's broad except swallowed it, and every caller
+            # received the ORIGINAL source back with no error. Reverting a change
+            # must include its call sites.
             if options.get('log_file'):
                 renamer.save_rename_log(options['log_file'])
         if options.get('unicode_ids'):
