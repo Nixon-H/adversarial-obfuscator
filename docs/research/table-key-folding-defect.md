@@ -1108,3 +1108,54 @@ renaming — the same shape as the `_nx_` markers this project already relies on
 Thirty rounds. The reduction in 142 is what made this visible: with one line
 containing 29 entries, 28 builtins and one stranger, the shape of the answer is
 readable.
+
+## Round 144: fixed — aliases emitted as attribute access
+
+Three attempts in one round, each defeated by a real property of the output.
+
+**1. Emit `_nx_bi_len = len`.** The alias name survived (both renamers leave
+`_nx_` alone) but the **value** did not: `_nx_bi_exit = _nx_f24f62`. A bare `Name`
+on the right-hand side is renamed like any local, so the alias pointed at the same
+undefined name it was meant to replace.
+
+**2. Emit `_nx_bi_len = __builtins__.len`.** `__builtins__` is a **dict** in a
+module namespace, not a module, so `__builtins__.sum` raised `AttributeError` — 44
+artefacts failed.
+
+**3. Emit `_nx_bi_len = __import__("builtins").len`.** Correct.
+
+```python
+artefacts checked: 96
+failures: 0
+```
+
+Two seeds, two build indices, all four corpus families.
+
+## Verification
+
+| check | result |
+|---|---|
+| artefact gate (2 seeds × 2 indices) | **96 artefacts, 0 failures** |
+| renamer semantics, diversity, golden, gate tests | **48 passed** |
+
+## The three attempts, and what each taught
+
+Attempt 1 failed on the **value** — and that is the original bug in miniature:
+every `Name` in the emitted tree is a rename candidate, including the ones a pass
+just wrote to be stable.
+
+Attempt 2 failed on **`__builtins__` being a dict** — a detail only the runtime
+knows, invisible in the source of the pass.
+
+Attempt 3 is correct because it uses an **attribute access**, which the renamer does
+not touch, on a value the renamer cannot misread.
+
+## The count
+
+Nine defects found, nine fixed — and this one took **thirty-one rounds**, more than
+the other eight combined.
+
+The pattern held to the end: rounds 113–121 were hypotheses, rounds 135–141 were
+invalid reductions, and the fix arrived only after round 142 produced a one-line
+case that could be read. Every step that moved came from looking at the value; every
+step that did not came from reasoning about the pipeline.

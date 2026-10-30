@@ -1252,6 +1252,7 @@ class InstructionSubstitutor(ast.NodeTransformer):
 class CallGraphObfuscator(ast.NodeTransformer):
     def __init__(self):
         self.func_table = {}
+        self._builtin_aliases = {}
         self.table_var = '_nx_ftable'
         self.func_counter = 0
     def visit_Module(self, node):
@@ -1269,7 +1270,26 @@ class CallGraphObfuscator(ast.NodeTransformer):
                     keywords=[]
                 )
             )
-            node.body.insert(0, table_init)
+            # Emit `_nx_bi_len = len` before the table so the alias resolves.
+            for alias, builtin_name in self._builtin_aliases.items():
+                # The VALUE must be an attribute access, not a bare Name:
+                # a bare Name would be renamed like any local, which is the
+                # bug this alias exists to avoid (`_nx_bi_exit = _nx_f24f62`).
+                node.body.insert(0, ast.Assign(
+                    targets=[ast.Name(id=alias, ctx=ast.Store())],
+                    value=ast.Attribute(
+                        # __import__("builtins") is the MODULE; __builtins__ is
+                        # a dict in a module namespace and has no attributes.
+                        value=ast.Call(
+                            func=ast.Name(id="__import__", ctx=ast.Load()),
+                            args=[ast.Constant(value="builtins")],
+                            keywords=[],
+                        ),
+                        attr=builtin_name,
+                        ctx=ast.Load(),
+                    ),
+                ))
+            node.body.insert(len(self._builtin_aliases), table_init)
         return node
     def visit_Call(self, node):
         self.generic_visit(node)
@@ -1290,7 +1310,16 @@ class CallGraphObfuscator(ast.NodeTransformer):
             import builtins
             if hasattr(builtins, func_name) and func_name not in blacklist:
                 idx = self.func_counter
-                self.func_table[idx] = func_name
+                # Store an ALIAS, not the builtin's own name. The table values
+                # are ordinary Name nodes, so both renamers rewrite them --
+                # `len` became `_nx_f24f62`, which nothing binds, and the table
+                # entry raised NameError at import. An `_nx_`-prefixed alias is
+                # left alone by both renamers, which is why the rest of this
+                # project's markers use that prefix.
+                alias = "_nx_bi_%s" % func_name
+                self.func_table[idx] = alias
+                if alias not in self._builtin_aliases:
+                    self._builtin_aliases[alias] = func_name
                 self.func_counter += 1
                 node.func = ast.Subscript(
                     value=ast.Name(id=self.table_var, ctx=ast.Load()),
