@@ -169,11 +169,25 @@ def test_paper_defect_count_matches_the_table():
     """
     with open(os.path.join(DOCS, "paper-draft.md"), encoding="utf-8") as f:
         text = f.read()
-    table_rows = [ln for ln in text.splitlines()
-                  if ln.startswith("| ") and ln.split("|")[1].strip().isdigit()]
+    # Count only the rows inside section 6. The paper has a second numbered
+    # table (module size, rows 1-4), and an unscoped count made this guard look
+    # for a fourteen-defect abstract.
+    _lines = text.splitlines()
+    _start = next((i for i, ln in enumerate(_lines) if ln.startswith("## 6.")), None)
+    table_rows = []
+    if _start is not None:
+        for ln in _lines[_start + 1:]:
+            if ln.startswith("## ") and not ln.startswith("### "):
+                break
+            if ln.startswith("| ") and len(ln.split("|")) > 2 and ln.split("|")[1].strip().isdigit():
+                table_rows.append(ln)
     assert len(table_rows) >= 9, "defect table lost rows: %d" % len(table_rows)
-    assert "nine correctness defects" in text, (
-        "the abstract no longer states the defect count that the table supports"
+    _words = {5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine",
+              10: "ten", 11: "eleven", 12: "twelve"}
+    _word = _words.get(len(table_rows))
+    assert _word is not None and (_word + " correctness defects") in text, (
+        "the abstract does not state the %r-defect count that the table supports"
+        % (_word,)
     )
 
 

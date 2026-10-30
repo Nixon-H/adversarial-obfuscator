@@ -36,7 +36,7 @@ predicted by its own construction.
 
 We report that plainly, and we report what survives: a benchmark whose gates
 and reproduction are reusable, a calibration showing what the counter does
-respond to, and **nine correctness defects** in the obfuscator, found by gates
+respond to, and **ten correctness defects** in the obfuscator, found by gates
 and by code the benchmark did not write. We do **not** claim that diversification fails to raise attacker cost. We
 claim that this instrument cannot tell, and we explain why so that the next
 attempt does not repeat it.
@@ -47,7 +47,7 @@ monotonically in nine of nine tasks and invariant to the order the functions
 appear in.
 
 We also report an earlier version of this endpoint that was withdrawn because
-it could not fail, and **nine correctness defects** in the obfuscator that the
+it could not fail, and **ten correctness defects** in the obfuscator that the
 benchmark found — four of which produce artefacts that compile and then fail,
 and one of which silently disabled every artefact thirty days after it was
 built.
@@ -233,7 +233,7 @@ Across both families at three build indices: **51 cells, zero non-singleton.**
 Every cell has exactly one candidate in the attacker's passing set, and the
 evaluator independently confirms it is the target.
 
-## 6. Nine correctness defects found by building this benchmark
+## 6. Ten correctness defects found by building this benchmark
 
 None of the following was the object of study. All five were found because the
 benchmark demanded something the project's own tests did not: behavioural
@@ -250,6 +250,7 @@ identity per build, then execution of the artefact rather than inspection of it.
 | 7 | `from __future__` hoisting | does not compile | external module 4 |
 | 8 | builtin names in the function table | fails at import | artefact gate |
 | 9 | an except that returns the input | silently returns unobfuscated source | suite |
+| 10 | names preserved in one place, renamed in another | fails at import | external module 5 |
 
 ### 6.1 The defects that produce code that does not run
 
@@ -290,7 +291,7 @@ Every one is invisible to a test that checks **the input** runs. Three are
 invisible to a test that checks **the output** compiles. All five are visible to
 one that compiles **and imports** the output over real modules.
 
-The internal fixtures could not have found six of them: they used no
+The internal fixtures could not have found seven of them: they used no
 dataclasses with plain fields, imported nothing, and used no `match`. The
 external modules — `more_itertools.recipes` and `cpython 3.13 statistics.py` —
 used all three within minutes.
@@ -304,7 +305,7 @@ engineering than the research apparatus in the rest of this paper, and it would
 have caught every defect above.
 
 This section is included because it is the concrete empirical result of the
-work: nine silent failure modes, none of them the subject of the study, all
+work: ten silent failure modes, none of them the subject of the study, all
 found by the instrumentation the study required.
 
 ## 7. Limitations
