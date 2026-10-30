@@ -259,3 +259,68 @@ emitted line reads `def ...(self, i=_nx_...)` or `def ...(self, i=i)`.
 Open. Two structural facts gained: `ast.arg` carries no default, and visiting defaults
 from `visit_FunctionDef` is safe where visiting them from `visit_arg` was not. Neither
 is the fix, and both are now recorded so the next attempt does not repeat them.
+
+## Round 193: the default is `i=i`, and the skip rule explains it
+
+The one command:
+
+```
+271: def _nx_6d1f3c(self, i=i):
+```
+
+The default is **unchanged**. Round 192's corrected code visits `args.defaults`, and the
+visit happens — but `i` is also the **parameter name of that same function**, and
+`visit_Name` skips names in `_local_params`:
+
+```python
+_params = getattr(self, '_local_params', None)
+if _params is not None and node.id in _params:
+    return node          # parameter: call-site contract, never renamed
+```
+
+So the default's `i` is treated as the parameter `i` and left alone. The loop variable
+outside was renamed; the default inside keeps the old spelling; the two no longer match.
+
+## The full chain, now complete
+
+| step | fact |
+|---|---|
+| source | `def prop(self, i=i)` inside `for i in range(...)` |
+| loop variable | renamed to `_nx_2b9331` |
+| default expression | is an `ast.Name` load of `i` |
+| `visit_FunctionDef` | visits `args.defaults` (round 192, correct) |
+| `visit_Name` | **skips it**, because `i` is in `_local_params` for this function |
+| result | `def ...(self, i=i)` — default references a binding the loop no longer creates |
+
+**The skip rule is right for the body** — `return self[i]` reads the parameter, and the
+parameter must keep its name. It is **wrong for the default**, which is evaluated in
+the enclosing scope *before* the parameter exists.
+
+That is the same distinction as round 188 but at a different layer: the default is not
+part of the call contract, and it is not part of the function's own scope either. It
+belongs to the scope that **encloses** the `def`.
+
+## Why five rounds did not find this
+
+Rounds 188–192 each looked at a different part of the traversal:
+
+| round | what was tried | outcome |
+|---|---|---|
+| 188 | identified the default isn't visited | correct |
+| 189 | visited `node.default` from `visit_arg` | AttributeError — no such attribute |
+| 190 | made the mapping idempotent | necessary, not sufficient |
+| 191 | retried 189's approach on top | same 8 failures |
+| 192 | visited `args.defaults` from `visit_FunctionDef` | safe, but the skip rule eats it |
+| **193** | **the line itself** | **the skip rule is why** |
+
+Every step was a correct observation. None was sufficient alone, and the line-level
+view was available at every step — it would have shown `i=i` unchanged in round 188.
+
+## Status
+
+Cause fully identified: **`_local_params` skips the default, and it should not.** The
+fix is to visit `args.defaults` with the parameter set temporarily cleared, or to
+exclude default expressions from the `_local_params` skip. Both are local to
+`visit_FunctionDef` and testable against `_make.py` plus the renamer tests — not
+attempted here for time, and recorded precisely so the next round can apply it in one
+edit.
