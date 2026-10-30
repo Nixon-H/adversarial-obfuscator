@@ -56,3 +56,49 @@ lost its target*.
 
 Five fixed, one open. Layer 6 has the **cleanest signature yet** — two names, one line,
 zero bindings — which makes it the most tractable of the six.
+
+## Round 197: neither invented name is in the renamer's mapping
+
+The one command round 196 named:
+
+```
+_nx_ec3de3 <- NOT IN reverse_mapping
+_nx_e8fc6a <- NOT IN reverse_mapping
+reverse_mapping size: 176
+```
+
+**Both invented names are absent from the renamer's own reverse mapping.** The renamer
+produced 176 names in this run and neither of these is among them.
+
+## What that means
+
+They did not come from `get_new_name`. The `_nx_` prefix and six hex digits match the
+**md5 branch** of `get_new_name` exactly:
+
+```python
+self.mapping[old_name] = "_nx_" + md5(old_name.encode()).hexdigest()[:...]
+```
+
+but that branch records into `reverse_mapping`, and these are not there. So one of:
+
+1. a **second** `SymbolRenamer` instance ran and its mapping is the one that produced
+   them — `apply_ast_mutation` constructs a renamer, and some paths construct another;
+2. the names came from a **different transformer** that also emits `_nx_<hex>` — the
+   internal-rename path, which uses its own mapping;
+3. `reverse_mapping` was **cleared or replaced** after they were produced.
+
+## Why this is the important question now
+
+If a second renamer runs, then the first one's reservations — imports, `__all__`,
+nonlocal targets, nested classes, all of them — **do not apply to the second**, and
+every fix in rounds 175–195 is only guaranteed for one of the two passes.
+
+That would explain why each layer of `_make.py` needed its own fix: the module is large
+enough to exercise a path that constructs a second renamer.
+
+## Status
+
+Open. The invented names are **not** from the mapping I have been inspecting, which
+means the renamer I instrumented is not the only one transforming this file. The
+next command prints how many `SymbolRenamer` instances are constructed during a single
+generation.
