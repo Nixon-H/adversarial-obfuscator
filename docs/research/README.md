@@ -70,6 +70,8 @@ in `artefact-gate.md`.
 | external: more_itertools | 3 | 12 | `corpus/external/recipes.py` (MIT) |
 | external: cpython statistics | 1 | 3 | `corpus/external2/statistics.py` (PSF) |
 | external: boltons | 0 gated | — | `corpus/external3/strutils.py` (BSD-3), gate only |
+| external: boltons bulk | 0 gated | — | `corpus/bulk/iterutils.py` (BSD-3), gate only |
+| external: more_itertools package | 0 gated | — | `corpus/pkg/more_itertools/` (MIT), gate only |
 | stress fixture | — | — | `corpus/fixtures/stress.py` |
 
 Validity: every gated cell has a unique evaluator-decided identity and a
@@ -81,7 +83,7 @@ singleton attacker set. `sibling-separation-audit.md` records the audit.
 
 | instrument | what it answers | how to run |
 |---|---|---|
-| artefact gate | does the output compile, import and run | `python3 scripts/transfer/artefact_gate.py` |
+| artefact gate | does the output compile, import and run — **104 artefacts, 4 corpus families, seed sweep** | `python3 scripts/transfer/artefact_gate.py --variants 2 --seeds 4242,7` |
 | reproduction | are the paper's numbers still true | `python3 scripts/transfer/reproduce.py` |
 | validity | is the task scoreable | `python3 scripts/transfer/evaluate_tasks.py` |
 | external validity | do third-party tasks pass | `python3 scripts/transfer/evaluate_external.py` |

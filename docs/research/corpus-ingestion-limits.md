@@ -190,3 +190,48 @@ What is still not done, and cannot be done from here: an **independent
 specification** — properties written by someone other than the author of the
 benchmark. Vendoring more code does not address it, which is why the paper names it
 as the primary limitation.
+
+## Round 151: the corpus is stable
+
+Re-ran the gate after adding the package:
+
+```
+artefacts checked: 104
+failures: 0
+```
+
+Two seeds, two build indices, four corpus families. Including
+`bulk/iterutils.py`, which failed at every seed in round 113 and now passes — the
+eighth defect's fix holds under the same conditions that exposed it.
+
+## The corpus as it stands
+
+| source | licence | shape | largest module |
+|---|---|---|---|
+| more_itertools.recipes | MIT | single file | 45 KB |
+| cpython statistics.py 3.13 | PSF | single file | 62 KB |
+| boltons.strutils | BSD-3 | single file | 48 KB |
+| boltons iterutils | BSD-3 | single file | 61 KB |
+| **more_itertools (package)** | MIT | **package** | **175 KB** |
+| stress fixture | own | fixtures | 2 KB |
+
+**104 artefacts, four families, zero failures, two seeds.**
+
+## What has changed since round 113
+
+Round 113 found the eighth defect by gating `iterutils.py` for the first time, and
+it failed at every build index. Rounds 113–144 diagnosed and fixed it. Round 151
+re-runs the same check under the same conditions and it passes.
+
+That is the full cycle this programme can demonstrate: **a check that built the
+evidence, a defect that survived thirty rounds of investigation, a fix, and the
+same check re-run.** The gate is not a claim; it is the procedure that produced the
+claim and then verified it.
+
+## What is still missing, and it is not code
+
+- Two packages needing vendoring (`requests`, `attrs`) — mechanical.
+- An **independent specification** — properties written by someone else. This is
+  the limitation the paper names as primary, and no amount of vendoring addresses
+  it.
+- A human timing study — analyst-minutes, not proxy prices.
