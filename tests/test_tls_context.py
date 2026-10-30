@@ -35,6 +35,29 @@ from obfuscator.core.sources import TLS_CTX_SOURCE, apply_vars
 # Certificate fixtures
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def _isolate_vars():
+    """Snapshot and restore the module-level VARS dict around every test here.
+
+    `apply_vars` reads `obfuscator.core.sources.VARS`, and `pipeline.py` writes
+    `VARS["FORCE_NATIVE_EXEC"]` in both branches of its native-compilation setup
+    with no restore. Any earlier test that runs the pipeline therefore changes the
+    values this file substitutes into TLS_CTX_SOURCE, which is why these tests
+    pass alone and failed in a full run (round 231, diagnosed in round 232).
+
+    Restoring here is the local half of the fix. The real fix is for pipeline.py
+    to restore what it sets, which needs a round that can run the native-build
+    tests.
+    """
+    from obfuscator.core import sources as _src
+    saved = dict(_src.VARS)
+    try:
+        yield
+    finally:
+        _src.VARS.clear()
+        _src.VARS.update(saved)
+
+
 def _make_ca():
     """Create a test CA; returns (ca_cert_pem_bytes, ca_cert, ca_key)."""
     from cryptography import x509

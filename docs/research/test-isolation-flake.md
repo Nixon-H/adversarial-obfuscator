@@ -113,3 +113,49 @@ round had four minutes.
 **Cause identified; flake remains.** The suite's two failures and three errors are now
 understood rather than mysterious, and the next attempt has a file, a line and two candidate
 fixes instead of a bisect over 4523 tests.
+
+## Round 233: the local half of the fix, applied and verified
+
+Round 232 named a restore in `pipeline.py` as the real fix and a fixture in the test file as
+the local one. The first was attempted and **reverted**: wrapping the block required
+extracting it into a function, the extraction broke the surrounding control flow, and
+`ruff` reported 71 errors. That is a refactor, not a fix.
+
+The second is applied:
+
+```python
+@pytest.fixture(autouse=True)
+def _isolate_vars():
+    from obfuscator.core import sources as _src
+    saved = dict(_src.VARS)
+    try:
+        yield
+    finally:
+        _src.VARS.clear()
+        _src.VARS.update(saved)
+```
+
+**Verified:** `test_tls_context` alone (8 passed) and alongside two files that run the
+pipeline (24 passed).
+
+## What this does and does not fix
+
+| | |
+|---|---|
+| fixes | the order-dependence that made a full-suite run fail |
+| does not fix | `pipeline.py` leaving a module-level flag set for every subsequent caller |
+
+The second is the real defect and remains. A fixture in one test file protects **that test
+file**; every other consumer of `VARS` after a build still sees the leaked value. The
+fixture is honest about being a boundary, not a cure.
+
+## Why the local half is worth taking anyway
+
+A flaky suite is worse than an unfixed production leak, because **the suite is the instrument
+every other claim rests on**. Twenty rounds of "4523 passed" were reported from a suite with
+a known intermittent failure; leaving it flaky while pursuing the correct fix would keep
+every subsequent verification uncertain.
+
+Fix the instrument first, then the defect it was hiding. That ordering has been wrong in this
+programme before — round 133 spent eight rounds investigating symptoms of a swallowed
+exception because the gate reported green.
