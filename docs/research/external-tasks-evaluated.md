@@ -88,5 +88,5 @@ inputs.
 
 The lesson is the programme's own: **when a check reports a problem, inspect the
 check's own assumptions before changing the thing it is measuring.** Round 135's
-invalid reducer, round 141's deleted `def`, and this round's class candidates are
+invalid reducer, round 14a's deleted `def`, and this round's class candidates are
 three instances of the instrument being wrong rather than the object.
