@@ -1,13 +1,21 @@
 """Minimal calibration pilot: does the oracle-free attacker rank at all?
 
-STATUS (2026-10-30): partial. The attacker ranks 3/3 top-1 on the
-UNPROTECTED artefacts. The obfuscated score is not yet trustworthy: three
-harness defects were found and fixed in sequence (an underscore filter that
-excluded every renamed candidate, a first-callable reference selection that
-picked the wrong function, and a name-versus-behaviour scoring error), and
-the obfuscated number still reads 0/3 even though direct execution shows
-the obfuscated functions behave correctly. Do not cite the obfuscated score
-until that is resolved.
+STATUS (2026-10-30): runs. The attacker ranks 3/3 top-1 on both the
+unprotected and the obfuscated artefacts.
+
+Reaching that number required fixing FOUR harness defects, each of which
+produced a plausible-looking result first: an underscore filter that
+excluded every renamed candidate; a first-callable reference pick that
+chose the wrong function; a name-based scoring path; and -- the one that
+survived three fixes -- passing the PLAIN path to the obfuscated scoring
+call, so it loaded unrenamed functions against renamed candidates and
+could never match. Every one of those defects made the protection look
+better than it is.
+
+n is three fixtures with two unrelated decoys: this is a calibration run,
+not evidence about the corpus. The result is that structural ranking
+survives this obfuscation at this size, which is a negative result for the
+protection and the reason the real study needs harder candidates.
 
 
 This is not the study. It is the Phase-2 calibration step, cut to what one
@@ -161,7 +169,11 @@ def run():
             # attacker may not. Names are useless here (they are renamed).
             inputs = INPUTS[name]
             plain_hits = _behavioural_match(plain, plain, name, r_plain, inputs)
-            obf_hits = _behavioural_match(plain, plain, name, r_obf, inputs)
+            # The artefact path must be the OBFUSCATED file: passing the
+            # plain one loaded unrenamed functions while the ranking held
+            # renamed candidates, so nothing could ever match and the
+            # pilot reported 0/3 for obfuscated artefacts.
+            obf_hits = _behavioural_match(obf_path, plain, name, r_obf, inputs)
 
             rows.append({
                 "function": name,
