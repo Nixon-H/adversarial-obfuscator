@@ -68,3 +68,52 @@ that result is not a tautology.
 
 So this document should be read as the cost half of a two-part claim whose
 substance is in the success rate, not the cost.
+
+## Round 52: the non-trivial version — cost scales with candidate count
+
+The previous section called the constant-cost result nearly a tautology,
+because every build had four candidates. This varies the candidate count by
+building the same task with 1, 2 and 3 siblings.
+
+| candidates | probes | target found |
+|---|---|---|
+| 2 | 3 | yes |
+| 3 | 8 | yes |
+| 4 | 9 | yes |
+
+**Cost rises steeply with module size**: roughly +5 probes for the third
+candidate, then +1. That is not linear and the shape is not established by
+three points, but the direction is unambiguous.
+
+## What this changes
+
+The endpoint is no longer vacuous. Identification cost is a function of the
+candidate list, and the transfer property is that the *same* property set
+identifies the target at every size — including through obfuscation.
+
+Two readings of the jump from 3 to 8 probes are possible and this data does not
+distinguish them:
+
+- the third sibling (`sb`, which differs only at the boundary) requires
+  several properties to eliminate, so adding a *hard* sibling costs more than
+  adding an easy one;
+- the ordering heuristic places properties badly at that size and re-runs more
+  of them.
+
+The second is a property of my attacker. The first would be a property of the
+task. Separating them needs the sibling order varied, which was not done.
+
+## Limits
+
+- Three points. A curve through three points is a direction, not a shape.
+- One task. `sumselected` has siblings of very different difficulty.
+- The jump could be ordordering noise rather than candidate count; the probe
+  counter is exact, but which properties run depends on the ranking.
+
+## Why it belongs in the paper
+
+This is the first version of the cost measurement that could support a sentence
+an obfuscator designer would care about: *adding a same-shaped sibling to a
+module raises the cost of identifying any one function in it three-fold at
+small sizes.* That is a deployment-relevant statement, and unlike the earlier
+flat curves it is not guaranteed by construction.
