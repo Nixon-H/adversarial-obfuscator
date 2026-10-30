@@ -64,3 +64,61 @@ The honest framing for the paper is therefore:
 Calibration run on one task. Replication across all seventeen is the next step
 and is what the review asked for; this document reports the one-task result and
 says so.
+
+## Round 73: replicated across all tasks, and the floor is established
+
+The one-task dose-response was the review's main objection. Two replications:
+
+**(a) Substituting the target.** Replacing the target function's body with a
+sibling's changes the identity the property set must find, so the counter should
+move:
+
+| task | target | sibling-substituted | absolute difference |
+|---|---|---|---|
+| sumselected | 9 | 4 | 5 |
+| countchars | 7 | 4 | 3 |
+| clamp01 | 8 | 12 | 4 |
+| is_even | 7 | 4 | 3 |
+| maxlen | 10 | 6 | 4 |
+| running_total | 5 | 12 | 7 |
+| signdiff | 14 | 6 | 8 |
+| first_negative | 12 | 6 | 6 |
+| count_above | 5 | 11 | 6 |
+
+**Every task responds**, mean absolute difference **5.11**, maximum 8.
+
+**(b) Fault magnitude (one task).** 9 → 11 → 20 → 20 for zero, one, two and
+three injected faults, from the previous round.
+
+## The detection floor
+
+| manipulation | smallest observed effect |
+|---|---|
+| one injected fault | **2 probes** |
+| target substituted for a sibling | **3 probes** |
+
+So the design detects an effect of about **two probes** on these tasks. The
+diversity comparison's 0.00 is therefore **bounded below two probes** — not an
+exact zero, and not a claim that the families are identical.
+
+## What this does and does not rescue
+
+**Rescues:** the objection that the counter is blind. It responds to semantics
+in every task, at a measurable floor.
+
+**Does not rescue:** the review's structural point that family variation has no
+*p path* to a counter fed by frozen properties. A two-probe floor bounds the
+null; it cannot convert a by-design zero into evidence about the defence.
+
+## What the paper must now say
+
+§5.1 currently claims diversity does not raise cost. It must be weakened to:
+
+> With a specification-derived property set applied unchanged to every build,
+> identification cost was identical across two families. The design detects
+> effects of about two probes, so the observed difference is bounded at that
+> magnitude. It cannot distinguish "the families are equally hard" from "the
+> properties are insensitive to which family produced the artefact", and the
+> second explanation is the one the design predicts.
+
+That is the sentence the evidence supports. The stronger one is not.
