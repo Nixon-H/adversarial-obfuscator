@@ -304,9 +304,13 @@ found by the instrumentation the study required.
 
 ## 7. Limitations
 
-- **Corpus.** Seventeen tasks by one author, in one obfuscation configuration.
-  The eight corpus tasks share a repository with their specifications. This is
-  not the twelve-plus independent projects an external corpus would provide.
+- **Corpus.** Seventeen internal tasks by one author, plus five external
+  sources gated for execution (three single-file libraries and one vendored
+  package, 104 artefacts). The external sources validate that the artefacts run;
+  they do **not** provide an independent **specification**, because the
+  properties are still written by this paper's author. That is the primary
+  limitation: twelve-plus projects specified by someone else would be, and this
+  is not that.
 - **Understanding.** Identification is not comprehension. Nothing here measures
   whether an analyst could explain or modify a recovered function.
 - **Family space.** Three families, two shown equally hard. Unequal families
@@ -321,10 +325,17 @@ found by the instrumentation the study required.
 ## 8. Conclusion
 
 For function identification in Python source, per-build transform-family
-diversity produced no measurable change in attacker cost, bounded below about
-two probes by a calibration that detects that magnitude. What does move cost is
-the number of same-shaped candidates in the module, from two probes at one
-candidate to 8.6 at four.
+diversity produced no measurable change in the cost this instrument measures —
+and that null is **predicted by the instrument's construction**, not evidence
+about diversification: a property set derived from the specification is
+semantic, and a semantics-preserving transform has no channel to it. An earlier
+draft reported a two-probe bound; section 5.1 withdraws it as a non-sequitur,
+because the calibration measures semantic differences within an artefact while
+the null concerns differences between families.
+
+What does move cost, on this instrument, is the number of same-shaped candidates
+in the module: from two probes at one candidate to 8.6 at four, monotone in nine
+of nine tasks and invariant to the order in which candidates are tried.
 
 We do not claim the families are equally hard. We claim that a specification
 applied unchanged to every build is insensitive to the family that produced it,
