@@ -572,3 +572,41 @@ a smaller set than `renamer.mapping`, which records intent rather than outcome.
 The gate found the defect and the suite found the fix's cost. Neither alone is
 sufficient, and this round is the clearest demonstration in the programme: a
 green gate with a red suite is the normal shape of a bad fix.
+
+## Round 124: the renamer is the wrong place
+
+The constrained version — rewrite definition names only, skip reserved — still
+failed **11 of 77** contract tests, including `__all__` preservation.
+
+The reason is structural: `__all__` is a list of **strings**, not `Name` nodes.
+Renaming a definition without rewriting the corresponding string leaves the
+module exporting a name that no longer exists. Any fix that touches the renamer
+has to synchronise `__all__`, reserved names, exports, and the skip rules at
+once — which is exactly the fifteen-test blast radius of the previous attempt.
+
+**Every attempt to fix this in the renamer fails the same way, and the reason is
+the same each time: the renamer's mapping is not the authority on what a name
+should be. The table is wrong, not the definitions.**
+
+## Where the fix belongs
+
+`CallGraphObfuscator` builds a table mapping indexes to **names**. It runs before
+renaming, so the names it records are pre-rename. The smallest correct fix is for
+the table to record the **final** names — either by running after the renamer, or
+by being rewritten from `renamer.mapping` at the point renaming completes.
+
+That touches one structure instead of the whole renamer, and it cannot break
+`__all__`, exports or reserved names because it never touches a definition.
+
+## The score after twelve rounds
+
+| attempt | gate | suite |
+|---|---|---|
+| guessed folding | — | — |
+| blanket mapping pass | green | **15 failed** |
+| definitions-only pass | — | **11 failed** |
+
+Two fixes, two reversions, both because they changed the wrong object. The
+diagnosis from round 122 stands: one invented name, produced by the md5 branch,
+whose definition was missed. The repair must be applied to the **table**, which
+is the structure that ended up wrong.
