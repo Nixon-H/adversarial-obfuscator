@@ -194,3 +194,49 @@ which is the same pre-pass shape as round 177's nonlocal fix and round 195's def
 `urllib3/_collections` is back to the unicode-name failure. The fix is now **stated
 precisely** — a per-class binding set — rather than attempted with a counter that cannot
 express it. `requests` remains blocked on packaging.
+
+## Round 210: fixed with the per-class binding set, and why the gate still refuses it
+
+The fix round 209 specified — reserve every name the **class body** binds, including
+methods a class-body alias points at — works:
+
+| package/module | result |
+|---|---|
+| `urllib3/_collections` | **imports** |
+| `attr/_make` | imports |
+| `attr/_next_gen` | imports |
+| `more_itertools/recipes` | imports |
+
+42 renamer, preserve, import and dataclass tests pass. `attrs` is unaffected, which round
+209's blanket version was not.
+
+## Why `urllib3` is not yet in the gate
+
+Adding the package gives **7 failures**, none of them the obfuscator:
+
+```
+FAIL pkg/urllib3/_base_connection: ImportError: No module named 'urllib3.util'
+FAIL pkg/urllib3/_request_methods:  ImportError: No module named 'urllib3.util'
+```
+
+`urllib3` has **subpackages**. The gate writes one flat directory per package and a
+single `__init__.py`; `urllib3.util` is a directory it does not create. Reverted.
+
+That is the same class as `requests` needing `urllib3` importable: **the gate's
+package layout is one level deep**, and both remaining sources are deeper than that.
+
+## What would fix both
+
+`check_one`'s package branch would need to copy the **tree** rather than the top-level
+`*.py` files — `shutil.copytree` for each package, then the artefact overwriting one
+module inside it. That also solves `requests`+`urllib3` in one move, since both would be
+copied into the same temp root.
+
+About six lines. Not attempted here: the artefact is only `_collections.py`, whose fix is
+verified, and a gate change that writes whole trees is worth its own measured round.
+
+## Status
+
+`urllib3`'s `typing` and class-body-alias defects are **closed and verified**. The package
+is not gated because the gate's layout is one level deep, and that is written down as the
+next change rather than worked around.
