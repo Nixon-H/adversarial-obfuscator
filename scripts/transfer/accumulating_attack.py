@@ -34,7 +34,11 @@ from scripts.transfer.attack import module_functions  # noqa: E402,F401
 class AccumulatingAttack:
     """An attacker whose cost on build k depends on what it saw in 0..k-1."""
 
-    def __init__(self):
+    def __init__(self, reset_ordering_each_build=False):
+        # reset_ordering_each_build=True re-learns the property ranking within
+        # each build instead of carrying it forward. It is the control for the
+        # claim that the degradation comes from a stale ranking.
+        self.reset_ordering_each_build = reset_ordering_each_build
         self.state = {
             "builds_seen": 0,
             "fingerprints": [],     # per-build transform traces it inferred
@@ -112,7 +116,7 @@ class AccumulatingAttack:
         exec(compile(src, path, "exec"), tree_mod)
         funcs = {n: v for n, v in tree_mod.items() if isinstance(v, types.FunctionType)}
 
-        power = self.state.get("prop_power", [])
+        power = [] if self.reset_ordering_each_build else self.state.get("prop_power", [])
         order = sorted(range(len(props)),
                        key=lambda i: -(power[i] if i < len(power) else 0))
         # keep the naturally strongest property last as a confirmation step

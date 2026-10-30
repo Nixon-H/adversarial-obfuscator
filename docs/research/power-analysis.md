@@ -111,3 +111,51 @@ the effect size it can now resolve.
 
 What is still missing is not resolution but validity: seventeen tasks by one
 author, with specifications by the same person who wrote the functions.
+
+## Round 49: the control refutes round 48's interpretation
+
+Round 48 concluded that "the learned ordering degrades with use". The obvious
+control is an attacker that re-learns the ranking within each build instead of
+carrying it forward. Added as `reset_ordering_each_build`.
+
+| condition | mean paired difference | sd |
+|---|---|---|
+| ranking carried across builds | **+0.44** | 0.88 |
+| ranking reset each build | **+1.00** | 0.00 |
+
+Carrying the ranking **halves** the cost growth. Round 48's sentence —
+"the learned ordering degrades with use on this benchmark" — is **wrong**: the
+ordering degrades *less* with use than without it.
+
+## What the reset condition shows
+
+With the ranking reset, every build re-learns from scratch and the difference is
+a flat +1.00 with zero variance: probes on the last build are always exactly one
+more than on the first. That is a *cleaner* signal than the carried condition
+and it points the other way.
+
+So the correct statement is:
+
+> Accumulated ordering reduces the growth in probe cost by about half, relative
+> to re-learning per build. Cost still rises with k, but the accumulation is
+> doing work rather than going stale.
+
+## What is still unexplained
+
+Why cost rises at all, even with accumulation. The most likely cause is that
+the builds differ: `master_seed` is held fixed and the variant index advances,
+so each build is a different artefact with different properties and a different
+number of candidates. Probes are partly a function of the build, not only of
+the attacker's state, and this design does not separate those.
+
+That is a real limitation of the measurement, and it means "cost rises with k"
+should be read as "cost varies across builds, with a small positive average"
+rather than as a trend caused by k itself.
+
+## Correction record
+
+This is the sixth conclusion in this programme retracted or corrected after a
+control was run: three harness bugs, one endpoint design error, one stale
+document claim, and now one interpretation that a single control reversed. The
+pattern is consistent enough to state plainly: **a direction without a control
+is a story, not a result.**
