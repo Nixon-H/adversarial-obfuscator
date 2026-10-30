@@ -652,3 +652,44 @@ Three hand-written minimal shapes all pass:
 
 So the defect needs more than call-graph structure. The reduction has to be rerun
 with the validity predicate before it can say what else is required.
+
+## Round 136: the header statements are load-bearing
+
+Reran the reduction with the validity predicate from round 135 — **input must
+import cleanly and the obfuscated version must not** — and got a different answer:
+
+```
+defs: 45 (none removed)
+input imports: False
+defect reproduces: False
+```
+
+The reducer kept all 45 definitions and still could not produce a valid input,
+because it had been reduced to **imports plus definitions only**. The module's
+header — the `try/except ImportError` blocks, `_UNSET`, `_REMAP_EXIT`,
+`_orig_default_visit`, `guid_iter` — is **required** for the source to import.
+
+And with that header removed, the defect **does not reproduce at all**. So the
+header is not incidental scaffolding: it is part of the trigger.
+
+## What that narrows
+
+| component | needed |
+|---|---|
+| imports | not sufficient (tested: three minimal shapes pass) |
+| definitions | not sufficient |
+| **header statements** | **required** |
+
+That is new information, and it came from the corrected predicate rather than from
+another hypothesis. The previous reduction had silently pruned the header and
+accepted invalid inputs, which pointed at definitions.
+
+## The next step
+
+Reduce the **header** while keeping it valid: drop individual header statements,
+keep those the source still needs, and check `defect()` after each. The candidate
+worth trying first is `_orig_default_visit = default_visit`, because it is the one
+header statement that names a **function object** rather than building a sentinel —
+exactly the shape the defect is about.
+
+That is one experiment, not a theory.
