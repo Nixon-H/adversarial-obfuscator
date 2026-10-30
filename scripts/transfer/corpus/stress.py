@@ -57,12 +57,19 @@ async def gather_two(a, b):
 
 
 def grouped(values):
+    # NOTE: `except*` forbids return/break/continue in its body, so the handler
+    # assigns and the function returns after the try/except. An earlier version
+    # of this module put `return 0` inside the handler, which made the FILE
+    # invalid Python -- and the obfuscator's SyntaxError was then correct
+    # behaviour reported as a defect.
+    result = 0
     try:
         if not values:
             raise ValueError("empty")
-        return sum(values)
+        result = sum(values)
     except* ValueError:
-        return 0
+        result = 0
+    return result
 
 
 def walrus_count(values):
