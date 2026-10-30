@@ -99,3 +99,48 @@ Two guards asserted the previous behaviour and were rewritten. The second now
 executes a `try/except ImportError` fallback and checks the value it computes,
 which is the property that matters; the old version asserted the absence of a
 particular string, which was a proxy for it.
+
+## Round 100: the gate is clean — 63 artefacts, zero failures
+
+The last class was plain imports. `import numbers` binds `numbers`, and the
+renamer renamed the binding while the uses kept their spelling (or the reverse),
+so `isinstance(x, numbers.Real)` became a reference to an unbound generated
+name.
+
+Applying the same reserve rule to `visit_Import` as to `visit_ImportFrom` fixed
+it:
+
+```
+artefacts checked: 63
+failures: 0
+```
+
+Every corpus artefact — nine synthetic tasks, eight corpus tasks, six external
+tasks, at three build indices — now parses, imports, and survives being
+exercised.
+
+## The path to zero
+
+| round | gate failures | cause addressed |
+|---|---|---|
+| 98 | **9** | gate built; `_sumprod`, `_nx_ee5c35` found |
+| 99 | **3** | reserved `from` imports |
+| 100 | **0** | reserved plain imports |
+
+Two rules, both forms of the same one: **a name bound by an import keeps its
+spelling, and so does every use.** That is the only invariant consistent with a
+renamer that rewrites uses but not module-level bindings.
+
+## What zero means, and what it does not
+
+**Means:** the current corpus is not hit by the six defect classes found so far.
+Every artefact in it runs.
+
+**Does not mean:** the obfuscator is correct. The corpus is 23 tasks from three
+sources, and six defects were found in it. A seventh class almost certainly
+exists in code none of these sources contains — a class with `async`, or
+generators, or descriptors, or `except*`.
+
+**Does mean something stronger than before:** there is now a command that
+answers "does the output run" over a fixed corpus, in about four minutes, and it
+returns zero. Any future transform change can be checked against it.

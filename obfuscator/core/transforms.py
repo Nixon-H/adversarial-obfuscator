@@ -428,9 +428,18 @@ class SymbolRenamer(ast.NodeTransformer):
         node.names = [self.get_new_name(n) for n in node.names]
         return node
     def visit_Import(self, node):
+        """Reserve plain imports the same way as `from` imports.
+
+        `import numbers` binds `numbers`; renaming that binding while the
+        module-level uses keep their spelling (or the reverse) leaves the
+        module referencing a name nothing binds. The `numbers` module hit this
+        as `_nx_...Real` in external/median_low.
+        """
         for alias in node.names:
             if alias.asname:
-                alias.asname = self.get_new_name(alias.asname)
+                self.reserved.add(alias.asname)
+            else:
+                self.reserved.add(alias.name.split(".")[0])
         return node
     def visit_ImportFrom(self, node):
         """Reserve imported names so their uses are not renamed either.

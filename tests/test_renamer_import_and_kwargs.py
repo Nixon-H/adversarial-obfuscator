@@ -65,3 +65,13 @@ def test_try_except_rebind_still_runs():
     ns = {}
     exec(compile(out, "<renamed>", "exec"), ns)
     assert ns["f"]([1, 2], [3, 4]) == 11
+
+
+def test_plain_import_is_reserved():
+    """`import numbers` must keep its name, and so must `numbers.Real`."""
+    src = "import numbers\n\ndef f(x):\n    return isinstance(x, numbers.Real)\n"
+    out = ast.unparse(SymbolRenamer().visit(ast.parse(src)))
+    ns = {}
+    exec(compile(out, "<renamed>", "exec"), ns)
+    assert ns["f"](1.5) is True
+    assert ns["f"]("s") is False
