@@ -104,3 +104,44 @@ upstream ships it.
 real library code: 175 KB, 117 functions, relative imports, and it survives at two
 build indices. It is not yet in `artefact_gate.py`'s module list; that is a small
 edit for the next round.
+
+## Round 149: the gate cannot check package modules yet
+
+Adding `more_itertools/{recipes,more}.py` to `artefact_gate.py`'s module list
+fails:
+
+```
+FAIL pkg/more_itertools/more seed=4242 k=0: fails at import:
+     attempted relative import with no known parent package
+```
+
+The gate's `check_one` writes the artefact to a temp file and imports it **as a
+standalone module**. That is exactly the situation that made these files
+un-gateable before they were vendored — vendoring gave the *repository* a package,
+but not the *gate* an import context.
+
+So the round 148 result ("both modules pass inside a real package") is true and was
+measured by a one-off script; it is **not yet represented in the gate**.
+
+## What the gate would need
+
+`check_one` must accept a package layout: write the artefact as
+`<tmp>/<pkg>/<module>.py`, write the package's other modules unmodified,
+`<tmp>/<pkg>/__init__.py`, and then run the import in a subprocess with `<tmp>` on
+`sys.path`. That is a second code path — roughly 20 lines — not a configuration
+change.
+
+Not done this round. The attempt is reverted so the gate stays honest about what it
+checks rather than carrying a case that fails for a reason unrelated to the
+obfuscator.
+
+## The honest status
+
+| claim | measured by | in the gate? |
+|---|---|---|
+| three single-file sources pass | `artefact_gate.py` | **yes** |
+| `more_itertools` package passes | one-off script, round 148 | **no** |
+| `requests`, `attrs` | not measured | no |
+
+The corpus grew this round in evidence but not in automation, and saying so is more
+useful than a gate that reports a failure it does not understand.
