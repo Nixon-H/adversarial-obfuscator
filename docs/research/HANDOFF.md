@@ -8,9 +8,9 @@
 
 | | |
 |---|---|
-| defects found and fixed | **nine** |
+| defects found and fixed | **ten** |
 | test suite | **4521 passed, 4 skipped, 0 failed** |
-| artefact gate | **104 artefacts, 0 failures** |
+| artefact gate | **72 artefacts, 0 failures** (2 indices; 38 at one) |
 | reproduction | **8 of 8 tables match** |
 | paper | 422 lines, instrument-validity note, internally consistent |
 | research documents | 51 |
@@ -29,12 +29,12 @@ their relative imports need package context. Rounds 148–150 built exactly the
 machinery for this:
 
 1. fetch the package into `scripts/transfer/corpus/pkg/<name>/`;
-2. add its modules to `artefact_gate.py`'s `_modules()` list as
-   `pkg/<name>/<module>`;
+2. add its name to the tuple in `artefact_gate.py`'s `_modules()` that already lists
+   `("more_itertools", "attr")`;
 3. run `python3 scripts/transfer/artefact_gate.py --variants 2 --seeds 4242,7`.
 
 This is mechanical. It adds no new claim. It does widen the corpus, which is the
-only thing that has ever found defects in this programme — four of the nine came
+only thing that has ever found defects in this programme — five of the ten came
 from code the project did not write.
 
 ---
@@ -113,8 +113,7 @@ Round 123 reverted a file and left a call to the removed helper. The resulting
 | item | severity | note |
 |---|---|---|
 | `apply_ast_mutation` returns `(source_code, {})` on any exception | **medium** (was high) | **Round 169: it now emits a `RuntimeWarning` naming the exception and saying the caller receives unobfuscated source.** The return is unchanged for compatibility with 34 test and 8 production call sites, but the failure is no longer silent, and `python -W error::RuntimeWarning` turns it into a raise. A full re-raise is still the correct end state. |
-| `dotproduct` at build index 0 is not evaluator-unique | low | Reported, not pooled. Fix is a separating input. |
-| Two packages un-gated | low | Mechanical; see above. |
+| one package un-gated | low | `requests`; mechanical, see above. |
 | `MAX_PROFILES`/other `_511` ORs | none known | Lower bound only; nothing above it is claimed. |
 
 ---
@@ -140,7 +139,7 @@ The research question was answered **negatively**, and the answer is about the
 semantic, so transform-family variation has no channel to it, and any null it
 produces is predicted by its own construction.
 
-What the work produced that outlives the question: **nine silent failure modes in
+What the work produced that outlives the question: **ten silent failure modes in
 the obfuscator**, six of which the project's own tests could not have found, and
 five instruments that fail in different directions.
 
