@@ -66,7 +66,12 @@ def _other_tool_flags():
     for rel in ("scripts/artifact_sign.py", "llvmgen/codegen.py",
                 "irgen/chaff_circuits.py", "irgen/fragmentation.py",
                 "irgen/variant_pool.py", "irgen/watermark.py",
-                "scripts/sbom.py", "scripts/secure_cleanup.py"):
+                "scripts/sbom.py", "scripts/secure_cleanup.py",
+                # The research instruments the README documents alongside the
+                # build CLI. Their flags are real; the guard just had not been
+                # told where to look.
+                "scripts/transfer/artefact_gate.py",
+                "scripts/transfer/reproduce.py"):
         path = os.path.join(ROOT, rel)
         if not os.path.exists(path):
             continue
