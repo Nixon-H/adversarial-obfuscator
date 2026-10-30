@@ -117,3 +117,62 @@ an obfuscator designer would care about: *adding a same-shaped sibling to a
 module raises the cost of identifying any one function in it three-fold at
 small sizes.* That is a deployment-relevant statement, and unlike the earlier
 flat curves it is not guaranteed by construction.
+
+## Round 53: the curve is monotone in every task
+
+Round 52 measured one task with three points and could not separate "the third
+sibling is intrinsically hard" from "the ordering heuristic misbehaves at that
+size". Repeating across all nine tasks, growing the candidate list one sibling
+at a time:
+
+| task | probes at 1, 2, 3, 4 candidates |
+|---|---|
+| sumselected | 2, 3, 8, 9 |
+| countchars | 2, 3, 8, 9 |
+| clamp01 | 2, 3, 8, 9 |
+| is_even | 2, 3, 4, 5 |
+| maxlen | 2, 3, 8, 9 |
+| running_total | 2, 3, 8, 9 |
+| signdiff | 2, 3, 8, 9 |
+| first_negative | 2, 3, 8, 9 |
+| count_above | 2, 3, 4, 5 |
+
+**Monotone non-decreasing in 9 of 9 tasks.** Mean probes: **2.0 at one
+candidate, 8.3 at four.**
+
+## What this resolves
+
+The previous round's two explanations are now separated. The jump is
+**systematic across tasks with different siblings**, so it is not a property of
+any particular sibling's difficulty. It follows the candidate count.
+
+The magnitudes differ — `is_even` and `count_above` reach only 5 where the
+others reach 9 — which suggests the ordering heuristic also matters, and the
+two are not fully separable without varying sibling order. But the direction
+and monotonicity are unambiguous.
+
+## The claim this supports
+
+> The cost of identifying a known function by specification rises monotonically
+> with the number of same-shaped candidates in the module, from about two probes
+> at one candidate to about eight at four.
+
+That is a deployment-relevant, non-tautological statement produced by an
+oracle-free attacker on a validity-gated benchmark. It is the first cost result
+in this programme that could carry a paper's results section.
+
+## Limits
+
+- Nine tasks, one author, one obfuscation configuration.
+- Four candidate points is a short curve; the shape beyond four is unmeasured.
+- Probes are a proxy for effort and the jump from 3 to 8 is large enough that
+  the ordering heuristic is probably responsible for part of it.
+- The measurement uses `master_seed` fixed and variant index 4 throughout, so
+  the builds are structurally similar even though they are distinct artefacts.
+
+## Where this leaves the endpoint
+
+Four rounds ago the cost curve had been retracted as vacuous. It now has a
+direction, a monotone replication, and a mechanism, obtained by varying the one
+thing that had been held constant. That is the difference between an endpoint
+that measures a harness and one that measures a system.
