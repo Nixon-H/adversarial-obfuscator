@@ -97,3 +97,39 @@ changes is not yet visible to anyone who clones.
 
 The affected change is documentation only: a README section naming the four checks
 and linking `docs/research/README.md`. No code, no test, no claim depends on it.
+
+## Round 157, resolved in round 158
+
+The push failure was **not** a missing key. `gh auth status` showed a valid
+keyring token with `repo` scope; the SSH agent had simply lost its identities while
+the GitHub CLI had kept its credentials.
+
+```
+gh auth setup-git
+git remote set-url origin https://github.com/Nixon-H/adversarial-obfuscator.git
+git push origin master
+  d0e980e..fa036a9  master -> master
+```
+
+Two commits, both documentation. Local and origin now agree.
+
+## What the episode was worth
+
+The record above says the divergence was written down rather than assumed, and that
+was the right call — but the **diagnosis** in it was wrong in the same shape as
+round 132's: I reported "the agent has lost its identities" as the cause when it was
+one of two credential paths failing, and the second path was available the whole
+time.
+
+The check that would have found it takes one command:
+
+```
+gh auth status
+```
+
+and it belongs next to `ssh-add -l` in any "cannot push" diagnosis, not after it.
+
+**Lesson, second instance:** when a tool fails, check whether the *same capability*
+is reachable by another configured route before writing a workaround into the
+record. The first instance was round 132's grep range; the shape is identical —
+one instrument failed and I reported its failure as the system's state.
