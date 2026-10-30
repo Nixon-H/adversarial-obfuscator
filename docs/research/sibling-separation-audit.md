@@ -111,3 +111,55 @@ before a paper uses the word.
 The corpus benchmark was not audited the same way. Its eight tasks pass the
 evaluator gate, and whether their attacker sets are singletons has not been
 checked. That is the next audit, not a current claim.
+
+## Round 65: the corpus benchmark is singleton too
+
+The previous round audited the synthetic tasks and left the corpus tasks
+unmeasured. At build index 4, every corpus task's attacker set has size 1:
+
+| task | passing set |
+|---|---|
+| rle_encode | 1 |
+| rle_decode | 1 |
+| slugify | 1 |
+| gcd | 1 |
+| priority_pick | 1 |
+| rotate_list | 1 |
+| store_get | 1 |
+| store_keys | 1 |
+
+## Combined state
+
+| benchmark | tasks | attacker set size | evaluator identity |
+|---|---|---|---|
+| synthetic | 9 | **1 everywhere** | unique |
+| real corpus | 8 | **1 everywhere** | unique |
+| **total** | **17** | **singleton** | **unique** |
+
+So "the attacker identifies the target" now means the same thing on both
+benchmarks, and it means a **singleton**: one candidate passes, and it is the
+right one.
+
+## What the audit sequence produced, across three rounds
+
+1. A positive control injected a fault, and the counter registered it
+   (9 → 11 probes) — but the faulted target collided with a sibling, revealing
+   a hazard.
+2. The hazard motivated an audit that found one task where the attacker's set
+   held two candidates, and named why (no zero-valued property input).
+3. The fix was one property, and both benchmarks now identify uniquely.
+
+Three rounds, one control, one measurement, one line. The result is not a new
+finding — it is a benchmark property that was assumed and is now verified, on
+both families.
+
+## What remains unverified
+
+- **Build indices other than 4.** The audit checked one index per task. Whether
+  a different build re-introduces a collision is unmeasured.
+- **The family effects.** The singleton property says the attacker finds one
+  candidate; it says nothing about how many probes it takes across builds, which
+  is where the cost measurements live.
+
+Recorded so that "singleton" is not over-claimed: it is a property of these
+seventeen tasks at one build index each, verified on both benchmark families.
