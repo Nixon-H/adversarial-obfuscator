@@ -213,3 +213,44 @@ Open, with the mechanism identified and a one-line description of the fix.
 Not fixed here because the renamer's import handling was not traced in the
 remaining time, and a speculative edit to a transform is how the first three
 defects were made.
+
+## Round 87: the obvious fix did not work, and that is informative
+
+The proposed fix was to add `visit_ImportFrom` to `SymbolRenamer`, renaming each
+alias's binding to match its renamed uses. Implemented, run against the external
+module, and **still failing**:
+
+```
+k=2 FAILED NameError: name '_nixon_ΗᎮ๔ӼӓĦկᚯぷᎥ' is not defined
+k=4 FAILED NameError: name '_nixon_ぐ疧Ꮃゕџ' is not defined
+```
+
+Reverted. A transform edit that does not fix the defect is not a fix, and this
+programme has already shipped three of those.
+
+## What the failed attempt establishes
+
+**`SymbolRenamer` is not the pass that renames this use.** Adding the import
+visitor there changed nothing, so either:
+
+- the rename is applied by a different transformer, and `SymbolRenamer` sees an
+  already-renamed tree where the import alias still matches the *original* name;
+  or
+- the import is removed and re-emitted by another pass, so the binding this
+  visitor touches is not the one that survives.
+
+Both hypotheses are testable — count the `ImportFrom` nodes before and after each
+pass — and neither was tested in the remaining time.
+
+## Why this is recorded rather than retried
+
+The correct next step is instrumentation, not another edit: log which pass emits
+the `if` and which emits the import. That is the same lesson as the
+`llvmgen` defect at the start of this work, where four rounds were spent
+guessing before one round of dumping the intermediate artefact found the cause.
+
+## Status
+
+Open. Mechanism identified to the line (`from sys import hexversion` unrenamed,
+use renamed), pass not identified. The reverted tree is green; the defect remains
+and is documented with its reproduction.
