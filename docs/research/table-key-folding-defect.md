@@ -1039,3 +1039,72 @@ Four reductions, three invalid:
 
 The working reducer differs from the others by one line — `ast.parse(code)` before
 accepting a candidate — and it produced the answer in a single run.
+
+## Round 143: the cause — the renamer renames builtins held in the table
+
+`CallGraphObfuscator` has exactly one writer to the table (`transforms.py:1293`),
+guarded by:
+
+```python
+if hasattr(builtins, func_name) and func_name not in blacklist:
+    self.func_table[idx] = func_name
+```
+
+So every value it stores is, at that moment, **a builtin**. Checking the minimal
+line confirms it:
+
+```
+entries: 29
+non-builtin values: ['_nx_f24f62']
+```
+
+Twenty-eight entries are builtins — `callable`, `iter`, `ValueError`, `zip`, `id`.
+One is not, and `hasattr(builtins, "_nx_f24f62")` is `False`.
+
+**So `_nx_f24f62` was a builtin when the table was built, and was renamed
+afterwards.** `SymbolRenamer.visit_Name` rewrites every `Name` in the tree by id,
+including the table's value nodes:
+
+```python
+len  ->  _nx_f24f62
+```
+
+But `len` is not a binding in this module — it resolves through `builtins`. Renaming
+its reference makes it a free variable with no definition anywhere, and the table
+entry becomes a `NameError` at import.
+
+## Why the earlier bisects were misleading
+
+`obf_calls` was **necessary** (it creates the table) and `symbol_rename` was
+**necessary** (it breaks the entry). Both controls were correct; the cause is the
+**interaction**, exactly as round 117 said, but the mechanism is not a stale table
+built too early — it is a **builtin reference being treated as a local binding**.
+
+## The fix, and why it is small
+
+The renamer must not rename a `Name` whose id is a builtin and which is not bound
+in the module. Two ways:
+
+1. in `SymbolRenamer.visit_Name`, skip when `node.id` is in `builtins` and not in
+   `self.mapping`'s bindings — narrow, but the renamer cannot see module scope;
+2. in `CallGraphObfuscator`, store the builtin under an **alias** it emits itself
+   (`_nx_bi_len = len`), which starts with `_nx_` and is therefore left alone by
+   both renamers.
+
+Option 2 is local to the pass that creates the problem and cannot affect any other
+renaming — the same shape as the `_nx_` markers this project already relies on.
+
+## What this took
+
+| round | finding |
+|---|---|
+| 113 | the gate found it |
+| 114–121 | six bisects, each correct about necessity, wrong about cause |
+| 122 | one invented name |
+| 135–141 | three invalid reductions |
+| 142 | the one-line minimal case |
+| **143** | **a builtin renamed as if it were a local** |
+
+Thirty rounds. The reduction in 142 is what made this visible: with one line
+containing 29 entries, 28 builtins and one stranger, the shape of the answer is
+readable.
