@@ -1,6 +1,8 @@
 # Literature Matrix: Python Software Protection Research
 ## Adversarial-Obfuscator paper programme — compiled 2026-09-28
 
+> **Status update (2026-10-29): this matrix is a historical working document and is not a verified novelty review.** A targeted follow-up screen found direct prior work on cross-program reuse of VM analysis knowledge (DCVP, CoDiver, DSVMP, DynOpVM), a real-world deobfuscation benchmark (DEBRA), and multiple Python obfuscation studies/benchmarks. Therefore, do not reuse claims below that no transfer metric, Python benchmark, attacker-effort study, or related work exists. The current candidate contribution and its limitations are recorded in [the research program plan](research-program-plan-2026-10-29.md). A documented systematic review is still required before any “first” or “to our knowledge” statement.
+
 **Status legend.** `VERIFIED` = confirming evidence fetched 2026-09-28.
 `USER-PROVIDED` = from prior analysis paste, not independently re-checked —
 verify before citing. `STANDARD` = canonical textbook-level reference.
