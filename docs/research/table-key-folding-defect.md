@@ -132,3 +132,51 @@ Instrument rather than reason, for the third time:
 The three defects in this class (`hexversion`, `_sumprod`, `_nx_f24f62`) each
 took a minimal reproduction to fix. This one does not have one yet, and the last
 two rounds have shown what happens when I skip that step.
+
+## Round 116: the control separates it, the audit does not find it
+
+Two of the three planned steps, both run.
+
+**Step 1 — control.** Generating with `obf_calls` disabled:
+
+| configuration | result |
+|---|---|
+| with `obf_calls` | `NameError: name '_nx_f24f62' is not defined` |
+| without `obf_calls` | **imports** |
+
+So the defect requires that pass. That is the first piece of hard evidence in
+three rounds of guessing.
+
+**Step 2 — audit the table it produces.** Running `CallGraphObfuscator` alone on
+the module and comparing every table entry's value name against the definitions,
+imports and builtins in the resulting tree:
+
+```
+truly undefined table entries: 0
+```
+
+**The pass on its own produces a valid table.** So the undefined name appears
+**later**: some subsequent transform either renames a function definition and
+not its table entry, or removes a definition the table references.
+
+## Where that leaves it
+
+| claim | status |
+|---|---|
+| the order (table before rename) | confirmed, round 115 |
+| the defect requires `obf_calls` | **confirmed by control** |
+| the defect is *caused* by `obf_calls` alone | **refuted** — its output is valid |
+| what removes or renames the target afterwards | unknown |
+
+**Step 3 — decide.** Not taken, because the decision depends on the unknown. The
+next step is to bisect the **remaining** passes the same way: disable each in
+turn and see which one turns a valid table into a broken one. That is the same
+control that just worked, applied to the rest of the pipeline.
+
+## What three rounds of this have cost, and taught
+
+Round 114: guessed folding, wrote a fix, reverted it.
+Round 115: confirmed the order, called it the cause, corrected that.
+Round 116: a control at last, which refuted the straightforward reading.
+
+The control took one command. Reaching for it first would have saved two rounds.
