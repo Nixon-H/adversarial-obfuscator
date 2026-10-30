@@ -102,3 +102,49 @@ Open. The invented names are **not** from the mapping I have been inspecting, wh
 means the renamer I instrumented is not the only one transforming this file. The
 next command prints how many `SymbolRenamer` instances are constructed during a single
 generation.
+
+## Round 198: the names are real, and my round-197 check was inverted
+
+`reverse_mapping` is keyed by the **old** name, so looking up a *new* name in it always
+returns nothing. Round 197's conclusion — "a second transformer is implicated" — was an
+artefact of reading a dict the wrong way round.
+
+Inverting the mapping correctly:
+
+```
+_nx_ec3de3 <- slots_getstate
+_nx_e8fc6a <- slots_setstate
+mapping size: 176
+```
+
+**They are ordinary renamer output.** One instance, one mapping, no second transformer.
+
+## The actual defect
+
+```
+'slots_getstate' in source:  True
+'slots_getstate' in output:  True     <- the DEFINITION kept its name
+'_nx_ec3de3' as def:         False
+count of _nx_ec3de3:         1        <- kept by the REFERENCE in the return
+```
+
+The **definition** was not renamed; the **reference** was. That is the same desync as
+rounds 182 and 187 — a `Store` preserved and a `Load` renamed — at a new site: a
+module-level function definition whose name also appears in a sibling's `return`.
+
+## Why the definition was not renamed
+
+`visit_FunctionDef` renames when the name is not reserved, does not start with `__` or
+`_`, and is not in `protected_functions`. `slots_getstate` satisfies all three, so
+something else is preserving it — most likely `protected_functions`, which is populated
+from `sources.py` and which round 128 measured as **empty** for a different module.
+
+Not tested. The command is the same one that has worked six times: print
+`protected_functions` and `current_function` at the moment `visit_FunctionDef` sees
+`slots_getstate`.
+
+## Status
+
+Open, with the signature corrected: not invented names, but **a definition left alone
+while its reference was renamed**. Third instance of that desync, and the first where
+the `Store` is a `def` rather than a class-body assignment or a comprehension target.
