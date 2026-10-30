@@ -378,3 +378,51 @@ not one. The current gate uses `master_seed=4242` only.
 Cause narrowed to an inconsistent rename across call sites, dependent on random
 state. Not fixed. The immediate action this justifies is in the gate, not the
 transform: widen the seed sweep so the flakiness cannot hide.
+
+
+## Round 121: the gate can see it, and the failure pattern is split
+
+The gate now sweeps seeds (`--seeds 4242,7,1234`) and includes
+`bulk/iterutils.py`:
+
+```
+seeds: 4242,7,1234
+artefacts checked: 72
+failures: 3
+  FAIL bulk/iterutils seed=4242 k=0: fails at import: NameError ...
+  FAIL bulk/iterutils seed=7    k=0: fails at import: NameError ...
+  FAIL bulk/iterutils seed=1234 k=0: fails at import: NameError ...
+```
+
+At `--variants 1` only build index 0 is exercised, and it fails at **every**
+seed. Round 120's seed table used `--variants 3` and showed index 0 failing while
+index 2 varied. Putting both together:
+
+| build index | behaviour |
+|---|---|
+| 0 | **always** fails |
+| 2 | fails or imports depending on the seed |
+
+## What that split means
+
+Two distinct things are happening, not one:
+
+1. **A deterministic defect at index 0.** Every seed fails, so this is a plain
+   inconsistency, not a race — the same class as `hexversion` and `_sumprod`.
+2. **A nondeterministic defect at index 2.** Some seeds pass, some fail, so the
+   rename sometimes takes the md5 branch and sometimes the random branch at one
+   call site and not the other.
+
+Reporting them as one defect has been the reason six rounds of fixes did not
+converge: each attempt addressed whichever of the two the last experiment
+happened to expose.
+
+## The gate change, and what it costs
+
+`--seeds` defaults to `4242` so existing behaviour is unchanged; passing several
+seeds multiplies runtime roughly linearly. A three-seed, one-index sweep is
+about three minutes, which is affordable for a release check and not for every
+test run.
+
+The gate now reports `seed=` in every failure line, because a failure that
+depends on a seed is a different kind of bug from one that does not.

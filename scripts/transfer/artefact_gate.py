@@ -45,6 +45,7 @@ from scripts.transfer.tasks import TASKS as SYNTH_TASKS  # noqa: E402
 STRESS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "fixtures", "stress.py")
 STRUTILS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "external3", "strutils.py")
 REQUESTS_UTILS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "external4", "utils.py")
+ITERUTILS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "bulk", "iterutils.py")
 
 # Properties for the stress module: the constructs it exercises have no
 # task-level specification, so the gate only requires that the artefact
@@ -59,6 +60,8 @@ def _modules():
         out.append(("stress/constructs", f.read(), STRESS_PROPS))
     with open(STRUTILS, encoding="utf-8") as f:
         out.append(("external3/strutils", f.read(), STRESS_PROPS))
+    with open(ITERUTILS, encoding="utf-8") as f:
+        out.append(("bulk/iterutils", f.read(), STRESS_PROPS))
     # requests/utils.py is kept as the __future__ regression fixture but is not
     # gated: it uses relative imports ("from .exceptions import ...") and cannot
     # be imported standalone, so the import check measures the fixture's shape
@@ -73,7 +76,7 @@ def _modules():
     return out
 
 
-def check_one(label, code, props, k, workdir):
+def check_one(label, code, props, k, workdir, seed=4242):
     """Parse, compile, import, and exercise. Returns a list of failure strings."""
     fails = []
     path = os.path.join(workdir, "artefact.py")
@@ -84,8 +87,8 @@ def check_one(label, code, props, k, workdir):
     try:
         compile(code, path, "exec")
     except SyntaxError as exc:
-        return ["%s k=%d: does not compile: line %s: %s"
-                % (label, k, exc.lineno, exc.msg)]
+        return ["%s seed=%d k=%d: does not compile: line %s: %s"
+                % (label, seed, k, exc.lineno, exc.msg)]
 
     # 2. import (executes module-level code)
     try:
@@ -93,19 +96,19 @@ def check_one(label, code, props, k, workdir):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
     except Exception as exc:
-        return ["%s k=%d: fails at import: %s: %s"
-                % (label, k, type(exc).__name__, exc)]
+        return ["%s seed=%d k=%d: fails at import: %s: %s"
+                % (label, seed, k, type(exc).__name__, exc)]
 
     # 3. exercise: every property over every callable must not raise
     funcs = [v for v in vars(mod).values() if callable(v) and not isinstance(v, type)]
     if not funcs:
-        return ["%s k=%d: no callables survived" % (label, k)]
+        return ["%s seed=%d k=%d: no callables survived" % (label, seed, k)]
     for fn in funcs:
         for prop in props:
             try:
                 prop(fn)
             except NameError as exc:
-                fails.append("%s k=%d: NameError when exercising: %s" % (label, k, exc))
+                fails.append("%s seed=%d k=%d: NameError when exercising: %s" % (label, seed, k, exc))
                 return fails
             except Exception:
                 # A property may legitimately raise TypeError on the wrong
@@ -117,8 +120,12 @@ def check_one(label, code, props, k, workdir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--variants", type=int, default=3, help="build indices to check")
+    ap.add_argument("--seeds", default="4242",
+                    help="comma-separated master seeds; more than one catches "
+                         "nondeterministic defects, which a single seed cannot")
     args = ap.parse_args()
 
+    seeds = [int(x) for x in args.seeds.split(",") if x.strip()]
     failures = []
     invalid_inputs = []
     checked = 0
@@ -141,16 +148,18 @@ def main():
 
     with tempfile.TemporaryDirectory(prefix="nxk_gate_") as workdir:
         for label, src, props in modules:
-            for k in range(args.variants):
-                try:
-                    code = generate_variant(src, k, {"master_seed": 4242})
-                except Exception as exc:
-                    failures.append("%s k=%d: generation failed: %s: %s"
-                                    % (label, k, type(exc).__name__, exc))
-                    continue
-                checked += 1
-                failures.extend(check_one(label, code, props, k, workdir))
+            for seed in seeds:
+                for k in range(args.variants):
+                    try:
+                        code = generate_variant(src, k, {"master_seed": seed})
+                    except Exception as exc:
+                        failures.append("%s seed=%d k=%d: generation failed: %s: %s"
+                                        % (label, seed, k, type(exc).__name__, exc))
+                        continue
+                    checked += 1
+                    failures.extend(check_one(label, code, props, k, workdir, seed))
 
+    print("seeds: %s" % ",".join(str(x) for x in seeds))
     print("artefacts checked: %d" % checked)
     print("invalid fixtures: %d" % len(invalid_inputs))
     print("failures: %d" % len(failures))
