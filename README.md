@@ -295,9 +295,33 @@ irgen/ llvmgen/ encrypt/  IR / LLVM / post-link encryption stages
 vm/ runtime/ relay/       VM ISA + interpreters, Rust runtime, Rust relay binary
 native/                   C/C++ extensions and stubs
 tests/test_*.py           Per-feature test files (see table above)
+docs/research/            Research programme: paper, benchmark, nine defect reports,
+                          retraction record -- start at docs/research/README.md
 docs/                     DEVELOPER.md, USER_GUIDE.md, PLATFORMS.md, ATTESTATION.md, ROADMAP.md, ...
 examples/hello.py         Sample payload (print-based)
 ```
+
+## Research programme
+
+`docs/research/` holds a research programme that ran alongside this codebase and
+produced **nine correctness defects** in it, all fixed and guarded, plus one
+negative result written up as an instrument-validity note. Start at
+[`docs/research/README.md`](docs/research/README.md).
+
+Four independent checks back it:
+
+| check | command | what it catches |
+|---|---|---|
+| test suite | `python3 -m pytest tests/ -q` | code drifting from its specification |
+| artefact gate | `python3 scripts/transfer/artefact_gate.py --variants 2 --seeds 4242,7` | output that does not compile, import or run |
+| reproduction | `python3 scripts/transfer/reproduce.py` | prose drifting from measurement |
+| paper guards | `python3 -m pytest tests/test_research_docs_consistency.py -q` | prose drifting from its own tables |
+
+The defects matter more than the paper. Six of the nine could not have been found
+by this project's own tests: they needed code the project did not write (three
+external libraries and a vendored package, 104 gated artefacts) or a check that
+imports the artefact rather than compiling it. Two of the nine produced code that
+**looked fine and was not obfuscated at all**.
 
 ## Testing
 
