@@ -42,7 +42,7 @@ That claim survived three independent reviews that each broke a larger one:
 
 ## The defects
 
-Seven, of which five could not have been found by the project's own tests.
+Nine, of which six could not have been found by the project's own tests.
 
 | # | defect | symptom | document |
 |---|---|---|---|
@@ -53,8 +53,10 @@ Seven, of which five could not have been found by the project's own tests.
 | 5 | string `match` patterns | does not compile | `match-pattern-rename-defect.md` |
 | 6 | plain-import bindings | fails at import | `artefact-gate.md` |
 | 7 | `from __future__` hoisting | does not compile | `future-import-defect.md` |
+| 8 | builtin names in the function table | fails at import | `table-key-folding-defect.md` |
+| 9 | an `except` that returns the input | silently returns unobfuscated source | `swallowed-exception-returns-original.md` |
 
-All seven are fixed and guarded. The guards live in `tests/test_*` and are named
+All nine are fixed and guarded. The guards live in `tests/test_*` and are named
 in `artefact-gate.md`.
 
 ---
