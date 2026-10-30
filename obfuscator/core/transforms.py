@@ -149,6 +149,7 @@ class SymbolRenamer(ast.NodeTransformer):
     def __init__(self, mapping=None):
         self.mapping = mapping if mapping is not None else {}
         self.reverse_mapping = {}
+        self._renamed_values = set()
         self.protected_functions = set()
         self.current_function = None
         self._rename_log = []
@@ -275,10 +276,18 @@ class SymbolRenamer(ast.NodeTransformer):
         except Exception:
             pass
     def get_new_name(self, old_name):
+        # Idempotence: a name this renamer already produced must come back
+        # unchanged. Without it, any node visited twice -- which happens as soon
+        # as a visitor recurses into something the traversal already handled --
+        # is renamed again, and the two references diverge. Round 189's
+        # default-argument fix failed on exactly that.
+        if old_name in self._renamed_values:
+            return old_name
         if hasattr(self, 'dynamic_unbounds') and old_name in self.dynamic_unbounds:
             if old_name not in self.mapping:
                 self.mapping[old_name] = "_nx_" + __import__('hashlib').md5(old_name.encode()).hexdigest()[:6]
                 self.reverse_mapping[old_name] = self.mapping[old_name]
+                self._renamed_values.add(self.mapping[old_name])
                 self._rename_log.append((old_name, self.mapping[old_name]))
             return self.mapping[old_name]
         if old_name in self.reserved: 
@@ -291,6 +300,7 @@ class SymbolRenamer(ast.NodeTransformer):
                 if new not in self.reserved and new not in self.mapping.values():
                     self.mapping[old_name] = new
                     self.reverse_mapping[old_name] = new
+                    self._renamed_values.add(new)
                     self._rename_log.append((old_name, new))
                     break
             else:

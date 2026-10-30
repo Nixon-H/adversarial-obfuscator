@@ -157,3 +157,50 @@ stays blocked on this layer. Six modules import; one does not.
 Two reverts in two rounds, both from **applying a correct idea through a risky
 mechanism** — recursion in 189, a text replace in 190. Neither was wrong about the
 cause.
+
+## Round 191: idempotence added, and it was not the missing piece
+
+Applied the idempotence guard correctly this time — by line index, with each site's own
+indentation, and a `_renamed_values` set recording every produced name:
+
+```python
+if old_name in self._renamed_values:
+    return old_name
+```
+
+61 renamer, preserve, diversity and dataclass tests pass. **The guard is kept**; it is
+correct and it removes a class of double-rename that round 189 exposed.
+
+Then the default-argument fix was retried on top of it:
+
+```
+8 failed, 46 passed
+```
+
+**The same eight tests.** Idempotence was not the missing piece. The recursion into
+`node.default` is wrong for a different reason, still unidentified.
+
+## What the pairing rules out
+
+| hypothesis | status |
+|---|---|
+| the mapping is not idempotent | **fixed, and the failure persists** |
+| therefore idempotence caused round 189's failures | **refuted** |
+
+Round 189's eight failures were **not** double-renaming. Something else about visiting
+`arg.default` from inside `visit_arg` breaks `test_plain_import_is_reserved` and seven
+others.
+
+## The default-arg change is reverted; the idempotence guard is kept
+
+The tree is at 54 passing across the four renamer files. `_make.py` remains blocked.
+
+## Why keeping the guard matters
+
+It is not a fix for this defect, and it **is** a fix for a real hazard: any future
+visitor that recurses — which is what the default-argument change was trying to be —
+would have hit the same double-rename. The guard makes that class of mistake
+impossible, and it cost nothing (61 tests, no behaviour change).
+
+That is the distinction between a **necessary** and a **sufficient** condition, and
+this round established which one idempotence is.
