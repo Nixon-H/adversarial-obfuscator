@@ -123,3 +123,33 @@ rejected.** `apply_ast_mutation` accepted `symbol_rename: True` and did nothing.
 Every caller who passed it believed their output was renamed. The tests were the
 only thing that noticed, and their signal was read as a regression rather than a
 report.
+
+## Round 131: the loud-rejection fix is not viable
+
+Applied fix B — raise on `symbol_rename` in `apply_ast_mutation` — and measured,
+as round 130 said to.
+
+| state | failures in the seven audited files |
+|---|---|
+| baseline (no change) | 11 |
+| with the rejection | **55** |
+
+Forty-four tests pass `symbol_rename` to `apply_ast_mutation` and expect it to
+return code, not raise. The option is used widely enough that rejecting it is a
+larger breaking change than the silent ignore.
+
+**Reverted.** The rule from round 130 — "an accepted and silently ignored option
+is worse than a rejected one" — is correct in principle and wrong in this
+codebase: the option is not vestigial, it is relied upon by 44 call sites that do
+not care whether renaming happens.
+
+## What that changes about fix A
+
+Fix A (route the entry point through the renamer) would make those 44 tests
+*rename* rather than *not rename*, which changes their output but not their
+contract — they assert the code compiles and the transforms applied, not the
+names. It is therefore the only viable option, and it is the larger one.
+
+The measurement that decided this took one command. It is the first time in this
+programme that a candidate fix was rejected on evidence **before** being
+committed, rather than reverted after.
