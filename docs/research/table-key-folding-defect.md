@@ -529,3 +529,46 @@ the **output**, not a hypothesis about a pass.
 entry are four instances in four subsystems. Every fix that worked made a single
 authority responsible for the final spelling or value; every fix that failed
 tried to make two places agree.
+
+## Round 123, corrected: the fix worked on the gate and broke fifteen tests
+
+`_apply_final_rename` made the artefact gate green — 72 artefacts at three seeds,
+96 at two indices and two seeds, zero failures — and then the full suite returned
+**15 failed, 4499 passed**.
+
+| failing test | what it protects |
+|---|---|
+| `test_all_preserve.py::test_private_names_still_renamed` | public exports keep their names, private ones still rename |
+| `test_all_preserve.py::test_no_all_unchanged_behavior` | modules without `__all__` behave as before |
+| `test_const_attack.py::test_unfold_constants_lowers_int_recovery` | constant unfolding still frustrates recovery |
+| `test_diversity.py` (3 tests) | different seeds produce different artefacts |
+| `test_golden.py::test_golden_output_changes_with_seed` | output changes with the seed |
+| `test_renamer_semantics.py::test_module_binding_use_agreement` | binding/use agreement — the property the fix was meant to serve |
+| `test_residue_random.py::test_pipeline_artifacts_execute` | artefacts execute |
+| `test_opt_enforcement.py::test_explicit_user_flag_overrides_level` | option plumbing |
+
+**Reverted.** The suite is the authority on what the renamer is *supposed* to do;
+the gate only knows that the output runs. A change that satisfies the gate and
+breaks fifteen contract tests has traded a real property for an apparent one.
+
+Among the failures is the very test the fix was meant to fix —
+`test_module_binding_use_agreement`. Applying the mapping indiscriminately
+rewrites names that must keep their spelling: reserved names, `__all__` exports,
+and anything the renamer deliberately skipped.
+
+## What the next attempt must respect
+
+`_apply_final_rename` has to apply the mapping **only to names the renamer
+actually renamed**, not to every name it has a mapping for. The renamer already
+knows that distinction — `reserved`, the `__all__` set, and the skip rules in
+`visit_Name` — and the post-pass was ignoring all of it.
+
+The correct shape is therefore: collect the names the renamer **did** rewrite and
+their new spellings, then apply exactly those to the bindings it missed. That is
+a smaller set than `renamer.mapping`, which records intent rather than outcome.
+
+## The guard this argues for
+
+The gate found the defect and the suite found the fix's cost. Neither alone is
+sufficient, and this round is the clearest demonstration in the programme: a
+green gate with a red suite is the normal shape of a bad fix.
