@@ -503,3 +503,40 @@ failing suite. **A fix is not verified until every check that can contradict it 
 Two of three closed. `urllib3/_collections` imports. `requests` remains blocked on
 cross-module exports and on the gate's package layout — both still open, neither a renamer
 bug.
+
+## Round 223: option 1 breaks a documented contract, so it is a decision
+
+Tried the first of round 212's three exits — when a module declares no `__all__`, preserve
+every public module-level name (anything not starting with `_`), so an importer's
+`from mod import f` keeps working.
+
+```
+1 failed, 46 passed
+FAILED test_all_preserve.py::test_no_all_unchanged_behavior
+```
+
+**The test is right and the change is wrong.** `test_no_all_unchanged_behavior` encodes the
+documented contract: a module without `__all__` is left alone, and obfuscation proceeds.
+Preserving its public names silently changes the tool's behaviour for every module that has
+no `__all__`, which is most modules.
+
+**Reverted.**
+
+## What that confirms
+
+All three exits genuinely conflict with something documented:
+
+| exit | conflicts with |
+|---|---|
+| preserve public names without `__all__` | `test_no_all_unchanged_behavior` — the tool's documented behaviour |
+| rewrite the importer too | the per-module transform architecture |
+| require `__all__` and refuse without it | usability: most packages declare none |
+
+This is the first defect in thirteen that **no test wants fixed**, because each fix would
+violate a different documented promise. That is what makes it a **decision** rather than a
+bug, and it is why the paper states it as one (section 6.4) instead of listing a fix.
+
+## Status
+
+Unchanged: thirteen defects, twelve fixed, one design question. The three exits and what
+each one costs are now measured rather than assumed.
