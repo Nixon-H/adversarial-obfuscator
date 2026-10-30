@@ -112,3 +112,54 @@ down as a cause without it.
 
 Open. Line located, one mechanism ruled out, two remain, next step is to read line
 2536 in full and compare the `for` target with the body's spelling.
+
+## Round 181: the for-target and the body disagree
+
+Reading line 2536 in full (602 characters):
+
+```
+for-target: name
+count of _nx_b06893 on the line: 2
+```
+
+**The comprehension binds `name` and uses `_nx_b06893`.** One of them was renamed and
+the other was not.
+
+## Why
+
+`SymbolRenamer.visit_Name` has a guard added for a real problem:
+
+```python
+if isinstance(node.ctx, (ast.Store, ast.Del)) and getattr(self, '_class_depth', 0) > 0:
+    return node          # never rename a Store inside a class body
+```
+
+The reason is documented and sound: a class-body `kind = "box"` is read back via
+`self.kind`, which never renames, so renaming the Store alone would desync them.
+
+**A comprehension target is a `Store` inside a class body** — but it is not a class
+attribute. It is a loop variable local to the comprehension, and its uses are inside
+the same comprehension. The guard cannot tell the two apart, so the target keeps its
+name while the body's `Load` is renamed (Loads are not guarded).
+
+That is exactly the desync the guard exists to prevent, produced by the guard itself
+for a node type it was not written for.
+
+## The fix this implies
+
+The class-body guard must exclude **comprehension scopes**: a `Store` inside a
+`GeneratorExp`, `ListComp`, `SetComp` or `DictComp` is not a class attribute, because
+Python gives those constructs their own scope. Tracking that needs a
+comprehension-depth counter alongside `_class_depth`.
+
+Not applied this round. It touches the same `visit_Name` that rounds 123 and 124 were
+reverted over, and the last four rounds in this module have each shown how a
+plausible guard change breaks a different contract. The change is small, testable
+against the three `_make`-independent renamer tests plus `_make.py` itself, and it
+belongs in a round with the time to run both.
+
+## Status
+
+**Cause identified.** Not "a renamed local is undefined" but "a class-body guard
+renames Loads and not Stores for comprehension targets". The wording change matters:
+the first is a symptom, the second names the line to change.
