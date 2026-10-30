@@ -61,3 +61,43 @@ name, so obfuscating their spelling has limited value.
 Cause identified, not fixed. Fifth layer in `_make.py`, fourth distinct class of
 defect in it, and the third instance in this programme of **"a value must have one
 owner"** appearing at a new site.
+
+## Round 184: the reservation does not fix it
+
+Implemented option 2 — in `visit_ClassDef`, reserve every `Store` name the class body
+binds, so a bare-name `Load` of a class constant keeps the same spelling.
+
+**It did not change the outcome:**
+
+```
+_make   AttributeError: type object '_nx_ffd075' has no attribute 'Hashability'
+```
+
+All 61 renamer, preserve, diversity and dataclass tests pass, so the change is
+harmless — and inert.
+
+## Why it did not work
+
+The reservation covers `Assign` and `AnnAssign` statements directly in the class body.
+`Hashability` is evidently **not** declared that way: it is a member of an `Enum`
+subclass, and the reference is `SomeEnum.Hashability` or a name imported from
+elsewhere. Reserved names in this renamer apply to `Name` nodes, not to `Attribute`
+attributes, so a reservation cannot reach an enum member accessed by attribute at all.
+
+So round 183's option 2 was based on a wrong reading: the site is an **attribute
+access**, not a bare name. `visit_Attribute` does not rename attributes, and the
+failure says the *class* lacks `Hashability` while having `hashability` — which means
+the **declaration** was renamed somewhere the reservation cannot see.
+
+## What that narrows
+
+| possibility | status |
+|---|---|
+| a bare-name class constant | **refuted** — the reservation would have fixed it |
+| an enum member declared via a class-body `Assign` | **refuted** — same reason |
+| an enum member declared inside a **function-local class** | not tested |
+| a name imported from another module and re-exported | not tested |
+
+The change is kept because it is correct and harmless — class-constant bare-name
+Loads were a real risk even if this defect is not that. But it is recorded as **not
+the fix**, so the next attempt does not assume the reservation closed anything.

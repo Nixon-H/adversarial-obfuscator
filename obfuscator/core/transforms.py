@@ -365,6 +365,22 @@ class SymbolRenamer(ast.NodeTransformer):
     def visit_ClassDef(self, node):
         if node.name not in self.reserved and not node.name.startswith("__") and not node.name.startswith("_"):
             node.name = self.get_new_name(node.name)
+        # Reserve every name the class body binds. A class-body Store is already
+        # left unrenamed (instance attributes are read via `self.kind`, which
+        # never renames). But a class-level name can also be read as a BARE Name:
+        # an enum member referenced as `Hashability`, or a class constant used as
+        # a value. Those Loads were renamed while the declaration was not, giving
+        # "type object ... has no attribute 'Hashability'". Reserving keeps both
+        # legs in step; class constants then keep their spelling, which loses
+        # little since they are reachable by name anyway.
+        for _stmt in node.body:
+            if isinstance(_stmt, ast.Assign):
+                for _tgt in _stmt.targets:
+                    for _n in ast.walk(_tgt):
+                        if isinstance(_n, ast.Name) and isinstance(_n.ctx, ast.Store):
+                            self.reserved.add(_n.id)
+            elif isinstance(_stmt, ast.AnnAssign) and isinstance(_stmt.target, ast.Name):
+                self.reserved.add(_stmt.target.id)
         _prev_depth = getattr(self, '_class_depth', 0)
         self._class_depth = _prev_depth + 1
         self.generic_visit(node)
