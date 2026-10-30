@@ -100,3 +100,55 @@ It does not show the obfuscation is weak in general, and it does not show it
 is strong. It shows that at n = 3 with unrelated decoys, a fixed structural
 heuristic ranks correctly. Every sentence beyond that needs the harder
 corpus.
+
+## The spec-directed attacker (round 12): a realistic attacker solves it anyway
+
+Round 11 concluded the shape-only attacker is too weak to test the
+protection, because siblings defeat it whether or not the source is
+obfuscated. The realistic attacker is not shape-only: the protocol grants
+every attacker the **task definition**, and a function's specification is
+enough to identify it among same-shaped siblings.
+
+`scripts/transfer/spec_attack.py` implements that attacker. The spec is a
+set of executable properties written from the task description -- "sum of
+the values in [lo, hi)", "hi is exclusive", "lo is inclusive" -- with inputs
+the attacker chooses. It contains no reference outputs and no ground-truth
+labels: properties, not answers. Candidates that violate a property are
+discarded.
+
+| condition | spec-passing | target found |
+|---|---|---|
+| plain, sibling decoys | **1 of 4** | yes |
+| obfuscated, sibling decoys | **1 of 4** | yes |
+
+The attacker isolates the correct function exactly, before and after
+obfuscation. Two of the five properties were added precisely because
+`sibling_b` (`lo < v <= hi`) satisfied the rest: a boundary probe at
+`hi` was needed to separate it. That is the shape of the real task -- an
+analyst writing tests from a specification -- and it costs a handful of
+probes.
+
+### What this establishes
+
+At realistic difficulty, with an attacker that uses the task definition,
+**the obfuscation provides no measurable protection against function
+identification** in this setting. The instruction-level obfuscation changes
+how the function looks; it does not change which observable behaviour
+matches the specification, and the specification is what the attacker has.
+
+This is a negative result about the protection, obtained with an
+oracle-free attacker on sibling-difficulty fixtures. It is still n=1 task
+and one obfuscation config, so it is a calibration finding, not a corpus
+result. But it is the second consecutive negative, and it points the same
+way as the first: the variable that decides these outcomes is not the
+transformation.
+
+### What it does not establish
+
+- It does not show obfuscation is useless. It shows that *identification*
+  among siblings is unaffected. Understanding, modifying, or extracting
+  logic from a semantically-recovered function is not measured here.
+- It does not quantify cost: probe count is small, and the cost endpoint
+  protocol v3 asks for is not yet instrumented across tasks.
+- n = 1 task. The property set is hand-written per task, which is the
+  attacker labour the study needs to price.
