@@ -143,7 +143,7 @@ per-task spread 0, maximum 0 (`cost-is-build-independent.md`, round 51).
 
 **Module size dominates.** Growing the candidate list one sibling at a time
 raises cost monotonically in nine of nine tasks, from a mean of 2.0 probes at
-one candidate to 8.3 at four (round 53). Permuting sibling order leaves the
+one candidate to 8.6 at four (round 53, corrected round 68). Permuting sibling order leaves the
 endpoint unchanged (every permutation ends at 9) while the path moves, so the
 endpoint is order-invariant and sibling-dependent (round 54).
 
