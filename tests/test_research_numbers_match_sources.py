@@ -176,3 +176,38 @@ def test_handoff_defect_count_matches_the_paper_table():
         assert ("| defects found and fixed | **%s**" % smaller) not in handoff, (
             "HANDOFF.md's defect count says %r but the paper's table lists %d"
             % (smaller, n_rows))
+
+
+def test_every_retracted_defect_document_is_cited_by_the_paper():
+    """A defect with its own document must appear somewhere in the paper.
+
+    Round 220 found the table at eleven rows while thirteen defects were fixed: the
+    two urllib3 fixes had documents and no row. The count guards compare documents
+    to each other and stayed green.
+
+    This checks the other direction -- documents against the paper -- by requiring
+    every `*defect*.md` file to be named in the paper's artefacts section or its
+    body. A document nobody cites is a defect nobody recorded.
+
+    Files whose own title begins RETRACTED are skipped: they record removed claims,
+    not defects.
+    """
+    import glob
+    paper = _read(PAPER)
+    missing = []
+    for path in sorted(glob.glob(os.path.join(DOCS, "*defect*.md"))):
+        name = os.path.basename(path)
+        text = _read(path)
+        if text.lstrip().startswith("# RETRACTED") or "# RETRACTED" in text[:200]:
+            continue
+        # cite by filename or by the defect's own short name in the table
+        if name in paper:
+            continue
+        stem = name[:-3].replace("-defect", "").replace("-", " ").split()[0]
+        if stem and stem in paper:
+            continue
+        missing.append(name)
+    assert not missing, (
+        "defect documents not cited anywhere in the paper: %r. Round 220 found two "
+        "fixes with documents and no table row; the count guards could not see it."
+        % (missing,))
