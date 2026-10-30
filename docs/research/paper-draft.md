@@ -44,8 +44,8 @@ monotonically in nine of nine tasks and invariant to the order the functions
 appear in.
 
 We also report an earlier version of this endpoint that was withdrawn because
-it could not fail, and **five correctness defects** in the obfuscator that the
-benchmark found — three of which produce artefacts that compile and then fail,
+it could not fail, and **seven correctness defects** in the obfuscator that the
+benchmark found — four of which produce artefacts that compile and then fail,
 and one of which silently disabled every artefact thirty days after it was
 built.
 
@@ -228,7 +228,7 @@ Across both families at three build indices: **51 cells, zero non-singleton.**
 Every cell has exactly one candidate in the attacker's passing set, and the
 evaluator independently confirms it is the target.
 
-## 6. Five correctness defects found by building this benchmark
+## 6. Seven correctness defects found by building this benchmark
 
 None of the following was the object of study. All five were found because the
 benchmark demanded something the project's own tests did not: behavioural
@@ -241,6 +241,8 @@ identity per build, then execution of the artefact rather than inspection of it.
 | 3 | emptied dataclass | does not compile | external module 1 |
 | 4 | unbound import and keyword names | fails at import | external module 1 |
 | 5 | string `match` patterns | does not compile | external module 2 |
+| 6 | plain-import bindings | fails at import | artefact gate |
+| 7 | `from __future__` hoisting | does not compile | external module 4 |
 
 ### 6.1 The defects that produce code that does not run
 
@@ -281,7 +283,7 @@ Every one is invisible to a test that checks **the input** runs. Three are
 invisible to a test that checks **the output** compiles. All five are visible to
 one that compiles **and imports** the output over real modules.
 
-The internal fixtures could not have found three of them: they used no
+The internal fixtures could not have found five of them: they used no
 dataclasses with plain fields, imported nothing, and used no `match`. The
 external modules — `more_itertools.recipes` and `cpython 3.13 statistics.py` —
 used all three within minutes.
@@ -295,7 +297,7 @@ engineering than the research apparatus in the rest of this paper, and it would
 have caught every defect above.
 
 This section is included because it is the concrete empirical result of the
-work: five silent failure modes, none of them the subject of the study, all
+work: seven silent failure modes, none of them the subject of the study, all
 found by the instrumentation the study required.
 
 ## 7. Limitations
