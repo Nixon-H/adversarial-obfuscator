@@ -75,3 +75,64 @@ currently is not there.
 Open. The positive control is the next experiment and it should be run before
 any submission. Until then the null is a measurement limitation presented as a
 result, which is the specific failure this programme has retracted seven times.
+
+## Round 62: the positive control, run
+
+The review's charge was that the probe counter cannot register a difference it
+was not built to see, so a B-vs-C null cannot distinguish "equally hard" from
+"insensitive". The way to test that is to inject a difference the counter *must*
+see if it can see anything.
+
+Injected fault: the target's bound changed from `lo <= v < hi` to
+`lo <= v <= hi`, applied before obfuscation:
+
+| build | probes | passing |
+|---|---|---|
+| correct | **9** | 1 |
+| boundary fault | **11** | 1 |
+
+**The counter registers the fault: 9 → 11 probes.** It is not blind, so the
+null in the diversity comparison is not automatic insensitivity. That part of
+the review's objection is answered.
+
+## And the control found something worse
+
+The attacker still reports **one passing candidate** on the faulted build — and
+it is the wrong one. The sibling `sb` is written `lo < v <= hi`; the faulted
+target became behaviourally identical to `sb`, so the property set accepted the
+sibling in place of the target.
+
+So the counter is sensitive but the **identities are not**:
+
+> A specification that pins the boundary catches the fault as a candidate-level
+> change but cannot tell the faulted target from the sibling that always had
+> that behaviour.
+
+That is a real limitation of the benchmark, not of the fault: `sb` and a
+boundary-faulted target are the same function, and no specification can
+separate two identical functions. The right reading is that the fault control
+needs a target with **no behaviourally identical sibling** — which this task
+does not have.
+
+## What the control establishes
+
+1. **The counter is not blind.** It moved by two probes on a known semantic
+   change. The review's strongest charge — that seventeen tasks were seventeen
+   replications of an insensitive harness — does not hold for the counter.
+2. **The diversity null is still weak for a different reason.** Sensitivity of
+   the *counter* is not sensitivity of the *comparison*: a deterministic counter
+   that responds to semantics can still produce zero for two families that
+   happen to cost the same. The null needs families chosen to differ, which is
+   the family-space limitation already recorded.
+3. **The benchmark has a sibling-collision hazard.** A fault can make the target
+   indistinguishable from a sibling, and then identification is undefined. That
+   is a task-design constraint worth stating: siblings must differ from the
+   target on **any** plausible fault, not merely on the tested inputs.
+
+## Status
+
+The control is run and its result is mixed: it rescues the counter from the
+insensitivity charge and adds a new limitation to the benchmark. Both are now
+written down. The claim in the manuscript should say "the counter responds to
+semantic change (9 → 11 probes on a fault control)" alongside the null, and
+should not claim the null demonstrates equal difficulty.
