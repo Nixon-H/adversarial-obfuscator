@@ -118,6 +118,26 @@ that was really a build defect.
 Source: `cost-curve-n8.md`. Eight tasks, 24 cells, all valid, attacker's set
 non-empty in 24 of 24.
 
+### 5.1b Replication on real corpus functions
+
+To test whether the pattern depends on hand-written fixtures, four tasks were
+built from the repository's own corpus (`real_tasks.py`): `rle_encode`,
+`rle_decode`, `slugify`, `gcd`, with the other functions in each module as
+siblings and specifications written from what each function does.
+
+| k | cells | unique identity | attacker hit |
+|---|---|---|---|
+| 0 | 4 | 4 | 4 |
+| 2 | 4 | 4 | 4 |
+| 4 | 4 | 4 | 4 |
+
+Source: `real-corpus-tasks.md`. Combined with the synthetic set: **36 valid
+cells, 36 unique, 36 hit**, all produced after the opaque-predicate fix.
+
+The finding replicates on two independent benchmarks with no change in
+direction. That is the strongest form the claim can take without a public
+corpus, and the corpus remains the largest open gap.
+
 ### 5.2 The attacker is not unique everywhere
 
 `signdiff` returns two candidates at every k. Uniqueness is the evaluator's
@@ -170,7 +190,7 @@ specification an attacker uses is invariant to the transformation.
 | cost endpoint measured | ✔ flat at n=8 |
 | authoring bound | ✔ proxy |
 | negative results reported | ✔ documented |
-| **corpus scale** | ✘ 8 synthetic tasks |
+| **corpus scale** | ◐ 36 cells, but 4 real modules against a target of 12–15 projects |
 | **systematic novelty review** | ✘ targeted screen only |
 | **analyst-minutes** | ✘ proxy only |
 
