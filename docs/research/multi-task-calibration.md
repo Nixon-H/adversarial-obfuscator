@@ -54,3 +54,27 @@ directly instead of trusting the aggregate.
   these numbers is used.
 - Whether the corpus is representative. Eight synthetic tasks are not.
 - Priced property authoring, which remains the unpriced labour in the study.
+
+## Round 15: the zero cells are still unattributed, and why
+
+Two attempts to attribute them both landed on the wrong function.
+
+**Attempt 1** examined a candidate that produced `[5]` where the original
+produces `0` on `([5], 0, 5)` — which looks exactly like inverted boundary
+semantics, i.e. semantic corruption. It is not: that candidate is
+`sibling_b`, the sibling deliberately written as `lo < v <= hi`. Comparing it
+to the target was comparing two different functions.
+
+**Attempt 2** asked which candidates satisfy the full property set in that
+build and got zero — including the target, whose behaviour was separately
+verified as correct on the same build. So the property set and the observed
+behaviour disagree, and that contradiction is the defect: either a property
+is being evaluated against the wrong candidate, or the candidate enumeration
+omits the one that behaves correctly.
+
+Neither attempt is evidence about the protection. What they establish is
+that the aggregate ("0 hits") cannot be attributed with the current harness,
+and that attributing it to corruption would have been wrong twice over.
+
+**Status: open.** The next step is to name each candidate by its behaviour
+rather than by its position or its property results, and only then score.
