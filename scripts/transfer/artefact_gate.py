@@ -43,6 +43,7 @@ from scripts.transfer.tasks import TASKS as SYNTH_TASKS  # noqa: E402
 
 
 STRESS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "fixtures", "stress.py")
+STRUTILS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "external3", "strutils.py")
 
 # Properties for the stress module: the constructs it exercises have no
 # task-level specification, so the gate only requires that the artefact
@@ -55,6 +56,8 @@ def _modules():
     out = []
     with open(STRESS, encoding="utf-8") as f:
         out.append(("stress/constructs", f.read(), STRESS_PROPS))
+    with open(STRUTILS, encoding="utf-8") as f:
+        out.append(("external3/strutils", f.read(), STRESS_PROPS))
     for name, t in SYNTH_TASKS.items():
         out.append(("synthetic/%s" % name, t["target"] + "\n" + "\n".join(t["siblings"]), t["props"]))
     for name in REAL_TASKS:
