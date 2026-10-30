@@ -1,155 +1,57 @@
-# `apply_ast_mutation` Silently Ignores `symbol_rename`
+# RETRACTED: `apply_ast_mutation` does honour `symbol_rename`
 
-**Date:** 2026-10-30
-**Found by:** tracing eleven failing contract tests to the entry point they use.
+**Retracted in round 132, three rounds after it was reported.**
 
-## The finding
+## What I claimed
 
-`obfuscator/core/sources.py`:
+That `apply_ast_mutation` accepts `symbol_rename` and never reads it, silently
+returning unrenamed code, as a ninth product defect.
 
-| function | line | mentions `symbol_rename` |
-|---|---|---|
-| `apply_ast_mutation` | 331 | **0 occurrences** |
-| (the full transform path) | 463 | `if options.get('symbol_rename')` |
+## What was actually true
 
-`apply_ast_mutation` is a public entry point. It takes an `options` dict, applies
-a set of AST mutations, and returns the result. **It never reads
-`symbol_rename`**, so passing `symbol_rename: True` — which every one of these
-tests does — has no effect.
+My evidence was:
 
-## Evidence
-
-The test helper builds its options with `symbol_rename: True`:
-
-```python
-_MIN_OPTS = {
-    "cfg_flatten": False, ..., "unicode_ids": False,
-    "symbol_rename": True,
-}
+```
+sed -n '331,460p' sources.py | grep -c symbol_rename   -> 0
 ```
 
-and the output for a source with four function definitions is:
+The function runs from line **331 to 727**. The renaming block is at line
+**463** — three lines past the end of the range I searched. Counting across the
+real range gives:
 
-```python
-def foo():
-def ping(self):
-def _priv():
-def helper():
+```
+awk 'NR>=331 && NR<=727' sources.py | grep -c symbol_rename   -> 1
 ```
 
-Every definition keeps its name. Ten lines total, one `__all__`, one `def foo(`
-— so this is not a duplicated body or a bypassed renamer: the renaming step was
-never invoked.
+So the entry point does apply the renamer. **There is no ninth defect.** The
+"silent ignore" was an artefact of a range literal I wrote and did not check.
 
-## Why this is the ninth defect and the worst of them
+## Why this one is worse than the others
 
-The other eight produce code that **fails** — does not compile, does not import,
-or raises. This one produces code that **works perfectly and is not obfuscated**.
+The eight retractions so far were experiments with a broken instrument. This one
+was **a grep with a bound I guessed**, and the conclusion drawn from it — that a
+public API silently discards its central option — is the most alarming claim in
+the programme. It was wrong, and it was written up as a finding with a severity
+paragraph about "the most damaging failure mode available".
 
-A caller who:
+Two rounds were then spent specifying fixes for it, and one was implemented and
+measured before the range was ever checked.
 
-```python
-code, _ = apply_ast_mutation(source, {"symbol_rename": True, ...})
-```
+## What survives
 
-gets an artefact whose function names, class names and globals are untouched, and
-no error, warning or return value indicates it. The option is accepted and
-discarded.
+- The **eleven failing tests are real** and their cause is still unknown. They
+  were failing before round 125, they fail now, and the renamer does run.
+- The **round 125 control** — that those eleven predate my fix — remains valid
+  and was measured correctly.
+- The **measurement discipline** from round 130 still works: fix B was rejected
+  on a number, not an argument.
 
-For a tool whose entire purpose is making source harder to read, silently not
-doing the central transformation is the most damaging failure mode available —
-and it is exactly the class the artefact gate **cannot** see, because the output
-runs.
+## The rule
 
-## What the eleven tests were detecting
+**A grep proves nothing until you have checked that the range you searched
+contains the thing.** Every "the code does not mention X" claim in this document
+needs the line count of the searched region printed next to it.
 
-`test_private_names_still_renamed`, `test_diversity` (3), `test_golden`,
-`test_all_preserve` (3) and others are all checking that renaming **happens**. They
-have been failing since the entry point diverged from the full path, and the
-failures were read as collateral of whatever change was most recent.
-
-## Status
-
-**Open, cause identified.** The fix is to route `apply_ast_mutation` through the
-same renaming step, or to reject `symbol_rename` there with an error rather than
-accepting it silently. The second is smaller and honest; the first is correct.
-
-Not done this round: the two paths have diverged further than a one-line bridge,
-and the last two reverts in this programme came from changing the rename
-machinery without a baseline.
-
-## Round 130: the fix, specified and not applied
-
-Two candidate repairs.
-
-**A. Route the entry point through the renamer.** Add the renaming step to
-`apply_ast_mutation`. Correct, and larger than it looks: the full path has ~80
-lines of reservations (`_NX_*` markers, trial-gate helpers, `__all__` names,
-protected functions) before `renamer.visit(tree)`, and a partial copy of that
-list is how the previous nine defects happened.
-
-**B. Reject the option instead of accepting it silently.**
-
-```python
-if options.get("symbol_rename"):
-    raise ValueError(
-        "apply_ast_mutation does not implement symbol_rename; use the full "
-        "transform path, or remove the option"
-    )
-```
-
-Smaller, honest, and it converts a **silent** failure into a **loud** one. It
-also makes the eleven failing tests fail **for the right reason** — with an
-exception that names the gap, rather than an assertion that the output is not
-obfuscated.
-
-**Not applied.** Both are changes to the top of the transform stack, and the last
-two attempts to change renaming in this programme were reverted after breaking
-15 and 11 contract tests. The difference this time is that the baseline is known:
-eleven specific tests are already failing, for a cause that is now named. That
-makes measurement possible — run those eleven before and after, and require that
-the count **decreases** and nothing else **increases**.
-
-## What the eleven tests were right about
-
-They were not stale, not collateral, and not confused by a recent change. They
-were reporting that the entry point they exercise does not obfuscate names, and
-they were correct for fourteen rounds while being read as noise.
-
-## The rule this makes concrete
-
-**An option that is accepted and silently ignored is worse than an option that is
-rejected.** `apply_ast_mutation` accepted `symbol_rename: True` and did nothing.
-Every caller who passed it believed their output was renamed. The tests were the
-only thing that noticed, and their signal was read as a regression rather than a
-report.
-
-## Round 131: the loud-rejection fix is not viable
-
-Applied fix B — raise on `symbol_rename` in `apply_ast_mutation` — and measured,
-as round 130 said to.
-
-| state | failures in the seven audited files |
-|---|---|
-| baseline (no change) | 11 |
-| with the rejection | **55** |
-
-Forty-four tests pass `symbol_rename` to `apply_ast_mutation` and expect it to
-return code, not raise. The option is used widely enough that rejecting it is a
-larger breaking change than the silent ignore.
-
-**Reverted.** The rule from round 130 — "an accepted and silently ignored option
-is worse than a rejected one" — is correct in principle and wrong in this
-codebase: the option is not vestigial, it is relied upon by 44 call sites that do
-not care whether renaming happens.
-
-## What that changes about fix A
-
-Fix A (route the entry point through the renamer) would make those 44 tests
-*rename* rather than *not rename*, which changes their output but not their
-contract — they assert the code compiles and the transforms applied, not the
-names. It is therefore the only viable option, and it is the larger one.
-
-The measurement that decided this took one command. It is the first time in this
-programme that a candidate fix was rejected on evidence **before** being
-committed, rather than reverted after.
+That is the same error class as the invalid fixture in round 102: the instrument
+was wrong, its output looked like an answer, and the answer was alarming enough
+that it was not checked.
