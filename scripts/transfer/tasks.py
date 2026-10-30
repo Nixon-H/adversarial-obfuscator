@@ -98,8 +98,13 @@ _task(
         "    if x > 1:\n"
         "        return 1\n"
         "    return x\n",
+        # c3 used to be `x + 0.0`, which is semantically identical to the
+        # target -- so the task had two correct answers and no attacker could
+        # be scored. A decoy must actually differ.
+        # c3 must differ from the target in at least one observed case. The
+        # clamp high bound is 2 here instead of 1, so x > 1 separates them.
         "def c3(x):\n"
-        "    return 0 if x < 0 else 1 if x > 1 else x + 0.0\n",
+        "    return min(max(x, 0), 2)\n",
     ],
     [
         lambda f: f(-5) == 0,

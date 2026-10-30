@@ -251,3 +251,48 @@ Earlier rounds called this "the target is dropped" (round 18) and "the target
 behaviour is absent" (round 17). Both were descriptions of the symptom. The
 defect is **a false opaque predicate wrapping a function body**, and with the
 mechanism visible the fix is obvious where the diagnosis was not.
+
+## Round 23: after the predicate fix, the benchmark is valid
+
+Re-running the evaluation once the two false predicates were repaired
+(`748ebae`), and repairing two task defects it then exposed:
+
+| state | unique identity | attacker hit | ambiguous |
+|---|---|---|---|
+| before the predicate fix | 15 | 20 | 9 |
+| after the predicate fix | 18 | 24 | 6 |
+| after separating `signdiff` at zero | 21 | 24 | 3 |
+| after fixing `clamp01`'s identical decoy | **24** | **24** | **0** |
+
+Two of those steps were task defects, not attacker or protection results:
+
+- `signdiff`'s sibling `s3` uses `a >= 0` where the target uses `a > 0`, so
+  they differ only when `a` is zero. No evaluator input contained a zero.
+  Adding `(0, -1)` separated them.
+- `clamp01`'s third sibling was `x + 0.0`, which is **semantically
+  identical** to the target: the task had two correct answers. It is now a
+  clamp to 2 instead of 1, which separates on any `x > 1`.
+
+### What the clean run means
+
+All 24 (task, build) cells now have exactly one function that matches the
+original, and the attacker's frozen property set contains it in every cell.
+With a valid benchmark, that is a real measurement: **a spec-directed
+attacker identifies the target in 24 of 24 cells, on plain and obfuscated
+source alike.**
+
+### What it does not mean
+
+- Identification is not understanding. The attacker does not recover logic,
+  and this says nothing about comprehension cost.
+- n = 8 tasks, one obfuscation configuration. The corpus is still synthetic
+  and small.
+- The property set is hand-written per task, and that authoring cost remains
+  unpriced.
+
+### The ordering in this section is the honest one
+
+The score moved from 15 to 24 across four changes, and **three of them were
+fixing the instrument rather than measuring the system**. A paper reporting
+"24/24 after fixes" without that history would be hiding the most
+informative part.
