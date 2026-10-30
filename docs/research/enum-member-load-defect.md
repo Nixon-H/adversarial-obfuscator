@@ -101,3 +101,54 @@ the **declaration** was renamed somewhere the reservation cannot see.
 The change is kept because it is correct and harmless — class-constant bare-name
 Loads were a real risk even if this defect is not that. But it is recorded as **not
 the fix**, so the next attempt does not assume the reservation closed anything.
+
+## Round 185: the site is a local alias, not a class attribute
+
+Found by one grep:
+
+```
+_make.py:1494:        Hashability = ClassProps.Hashability
+_make.py:1497:            hashability = Hashability.LEAVE_ALONE
+_make.py:1500:                Hashability.HASHABLE_CACHED
+```
+
+`Hashability` is a **local variable inside a function**, assigned from an attribute of
+another class and then used as `Hashability.LEAVE_ALONE`. So:
+
+- the **declaration** is a `Store` in a **function** scope, which this renamer **does**
+  rename;
+- the **uses** are `Hashability.LEAVE_ALONE` — an `Attribute` on a local, which
+  `visit_Name` renames through the `Name` node that holds the local;
+- `ClassProps.Hashability` itself is an **attribute**, which `visit_Attribute` never
+  renames.
+
+## Why the error message reads as it does
+
+```
+type object '_nx_ffd075' has no attribute 'Hashability'
+```
+
+`_nx_ffd075` is the renamed local. The class it points at still has `Hashability` --
+because the **attribute** in `ClassProps.Hashability` was never renamed -- but the code
+now looks up `Hashability` on the **renamed local's** attribute path... and that path is
+correct. The message says the object lacks the attribute, which means the local refers
+to something **other** than `ClassProps`.
+
+**That is the real defect: the local `Hashability` and the assignment source disagree.**
+The assignment `Hashability = ClassProps.Hashability` renames its **target**, and the
+reference `ClassProps.Hashability` renames nothing — but the local's name is also used
+in a **different function's** scope, where the mapping supplies a different spelling.
+
+## What this rules out, finally
+
+| possibility | status |
+|---|---|
+| bare-name class constant | refuted (round 184) |
+| enum member via class-body `Assign` | refuted (184) |
+| **class-body attribute accessed by name** | **refuted here** — it is an attribute, untouched |
+| **one local aliased across two function scopes** | **now the leading candidate** |
+
+## Status
+
+Not fixed. Four candidates reduced to one, and the one is the same "a value must have
+one owner" family: a local's spelling is decided in two scopes and they disagree.
