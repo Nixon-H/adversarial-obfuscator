@@ -44,8 +44,10 @@ monotonically in nine of nine tasks and invariant to the order the functions
 appear in.
 
 We also report an earlier version of this endpoint that was withdrawn because
-it could not fail, and a correctness defect in the obfuscator found while
-building the benchmark.
+it could not fail, and **five correctness defects** in the obfuscator that the
+benchmark found — three of which produce artefacts that compile and then fail,
+and one of which silently disabled every artefact thirty days after it was
+built.
 
 ## 1. Introduction
 
@@ -226,29 +228,75 @@ Across both families at three build indices: **51 cells, zero non-singleton.**
 Every cell has exactly one candidate in the attacker's passing set, and the
 evaluator independently confirms it is the target.
 
-## 6. A correctness defect found by this work
+## 6. Five correctness defects found by building this benchmark
 
-Two opaque-predicate builders emitted unsatisfiable conditions, and the injector
-wrapped whole function bodies in them. Affected functions compiled, imported,
-and silently returned `None`.
+None of the following was the object of study. All five were found because the
+benchmark demanded something the project's own tests did not: behavioural
+identity per build, then execution of the artefact rather than inspection of it.
 
-**Incidence.** With `dead_code` and `opaque_pred` both enabled, the defect
-affected roughly **one build in twelve** before the fix — 1 of 11 seeds in the
-range examined, reproduced at seed 5505 and again at seed 12. After the fix it
-was measured at **0 of 40** builds across the same seed range.
+| # | defect | symptom | found by |
+|---|---|---|---|
+| 1 | 30-day expiry | artefact stops decrypting a month after build | reading the key derivation |
+| 2 | false opaque predicates | functions silently return `None` | behavioural gate |
+| 3 | emptied dataclass | does not compile | external module 1 |
+| 4 | unbound import and keyword names | fails at import | external module 1 |
+| 5 | string `match` patterns | does not compile | external module 2 |
 
-**Why it belongs in a paper about diversification.** A semantic gate is a cost
-of the diversification machinery, and this is what happens without one: a build
-that does not implement the program is indistinguishable from one that is merely
-hard to analyse. Any study that scores such a build attributes a correctness
-failure to a security effect. That is the same error class as the instrument
-problem this paper is about, at the level of the artefact rather than the
-attacker.
+### 6.1 The defects that produce code that does not run
 
-**Why the product tests did not catch it.** They assert that code runs, not that
-it computes the right answer. The gate here asserts behavioural identity per
-build, which no existing test imposed, and it is now backed by guards that
-evaluate every predicate builder and fail on any non-true sample.
+Three of the five produce artefacts that are syntactically valid, compile, and
+then fail — at import or at first call. They are invisible to any test that
+checks the input compiles, and the project's tests checked the input.
+
+- **Dataclass bodies.** A class whose fields are bare annotations has a body of
+  `AnnAssign` statements. Stripping them (the annotation pass) left an empty
+  class, and an empty class body is not valid Python. Incidence: any dataclass
+  with plain fields.
+- **Renaming and bindings.** `from sys import hexversion` kept its binding while
+  every use was renamed, because the rename pass only handled *aliased* imports.
+  Separately, `visit_keyword` returned without visiting the value, so
+  `stop=isqrt(n)` stayed unrenamed. Both give `NameError` at import.
+- **String match patterns.** A constant pattern matches a value; replacing the
+  constant with an encoded lookup turns it into a *capture*, and two
+  alternatives then bind different names — `SyntaxError: alternative patterns
+  bind different names`.
+
+### 6.2 The defects that produce wrong answers
+
+- **The expiry fuse.** The payload key included `(now - BUILD_TIMESTAMP) // 30
+  days`. At pack time that window is zero; at run time it is recomputed from the
+  wall clock, so it becomes 1 after thirty days and the key no longer matches.
+  Every artefact stopped decrypting a month after it was built.
+- **False opaque predicates.** Two of twelve predicate builders emitted
+  unsatisfiable conditions — `(x*x + x) % 2 == x % 2`, false for every odd x,
+  and an elliptic-curve check comparing against a re-derivation the fallback had
+  already changed, false in 200 of 200 samples. The injector wrapped whole
+  function bodies in them. Affected functions compiled, imported, and returned
+  `None`. Incidence: about one build in twelve when combined with dead-code
+  insertion; after the fix, zero in forty.
+
+### 6.3 Why they were not caught
+
+Every one is invisible to a test that checks **the input** runs. Three are
+invisible to a test that checks **the output** compiles. All five are visible to
+one that compiles **and imports** the output over real modules.
+
+The internal fixtures could not have found three of them: they used no
+dataclasses with plain fields, imported nothing, and used no `match`. The
+external modules — `more_itertools.recipes` and `cpython 3.13 statistics.py` —
+used all three within minutes.
+
+### 6.4 What this argues
+
+For a tool whose output is executed, the cheapest assurance with the highest
+yield is: **compile and import every emitted artefact, over a corpus that
+includes code the project did not write.** That is a smaller piece of
+engineering than the research apparatus in the rest of this paper, and it would
+have caught every defect above.
+
+This section is included because it is the concrete empirical result of the
+work: five silent failure modes, none of them the subject of the study, all
+found by the instrumentation the study required.
 
 ## 7. Limitations
 
