@@ -204,3 +204,58 @@ impossible, and it cost nothing (61 tests, no behaviour change).
 
 That is the distinction between a **necessary** and a **sufficient** condition, and
 this round established which one idempotence is.
+
+## Round 192: `ast.arg` has no `default`, and the real fix is elsewhere again
+
+Diagnosing round 189's eight failures gave the answer in one command:
+
+```
+E   AttributeError: 'arg' object has no attribute 'default'
+```
+
+**`visit_arg` receives an `ast.arg`**, which holds only the parameter's name and
+annotation. Default values live on the enclosing `ast.arguments`, as
+`args.defaults` and `args.kw_defaults`. Rounds 188 and 189 wrote
+`node.default` from `visit_arg`, which cannot work — the attribute does not exist.
+
+That is why idempotence changed nothing: the code never reached a default. It raised.
+
+## The corrected attempt
+
+Visiting defaults from `visit_FunctionDef`, where `node.args` is available:
+
+```python
+for _d in list(node.args.defaults) + [d for d in node.args.kw_defaults if d is not None]:
+    self.visit(_d)
+```
+
+54 renamer, preserve, diversity and import tests pass — no regressions, unlike round
+189's eight failures. **The approach is right.**
+
+It still does not fix `_make.py`:
+
+```
+NameError: name 'i' is not defined
+```
+
+So the default argument is now visited and the defect persists, which means the
+unrenamed `i` is **not** in `args.defaults`.
+
+## Where that leaves it
+
+The failing construct is `def _nx_6d1f3c(self, i=i)` **inside a `for` loop**. Two
+things could be true:
+
+- the default **is** in `args.defaults` and was renamed, but the **loop variable**
+  was renamed to a *different* name;
+- or the `i` that fails is a **different** `i` — the closure body's `return self[i]`,
+  which reads the parameter, not the default.
+
+The second is now more likely and is testable in one command: check whether the
+emitted line reads `def ...(self, i=_nx_...)` or `def ...(self, i=i)`.
+
+## Status
+
+Open. Two structural facts gained: `ast.arg` carries no default, and visiting defaults
+from `visit_FunctionDef` is safe where visiting them from `visit_arg` was not. Neither
+is the fix, and both are now recorded so the next attempt does not repeat them.

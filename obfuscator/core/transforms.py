@@ -350,6 +350,17 @@ class SymbolRenamer(ast.NodeTransformer):
         self._local_params = _prev_params
         self.current_function = old_function
         return node
+        # Default argument VALUES are ordinary expressions evaluated in the
+        # enclosing scope and must be renamed with everything else. The names
+        # are not: parameter names are call-site contracts. `def prop(self, i=i)`
+        # inside `for i in ...` is the closure-in-a-loop idiom, and leaving its
+        # default unrenamed made it reference a name the loop no longer binds.
+        # Found on attrs/_make.py. `ast.arg` has no `default` -- defaults live
+        # on `node.args`, which is why visiting them from visit_arg raised
+        # AttributeError.
+        for _d in list(node.args.defaults) + [d for d in node.args.kw_defaults if d is not None]:
+            self.visit(_d)
+
     def _visit_comp(self, node):
         """Track comprehension nesting so the class-body Store guard ignores it."""
         prev = getattr(self, '_comp_depth', 0)
