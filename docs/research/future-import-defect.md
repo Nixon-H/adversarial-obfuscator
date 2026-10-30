@@ -66,3 +66,41 @@ unverified edit to a transform costs more than it saves.
 Seven defects. This one is the third found purely because a new external source
 used a construct the corpus lacked, and the first where the source is
 application code rather than a utility library.
+
+## Round 110: fixed, by hoisting after every transform
+
+Two attempts:
+
+1. **Splice the preamble after the directive block** in `sources.py`. Worked at
+   build indices 2 and 4, failed at 0 — because `CallGraphObfuscator` inserts a
+   function table at module index 0, which is *another* pass putting material
+   above the original first line.
+2. **Hoist `from __future__` to the top after all transforms**, in
+   `_hoist_future_imports`. Works at every index.
+
+The second is the right shape: reordering once, at the end, is more robust than
+making each pass aware of a compiler rule.
+
+```
+artefacts checked: 69
+invalid fixtures: 0
+failures: 0
+```
+
+## The fixture that stays, and why it is not gated
+
+`requests/utils.py` remains in the corpus as the regression fixture for this
+defect — it is what found it — but it is **not** in the artefact gate. It uses
+relative imports (`from .exceptions import ...`), so it cannot be imported
+standalone by any tool, and the gate's import check would be measuring the
+fixture's shape rather than the obfuscator's behaviour.
+
+That distinction matters: a fixture that cannot be imported is not evidence of a
+defect in the thing being tested. It is the same reasoning as round 102, applied
+before the report rather than after.
+
+## What would be needed to gate it
+
+A package layout: copy the whole `requests` package, generate a shim that makes
+it importable, and gate that. It is a real extension of the corpus and it is not
+done here.

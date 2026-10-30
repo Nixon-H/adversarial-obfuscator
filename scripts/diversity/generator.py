@@ -95,7 +95,7 @@ def generate_variant(source: str, variant_id: int, config: dict) -> str:
         result = transformer.transform(source, options=options)
     finally:
         _unpatch_secrets_for_variant()
-    return _repair_empty_bodies(result)
+    return _hoist_future_imports(_repair_empty_bodies(result))
 
 
 def _repair_empty_bodies(code: str) -> str:
@@ -220,3 +220,27 @@ def _validate_syntax(code: str):
         return True, None
     except SyntaxError as e:
         return False, str(e)
+
+def _hoist_future_imports(code: str) -> str:
+    """Move `from __future__` imports to the top of the emitted file.
+
+    The directive must precede every other statement. Several passes insert
+    material above the original first line -- the alias preamble, the string
+    decoder, the function table -- and any of them breaks a source that uses
+    `from __future__ import annotations`:
+
+        SyntaxError: from __future__ imports must occur at the beginning of the
+        file
+
+    Reordering once, after every transform, is more robust than making each
+    pass aware of the rule.
+    """
+    lines = code.splitlines()
+    future = [l for l in lines if l.startswith("from __future__ import")]
+    if not future:
+        return code
+    rest = [l for l in lines if not l.startswith("from __future__ import")]
+    # drop leading blank lines left behind
+    while rest and not rest[0].strip():
+        rest.pop(0)
+    return "\n".join(future + rest)
