@@ -148,3 +148,55 @@ result at n=8 with no equivalence bound.
 the interpreter-startup floor that dominated seconds), a pre-registered
 equivalence bound, and a corpus large enough that 2-of-8 is not the whole
 sample.
+
+## Round 37: a paired equivalence test with an interval
+
+The previous round reported two falls, two rises and four flats without an
+interval. That is a description, not a result. This adds the pre-registered
+comparison: paired difference in probes between the last and first build of
+each task, across eight tasks.
+
+| task | k=0..5 |
+|---|---|
+| sumselected | 8 7 7 6 7 7 |
+| countchars | 6 7 7 6 7 7 |
+| clamp01 | 7 7 7 6 7 7 |
+| is_even | 6 7 7 6 7 7 |
+| maxlen | 9 10 10 9 10 10 |
+| running_total | 4 5 5 4 5 5 |
+| signdiff | 11 12 12 11 12 12 |
+| first_negative | 11 10 10 9 10 10 |
+
+Paired differences (last − first): `-1, 1, 0, 1, 1, 1, 1, -1`
+
+- mean **+0.38 probes**
+- 95% CI **[−0.39, +1.14]** (t, df = 7)
+- **the interval includes zero**
+
+## What the interval buys
+
+Two things a bare count of falls could not:
+
+1. **No consistent effect, stated with an interval.** Accumulated state does
+   not reliably reduce or increase probe cost at this scale.
+2. **A bound.** Effects larger than ~1.1 probes are excluded at 95%. That is a
+   real equivalence statement as far as it goes: the mechanism, if it exists,
+   is smaller than the noise floor of this instrument.
+
+## What it does not buy
+
+- Eight tasks, one obfuscation configuration, one task author. The interval is
+  narrow because the tasks are similar, not because the effect is well
+  characterised in general.
+- Probes are a proxy for effort. A probe count of ±1 does not translate into
+  analyst time.
+- The interval is about **this** accumulating heuristic. A better one — for
+  example one that learns per-program which property is decisive rather than
+  per-build — could still produce a real effect.
+
+## Status of the endpoint
+
+It is now falsifiable, measured with a currency that has no startup floor, and
+reported with a paired interval that includes zero. That satisfies the
+reviewer's three structural objections and leaves the corpus objection intact:
+eight tasks written by one person is not a benchmark, however well measured.
