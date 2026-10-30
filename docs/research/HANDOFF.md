@@ -8,7 +8,7 @@
 
 | | |
 |---|---|
-| defects found | **eleven found, ten fixed** |
+| defects found | **thirteen found, twelve fixed** |
 | test suite | **4521 passed, 4 skipped, 0 failed** |
 | artefact gate | **72 artefacts, 0 failures** (2 indices; 38 at one) |
 | reproduction | **8 of 8 tables match** |
@@ -152,7 +152,7 @@ The research question was answered **negatively**, and the answer is about the
 semantic, so transform-family variation has no channel to it, and any null it
 produces is predicted by its own construction.
 
-What the work produced that outlives the question: **eleven silent failure modes in
+What the work produced that outlives the question: **thirteen silent failure modes in
 the obfuscator**, six of which the project's own tests could not have found, and
 five instruments that fail in different directions.
 

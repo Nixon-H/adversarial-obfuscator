@@ -183,7 +183,7 @@ def test_paper_defect_count_matches_the_table():
                 table_rows.append(ln)
     assert len(table_rows) >= 9, "defect table lost rows: %d" % len(table_rows)
     _words = {5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine",
-              10: "ten", 11: "eleven", 12: "twelve"}
+              10: "ten", 11: "eleven", 12: "twelve", 13: "thirteen"}
     _word = _words.get(len(table_rows))
     assert _word is not None and (_word + " correctness defects") in text, (
         "the abstract does not state the %r-defect count that the table supports"

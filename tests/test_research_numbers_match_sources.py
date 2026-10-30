@@ -91,7 +91,7 @@ def test_readme_defect_count_matches_the_paper_table():
     n_rows = len(_defect_rows(_read(PAPER)))
     readme = _read(README)
     words = {5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine",
-             10: "ten", 11: "eleven", 12: "twelve"}
+             10: "ten", 11: "eleven", 12: "twelve", 13: "thirteen"}
     word = words.get(n_rows)
     if word is None:
         return
@@ -132,7 +132,7 @@ def test_no_document_claims_a_defect_count_the_paper_does_not_support():
     n_rows = len(_defect_rows(_read(PAPER)))
     words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
              "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
-             "twelve": 12}
+             "twelve": 12, "thirteen": 13}
     for fn in sorted(os.listdir(DOCS)):
         if not fn.endswith(".md"):
             continue
@@ -164,7 +164,7 @@ def test_handoff_defect_count_matches_the_paper_table():
     n_rows = len(_defect_rows(_read(PAPER)))
     handoff = _read(os.path.join(DOCS, "HANDOFF.md"))
     words = {5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine",
-             10: "ten", 11: "eleven", 12: "twelve"}
+             10: "ten", 11: "eleven", 12: "twelve", 13: "thirteen"}
     word = words.get(n_rows)
     if word is None:
         return

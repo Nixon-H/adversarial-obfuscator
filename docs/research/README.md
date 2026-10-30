@@ -2,7 +2,7 @@
 
 **Last updated:** round 201 (2026-10-31)
 
-This directory holds a research programme that produced **eleven product defects
+This directory holds a research programme that produced **thirteen product defects
 and one negative result**. This file is the entry point: what exists, what it
 claims, and what it does not.
 
@@ -42,7 +42,7 @@ That claim survived three independent reviews that each broke a larger one:
 
 ## The defects
 
-Eleven, of which eight could not have been found by the project's own tests.
+Thirteen, of which ten could not have been found by the project's own tests.
 
 | # | defect | symptom | document |
 |---|---|---|---|
@@ -56,9 +56,11 @@ Eleven, of which eight could not have been found by the project's own tests.
 | 8 | builtin names in the function table | fails at import | `table-key-folding-defect.md` |
 | 9 | an `except` that returns the input | silently returns unobfuscated source | `swallowed-exception-returns-original.md` |
 | 10 | names preserved in one place, renamed in another | fails at import | `invented-return-tuple-defect.md` |
-| 11 | public exports renamed, importer not | fails to import from its own package | `requests-urllib3-attempt.md` |
+| 11 | `import typing` stripped as an annotation | fails at import | `requests-urllib3-attempt.md` |
+| 12 | class-body alias value renamed | fails at import | `requests-urllib3-attempt.md` |
+| 13 | public exports renamed, importer not | fails to import from its own package | `requests-urllib3-attempt.md` |
 
-Ten of eleven are fixed; one is a design question (see below). The guards live in `tests/test_*` and are named
+Eleven of thirteen are fixed; one is a design question, one is open (see below). The guards live in `tests/test_*` and are named
 in `artefact-gate.md`.
 
 ---
