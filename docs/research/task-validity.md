@@ -59,3 +59,39 @@ uses `x < 0`, and none of the three evaluator inputs contains a zero.
 - Attacker hit rate on valid cells only: 15 of 15 by construction of the
   intersection test, which is why the meaningful measure is the *validity*
   rate (15/24) rather than the hit rate.
+
+## Round 17: the k=4 cells are not ambiguous tasks — they are an open defect
+
+Repairing the ambiguous tasks required looking at why four cells have
+**zero** candidates matching the original. The answer is not ambiguity:
+
+`sumselected`, k=4, seed 5505, evaluator inputs
+`[([1,2,3,4],1,4), ([2],2,3), ([9,9],9,10)]`:
+
+| | values |
+|---|---|
+| original | `[6, 2, 18]` |
+| candidates | `[None, None, None]`, `TypeError`, `[9, 0, 0]`, `[None, None, None]`, **`[7, 3, 19]`** |
+
+No candidate matches. The closest, `[7, 3, 19]`, is the original plus one in
+every position — which is exactly `sibling_c`, the sibling that starts its
+accumulator at `1` instead of `0`. So the module contains the siblings and
+**nothing that behaves like the target**.
+
+Two explanations remain, and the evidence does not choose between them:
+
+1. the target function is dropped from the build at this seed; or
+2. the target is present but its behaviour changed.
+
+Both are serious. Neither is established: a textual search cannot settle it
+because the transformation rewrites the comparison expression, so the
+target's body does not survive verbatim for a grep to find.
+
+**Status: open defect, needs investigation before any k=4 number is used.**
+The correct action is to name every candidate by behaviour against the
+original and check whether a function with the target's behaviour exists at
+all in the module — not to score the cell.
+
+This is recorded rather than fixed because a wrong answer here would be a
+false claim about the product in either direction: "obfuscation drops
+functions" if it does not, or "tasks are merely ambiguous" if it does.
