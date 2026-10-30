@@ -69,3 +69,45 @@ singleton.
 Audit complete. The benchmark's separation is adequate, its weakest task is
 named, and the reason "hit" is a weaker criterion than "unique" is now measured
 rather than remembered.
+
+## Round 64: the fix applied, and every task is now a singleton
+
+The audit named one task where the attacker's set contained two candidates.
+Adding a zero-valued property input to `signdiff` separates it from the sibling
+that used `a >= 0`:
+
+| subject | property results |
+|---|---|
+| target | True, True, True, True, **True** |
+| sibling 0 | False, False, False, False, False |
+| sibling 1 | True, False, True, True, False |
+| sibling 2 | True, True, True, True, **False** |
+
+The sibling that previously passed everything now fails the new property, so the
+attacker's set is a singleton.
+
+Verified across the whole synthetic benchmark at build index 4:
+
+| task | attacker's passing set size |
+|---|---|
+| all nine | **1** |
+
+And the validity result is unchanged: 27 of 27 cells with unique evaluator
+identity and an attacker hit.
+
+## What this changes
+
+The "hit" criterion is now a **singleton** criterion on the synthetic benchmark
+rather than an intersection. That is a stronger statement, and it removes the
+last place where the attacker could claim success on two candidates at once.
+
+It does not change any measured effect — the diversity null, the module-size
+scaling, and the order invariance are all measured in probes, not in set sizes.
+It changes what the word "hit" means, which is the kind of change worth making
+before a paper uses the word.
+
+## What remains
+
+The corpus benchmark was not audited the same way. Its eight tasks pass the
+evaluator gate, and whether their attacker sets are singletons has not been
+checked. That is the next audit, not a current claim.

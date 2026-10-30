@@ -216,6 +216,11 @@ _task(
         lambda f: f(-1, 1) is True,
         lambda f: f(1, 1) is False,
         lambda f: f(-1, -1) is False,
+        # A zero on the left separates the target from the sibling that uses
+        # a >= 0. Without it the attacker's set contains two candidates and
+        # identification is an intersection rather than a singleton
+        # (see `sibling-separation-audit.md`).
+        lambda f: f(0, 1) is True,
     ],
 )
 
