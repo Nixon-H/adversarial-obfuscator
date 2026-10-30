@@ -610,3 +610,45 @@ Two fixes, two reversions, both because they changed the wrong object. The
 diagnosis from round 122 stands: one invented name, produced by the md5 branch,
 whose definition was missed. The repair must be applied to the **table**, which
 is the structure that ended up wrong.
+
+## Round 135: the reduction attempt was invalid, and how
+
+Automatic reduction (drop definitions while the module still raises `NameError`
+after obfuscation) produced a 31-line source and a one-function source — and both
+were **false positives**.
+
+The failure predicate was `NameError after obfuscation`. Pruning a definition
+while leaving a header statement or a default argument that referenced it makes
+the **input** raise `NameError` at import, and the predicate cannot tell that from
+the defect it was hunting.
+
+Two examples the reducer accepted:
+
+```python
+_orig_default_visit = default_visit     # default_visit was pruned
+guid_iter = GUIDerator()                # GUIDerator was pruned
+```
+```python
+def pairwise(src, end=_UNSET):          # _UNSET lived in a pruned try/except
+    return windowed(src, 2)             # windowed was pruned
+```
+
+Both raise on the **original** source. Neither is evidence about the obfuscator.
+
+**The predicate must be: the original source imports cleanly AND the obfuscated
+version does not.** That check was missing, which is the same class of error as
+round 102's invalid fixture and round 132's short grep: the instrument accepted a
+result that a validity check would have rejected.
+
+## What was confirmed
+
+Three hand-written minimal shapes all pass:
+
+| shape | result |
+|---|---|
+| two functions, one calls the other | imports |
+| one function only | imports |
+| three functions in a chain | imports |
+
+So the defect needs more than call-graph structure. The reduction has to be rerun
+with the validity predicate before it can say what else is required.
