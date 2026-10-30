@@ -58,7 +58,18 @@ class TypeHintStripper(ast.NodeTransformer):
         node.names = new_names
         return node
     def visit_ImportFrom(self, node):
-        if node.module == 'typing': return None
+        if node.module == 'typing':
+            # Not every `typing` name is an annotation. `NamedTuple`, `Protocol`,
+            # `TypedDict` and `Literal` are RUNTIME base classes; stripping the
+            # import leaves `class _Attributes(NamedTuple)` referring to nothing
+            # and the module raises NameError at import. Found on attrs' _make.py.
+            # Keeping the import costs a little obfuscation and cannot be wrong.
+            _runtime = {'NamedTuple', 'Protocol', 'TypedDict', 'Literal',
+                        'Generic', 'TypeVar', 'runtime_checkable', 'final'}
+            kept = [a for a in node.names if (a.name or a.asname) in _runtime]
+            if not kept:
+                return None
+            node.names = kept
         return node
 class FStringLowering(ast.NodeTransformer):
     def visit_JoinedStr(self, node):
@@ -114,6 +125,26 @@ class ScopeAnalyzer(ast.NodeVisitor):
             if scope['potentially_unbound']:
                 unsafe.append((func_name, scope['potentially_unbound']))
         return unsafe
+def _scope_declared_names(tree):
+    """Every name that a `nonlocal` or `global` declaration refers to.
+
+    Renaming happens in a single traversal, so a use inside a function can be
+    rewritten before the traversal reaches that function's declaration. Reserving
+    the names up front removes the ordering dependency: `nonlocal n` and `n += 1`
+    then keep the same spelling regardless of which the walker meets first.
+
+    `global` targets are included for the same reason even though module-level
+    names are renamed -- a `global COUNT` must match `COUNT = 0`, and both are
+    renamed together only if neither is reserved prematurely. That is why
+    visit_Global still calls get_new_name.
+    """
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Nonlocal,)):
+            names.update(node.names)
+    return names
+
+
 class SymbolRenamer(ast.NodeTransformer):
     def __init__(self, mapping=None):
         self.mapping = mapping if mapping is not None else {}
