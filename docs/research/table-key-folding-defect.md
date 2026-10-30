@@ -693,3 +693,41 @@ header statement that names a **function object** rather than building a sentine
 exactly the shape the defect is about.
 
 That is one experiment, not a theory.
+
+## Round 137: the header shapes are individually fine
+
+Tested the three header statements in isolation, each with a function that uses
+them:
+
+| shape | output imports |
+|---|---|
+| `_orig = default_visit` (alias of a function object) | **yes** |
+| `_UNSET = object()` (sentinel) | **yes** |
+| `try: from math import missing / except ImportError: _REM = object()` | **yes** |
+
+All three pass at build index 0. So no header statement is sufficient on its own,
+just as no definition was.
+
+## What the reduction has established, cumulatively
+
+| component | sufficient alone |
+|---|---|
+| imports | no (round 135) |
+| definitions (incl. call chains) | no (round 135) |
+| header statements | no (round 137) |
+| header **and** definitions | still not tested |
+
+The trigger is therefore an **interaction** between a header statement and a
+definition, or it depends on module size. Both are testable: build sources that
+pair each header statement with each of a few definitions and check the defect.
+
+## Why the reduction has taken three rounds
+
+Round 135's reducer produced false positives because it accepted invalid inputs.
+Round 136 fixed the predicate and found the header mattered, but reduced to
+imports-plus-definitions, which is invalid on its own. Only in round 137 did the
+test become a **controlled comparison**: a valid input containing one header shape
+and one function, measured for a property the input does not have.
+
+Each round got closer by making the test smaller and more explicit, and no round
+got closer by reasoning about the obfuscator.
