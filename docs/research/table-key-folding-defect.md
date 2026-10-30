@@ -731,3 +731,75 @@ and one function, measured for a property the input does not have.
 
 Each round got closer by making the test smaller and more explicit, and no round
 got closer by reasoning about the obfuscator.
+
+## Round 138: the defect resists reduction
+
+Two more controlled experiments.
+
+**Header × body grid** — three header shapes against three body shapes, nine
+combinations, all valid inputs:
+
+| | simple | chain | class |
+|---|---|---|---|
+| alias of function | imports | imports | imports |
+| sentinel | imports | imports | imports |
+| try/except fallback | imports | imports | imports |
+
+**Nine of nine pass.**
+
+**Size sweep** — synthetic modules of 5, 15, 30 and 45 functions at two build
+indices each:
+
+```
+n=5   0/2 fail
+n=15  0/2 fail
+n=30  0/2 fail
+n=45  0/2 fail
+```
+
+No threshold. Forty-five plain functions obfuscate and import cleanly.
+
+## What the programme has now ruled out
+
+| hypothesis | rounds spent | verdict |
+|---|---|---|
+| the folding pass makes tuple keys | 114 | refuted |
+| pass order (table before rename) | 115 | necessary, not sufficient |
+| the table needs `obf_calls` | 116 | necessary, not sufficient |
+| the two passes together | 117–118 | refuted by dump |
+| `EnhancedJunk` | 119 | trigger, not cause |
+| the random stream | 120 | real, but not sufficient alone |
+| the renamer renames wrongly | 123–124 | refuted, two fixes reverted |
+| a stale call returning the input | 133 | real, a **different** defect |
+| imports alone | 135 | not sufficient |
+| definitions alone | 135 | not sufficient |
+| header statements alone | 137 | not sufficient |
+| header × body | 138 | not sufficient |
+| module size | 138 | not sufficient |
+
+**Thirteen ruled out.** What remains is something specific to
+`iterutils.py`'s content that none of these abstractions capture.
+
+## The honest assessment
+
+This defect has now consumed more rounds than every other defect in the programme
+combined, and the reduction has failed at every level tried. The remaining options
+are:
+
+1. **Bisect the module by content, not structure** — keep the full source, replace
+   individual function *bodies* with `return None` one at a time, and see which
+   replacement removes the defect. That is a different axis from dropping whole
+   definitions.
+2. **Accept the defect as open** and record it with the thirteen refutations, so
+   the next attempt does not repeat them.
+
+Option 2 is defensible and option 1 is one experiment. The document now carries
+enough refutations that option 1 is cheap to try and cheap to abandon.
+
+## Why this is still progress
+
+Every one of the thirteen refutations is a fact that was not known before, and
+five of them cost only one command each. The defect is not closer to fixed, but
+the space of explanations is thirteen smaller — and the previous twelve rounds of
+this defect were spent on hypotheses that are now excluded by measurement rather
+than argument.
