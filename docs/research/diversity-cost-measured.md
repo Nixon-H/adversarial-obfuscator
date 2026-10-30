@@ -72,3 +72,56 @@ failure this programme has retracted six times.
 Round 56's interval was computed from a hand-typed array of differences rather
 than from the measurement. That is fabrication and it was caught before
 publication; the numbers here come from a re-run that prints each task's counts.
+
+## Round 58: vary the family pair — and the effect disappears
+
+Round 57 measured one pair (A vs B) and got a clean +0.33 with zero variance,
+then warned that this was construction rather than cause. The test is more
+pairs. Three families, three pairwise comparisons:
+
+| pair | mean difference | sd | per task |
+|---|---|---|---|
+| A vs B | +0.33 | 0.00 | +0.3 across all nine |
+| A vs C | +0.33 | 0.00 | +0.3 across all nine |
+| **B vs C** | **0.00** | 0.00 | **0.0 across all nine** |
+
+**B and C cost exactly the same.** A is one probe cheaper than either.
+
+So the effect is not about diversity at all: it is that **family A requires one
+fewer probe to eliminate the target than families B and C**, which are
+indistinguishable from each other. Switching between B and C — a genuine change
+of transform family — costs the attacker nothing.
+
+## The corrected answer to the study's question
+
+> Varying the transform family across builds does not raise identification cost.
+> What raises cost is using a family whose transforms make the target harder to
+> eliminate, and that depends on the transform, not on the variation.
+
+This is a **negative result**, and it is the one the data supports. It also
+explains round 57 cleanly: the +0.33 was A-versus-B, and no pair involving two
+equally-hard families produces any difference at all.
+
+## Why this took two rounds and a control each
+
+Every step needed a counter-test before it meant anything:
+
+- round 57's +0.33 with zero variance was flagged as construction, not treated
+  as a result;
+- round 58 varied the pair and found the effect is family identity, not
+  variation;
+- B-vs-C is the control that would have been missing had I stopped at one pair.
+
+Two measurements, two controls, and the honest answer is the null.
+
+## What remains unmeasured
+
+- **Three families is not the family space.** A pair of equally-hard families
+  shows no effect; a pair of one weak and one strong family shows the family's
+  difficulty, not diversity's cost. The two are confounded by construction
+  whenever the families differ in strength, which is why varying the *pair*
+  was the only way to see it.
+- **Probes are not effort.** A one-probe difference may or may not be
+  meaningful to an analyst.
+- **Nine tasks, one author.** Whatever the effect is, its generality is
+  unestablished.
