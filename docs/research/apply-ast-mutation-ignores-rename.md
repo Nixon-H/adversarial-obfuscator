@@ -77,3 +77,49 @@ accepting it silently. The second is smaller and honest; the first is correct.
 Not done this round: the two paths have diverged further than a one-line bridge,
 and the last two reverts in this programme came from changing the rename
 machinery without a baseline.
+
+## Round 130: the fix, specified and not applied
+
+Two candidate repairs.
+
+**A. Route the entry point through the renamer.** Add the renaming step to
+`apply_ast_mutation`. Correct, and larger than it looks: the full path has ~80
+lines of reservations (`_NX_*` markers, trial-gate helpers, `__all__` names,
+protected functions) before `renamer.visit(tree)`, and a partial copy of that
+list is how the previous nine defects happened.
+
+**B. Reject the option instead of accepting it silently.**
+
+```python
+if options.get("symbol_rename"):
+    raise ValueError(
+        "apply_ast_mutation does not implement symbol_rename; use the full "
+        "transform path, or remove the option"
+    )
+```
+
+Smaller, honest, and it converts a **silent** failure into a **loud** one. It
+also makes the eleven failing tests fail **for the right reason** — with an
+exception that names the gap, rather than an assertion that the output is not
+obfuscated.
+
+**Not applied.** Both are changes to the top of the transform stack, and the last
+two attempts to change renaming in this programme were reverted after breaking
+15 and 11 contract tests. The difference this time is that the baseline is known:
+eleven specific tests are already failing, for a cause that is now named. That
+makes measurement possible — run those eleven before and after, and require that
+the count **decreases** and nothing else **increases**.
+
+## What the eleven tests were right about
+
+They were not stale, not collateral, and not confused by a recent change. They
+were reporting that the entry point they exercise does not obfuscate names, and
+they were correct for fourteen rounds while being read as noise.
+
+## The rule this makes concrete
+
+**An option that is accepted and silently ignored is worse than an option that is
+rejected.** `apply_ast_mutation` accepted `symbol_rename: True` and did nothing.
+Every caller who passed it believed their output was renamed. The tests were the
+only thing that noticed, and their signal was read as a regression rather than a
+report.
