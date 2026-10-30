@@ -108,3 +108,52 @@ and the other five modules are unaffected.
 
 The reverted four are all in the rename machinery, and each was reverted because a
 guard or traversal assumption was invisible from the call site being changed.
+
+## Round 190: the idempotence fix, attempted with a blanket replace, reverted
+
+Round 189 established that the mapping is not idempotent, and that this is why the
+default-argument fix double-renamed. The targeted repair is in `get_new_name`:
+
+```python
+if old_name in self.reverse_mapping or old_name in self._renamed_values:
+    return old_name
+```
+
+plus recording every produced name. That part is sound.
+
+**The edit was applied with a text replace over two `self.mapping[old_name] = `
+sites.** One of them is indented differently from the other, so the inserted line
+produced an `IndentationError` and two collection errors.
+
+**Reverted.** The tree parses and 28 renamer and preserve tests pass.
+
+## Why this is worth recording rather than retrying
+
+The change is three lines in three places. Applying it with a blanket string replace
+is the same mistake as round 88's misplaced `visit_ImportFrom`, round 132's short
+grep, and round 189's non-idempotent recursion: **a text-level edit to a file with
+several similar sites.** Each of those cost a round, and the fix each time was to
+edit by line number or by unique context.
+
+A correct version edits `get_new_name` by its own body, and adds the recording at each
+`mapping[...] =` site individually — two edits, each verified.
+
+## Status
+
+Unchanged from round 189: the cause is known, the repair is three lines, and `_make.py`
+stays blocked on this layer. Six modules import; one does not.
+
+## The pattern in the last six rounds
+
+| round | what happened |
+|---|---|
+| 185 | one grep located the site |
+| 186 | direction determined |
+| 187 | nested-class fix **worked** |
+| 188 | next layer's cause identified |
+| 189 | narrow fix double-visits, reverted |
+| 190 | idempotence fix misapplied, reverted |
+
+Two reverts in two rounds, both from **applying a correct idea through a risky
+mechanism** — recursion in 189, a text replace in 190. Neither was wrong about the
+cause.
