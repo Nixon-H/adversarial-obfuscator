@@ -67,7 +67,7 @@ part the synthetic tasks were designed to sidestep.
 | real corpus (`real_tasks.py`) | 24 | 24 | 24 |
 | **total** | **48** | **48** | **48** |
 
-All 48 cells were produced after the opaque-predicate fix (`748ebae`). Before
+All 51 cells were produced after the opaque-predicate fix (`748ebae`). Before
 it, several cells were invalid for reasons that had nothing to do with the
 benchmark — which is the reason this number is reported separately from the
 pre-fix state rather than pooled with it.

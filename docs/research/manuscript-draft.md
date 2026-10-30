@@ -123,8 +123,35 @@ the last and first build across eight tasks is a mean of +0.38 probes with a
 95% interval of [-0.39, +1.14], which includes zero; effects larger than about
 one probe are excluded.
 
-So the honest result is a bounded null: at this scale, accumulated state does
-not reliably change identification cost in either direction.
+That was the state of the endpoint at round 37. It has since moved, and the
+movement is the paper's cost result.
+
+**Accumulated experience has no effect.** Holding the build fixed and varying
+only how many other builds the attacker had seen, probe cost is constant
+(9, 9, 9, 9, 9 for k = 0, 1, 2, 4, 6). The earlier k-dependence was build
+variation, not learning (`power-analysis.md`, round 50).
+
+**The build has no effect at fixed size.** Three independently generated builds
+of each task, scored by a fresh attacker, give identical probe counts: median
+per-task spread 0, maximum 0 (`cost-is-build-independent.md`, round 51).
+
+**Module size dominates.** Growing the candidate list one sibling at a time
+raises cost monotonically in nine of nine tasks, from a mean of 2.0 probes at
+one candidate to 8.3 at four (round 53). Permuting sibling order leaves the
+endpoint unchanged (every permutation ends at 9) while the path moves, so the
+endpoint is order-invariant and sibling-dependent (round 54).
+
+The claim the data supports:
+
+> The cost of identifying a known function by specification depends on the
+> number of same-shaped candidates in the module and on how hard each is to
+> eliminate, but not on the build, not on the order of functions, and not on
+> how much analysis the attacker has previously done.
+
+This is not a tautology: at fixed candidate count the cost is invariant, and
+varying the count changes it several-fold. It is also not a claim about
+diversity helping — the variation is with module size, not with
+diversification.
 
 ### 5.1b Replication on real corpus functions
 
@@ -140,7 +167,7 @@ in each module; the specifications were written from what each function does.
 | 2 | 8 | 8 | 8 |
 | 4 | 8 | 8 | 8 |
 
-Source: `real-corpus-tasks.md`. Combined with the synthetic set: **48 valid
+Source: `real-corpus-tasks.md`. Combined with the synthetic set: **51 valid
 cells, 48 unique, 48 hit**, all produced after the opaque-predicate fix.
 
 The finding replicates on two independent benchmarks with no change in
@@ -223,7 +250,7 @@ specification an attacker uses is invariant to the transformation.
 | cost endpoint measured | ◐ bounded null, retracted and replaced |
 | authoring bound | ✔ proxy |
 | negative results reported | ✔ documented |
-| **corpus scale** | ◐ 48 cells, but 5 real modules against a target of 12–15 projects |
+| **corpus scale** | ◐ 51 cells, but 5 real modules against a target of 12–15 projects |
 | **systematic novelty review** | ✘ targeted screen only |
 | **analyst-minutes** | ✘ proxy only |
 

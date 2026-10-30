@@ -75,7 +75,7 @@ humans and must be labelled as such.
 ## What this plan is not
 
 - It is **not** started. No external project has been acquired.
-- It does **not** claim the current 48 cells are a corpus. They are a
+- It does **not** claim the current 51 cells are a corpus. They are a
   calibration set with a validity gate, and they are labelled that way.
 - It does **not** resolve the memorisation problem. Public code may be in a
   model's training data; the mitigation is reporting, not elimination.

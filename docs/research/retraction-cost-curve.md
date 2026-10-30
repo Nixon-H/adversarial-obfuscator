@@ -57,7 +57,7 @@ That design can yield either sign. The current one cannot.
 
 ## What is not retracted
 
-- The **benchmark validity** work (`task-validity.md`): 48 cells across two
+- The **benchmark validity** work (`task-validity.md`): 51 cells across two
   families, each with a unique evaluator-decided identity. That is a property
   of the tasks and the builds, not of the attacker's memory.
 - The **oracle-free attacker** and its guards. They are the reason the design

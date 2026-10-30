@@ -41,7 +41,7 @@ def _benchmark_counts():
 
 def test_benchmark_counts_match_the_documents():
     synth, real = _benchmark_counts()
-    assert synth == 8, "synthetic task count changed; update the documents"
+    assert synth == 9, "synthetic task count changed; update the documents"
     assert real == 8, "corpus task count changed; update the documents"
 
 
