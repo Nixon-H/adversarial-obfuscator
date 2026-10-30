@@ -64,7 +64,7 @@ def test_build_closure_parses_on_310_grammar():
         if not os.path.isdir(root_dir):
             continue
         for root, _dirs, files in os.walk(root_dir):
-            if "test_data" in root:
+            if "test_data" in root or "fixtures" in root:
                 continue
             for fn in files:
                 if not fn.endswith(".py"):

@@ -42,7 +42,7 @@ from scripts.transfer.real_tasks import module_source as real_source  # noqa: E4
 from scripts.transfer.tasks import TASKS as SYNTH_TASKS  # noqa: E402
 
 
-STRESS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "stress.py")
+STRESS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus", "fixtures", "stress.py")
 
 # Properties for the stress module: the constructs it exercises have no
 # task-level specification, so the gate only requires that the artefact

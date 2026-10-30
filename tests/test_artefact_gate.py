@@ -24,7 +24,7 @@ from scripts.transfer.external_tasks import (  # noqa: E402
     TASKS as EXT_TASKS, module_source,
 )
 
-STRESS = os.path.join(os.path.dirname(__file__), "..", "scripts", "transfer", "corpus", "stress.py")
+STRESS = os.path.join(os.path.dirname(__file__), "..", "scripts", "transfer", "corpus", "fixtures", "stress.py")
 
 
 def _run(source, label, props):

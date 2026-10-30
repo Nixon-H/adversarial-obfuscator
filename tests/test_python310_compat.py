@@ -28,14 +28,20 @@ LIVE_DIRS = ("obfuscator", "scripts", "tests", "irgen", "vm", "llvmgen",
 
 #: Files that are deliberately not valid Python 3.10:
 #:   tests/test_data/  decoy and prompt-poison fixtures (test data).
-EXCLUDE = ("tests/test_data",)
+EXCLUDE = (
+    "tests/test_data",
+    # The stress fixture exercises constructs the corpus lacks, including
+    # except* (Python 3.11+). It is an INPUT to the obfuscator, like
+    # tests/test_data, not a module that has to run on the 3.10 floor.
+    "scripts/transfer/corpus/fixtures/",
+)
 
 
 def _live_python_files():
     for base in LIVE_DIRS:
         root = os.path.join(REPO_ROOT, base)
         for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+            dirnames[:] = [d for d in dirnames if d not in ("__pycache__", "fixtures")]
             if any(dirpath.startswith(os.path.join(REPO_ROOT, x))
                    for x in EXCLUDE):
                 continue
