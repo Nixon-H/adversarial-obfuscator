@@ -91,6 +91,57 @@ _task(
 )
 
 
+_task(
+    "priority_pick",
+    "held_out/sched/prog.py",
+    "priority_pick",
+    [
+        lambda f: f([("a", 1), ("b", 5), ("c", 3)]) == "b",
+        lambda f: f([]) == "",
+        lambda f: f([("x", 2)]) == "x",
+        lambda f: f([("p", 1), ("q", 1)]) == "p",
+    ],
+    [([("m", 3), ("n", 9)],), ([],), ([("z", 7)],)],
+)
+
+_task(
+    "rotate_list",
+    "held_out/sched/prog.py",
+    "rotate_list",
+    [
+        lambda f: f([1, 2, 3], 1) == [2, 3, 1],
+        lambda f: f([], 3) == [],
+        lambda f: f([1, 2, 3], 0) == [1, 2, 3],
+        lambda f: f([1, 2, 3], 3) == [1, 2, 3],
+    ],
+    [([4, 5, 6], 2), ([], 1), ([7], 5)],
+)
+
+_task(
+    "store_get",
+    "development/store/prog.py",
+    "store_get",
+    [
+        lambda f: f({"a": 1}, "a", 0) == 1,
+        lambda f: f({}, "a", 0) == 0,
+        lambda f: f({"a": None}, "a", 9) is None,
+        lambda f: f({}, "z", "d") == "d",
+    ],
+    [({"b": 2}, "b", -1), ({}, "q", 0), ({"c": 5}, "c", -1)],
+)
+
+_task(
+    "store_keys",
+    "development/store/prog.py",
+    "store_keys",
+    [
+        lambda f: f({"a": 1, "b": 2}) == ["a", "b"],
+        lambda f: f({}) == [],
+        lambda f: f({"z": 1}) == ["z"],
+    ],
+    [({"m": 0, "n": 1},), ({},), ({"q": 9},)],
+)
+
 def module_source(task_name):
     """The target module's source plus nothing else: siblings are its own."""
     return _module_source(TASKS[task_name]["module"])

@@ -26,15 +26,19 @@ synthetic either.
 | rle_decode | held_out/codec/prog.py | 3 | 4 |
 | slugify | calibration/parser/prog.py | 4 | 4 |
 | gcd | calibration/calc/prog.py | 4 | 4 |
+| priority_pick | held_out/sched/prog.py | 3 | 4 |
+| rotate_list | held_out/sched/prog.py | 3 | 4 |
+| store_get | development/store/prog.py | 4 | 4 |
+| store_keys | development/store/prog.py | 4 | 4 |
 
 ## Result
 
 | k | cells | unique identity | attacker hit |
 |---|---|---|---|
-| 0 | 4 | 4 | 4 |
-| 2 | 4 | 4 | 4 |
-| 4 | 4 | 4 | 4 |
-| **total** | **12** | **12** | **12** |
+| 0 | 8 | 8 | 8 |
+| 2 | 8 | 8 | 8 |
+| 4 | 8 | 8 | 8 |
+| **total** | **24** | **24** | **24** |
 
 Every cell has exactly one function matching the original, and the attacker's
 frozen property set contains it. The same pattern as the synthetic benchmark,
@@ -47,7 +51,7 @@ than designed decoys, and where the target was not written by the person who
 wrote its spec. It raises the total valid cells from 24 to 36 with no change in
 the finding.
 
-**Does not add:** scale. Four tasks in two modules is still small, and the
+**Does not add:** scale. Eight tasks in five modules is still small, and the
 corpus programs are simple. The review asked for 12–15 held-out projects with
 one task each; this is four modules. The gap narrows, it does not close.
 
@@ -60,8 +64,8 @@ part the synthetic tasks were designed to sidestep.
 | benchmark | cells | valid | attacker hit |
 |---|---|---|---|
 | synthetic (`tasks.py`) | 24 | 24 | 24 |
-| real corpus (`real_tasks.py`) | 12 | 12 | 12 |
-| **total** | **36** | **36** | **36** |
+| real corpus (`real_tasks.py`) | 24 | 24 | 24 |
+| **total** | **48** | **48** | **48** |
 
 All 36 cells were produced after the opaque-predicate fix (`748ebae`). Before
 it, several cells were invalid for reasons that had nothing to do with the
