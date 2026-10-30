@@ -803,3 +803,64 @@ five of them cost only one command each. The defect is not closer to fixed, but
 the space of explanations is thirteen smaller — and the previous twelve rounds of
 this defect were spent on hypotheses that are now excluded by measurement rather
 than argument.
+
+## Round 139: the content bisect produced noise, and the reason is known
+
+Replacing each top-level function body with `return None` and checking whether the
+defect disappears:
+
+```
+baseline defect: True
+top-level functions: 42
+bodies whose replacement removes the defect: 31
+```
+
+**Thirty-one of forty-two.** Replacing almost any body appears to "fix" it, which
+is not a signal about content — it is the **RNG** again. Any edit to the module
+shifts the random stream, and round 120 established that the defect is
+nondeterministic: it appears when the stream reaches a particular state.
+
+So the bisect is measuring the stream, not the code. The same reading applies to
+the earlier bisects that "located" `enhanced_junk`, `symbol_rename` and
+`obf_calls`: each was a stream shift.
+
+## Confirmed by size
+
+Large synthetic modules do not reproduce it:
+
+| functions | statements each | lines | failures |
+|---|---|---|---|
+| 10 | 10 | 129 | 0/2 |
+| 20 | 20 | 459 | 0/2 |
+| 30 | 30 | 989 | 0/2 |
+
+989 lines of dense arithmetic obfuscates and imports cleanly. So the defect is not
+volume, not structure, not any single construct — and the reduction techniques
+that work on deterministic defects cannot see it.
+
+## What this means for the eighth defect
+
+**A reduction is not possible while the defect is nondeterministic.** The correct
+order is:
+
+1. make the defect **deterministic** first — find the seed and build index that
+   reproduce it, and fix the stream so the same input always produces the same
+   failure;
+2. then bisect, because a bisect erases itself when any edit changes the outcome.
+
+The programme has done (2) five times and (1) never. Round 120 found the
+nondeterminism and rounds 135–139 continued bisecting anyway.
+
+## The honest status
+
+The eighth defect is **not reduced** and cannot be reduced by the methods tried.
+What is known:
+
+- it requires `obf_calls` and `symbol_rename` to both run;
+- their combined output is valid;
+- it appears at build index 0 always and index 2 sometimes;
+- it is insensitive to module size and composition;
+- every structural edit perturbs it.
+
+That is a description of a race in the rename/fold interaction, and the next step
+is to make it reproducible, not to reduce it.
