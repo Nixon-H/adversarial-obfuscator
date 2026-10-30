@@ -977,3 +977,65 @@ the three failures weakens those facts.
 `CodeChecksummer` is **not** a defect. The template is correct, `src` is bound, and
 the integrity check is scoped to a function. That is worth stating because for one
 round it looked like the finding.
+
+## Round 142: the minimal case is one line
+
+Fourth reduction attempt, this time **structure-preserving** — `ast.parse` after
+every step, and the reduced source must parse **and** fail with `NameError`. That
+was the check missing from rounds 135 and 141.
+
+It reduced 125 top-level statements to **one**, which still parses and still fails:
+
+```python
+_nx_ftable = dict([..., (22, _nx_f24f62), ..., (sum([7, 21]), id)])
+```
+
+Undefined names in that line:
+
+```
+undefined: ['_nx_f24f62']
+```
+
+**One line. One undefined name. No functions, no imports, no classes.**
+
+## What the minimal case says
+
+- The table's **keys** are fine: `sum([2])` is 2, `78 ^ 70` is 8, `(1 << 3) + 5` is
+  13. Every key evaluates to the intended index.
+- The table's **values** are mostly builtins — `callable`, `iter`, `ValueError`,
+  `TypeError`, `zip`, `next`, `filter`, `all`, `id`.
+- Exactly one value is a generated name, `_nx_f24f62`, and nothing in the file
+  binds it.
+
+So `CallGraphObfuscator` builds a table whose entry 22 points at a function it
+believed existed. Whatever removed that function did so **after** the table was
+built, and the table was never corrected.
+
+## Why this is the finding
+
+Eleven rounds of reduction produced, in the end, a single line — and the line is a
+data structure with one dangling reference. That is not a race, not a size effect,
+and not a construct gap. It is a **stale table**, and the minimal case makes it
+visible without any obfuscation pipeline at all: the line can be read and checked
+by eye.
+
+## The experiment this enables
+
+The one-line case can be reduced further by **rebuilding it by hand**, adding
+entries until it fails — which tests whether a single dangling entry is enough or
+whether the surrounding entries matter. That is the next step, and it is now
+cheap.
+
+## What took so long
+
+Four reductions, three invalid:
+
+| round | reducer | invalidity |
+|---|---|---|
+| 135 | source, drop defs | pruned definitions created undefined names |
+| 139 | source, replace bodies | changed RNG consumption |
+| 141 | output, drop lines | deleted a `def`, kept its body |
+| **142** | **output, drop statements, parse-checked** | **none** |
+
+The working reducer differs from the others by one line — `ast.parse(code)` before
+accepting a candidate — and it produced the answer in a single run.
