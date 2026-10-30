@@ -544,6 +544,14 @@ def apply_ast_mutation(source_code, options=None):
             for _n in ast.walk(tree):
                 if isinstance(_n, ast.Nonlocal):
                     _pre.update(_n.names)
+                # Import bindings too: `import typing` binds a MODULE whose uses
+                # are attribute accesses the renamer never touches, so renaming
+                # the import alone leaves seventeen uses pointing at nothing
+                # (urllib3/_collections.py). Reserving up front removes the
+                # traversal-order dependency exactly as the nonlocal pre-pass did.
+                elif isinstance(_n, ast.Import):
+                    for _a in _n.names:
+                        _pre.add((_a.asname or _a.name).split(".")[0])
             renamer.reserved.update(_pre)
             tree = renamer.visit(tree)
             # Renaming happens at visit time, so a mapping created late never
