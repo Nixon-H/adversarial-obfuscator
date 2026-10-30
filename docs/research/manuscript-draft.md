@@ -18,11 +18,17 @@ and executions, we measure identification cost as a function of *k*
 previously analysed builds of the same program. An earlier version of this
 endpoint was withdrawn: the attacker it measured was memoryless in *k*, so a
 flat curve was a property of the harness rather than of the defence
-(`retraction-cost-curve.md`). The replacement attacker accumulates state across
-builds. Measured over eight tasks, the paired change in probes between the last
-and first build is +0.38 with a 95% interval of [-0.39, +1.14]: no consistent
-effect, and effects larger than about one probe are excluded. We therefore
-report a bounded null rather than a finding.
+(`retraction-cost-curve.md`). The replacement measures identification cost in
+probes, and separates the two things that vary across builds.
+
+The answer is negative. Varying the transform family across builds does not
+raise identification cost: across three families and all three pairwise
+comparisons, two of the families are indistinguishable (difference 0.00, sd
+0.00 over nine tasks) and the only differences come from one family being
+easier to eliminate than the others. What does raise cost is the number of
+same-shaped candidates in the module, which moves the mean from about two
+probes at one candidate to about eight at four, monotonically in nine of nine
+tasks and invariant to the order the functions appear in.
 
 **Scope limit, stated in the abstract rather than the limitations:** eight
 synthetic tasks, one obfuscation configuration, identification only.
@@ -149,9 +155,34 @@ The claim the data supports:
 > how much analysis the attacker has previously done.
 
 This is not a tautology: at fixed candidate count the cost is invariant, and
-varying the count changes it several-fold. It is also not a claim about
-diversity helping — the variation is with module size, not with
-diversification.
+varying the count changes it several-fold.
+
+### 5.2 Does diversity itself raise the cost? No.
+
+The question the study set out to answer is separate from module size, and it
+takes one more control to see. Comparing builds that vary **only the seed**
+against builds that **alternate transform families**, over three families and
+all three pairs:
+
+| pair | mean difference in probes | sd |
+|---|---|---|
+| A vs B | +0.33 | 0.00 |
+| A vs C | +0.33 | 0.00 |
+| **B vs C** | **0.00** | 0.00 |
+
+Family A is one probe cheaper than B and C; **B and C are identical**. So the
+difference is which family was used, not whether the family varied. Switching
+between two equally-hard families costs the attacker nothing.
+
+This is a negative result and it is the study's answer:
+
+> Varying the transform family across builds does not raise identification
+> cost. What raises cost is a family whose transforms make the target harder to
+> eliminate, and that is a property of the transform, not of the variation.
+
+It also explains an earlier reading: one pair (A vs B) alone gives +0.33 with
+zero variance, and reporting it would have claimed a diversity benefit that the
+B-versus-C control removes.
 
 ### 5.1b Replication on real corpus functions
 
