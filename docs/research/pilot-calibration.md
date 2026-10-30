@@ -38,6 +38,35 @@ survived three rounds of fixing because the other three were also plausible.
 A pilot that reports 0/3 for obfuscated and 3/3 for plain reads like a
 strong result, and it was four bugs.
 
+## The sibling condition (added round 11): the protection is not what matters
+
+The third caveat below said unrelated decoys are trivially separable and the
+real corpus has siblings. That is now measured rather than asserted.
+
+Fixtures: one target and four sibling functions with the **same arity** and
+near-identical bodies (`total += v` versus `total += v * 2`; `lo <= v < hi`
+versus `lo < v <= hi`; `total = 0` versus `total = 1`).
+
+| condition | plain top-1 | obf top-1 | obf top-3 |
+|---|---|---|---|
+| unrelated decoys | 3/3 | 3/3 | 3/3 |
+| **siblings** | **0/1** | **0/1** | **0/1** |
+
+The heuristic **fails on siblings — and it fails identically on the
+unprotected source**. The obfuscation is not what defeats it; the presence
+of near-duplicate functions is. Two consequences:
+
+1. The structural heuristic is too weak for a realistic corpus, and its
+   weakness has nothing to do with protection. Reporting an obfuscated 0/1
+   without the plain 0/1 would have claimed a security benefit that does not
+   exist.
+2. Whatever the study measures on a realistic corpus must control for
+   sibling density, because that variable dominates the outcome.
+
+This is the most useful negative in the programme so far: it says the
+attacker needs semantics, not shape, and that a shape-based attacker's
+results cannot distinguish protection from corpus difficulty.
+
 ## Caveats, stated as limits on the claim
 
 1. **n = 3.** Three fixtures with two decoys each. This is calibration, not

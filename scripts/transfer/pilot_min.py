@@ -91,6 +91,58 @@ INPUTS = {
     "clamp": [(5, 0, 3), (-1, 0, 3), (2, 0, 3)],
 }
 
+
+# Hard fixtures: the target sits among SIBLING functions with the same arity
+# and near-identical shape. This is the condition the pilot's own document
+# said was missing -- unrelated decoys are trivially separable, siblings are
+# not, and siblings are what real modules contain.
+FIXTURES_HARD = {
+    "sumselected": (
+        "def sumselected(values, lo, hi):\n"
+        "    total = 0\n"
+        "    for v in values:\n"
+        "        if lo <= v < hi:\n"
+        "            total += v\n"
+        "    return total\n"
+    ),
+    "sibling_a": (
+        "def sibling_a(values, lo, hi):\n"
+        "    total = 0\n"
+        "    for v in values:\n"
+        "        if lo <= v < hi:\n"
+        "            total += v * 2\n"
+        "    return total\n"
+    ),
+    "sibling_b": (
+        "def sibling_b(values, lo, hi):\n"
+        "    total = 0\n"
+        "    for v in values:\n"
+        "        if lo < v <= hi:\n"
+        "            total += v\n"
+        "    return total\n"
+    ),
+    "sibling_c": (
+        "def sibling_c(values, lo, hi):\n"
+        "    total = 1\n"
+        "    for v in values:\n"
+        "        if lo <= v < hi:\n"
+        "            total += v\n"
+        "    return total\n"
+    ),
+    "sibling_d": (
+        "def sibling_d(values, lo, hi):\n"
+        "    out = []\n"
+        "    for v in values:\n"
+        "        if lo <= v < hi:\n"
+        "            out.append(v)\n"
+        "    return out\n"
+    ),
+}
+
+INPUTS_HARD = {
+    "sumselected": [([1, 2, 3, 4, 5], 2, 5), ([0, 10], 0, 1)],
+}
+
 def _rank(attack, path):
     art = attack.develop({"path": path}, tempfile.mkdtemp())
     out = attack.apply(art, {"path": path}, tempfile.mkdtemp())
@@ -144,12 +196,20 @@ def _topk_behaviour(ranking, hits, k):
     return None
 
 
-def run():
+def run(hard=False):
     attack = ArtifactOnlyAttack()
+    fixtures = FIXTURES_HARD if hard else FIXTURES
+    inputs_map = INPUTS_HARD if hard else INPUTS
     rows = []
-    for name, func in FIXTURES.items():
+    # Only functions present in the inputs map are TARGETS; the rest are
+    # decoys/siblings. Iterating over every fixture made sibling fixtures
+    # raise KeyError.
+    for name in [k for k in fixtures if k in inputs_map]:
         with tempfile.TemporaryDirectory(prefix="nxk_pilot_") as td:
-            src = func + "\n" + DECOYS
+            # Target plus decoys: unrelated helpers in the easy condition,
+            # true sibling functions in the hard one.
+            others = "".join(f for k, f in fixtures.items() if k != name)
+            src = fixtures[name] + "\n" + (others if hard else DECOYS)
             plain = os.path.join(td, "plain.py")
             with open(plain, "w", encoding="utf-8") as f:
                 f.write(src)
@@ -167,7 +227,7 @@ def run():
 
             # Behavioural identity: the evaluator may compare outputs, the
             # attacker may not. Names are useless here (they are renamed).
-            inputs = INPUTS[name]
+            inputs = inputs_map[name]
             plain_hits = _behavioural_match(plain, plain, name, r_plain, inputs)
             # The artefact path must be the OBFUSCATED file: passing the
             # plain one loaded unrenamed functions while the ranking held
@@ -188,7 +248,9 @@ def run():
 
 
 if __name__ == "__main__":
-    rows = run()
+    hard = "--hard" in sys.argv
+    rows = run(hard=hard)
+    print("condition: %s" % ("siblings" if hard else "unrelated decoys"))
     print(json.dumps(rows, indent=2))
     plain_hits = sum(1 for r in rows if r["plain_top1"] == 1)
     obf_hits = sum(1 for r in rows if r["obf_top1"] == 1)
