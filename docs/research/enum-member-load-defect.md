@@ -152,3 +152,46 @@ in a **different function's** scope, where the mapping supplies a different spel
 
 Not fixed. Four candidates reduced to one, and the one is the same "a value must have
 one owner" family: a local's spelling is decided in two scopes and they disagree.
+
+## Round 186: the class is renamed, its member is renamed, the attribute is not
+
+The generated lines:
+
+```python
+744:  self._cache_hash = props.hashability is _nx_ffd075.Hashability.HASHABLE_CACHED
+1529: _nixon_... = _nx_ffd075.Hashability
+2722: return self.hashability is _nx_ffd075.Hashability.HASHABLE or ...
+```
+
+`_nx_ffd075` **is `ClassProps`**. The attribute access `_nx_ffd075.Hashability` does
+**not** rename `Hashability` — `visit_Attribute` never touches attribute names, which
+is correct and necessary for third-party APIs.
+
+So the failure means the **class no longer has a member spelled `Hashability`**. The
+member was renamed *in the class body* while every access to it was left alone.
+
+**That is the guard failing in the direction opposite to rounds 182 and 183.** The
+class-body Store guard is supposed to skip these assignments; something is renaming
+them anyway.
+
+## The remaining candidates, and which this selects
+
+| candidate | status |
+|---|---|
+| bare-name class constant | refuted (184) |
+| enum member via a direct class-body `Assign` | refuted (184) — the reservation would have caught it |
+| class-body attribute accessed by name | refuted (185) |
+| **member renamed by a path that bypasses the Store guard** | **selected** |
+
+The reservation in round 184 covered `Assign` and `AnnAssign` **directly** in
+`node.body`. A member declared through an **annotation-only** statement, a
+**conditional** branch, a **nested class**, or an `Enum` functional API call would not
+be covered — and would still be renamed by whatever path handles `Store` nodes there.
+
+## Status
+
+Open. The direction of the failure is now known: the **declaration** is renamed and the
+**access** is not, which is the opposite of what rounds 182 and 183 assumed. The next
+step is to find how `ClassProps.Hashability` is declared in the source — one grep of
+`ClassProps`'s body for `Hashability` returned nothing, so it is inherited or created
+outside a plain assignment.
