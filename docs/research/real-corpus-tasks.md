@@ -1,4 +1,4 @@
-# Real Corpus Functions: 12/12 Cells Valid and Hit
+# Real Corpus Functions: 24/24 Cells Valid and Hit
 
 **Date:** 2026-10-30
 **Script:** `scripts/transfer/real_tasks.py`
@@ -53,7 +53,7 @@ the finding.
 
 **Does not add:** scale. Eight tasks in five modules is still small, and the
 corpus programs are simple. The review asked for 12–15 held-out projects with
-one task each; this is four modules. The gap narrows, it does not close.
+one task each; this is five modules. The gap narrows, it does not close.
 
 It also does not price authoring for real functions, where a specification may
 be ambiguous or undocumented — the hardest part of the real setting and the
@@ -67,7 +67,28 @@ part the synthetic tasks were designed to sidestep.
 | real corpus (`real_tasks.py`) | 24 | 24 | 24 |
 | **total** | **48** | **48** | **48** |
 
-All 36 cells were produced after the opaque-predicate fix (`748ebae`). Before
+All 48 cells were produced after the opaque-predicate fix (`748ebae`). Before
 it, several cells were invalid for reasons that had nothing to do with the
 benchmark — which is the reason this number is reported separately from the
 pre-fix state rather than pooled with it.
+
+## Correction (round 34): three factual errors in this file
+
+An independent review read this document and found it contradicted itself and
+the manuscript. All three were mine, and all three were shipped:
+
+| claimed | actual |
+|---|---|
+| title said "12/12 Cells" | the table has 24 cells |
+| "this is four modules" | five modules are used |
+| "All 36 cells" | the combined total is 48 |
+
+The cause is simple and worth recording: when this file was doubled from four
+tasks to eight, the tables were updated and the prose around them was not. The
+manuscript was updated separately, so the two disagreed.
+
+**The lesson is not "update the prose".** It is that a document reporting
+numbers needs a check that its own numbers agree with each other — a human
+reviewer found these in one pass, and no test covers a markdown file.
+
+Verified after the fix: title 24/24, body says five modules, total 48.
