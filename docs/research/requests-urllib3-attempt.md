@@ -240,3 +240,43 @@ verified, and a gate change that writes whole trees is worth its own measured ro
 `urllib3`'s `typing` and class-body-alias defects are **closed and verified**. The package
 is not gated because the gate's layout is one level deep, and that is written down as the
 next change rather than worked around.
+
+## Round 211: copying trees does not help, and the reason is a different defect
+
+Replaced the flat `os.listdir` copy with `shutil.copytree` for every vendored package,
+which fixed the `urllib3.util` subpackage problem. It did **not** give a green gate:
+
+```
+artefacts checked: 48
+failures: 18
+FAIL pkg/attr/_cmp: cannot import name 'cmp_using' from 'attr._cmp'
+FAIL pkg/attr/_compat: cannot import name 'PY_3_11_PLUS' from 'attr._compat'
+```
+
+**The failure moved.** With trees copied, each package's real `__init__.py` runs, and it
+does `from ._cmp import cmp_using`. The obfuscated `_cmp` no longer exports `cmp_using`
+under that name, so the package fails to import — for a reason that has nothing to do with
+`urllib3`.
+
+**Reverted.** The gate keeps its flat layout and its 76 green artefacts.
+
+## What this establishes
+
+The gate's flat layout was **masking** a different defect: obfuscated modules do not
+preserve the names their package `__init__` re-exports. `all_preserve` handles a module's
+own `__all__`, and this is the **importer's** side of the same contract.
+
+That is a real finding and a fifth-order one: it only appears when a package's `__init__`
+imports from a module the gate has obfuscated. The synthetic fixtures and every
+single-file source cannot produce it.
+
+## Status
+
+`urllib3`'s two defects are closed and verified by direct import. Neither `urllib3` nor
+`requests` is in the gate, and the blocker is now:
+
+1. a module's re-exported names must survive (a new defect, not yet investigated);
+2. only then does the tree-copy layout pay off.
+
+Recorded in that order so the next attempt does not re-run the tree copy and conclude the
+layout was wrong.
