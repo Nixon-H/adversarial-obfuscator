@@ -365,3 +365,58 @@ printing which guard returns for that `Name` — would settle it.
 
 Seven rounds, no fix, four hypotheses eliminated. The remaining space is **which guard
 in `visit_Name` returns**, and that is one print away.
+
+## Round 195: the guard instrumentation found it, and the fix is ordering
+
+The print round 194 asked for:
+
+```
+G occurrences of i: 5
+G ctx=Load pf=False param=True cls=0 comp=0 func=2 fn=getter
+G ctx=Load pf=False param=True cls=0 comp=0 func=2 fn=getter
+```
+
+Both loads of `i` inside `getter` report **`param=True`** — `_local_params` contains it,
+because `i` **is** a parameter of `getter`. So round 193's reading was right and round
+194's clearing failed for a reason it did not check: **the clearing code ran after
+`_local_params` was set**, and `visit_FunctionDef` assigns it before
+`generic_visit`.
+
+## The fix
+
+Visit `args.defaults` and `args.kw_defaults` **before** the parameter set is
+accumulated:
+
+```python
+# before _prev_params = ... / _local_params = _accum
+for _d in list(node.args.defaults) + [d for d in node.args.kw_defaults if d is not None]:
+    self.visit(_d)
+```
+
+The default is then renamed with the **enclosing** mapping, which is what its semantics
+require.
+
+## Result
+
+| check | result |
+|---|---|
+| renamer / preserve / import / dataclass | **42 passed** |
+| `_next_gen`, `_cmp`, `_funcs`, `_config`, `_compat` | import |
+| **`_make`** | **`NameError: _nx_ec3de3`** — a sixth layer |
+
+**The `i` defect is closed.** Eight rounds, five hypotheses, one fix.
+
+## What eight rounds established
+
+| round | finding |
+|---|---|
+| 188 | the default is not visited |
+| 189 | `ast.arg` has no `default` |
+| 190 | idempotence is necessary, not sufficient |
+| 192 | defaults live on `node.args`, visiting them is safe |
+| 193 | the emitted line still says `i=i` |
+| 194 | clearing `_local_params` after the fact does nothing |
+| **195** | **the guard says `param=True` — the visit must come first** |
+
+Every step was correct and none was sufficient. The one that resolved it was the one
+that **printed the guard state**, which was available from round 189.

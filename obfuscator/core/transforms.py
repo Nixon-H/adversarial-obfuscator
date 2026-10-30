@@ -339,6 +339,16 @@ class SymbolRenamer(ast.NodeTransformer):
                 _param_names.add(node.args.vararg.arg)
             if node.args.kwarg is not None:
                 _param_names.add(node.args.kwarg.arg)
+        # Visit default VALUES first, before this function's parameters are in
+        # scope. A default is evaluated in the ENCLOSING scope, before the
+        # parameter exists, so `def prop(self, i=i)` inside `for i in ...` must
+        # rename the right-hand i with the outer mapping. Doing this after
+        # _local_params is set meant visit_Name skipped it as a parameter and the
+        # default kept a spelling the loop no longer binds (round 195 instrumented
+        # the guard and found param=True for exactly that name).
+        for _d in list(node.args.defaults) + [
+                d for d in node.args.kw_defaults if d is not None]:
+            self.visit(_d)
         _prev_params = getattr(self, '_local_params', None)
         _accum = set(_prev_params) if _prev_params else set()
         _accum.update(_param_names)
@@ -358,11 +368,7 @@ class SymbolRenamer(ast.NodeTransformer):
         # Found on attrs/_make.py. `ast.arg` has no `default` -- defaults live
         # on `node.args`, which is why visiting them from visit_arg raised
         # AttributeError.
-        # Keep: visiting defaults from FunctionDef is correct and safe (round 192).
-        # Do NOT keep the parameter-clearing variant: it left `i=i` unchanged
-        # (round 194) and perturbed an unrelated ordering-sensitive test.
-        for _d in list(node.args.defaults) + [d for d in node.args.kw_defaults if d is not None]:
-            self.visit(_d)
+
 
     def _visit_comp(self, node):
         """Track comprehension nesting so the class-body Store guard ignores it."""
