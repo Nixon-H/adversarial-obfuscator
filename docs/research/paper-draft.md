@@ -21,7 +21,10 @@ Python source.
 
 We build 17 tasks — nine hand-written and eight drawn from real programs — each
 a target function among same-arity siblings, and give an attacker only an
-emitted artefact and the task's specification. The attacker's asset is a set of
+emitted artefact and the task's specification. A further five external sources
+(three single-file libraries and one vendored package, 104 artefacts) are gated
+for execution, which validates that the artefacts run without providing an
+independent specification. The attacker's asset is a set of
 executable properties derived from that specification, applied unchanged to
 every build.
 
@@ -33,8 +36,8 @@ predicted by its own construction.
 
 We report that plainly, and we report what survives: a benchmark whose gates
 and reproduction are reusable, a calibration showing what the counter does
-respond to, and a correctness defect in the obfuscator found by the behavioural
-gate. We do **not** claim that diversification fails to raise attacker cost. We
+respond to, and **nine correctness defects** in the obfuscator, found by gates
+and by code the benchmark did not write. We do **not** claim that diversification fails to raise attacker cost. We
 claim that this instrument cannot tell, and we explain why so that the next
 attempt does not repeat it.
 

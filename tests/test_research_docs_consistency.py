@@ -157,3 +157,34 @@ def test_reproduce_script_exists_and_is_runnable():
     for table in ("table_singleton", "table_module_size", "table_diversity",
                   "table_fixed_build", "table_fault_control", "table_authoring"):
         assert "def %s(" % table in src, "reproduce.py lost %s" % table
+
+
+def test_paper_defect_count_matches_the_table():
+    """The abstract must not understate the defects the table lists.
+
+    Rounds 145 and 155 both found the paper saying "a correctness defect" while
+    section 6 listed nine. A prose count that drifts from its own table is the
+    failure mode this whole programme has been guarding against, and it recurred
+    in the abstract because nothing checked it.
+    """
+    with open(os.path.join(DOCS, "paper-draft.md"), encoding="utf-8") as f:
+        text = f.read()
+    table_rows = [ln for ln in text.splitlines()
+                  if ln.startswith("| ") and ln.split("|")[1].strip().isdigit()]
+    assert len(table_rows) >= 9, "defect table lost rows: %d" % len(table_rows)
+    assert "nine correctness defects" in text, (
+        "the abstract no longer states the defect count that the table supports"
+    )
+
+
+def test_paper_corpus_count_matches_the_gate():
+    """The abstract's corpus claim must match what the gate actually checks."""
+    with open(os.path.join(ROOT, "scripts", "transfer", "artefact_gate.py"), encoding="utf-8") as f:
+        gate = f.read()
+    with open(os.path.join(DOCS, "paper-draft.md"), encoding="utf-8") as f:
+        paper = f.read()
+    if "more_itertools" in gate:
+        assert "external sources" in paper, (
+            "the gate covers an external package but the paper does not mention "
+            "external sources"
+        )
