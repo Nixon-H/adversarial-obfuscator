@@ -311,6 +311,13 @@ class SymbolRenamer(ast.NodeTransformer):
             for old, new in self._rename_log:
                 f.write(f"{old} -> {new}\n")
     def visit_FunctionDef(self, node):
+        # A nested `def` keeps its name (closures are preserved by design), so
+        # its name must be RESERVED as well -- otherwise a reference to it in an
+        # enclosing scope is renamed while the definition is not. `slots_getstate`
+        # and `slots_setstate` are nested inside `_make_getstate_setstate` and
+        # returned as a pair; the return was renamed, the defs were not.
+        if getattr(self, '_func_depth', 0) > 0:
+            self.reserved.add(node.name)
         old_function = self.current_function
         self.current_function = node.name
         if node.name not in self.protected_functions and not node.name.startswith("__") and not node.name.startswith("_") and node.name not in self.reserved:

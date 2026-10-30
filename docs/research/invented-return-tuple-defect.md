@@ -148,3 +148,61 @@ Not tested. The command is the same one that has worked six times: print
 Open, with the signature corrected: not invented names, but **a definition left alone
 while its reference was renamed**. Third instance of that desync, and the first where
 the `Store` is a `def` rather than a class-body assignment or a comprehension target.
+
+## Round 199: a nested `def` — the name is preserved, so it must be reserved
+
+The print round 198 asked for:
+
+```
+F name=slots_getstate cur=_make_getstate_setstate protected=False reserved=False |pf|=0
+F name=slots_setstate cur=_make_getstate_setstate protected=False reserved=False |pf|=0
+```
+
+Every guard is **false**. `visit_FunctionDef` should have renamed both. It did not
+because of the **fourth** thing the condition checks, which an `if` on `protected` and
+`reserved` does not show: `current_function` is `_make_getstate_setstate`, so both are
+**nested defs**, and nested closures are preserved by design (the V10 super()/override
+reason in the code comment).
+
+## The defect in one sentence
+
+**A name is preserved in one place and renamed in another, because "preserved" was
+implemented as "don't touch the definition" rather than "reserve the name".**
+
+The reference in the sibling's `return` was renamed; the nested `def` was not.
+
+## The fix
+
+```python
+if getattr(self, '_func_depth', 0) > 0:
+    self.reserved.add(node.name)
+```
+
+A nested `def` keeps its name **and** reserves it, so every reference agrees. Same
+repair as round 187's nested classes, applied to functions.
+
+## Result
+
+| check | result |
+|---|---|
+| renamer / preserve / import / dataclass | **42 passed** |
+| artefact gate | **26 artefacts, 0 failures** |
+| **all six attrs modules** | **import** |
+
+**`_make.py` now imports.** The tenth defect — open since round 174 — is **closed**,
+and `attrs` is the fifth external source to pass whole.
+
+## The six layers, all fixed
+
+| # | defect | fixed |
+|---|---|---|
+| 1 | `nonlocal hash` | 175 |
+| 2 | `typing` runtime imports | 178 |
+| 3 | comprehension vs class-body Store | 182 |
+| 4 | nested class renamed, attribute not | 187 |
+| 5 | default argument kept old loop-var spelling | 195 |
+| 6 | nested def preserved, reference renamed | **199** |
+
+**Six layers, six fixes, twenty-five rounds.** Every one was the same rule: *a name
+must have one authority.* Five of the six were a `Store` preserved while a `Load` was
+renamed.
