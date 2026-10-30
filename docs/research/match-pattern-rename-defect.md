@@ -66,3 +66,56 @@ targeted change to the renamer's `visit_MatchOr`, a method it currently lacks.
 
 Five defects, three of them from external code, and every one of them is
 invisible to a test that only checks the module compiles **before** obfuscation.
+
+
+## Round 94: the cause is not renaming — it is string replacement
+
+The hypothesis in the previous section (inconsistent binding renames) is wrong.
+Minimal tests of tuple patterns, class patterns and bare captures all **compile**
+after renaming:
+
+| shape | result |
+|---|---|
+| `case (1, x) | (2, x):` | compiles, both alternatives get the same name |
+| `case P(x) | P(x):` | compiles |
+| `case x:` | compiles |
+
+Looking at the source explains it. The patterns are **string literals**:
+
+```python
+case 'normal' | 'gauss':
+case 'rectangular' | 'uniform':
+```
+
+The string obfuscation pass replaces those constants with encoded lookups, so a
+constant pattern becomes a **capture pattern** — and two alternatives then bind
+two different names:
+
+```python
+case _nixon_A(_nixon_x) | _nixon_A(_nixon_y):
+```
+
+which CPython rejects as "alternative patterns bind different names".
+
+## What this changes
+
+It is not a renamer bug at all. It is a **string-pass** bug: replacing a string
+constant inside a `match` pattern changes the pattern's *kind*, from matching a
+value to capturing a name. The renamer was a red herring, and the previous
+section's proposed fix would not have helped.
+
+That is worth recording as a process note: I had a plausible mechanism, wrote it
+down, and the minimal test refuted it in one command. The refutation cost less
+than the theory.
+
+## Severity and scope
+
+Any `match` with a string-literal pattern breaks, and `match` on strings is the
+common case. The fix belongs in the string pass, which must leave `match`
+patterns alone — they are not ordinary constants.
+
+## Status
+
+Open, with the cause correctly identified this time. Not fixed because the string
+pass is applied after the whole tree is rewritten, and the repair needs a
+pattern-aware exclusion rather than a renamer method.
