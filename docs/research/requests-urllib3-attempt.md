@@ -280,3 +280,47 @@ single-file source cannot produce it.
 
 Recorded in that order so the next attempt does not re-run the tree copy and conclude the
 layout was wrong.
+
+## Round 212: the module has no `__all__`, and that is the whole story
+
+```
+_cmp.py declarations:  def cmp_using(  ...  def _make_init()  ...
+_cmp.py __all__:       absent
+generated 'cmp_using': False
+```
+
+`cmp_using` is a **public function with no `__all__` entry**, so the renamer treats it as
+an ordinary name and renames it. `attr/__init__.py` then does
+`from ._cmp import cmp_using` and fails.
+
+## Why this cannot be fixed inside the module
+
+`all_preserve` handles a module's **own** `__all__`. Here there is no `__all__` — the
+export contract exists only in **another file**, which the renamer never sees. A per-module
+transform cannot know that a name is imported elsewhere.
+
+Three ways out, none of them local:
+
+1. **Do not rename public module-level functions at all.** Simple, safe, and it gives up
+   most of the identifier obfuscation this tool exists for.
+2. **Rename and rewrite the importer too** — a whole-program pass over every module in the
+   package. That is what `obfuscator/core/sources.py` would need, and it is a redesign.
+3. **Require `__all__`** and refuse to obfuscate a module that exports without one.
+   Honest, but it makes the tool unusable on most real packages.
+
+The current behaviour picks none of these and quietly breaks the import.
+
+## What this means for the corpus
+
+`urllib3` and `requests` stay un-gated, and not because of the gate's layout. The blocker
+is a **product design question** about cross-module naming, which is larger than any fix
+this programme has made and needs a decision rather than an experiment.
+
+## The honest position
+
+Twelve defects have been found and eleven fixed, all of them inside one module's
+transformation. This one is the first that **cannot** be fixed inside a module, and saying
+so is more useful than a tenth attempt at the renamer.
+
+`_cmp`'s rename is not a bug in the renamer. It is the renamer doing exactly what it was
+built to do, in a situation where doing it breaks the caller.
