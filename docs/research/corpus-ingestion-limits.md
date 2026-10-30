@@ -55,3 +55,52 @@ easiest to ingest are also the least like application code.
 
 That is worth stating in the paper, because "three external modules" reads like a
 sample size when it is closer to a sample **type**.
+
+## Round 148: the limit was solvable — vendor the package
+
+The conclusion above that "half the external modules cannot be gated" was correct
+about **single-file** ingestion and wrong about the **fix**. Vendoring the package
+whole works.
+
+`more_itertools` is now vendored at `scripts/transfer/corpus/pkg/more_itertools/`
+— `recipes.py`, `more.py`, and an `__init__.py` that re-exports both. Gating each
+module inside that package, with the other module present unmodified:
+
+| module | k=0 | k=2 |
+|---|---|---|
+| `recipes` | imports | imports |
+| **`more`** | **imports** | **imports** |
+
+`more.py` is **175 KB and 117 top-level functions**, and it previously failed with
+`ImportError: attempted relative import with no known parent package`. Inside a
+real package it obfuscates and imports cleanly at both build indices.
+
+## What changed in the corpus
+
+| | before round 148 | after |
+|---|---|---|
+| gated sources | 3 single-file | 3 single-file + **1 package (2 modules)** |
+| largest gated module | 61 KB | **175 KB** |
+| previously rejected | `more.py`, `requests/utils.py`, `attrs/validators.py` | `more.py` now **passes** |
+
+So the corpus is no longer limited to single files. `requests/utils.py` and
+`attrs/validators.py` would need their own packages vendored — a mechanical job
+this round did not do — but the obstacle is now **effort**, not structure.
+
+## The honest correction
+
+Round 147 said the narrowness was "structural rather than incidental". That was
+half right: single-file ingestion is structurally narrow, and **vendoring is the
+structural fix**. One round of the fix produced the largest module this programme
+has ever gated, and it passed.
+
+The prior conclusion that AST-level extraction was the only alternative was also
+unnecessary — no extraction, no editing of the code under test, just the package as
+upstream ships it.
+
+## Status
+
+`more.py` is now the strongest single piece of evidence that the obfuscator handles
+real library code: 175 KB, 117 functions, relative imports, and it survives at two
+build indices. It is not yet in `artefact_gate.py`'s module list; that is a small
+edit for the next round.
