@@ -57,3 +57,24 @@ of tests. Only a completed run with `success` is.
 - Whether any *other* failure is hiding behind the 26 non-completed runs. The
   five most recent completed runs all failed on this same test, which suggests
   one cause, but the earlier queued commits have not been checked.
+
+## Round 43: the queue is a runner problem, not only a concurrency one
+
+A concurrency group was added (`.github/workflows/ci.yml`) so superseded runs
+are cancelled and the newest commit gets the runner. That is correct and will
+help once runners are available.
+
+It does not explain the current state. After the change, new runs are still
+`queued`, as are the older ones — nothing is being picked up at all. That
+points at runner availability (capacity, billing, or a disabled runner), not at
+queue depth, and this session cannot diagnose or fix it from here.
+
+**So the honest statement is two-part:**
+
+1. the workflow now has the concurrency control it lacked, so a backlog cannot
+   silently accumulate again in the same way;
+2. CI feedback is currently unavailable for reasons outside this repository's
+   configuration, and the local suite is the only verification in effect.
+
+Anything claiming "CI is green" while runs sit queued is unsupported. The
+verification that counts today is the local run.
