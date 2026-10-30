@@ -119,3 +119,60 @@ pipeline for this source, and diff it against the renamer's default set. The ext
 entry is the bug, and it is one line to find — the same "look at the value"
 technique that eventually settled the table defect, applied for the first time
 here before rather than after two wrong fixes.
+
+## Round 127: function renaming is effectively disabled
+
+Instrumenting `reserved` at the visit boundary showed what round 126 could not:
+`helper` is **not** reserved when the pipeline hands the tree to the renamer. So
+reservation was never the cause.
+
+The actual output for the test's source:
+
+```
+def foo():
+def ping(self):
+def _priv():
+def helper():
+```
+
+**None of the four is renamed.** `foo` is an export and should keep its name;
+`_priv` is underscore-prefixed and by policy keeps its name; `ping` is a method and
+is deliberately preserved. But `helper` is a plain module-level function that no
+rule protects — and it survives too.
+
+So `symbol_rename` is not renaming **module-level functions at all**. The eleven
+failures are not stale tests and not a reservation problem: the pass has become a
+no-op for the construct it exists to obfuscate.
+
+## Why this matters more than the eleven tests
+
+Renaming functions is the core of the obfuscator's identifier obfuscation. If a
+plain `def helper():` keeps its name, the output is far more readable than the
+configuration says it should be — and `test_diversity`, `test_golden` and
+`test_private_names_still_renamed` are all detecting exactly that, from three
+different angles.
+
+The gate cannot see it: the artefacts still **run**. Every defect this programme
+has chased for fourteen rounds produced code that failed; this one produces code
+that works and is **less obfuscated than advertised**.
+
+## What is established
+
+| claim | status |
+|---|---|
+| `helper` is not in `reserved` before the visit | confirmed |
+| `helper` is not renamed | confirmed |
+| `foo`, `ping`, `_priv` also unrenamed | confirmed |
+| reservation causes it | **refuted** |
+| function renaming is disabled | **confirmed for module-level defs** |
+
+## The next step
+
+Find the condition in `visit_FunctionDef` that skips the rename. The code reads
+`if node.name not in self.protected_functions and not node.name.startswith("__") ...`
+and the comment says module-level functions still rename — so either the condition
+now excludes them, or `protected_functions` contains everything.
+
+`protected_functions` is set from `sources.py`. If it is populated with every
+function name rather than the ones that must be protected, the renamer would
+preserve them all silently — which matches what the output shows.
