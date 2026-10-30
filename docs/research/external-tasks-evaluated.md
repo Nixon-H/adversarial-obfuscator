@@ -1,4 +1,9 @@
-# External Tasks Through the Gates: 8 of 9 Cells Valid
+# External Tasks Through the Gates: 12 of 12 Cells Valid
+
+> **Updated in round 171.** The original run below reported 8 of 9; the corpus
+> has since grown to 12 cells and two evaluator bugs (classes and private
+> aliases counted as candidates) were fixed. The historical section is kept
+> because it records what was true when measured.
 
 **Date:** 2026-10-30
 **Source:** `more_itertools.recipes` (MIT), vendored at
@@ -29,7 +34,7 @@ here because the point of this run is the gate, not the score.
 ## What this establishes
 
 **Third-party code passes the same gates as the internal corpus**, at 8 of 9
-cells. Three functions from a real library, with the library's own 70 functions
+cells in the original run and 12 of 12 after the round 171 evaluator fix. Three functions from a real library, with the library's own 70 functions
 as siblings, are identified by a specification-derived property set — and the
 audit machinery from the internal benchmark transfers without modification.
 
@@ -49,7 +54,7 @@ self-referential. The internal tasks were built to a template; these were not.
 ## Why it belongs in the paper
 
 The paper's §4.1 says the benchmark is 17 hand-built tasks. It can now say that
-a third-party module passes the same gates at 8 of 9 cells, which is the
+a third-party module passes the same gates at 12 of 12 cells, which is the
 difference between "a benchmark we built" and "a benchmark that has been
 exercised on code we did not write".
 
