@@ -133,3 +133,56 @@ A minimal reproduction at the source level (the 4-function input above is
 already minimal for this case) and a bisect over build options to find which
 transform drops the function. That is product debugging, not research
 instrumentation, and it should be filed separately from the study.
+
+## Round 19: the culprit is a two-transform interaction
+
+Bisecting the pass list at seed 5505, build index 4, over the four-function
+source:
+
+| pass set | target survives |
+|---|---|
+| rename, dead_code, opaque_pred, string_encode, vm (base) | no |
+| base minus rename | no |
+| base minus **dead_code** | **yes** |
+| base minus **opaque_pred** | **yes** |
+| base minus string_encode | no |
+| base minus vm | no |
+
+Either of two removals fixes it, which points at an interaction rather than
+a single faulty transform. Isolating:
+
+| pass set | survives |
+|---|---|
+| dead_code alone | yes |
+| opaque_pred alone | yes |
+| **dead_code + opaque_pred** | **no** |
+| rename + dead_code | yes |
+| rename + opaque_pred | yes |
+| rename + dead_code + opaque_pred | no |
+
+So the minimal trigger is **`dead_code` together with `opaque_pred`**. Adding
+`rename` neither causes nor prevents it.
+
+Across twelve seeds with that pair, **1 of 12** loses the function (seed 12).
+So the defect is a seed-dependent interaction between two transforms, not a
+property of either one.
+
+### Why this is the right shape of answer
+
+It gives product debugging three things it can act on:
+
+1. a **minimal repro** — two transforms, not five;
+2. a **named interaction** — dead-code insertion and opaque predicates
+   combined;
+3. a **rate** — about one seed in twelve, so it will hit roughly 8% of builds
+   and cannot be dismissed as a one-off.
+
+### Still open
+
+The mechanism is not identified: whether dead-code insertion deletes the
+target's body, or opaque-predicate injection mislays it, requires reading the
+transform implementations rather than bisecting pass sets. That is the next
+step and it is product work.
+
+Until then, any build using both transforms is suspect, and the study must
+either exclude the pair or verify every build behaviourally before use.
