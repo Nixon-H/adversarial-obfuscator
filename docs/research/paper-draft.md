@@ -160,16 +160,24 @@ frozen and nothing carries between builds.
 
 ### 5.2 Module size does
 
-| candidates | mean probes |
-|---|---|
-| 1 | 2.0 |
-| 2 | 3.4 |
-| 3 | 5.8 |
-| 4 | 8.6 |
+| candidates | specification properties | blind properties |
+|---|---|---|
+| 1 | **2.0** probes | 8.0 |
+| 2 | **3.4** | 12.0 |
+| 3 | **5.8** | 16.0 |
+| 4 | **8.6** | 20.0 |
 
 Monotone in 9 of 9 tasks. Permuting sibling order leaves the endpoint unchanged
 (every permutation ends at 9) while the path moves, so the endpoint is
 order-invariant and sibling-dependent.
+
+**A blind-property baseline rules out the near-definitional reading.** An
+attacker whose four properties always return true — no information about which
+candidate is the target — spends 8.0 probes at one candidate and 20.0 at four,
+against 2.0 and 8.6 for the specification set. So the growth is not merely the
+size of the search space: a specification buys roughly a factor of two at small
+sizes, and the advantage erodes as modules grow (25% of the blind cost at one
+candidate, 43% at four).
 
 ### 5.3 Calibration: what the counter can detect
 
