@@ -24,18 +24,31 @@ from here" below.
 
 ## The one thing worth doing next
 
-**Vendor two packages.** `requests` and `attrs` are collected but not gated because
-their relative imports need package context. Rounds 148–150 built exactly the
-machinery for this:
+**Decide whether public exports may be renamed.** This is the only open defect and it
+is a **product decision**, not a fix (round 212). `attr/_cmp.py` declares a public
+function and no `__all__`; the renamer renames it correctly by its own rules, and
+`attr/__init__.py`'s `from ._cmp import cmp_using` then fails.
 
-1. fetch the package into `scripts/transfer/corpus/pkg/<name>/`;
-2. add its name to the tuple in `artefact_gate.py`'s `_modules()` that already lists
-   `("more_itertools", "attr")`;
-3. run `python3 scripts/transfer/artefact_gate.py --variants 2 --seeds 4242,7`.
+Three exits, none of them local to a module:
 
-This is mechanical. It adds no new claim. It does widen the corpus, which is the
-only thing that has ever found defects in this programme — six of the eleven came
-from code the project did not write.
+1. **stop renaming public module-level functions** — safe, and gives up most of the
+   identifier obfuscation the tool exists for;
+2. **rewrite the importer too** — a whole-program pass over every module in a package,
+   which is a redesign of `obfuscator/core/sources.py`;
+3. **require `__all__`** and refuse to obfuscate without it — honest, unusable on most
+   real packages.
+
+The current behaviour picks none of them and silently produces a module its own package
+cannot import. Whichever is chosen, it should be **documented as a contract** rather
+than left implicit.
+
+## After that
+
+The gate still writes **one flat directory per package**, so `urllib3` (subpackages) and
+`requests` (depends on `urllib3`) cannot be gated. `shutil.copytree` fixes the layout —
+round 211 confirmed it — but only once the export question above is settled, because
+copying trees makes each package's real `__init__.py` run and the re-export failure
+appears immediately.
 
 ---
 
