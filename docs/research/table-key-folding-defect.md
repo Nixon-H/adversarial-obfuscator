@@ -180,3 +180,53 @@ Round 115: confirmed the order, called it the cause, corrected that.
 Round 116: a control at last, which refuted the straightforward reading.
 
 The control took one command. Reaching for it first would have saved two rounds.
+
+## Round 117: the defect is the interaction of two passes
+
+The control from round 116, applied to every pass in turn:
+
+| pass disabled | result |
+|---|---|
+| **`symbol_rename`** | **imports** |
+| **`obf_calls`** | **imports** |
+| `cfg_flatten` | imports |
+| `bogus_exceptions` | fails |
+| `split_vars` | fails |
+| `unfold_constants` | fails |
+| `mba_subs` | fails |
+| `opaque_predicates` | fails |
+| `string_encode` | fails |
+
+Two of the nine make the defect disappear: the table pass and the rename pass.
+The others are irrelevant, and `cfg_flatten` also happening to import is a
+separate observation worth checking later.
+
+So it is the **interaction**: a table is built, then a rename runs over both the
+definitions and the table, and the two do not agree. Round 115 said this was a
+precondition; it is now shown to be the mechanism's location, by control.
+
+## What remains unknown, precisely
+
+`visit_Name` renames every `Name` by id, so a table entry and its definition
+should receive the same spelling. They do not, which means one of three things:
+
+1. **the table's value is not a `Name`** at the time the renamer runs (it may be
+   a string, or a nested attribute, that `visit_Name` does not reach);
+2. the table is **re-emitted** after renaming by a pass that keeps a stale copy;
+3. the definition is **skipped** by the renamer while the table entry is not.
+
+Distinguishing those needs one dump: the tree immediately after `obf_calls`,
+and the tree immediately after the renamer, with the table entry and the
+definition's spelling shown side by side. That is the next step and it is small.
+
+## The method, at last
+
+| round | method | outcome |
+|---|---|---|
+| 114 | guessed a cause, wrote a fix | reverted |
+| 115 | reasoned from pass order | corrected |
+| 116 | one control | refuted the reading |
+| **117** | **one control per pass** | **located to two passes** |
+
+Four rounds. The last two used the method the whole programme has been
+recommending, and the last two produced the only hard results.
