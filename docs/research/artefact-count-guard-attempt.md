@@ -53,7 +53,7 @@ could not derive what it was checking:
 |---|---|---|
 | 173 | conflicting `N of M` claims | `N of M` is not one quantity |
 | 227 | artefact count | the count is a runtime measurement, not a source property |
-| 137, 141 | reducers | they altered the thing they measured |
+| 137, 14a | reducers | they altered the thing they measured |
 
 **A guard is only as good as its ability to compute the truth independently of the claim.**
 Where it cannot, the honest alternative is a recorded rule and a periodic audit — which is
