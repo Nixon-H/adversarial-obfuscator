@@ -176,3 +176,60 @@ now excludes them, or `protected_functions` contains everything.
 `protected_functions` is set from `sources.py`. If it is populated with every
 function name rather than the ones that must be protected, the renamer would
 preserve them all silently — which matches what the output shows.
+
+## Round 128: the condition, and one clause that explains part of it
+
+The gate on renaming a function:
+
+```python
+if (node.name not in self.protected_functions
+        and not node.name.startswith("__")
+        and not node.name.startswith("_")
+        and node.name not in self.reserved):
+```
+
+Instrumented at the visit boundary for the failing source:
+
+```
+protected_functions = 0     (so nothing is protected)
+'helper' in protected_functions: False
+reserved = 310 entries      (and 'helper' is not among them)
+```
+
+So for `helper`, **every clause passes** — yet it is not renamed. The
+`startswith("_")` clause explains `_priv` and nothing else in the failing set.
+
+Two facts that must both be true and are not:
+
+1. the condition admits `helper`;
+2. the output contains `def helper(`.
+
+## What that means
+
+Either the `if` body does not reach its rename for module-level functions, or the
+name is rewritten and then **rewritten back**, or the emitted `def helper(` comes
+from a path that bypasses the renamer entirely — a copy of the original source
+concatenated after the transformed tree.
+
+That third possibility is worth checking first, because the earlier `_MOD_SRC`
+inspection showed `__all__` at the top of the output followed by `def foo():`
+with the **original formatting**, including a blank line the AST unparser would
+not normally produce.
+
+## Established vs not
+
+| claim | status |
+|---|---|
+| `protected_functions` is empty | confirmed |
+| `helper` is not reserved | confirmed |
+| the condition's clauses all pass for `helper` | confirmed by reading |
+| functions are not renamed in the output | confirmed |
+| **why** | **not established** |
+
+## The next step, unchanged
+
+Check whether the output contains the original source verbatim — search for a
+second `__all__` assignment or a duplicate module body. If the emitted artefact is
+the transformed tree **plus an untouched copy**, no renamer change would fix it
+and the eleven failures have a completely different cause from the one this
+document has been pursuing.
