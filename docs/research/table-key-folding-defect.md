@@ -60,3 +60,45 @@ that found `hexversion` and `isqrt`, rather than reading the passes.
 
 Eight defects. This one is the first found in a module over 50 KB, and the first
 where the observable is a wrong **data structure** rather than a missing binding.
+
+
+## Round 114: the cause is not the folding, it is the order
+
+I instrumented this expecting a dict-key or tuple problem and got it wrong twice.
+
+**The folding is harmless.** `(sum([2]), ValueError)` evaluates to `(2,
+ValueError)`; `sum([2, 1])` evaluates to `3`. The table's keys are correct after
+evaluation. What is not correct is a **value**: the table maps an index to a
+**function name**, and one of those names is undefined at the point the table is
+built.
+
+```
+_nx_ftable = dict([(0, callable), (1, iter), (sum([2]), ValueError), ..., (n, _nx_f24f62), ...])
+```
+
+`_nx_f24f62` is a renamed name. The table is emitted **before** the rename pass
+runs, so the entry keeps the pre-rename spelling while every other reference in
+the module gets the new one. The table then points at a name that exists only in
+its own construction line.
+
+**That is a third instance of the same structural defect** as `hexversion` and
+`_sumprod`: a binding written before a rename, and a use after it.
+
+## What I got wrong, in order
+
+1. guessed "dict keys are unfolded into tuples" — wrote a `visit_Dict` fix;
+2. the fix kept the keys but the module still failed, so I inspected the emitted
+   table and found the tuple *is* the key and the key is correct;
+3. only then did I look at the **values** and find the undefined name.
+
+Two rounds of guessing before reading the artefact, which is the same mistake as
+rounds 87–88. The instrument was available the whole time: dump the emitted
+table and look at it.
+
+## Status
+
+Open. The fix is to build the function table **after** renaming, or to rename
+its entries in step — the same "one owner per value" shape that solved the core
+digest and the licence key.
+
+The dict-key change was reverted: it addressed a problem that does not exist.
