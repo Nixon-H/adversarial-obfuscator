@@ -377,3 +377,55 @@ in the internal-rename path. Two options:
 Neither is a five-minute change. Recorded rather than patched, because a sixth extension of
 a flat `reserved` set would make the leak worse, and this programme has now spent seven
 rounds learning what a flat namespace costs.
+
+## Round 215: the regression is real, the scoping fix is not enough, and round 210 is reverted
+
+Round 214's suggestion — scope the class-body reservation with a save/restore around the
+body — was implemented and **did not fix the three tests**:
+
+```
+assert "helper" not in defs
+E  AssertionError: assert 'helper' not in ['compute', 'helper']
+```
+
+That test is `test_def_use_consistency_with_flag`, which exercises the **opt-in
+internal-rename path**. `helper` is a **class method**, and `internal_rename` exists
+precisely to rename proven-internal methods. Reserving every class-body method name makes
+that flag a no-op for its own intended target.
+
+So the conflict is not scope. It is **priority**: an unconditional class-body reservation
+cannot coexist with an opt-in "rename internal methods" flag, because the flag's whole
+purpose is to rename the names the reservation protects.
+
+**Round 210 reverted.** 54 tests pass across internal-rename, renamer semantics, preserve,
+import and dataclass.
+
+## What that costs
+
+`urllib3/_collections.py` is back to failing on its class-body alias. Two defects it had
+fixed by round 210 — `typing` and the class-body alias — become:
+
+| defect | status |
+|---|---|
+| `typing` module import | **fixed and kept** (round 208) |
+| class-body alias | **regressed to open** |
+
+That is the correct trade: `typing` was a repair with no conflicting owner. The class-body
+alias conflicts with a documented feature, and a fix that silently disables
+`internal_rename` for methods is not a fix.
+
+## What the next attempt needs
+
+A reservation that applies **only when `internal_rename` is off**, or a class-body rule
+that excludes names the flag has been told to rename. That is a condition on a flag, not a
+scope change, and it is one line — but it needs a round that runs both the flag tests and
+`urllib3`.
+
+## The count
+
+| | |
+|---|---|
+| defects found | 11 |
+| fixed and kept | 9 |
+| open, cause known | 2 (class-body alias, cross-module exports) |
+| regressions caught by the suite | 1 |
