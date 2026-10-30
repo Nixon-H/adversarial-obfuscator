@@ -128,7 +128,11 @@ def test_no_bare_141_claim_in_code():
     # coincidence (e.g. 314182922) — not as an op-count claim.
     bad = []
     skip_dirs = {"archive", "build", ".git", ".opencode", ".mypy_cache",
-                 ".pytest_cache", "__pycache__", "h0h5-results"}
+                 ".pytest_cache", "__pycache__", "h0h5-results",
+                 # Vendored third-party code for the external corpus: its
+                 # constants are not this project's claims. recipes.py's
+                 # Miller-Rabin base 4759123141 contains the digits by accident.
+                 }
     skip_files = {"test_opcount_truth.py", "test_multi_func.py",
                   "test_lowering_parity_141.py"}
     for root, dirs, files in os.walk(REPO_ROOT):
@@ -137,6 +141,11 @@ def test_no_bare_141_claim_in_code():
             if not (fn.endswith(".py") or fn.endswith(".md")):
                 continue
             if fn in skip_files or ".decoy.py" in fn or "attention_poison" in fn:
+                continue
+            # Vendored third-party code for the external corpus: its constants
+            # are not this project's claims. recipes.py's Miller-Rabin base
+            # 4759123141 contains the digits by accident.
+            if os.sep + os.path.join("corpus", "external") in os.path.join(root, fn):
                 continue
             p = os.path.join(root, fn)
             # Git-ignored files are build leftovers, not source: a failed
