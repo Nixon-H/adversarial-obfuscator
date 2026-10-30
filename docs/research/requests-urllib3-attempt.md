@@ -324,3 +324,56 @@ so is more useful than a tenth attempt at the renamer.
 
 `_cmp`'s rename is not a bug in the renamer. It is the renamer doing exactly what it was
 built to do, in a situation where doing it breaks the caller.
+
+## Round 214: the class-body reservation leaks to module scope
+
+The full suite after round 210's fix:
+
+```
+3 failed, 4519 passed, 4 skipped
+FAILED test_internal_rename.py::test_staticmethod_internal_still_renames
+FAILED test_internal_rename.py::test_def_use_consistency_with_flag
+```
+
+and
+
+```
+assert "def helper(" not in out
+E  AssertionError: assert 'def helper(' not in 'class _nixo....compute(5))'
+```
+
+**`helper` is a class-body method and a module-level function with the same name.** Round
+210's fix adds every class-body method name to `self.reserved`, which is **global** — so
+the module-level `helper` stops being renamed everywhere, not just inside its class.
+
+## What that establishes
+
+`reserved` is a flat set with no scope. Every fix that adds to it is correct **within the
+site it was written for** and **leaks to every other site sharing the name**. The last six
+fixes all extended `reserved`:
+
+| round | what was reserved |
+|---|---|
+| 175 | builtin nonlocal targets |
+| 187 | nested class names |
+| 195 | (default args, no reservation) |
+| 199 | nested def names |
+| 207 | import bindings |
+| **210** | **class-body method names** |
+
+Five of those are safe because the names they reserve are **unique to their scope**
+(imports are module-level, nested defs are function-local). Round 210's is not: a class
+method can share a name with a module function.
+
+## Status
+
+**Regression, not fixed.** The suite is red for the first time in 12 rounds, on three tests
+in the internal-rename path. Two options:
+
+1. make `reserved` scoped — a set per class body, consulted only while that body is
+   visited — which is the correct fix and a real change to the renamer's data model;
+2. revert round 210, which restores the suite and re-breaks `urllib3/_collections`.
+
+Neither is a five-minute change. Recorded rather than patched, because a sixth extension of
+a flat `reserved` set would make the leak worse, and this programme has now spent seven
+rounds learning what a flat namespace costs.
