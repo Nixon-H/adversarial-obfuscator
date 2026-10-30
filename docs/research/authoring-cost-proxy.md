@@ -22,8 +22,11 @@ below and is the same number for anyone repeating the measurement.
 | signdiff | 4 | 1 |
 | first_negative | 4 | 2 |
 
-**33 properties authored across eight tasks** (4–5 each); the minimum needed
+**38 properties authored across nine tasks** (4–5 each); the minimum needed
 to separate is **1–2** (median 1.5, max 2).
+
+*(Corrected round 69: this read 33 across eight tasks before the ninth task was
+added in round 47. `reproduce.py` regenerates the count from the task files.)*
 
 ## What this says
 

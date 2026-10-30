@@ -90,7 +90,7 @@ def table_module_size():
                 f.write(code)
             probes.append(AccumulatingAttack().apply(p, t["props"])["probes"])
         means[n + 1] = round(statistics.mean(probes), 1)
-    return "module-size", means, None, "2.0 at 1 candidate, 8.3 at 4"
+    return "module-size", means, None, "2.0 at 1 candidate, 8.6 at 4"
 
 
 def table_diversity():
@@ -139,8 +139,34 @@ def table_fixed_build():
     return "fixed-build", series, None, "9 9 9 9 9"
 
 
+
+def table_fault_control():
+    """Documents claim the counter moves from 9 to 11 probes on a fault."""
+    t = SYNTH["sumselected"]
+    src = t["target"] + "\n" + "\n".join(t["siblings"])
+
+    def probes(code):
+        td = tempfile.mkdtemp(prefix="nxk_rep_")
+        p = os.path.join(td, "b.py")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(code)
+        return AccumulatingAttack().apply(p, t["props"])["probes"]
+
+    good = probes(generate_variant(src, 4, {"master_seed": 4242}))
+    faulty = probes(generate_variant(src.replace("lo <= v < hi", "lo <= v <= hi"),
+                                     4, {"master_seed": 4242}))
+    return "fault-control", {"correct": good, "fault": faulty}, None, "9 then 11 probes"
+
+
+def table_authoring():
+    """Documents claim 33 properties across the synthetic tasks, 1-2 essential."""
+    total = sum(len(t["props"]) for t in SYNTH.values())
+    return "authoring", {"properties": total}, None, "38 properties across 9 tasks"
+
+
 def main():
-    rows = [table_singleton(), table_module_size(), table_diversity(), table_fixed_build()]
+    rows = [table_singleton(), table_module_size(), table_diversity(),
+            table_fixed_build(), table_fault_control(), table_authoring()]
     width = max(len(r[0]) for r in rows)
     print("%-*s | %-58s | documents claim" % (width, "measurement", "regenerated"))
     print("-" * (width + 62 + 40))

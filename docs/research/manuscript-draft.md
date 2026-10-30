@@ -231,7 +231,7 @@ property — but a corpus may not.
 
 ### 5.5 Authoring bound
 
-33 properties across eight tasks; 1–2 needed to separate. Paid once per task,
+38 properties across nine tasks; 1–2 needed to separate. Paid once per task,
 not per build — a reason the old curve could not have detected a build
 effect even if one existed.
 
