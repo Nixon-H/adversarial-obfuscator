@@ -378,3 +378,58 @@ run and one `diff`.
 
 Flake unresolved. Instrument ready. The comparison is the first thing the next round should do,
 and it needs nothing built.
+
+## Round 241: the diff, run at last
+
+```
+tls_len      isolated=1099  full=1099        <- TLS_CTX_SOURCE identical
+keys only in isolated: []
+keys only in full:     []
+changed values:        398                   <- all of VARS
+```
+
+**`VARS` is randomized per run.** Every class name it holds is regenerated with a different
+suffix on each process start, so 398 of its 418 values differ between any two runs. That is
+by design — the obfuscator randomizes its markers — and it is **not** a leak.
+
+`TLS_CTX_SOURCE` is **byte-identical** between runs, which rules it out as the changed input.
+
+## And the run passed
+
+```
+4527 passed, 4 skipped, 0 failed   (32 minutes)
+```
+
+**The flake did not reproduce.** Same code, same suite, no failures — with the recording test
+added, which changes nothing about ordering except its own position in the file.
+
+## What this actually establishes
+
+| claim | status |
+|---|---|
+| VARS is stable within a run | confirmed (round 239) |
+| VARS differs between runs | **confirmed — 398 values, by design** |
+| TLS_CTX_SOURCE differs between runs | **refuted — identical** |
+| the flake reproduces reliably | **refuted — 0 failures this run** |
+
+The failure is **intermittent across runs**, not order-dependent across files. That is a
+different defect from the one rounds 231–239 have been chasing, and it means:
+
+1. the `VARS` save/restore added in round 235 fixed a **real leak** and is **not** related to
+   this symptom;
+2. eleven rounds have been spent on a **nondeterministic** failure under a diagnosis built
+   from runs that happened to fail.
+
+## What a nondeterministic test failure needs
+
+Not a diff between two runs — **the failing run's own state**. The recorder now writes
+`VARS` whenever `NX_VARS_RECORD` is set, so the next failing run will leave a file behind with
+the exact 66-to-418 values in force. Comparing **that** file against a passing one is the real
+experiment, and it can only run when a failure occurs.
+
+## Status
+
+Flake unresolved and **reclassified**: intermittent across runs rather than order-dependent
+across files. The instrument is correct and waits for a failing run. Eleven rounds, and the
+honest summary is that the first nine chased an ordering hypothesis that the evidence never
+supported.
