@@ -159,3 +159,48 @@ every subsequent verification uncertain.
 Fix the instrument first, then the defect it was hiding. That ordering has been wrong in this
 programme before — round 133 spent eight rounds investigating symptoms of a swallowed
 exception because the gate reported green.
+
+## Round 234: the flake is fixed; a version pin is not
+
+Full suite after round 233's fixture:
+
+```
+1 failed, 4524 passed, 4 skipped
+FAILED test_crypto_fallback.py::TestVersionPinning::test_installed_cryptography_meets_declared_floor
+```
+
+**The TLS order-dependence is gone** — 4524 passed, up from 4520, with no errors.
+
+The remaining failure is an environment mismatch, not a regression:
+
+```
+requirements.txt:  cryptography==50.0.0
+installed:         46.0.7
+assert (46, 0, 7) >= (50, 0, 0)
+```
+
+`requirements.txt` pins a version this environment does not have. That test asserts the
+**installed** version meets the **declared** floor, so it fails wherever the pin and the
+environment disagree — which is a deployment statement, not a code defect.
+
+## Why it is recorded rather than fixed
+
+Changing `requirements.txt` to `46.0.7` would make the test pass and would **weaken the
+declared floor** to whatever happens to be installed. Whether `50.0.0` is a real release, a
+typo, or a deliberate minimum is a maintainer's call, and this programme has learned not to
+change a pin to make a test green.
+
+The honest options are: pin to a version that exists, or relax the assertion to a warning.
+Both are one line and both need the maintainer's intent.
+
+## The suite's state, accurately
+
+| round | result |
+|---|---|
+| 231 | 2 failed, 3 errors — order-dependent, cause unknown |
+| 232 | cause identified (`VARS` leak) |
+| 233 | fixture applied |
+| **234** | **1 failed, 4524 passed — order-dependence gone, one environment pin** |
+
+**The instrument is trustworthy again for code changes.** One test fails for a reason that
+belongs to the deployment, and it says so in its own assertion message.
