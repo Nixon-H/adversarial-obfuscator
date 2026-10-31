@@ -2921,6 +2921,12 @@ def _VERIFY_INTEGRITY():
     half = len(keys) // 2
     map_a = {k: runtime_morph_map[k] for k in keys[:half]}
     map_b = {k: runtime_morph_map[k] for k in keys[half:]}
+    # FORCE_NATIVE_EXEC is set in both branches below and was never restored, so
+    # every caller after a build saw the previous build's value. A test file that
+    # reads VARS through apply_vars failed only in a full run because of it
+    # (rounds 231-234). Save here, restore after the block.
+    _prev_force_native = VARS.get("FORCE_NATIVE_EXEC")
+    _had_force_native = "FORCE_NATIVE_EXEC" in VARS
     if args.native or getattr(args, 'native_only', False):
         if hasattr(args, '_real_native_blobs') and args._real_native_blobs:
             native_blobs = args._real_native_blobs
@@ -2940,6 +2946,10 @@ def _VERIFY_INTEGRITY():
         native_blob = ""
         native_blobs = {'windows': '', 'linux': '', 'darwin': ''}
         VARS["FORCE_NATIVE_EXEC"] = False
+    if _had_force_native:
+        VARS["FORCE_NATIVE_EXEC"] = _prev_force_native
+    else:
+        VARS.pop("FORCE_NATIVE_EXEC", None)
     UI._out(f" {UI.BLUE}├──{UI.RESET} {UI.BOLD}Output Generation{UI.RESET} :")
     variants = [("Debug", True), ("Silent", False)]
     for i, (suffix, is_debug) in enumerate(variants):

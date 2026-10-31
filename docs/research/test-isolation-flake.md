@@ -204,3 +204,53 @@ Both are one line and both need the maintainer's intent.
 
 **The instrument is trustworthy again for code changes.** One test fails for a reason that
 belongs to the deployment, and it says so in its own assertion message.
+
+## Round 235: the real fix, applied inline
+
+Round 233 reverted an attempt that extracted the native-compilation block into a function —
+that broke the surrounding control flow and produced 71 lint errors. The block does not need
+extracting: it needs a save before it and a restore after it.
+
+```python
+_prev_force_native = VARS.get("FORCE_NATIVE_EXEC")
+_had_force_native = "FORCE_NATIVE_EXEC" in VARS
+if args.native or ...:
+    ...            # both branches still set the flag
+    VARS["FORCE_NATIVE_EXEC"] = False
+if _had_force_native:
+    VARS["FORCE_NATIVE_EXEC"] = _prev_force_native
+else:
+    VARS.pop("FORCE_NATIVE_EXEC", None)
+```
+
+`ruff` clean, parses, and **34 build-related tests pass** including the TLS file, the residue
+tests that run the pipeline, and `test_build_dependencies`/`test_build_id`.
+
+## What that changes
+
+The fixture added in round 233 is now redundant for this leak — but it is **kept**, because
+it costs nothing and protects the file against any future global of the same kind. A
+boundary that is no longer needed is still a boundary.
+
+## The tenth instance of one rule
+
+| # | value | two owners |
+|---|---|---|
+| 1 | expiry window | pack time vs run time |
+| 2 | `hexversion` | import binding vs use |
+| 3 | `_sumprod` | alias vs fallback |
+| 4 | builtin table name | table vs reference |
+| 5 | `nonlocal hash` | declaration vs shadow |
+| 6 | nested class | definition vs attribute |
+| 7 | default argument | enclosing vs function scope |
+| 8 | nested def | definition vs reference |
+| 9 | class-body alias | Store skipped, Load renamed |
+| **10** | **`VARS["FORCE_NATIVE_EXEC"]`** | **set by a build, restored by nothing** |
+
+Ten instances, ten subsystems, one rule. Every one was fixed by giving the value a single
+owner — save/restore, reserve the name, or emit once.
+
+## Status
+
+The leak is closed and the suite should be green except the `cryptography` pin, which is a
+deployment statement rather than a code defect (round 234).
