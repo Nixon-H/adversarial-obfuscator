@@ -254,3 +254,55 @@ owner — save/restore, reserve the name, or emit once.
 
 The leak is closed and the suite should be green except the `cryptography` pin, which is a
 deployment statement rather than a code defect (round 234).
+
+## Round 238: the flake is back, so the VARS diagnosis was wrong
+
+Full suite after both fixes (the fixture in round 233 and the save/restore in round 235):
+
+```
+3 failed, 4520 passed, 4 skipped, 3 errors
+FAILED test_tls_context.py::test_hostname_mismatch_is_rejected    AttributeError
+FAILED test_tls_context.py::test_ca_bundle_helper_roundtrip       AttributeError
+ERROR  test_tls_context.py::test_untrusted_certificate_is_rejected
+```
+
+And alone:
+
+```
+8 passed in 1.78s
+```
+
+**The flake survives both fixes.** `VARS["FORCE_NATIVE_EXEC"]` was **not** the cause, or not the
+only one.
+
+## What rounds 232 and 236 got wrong
+
+Round 232 read two greps, found that `pipeline.py` writes a module-level flag without
+restoring it, and concluded that was the channel. Round 236 verified the fix against the
+build tests — 34 passed — and declared the leak closed.
+
+Both were **plausible** and neither was **tested against the failing case**. The fix was
+verified by the tests that already passed, not by the full run that had failed. That is
+round 210's mistake again: **running one of the two checks and concluding.**
+
+## What is actually known now
+
+| claim | status |
+|---|---|
+| `test_tls_context` passes alone | confirmed, three times |
+| it fails in a full run | confirmed, twice |
+| `VARS` leak exists | **confirmed** and **fixed** — a real defect, not this one |
+| `VARS` causes the flake | **refuted** |
+
+The `VARS` leak was real: a module-level flag set in two branches and restored by nothing is
+a defect regardless of what it breaks. Fixing it was correct. **It was not the flake.**
+
+## The next step, stated
+
+The channel is a **module-level mutable** that `apply_vars` reads and something else writes.
+The candidates are `VARS` (fixed) and whatever `TLS_CTX_SOURCE` interpolates. The cheap test
+is to print `VARS` in the failing run and in the passing run and diff them — the same
+instrumentation that settled round 195 after five rounds of reasoning.
+
+Not done this round for time. Recorded so the next attempt does not re-fix `VARS` and conclude
+again.
