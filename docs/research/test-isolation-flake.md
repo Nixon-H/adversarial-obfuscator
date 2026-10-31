@@ -433,3 +433,49 @@ Flake unresolved and **reclassified**: intermittent across runs rather than orde
 across files. The instrument is correct and waits for a failing run. Eleven rounds, and the
 honest summary is that the first nine chased an ordering hypothesis that the evidence never
 supported.
+
+## Round 243: a second green run, and what the sample means
+
+```
+round 241: 4527 passed, 0 failed
+round 243: 4527 passed, 0 failed
+```
+
+**Two consecutive green runs** after two red ones (rounds 231 and 238).
+
+## The sample so far
+
+| round | result |
+|---|---|
+| 231 | 3 failed, 3 errors |
+| 234 | 1 failed (the cryptography pin only) |
+| 236 | 1 failed (the pin only) |
+| 238 | 3 failed, 3 errors |
+| 241 | **0 failed** |
+| 243 | **0 failed** |
+
+Excluding the deterministic pin failure, the TLS file failed in **two of six** full runs and
+passes alone in **three of three**. A one-in-three failure rate is consistent with everything
+observed and is not a rate any diagnosis should be built on.
+
+## What two green runs do and do not justify
+
+**Do not justify:** "the flake is fixed." Nothing in rounds 241–243 touched the code path
+involved; the recorder writes a file and the fixture restores a dict, and neither changes what
+`apply_vars` produces.
+
+**Do justify:** "the failure is intermittent with a rate low enough that two green runs are
+expected." That is the honest reading, and it is the one the handoff now states.
+
+## The cost of a low-rate failure
+
+A one-in-three failure needs roughly **ten** full runs to characterise, and each costs twenty
+minutes. That is three hours of wall clock for a failure rate, before any diagnosis. It is why
+the recorder is the right instrument and why the next attempt should be **running the suite
+until it fails**, not reasoning about it.
+
+## Status
+
+Unchanged and honestly stated: intermittent, two failures in six runs, cause unknown, recorder
+in place. Two green runs in a row are **consistent with** the observed rate and are **not
+evidence of a fix.**
