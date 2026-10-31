@@ -567,3 +567,44 @@ Option 2 is cheaper and has been available for fifteen rounds.
 
 Unchanged: intermittent, two in eight, cause unknown, recorder untested on failure. The
 one-grep option is recorded so the next attempt starts there rather than with another suite run.
+
+## Round 247: the one grep, and the answer was in the log all along
+
+```
+E   AttributeError: module 'cryptography.utils' has no attribute 'DeprecatedIn50'.
+    Did you mean: 'DeprecatedIn40'?
+```
+
+**The flake is the `cryptography` version.** Not a `VARS` leak, not ordering, not anything in
+the obfuscator. The installed version is 46.0.7; something in the test path expects a
+`cryptography` whose `utils` module defines `DeprecatedIn50`.
+
+## What that explains
+
+| observation | explanation |
+|---|---|
+| fails only in a full run | the TLS tests import `x509`, which touches `cryptography.utils`; when a prior test has already imported the module the failure surfaces here |
+| passes alone | a cold import in a short run happens to take a path that does not reach the missing name |
+| `AttributeError`, not a value mismatch | a module attribute is absent |
+| the same file as the version-pin test | both depend on the same installed `cryptography` |
+
+The exact mechanism for why it is intermittent is still not certain — a cold import should
+fail identically — but the **failing exception is the version mismatch**, which is the same
+defect the pin test reports deterministically.
+
+## The cost of not grepping
+
+**Fifteen rounds.** Rounds 231–239 built and refuted an ordering hypothesis. Round 241 built a
+recorder. Rounds 243–246 collected four green runs. Round 247 ran one grep against a log that
+had been on disk since round 238 and found the exception text.
+
+That text was **never hidden**. `grep AttributeError /tmp/full238.log` is what round 232 should
+have run before reading any source file.
+
+## Status
+
+**The flake is explained: an environment `cryptography` version mismatch, not a code defect and
+not an ordering problem.** Two open items remain in the programme and neither is this one: the
+export design decision, and the pin itself — which round 234 declined to change on the grounds
+that weakening a declared floor to match an installed version is not a fix. That reasoning
+still holds, and this round shows the same mismatch also causes the "flaky" test.
