@@ -134,3 +134,25 @@ nine defects.
 reports. Each claim is bound to a content-addressed evidence snapshot and
 re-hashed on read, so a claim that no longer matches its evidence is marked
 rather than trusted.
+
+---
+
+## Final state
+
+| | |
+|---|---|
+| defects found | **thirteen** |
+| fixed and guarded | **twelve** |
+| open, measured decision | **one** (cross-module exports, §6.4) |
+| from code the project did not write | **ten of thirteen** |
+| test suite | 4527 passed, 4 skipped |
+| artefact gate | 38 artefacts, 0 failures |
+| reproduction | 8 of 8 tables |
+| document guards | 21 |
+| sealed reports | 65 |
+
+An intermittent failure in `test_tls_context.py` cost fifteen rounds and turned out to be
+**two Python installations on the same machine** — the suite runs under one that satisfies
+the `cryptography` pin, the failing runs used another that did not. **No product defect.**
+Recorded in `test-isolation-flake.md`; the lesson is `which python3` before reading a
+version from it.
