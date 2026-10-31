@@ -306,3 +306,40 @@ instrumentation that settled round 195 after five rounds of reasoning.
 
 Not done this round for time. Recorded so the next attempt does not re-fix `VARS` and conclude
 again.
+
+## Round 239: VARS is stable inside the file
+
+Added a check that two consecutive reads of `VARS` with no build between them are equal:
+
+```
+9 passed in 2.42s
+```
+
+**Stable.** So the value does not change *within* `test_tls_context`, which means the
+`AttributeError` is not caused by a mid-file `VARS` mutation.
+
+Two readings remain:
+
+1. **The leak is cross-file.** An earlier test file leaves `VARS` in a different state, and the
+   fixture added in round 233 restores only *after each test*, not to a known baseline *before
+   the file starts*. If the file's first read already sees the leaked value, restoring
+   afterwards cannot help — the damage precedes the fixture.
+2. **The channel is not `VARS`.** `TLS_CTX_SOURCE` is a module-level constant that
+   `apply_vars` interpolates; if something rebinds or patches it, the substituted source is
+   wrong for a reason `VARS` cannot show.
+
+Reading 1 is testable in one command: print `VARS` as the first statement of the file's first
+test in a full run and in an isolated run, and diff. That is the same instrumentation round 195
+needed, and it is the third round this defect has gone without.
+
+## What round 238's retraction should have said
+
+It said the diagnosis was wrong and the next step was the diff. It did not add the diff. This
+round added a *stability* check instead — useful, and **not the diff**. The distinction
+matters: stability inside the file rules out one channel; only the cross-run diff identifies
+the real one.
+
+## Status
+
+Flake unresolved. `VARS` mutation confirmed impossible **inside** the file; the leak, if it is
+`VARS`, enters before the first test. `TLS_CTX_SOURCE` remains an untested channel.

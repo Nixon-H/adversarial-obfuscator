@@ -58,6 +58,21 @@ def _isolate_vars():
         _src.VARS.update(saved)
 
 
+def _vars_snapshot():
+    """Diagnostic: record what apply_vars would see (round 239)."""
+    from obfuscator.core import sources as _src
+    return dict(_src.VARS)
+
+
+def test_vars_snapshot_is_stable():
+    """If VARS changes between two reads with no build in between, something leaked."""
+    first = _vars_snapshot()
+    second = _vars_snapshot()
+    assert first == second, (
+        "VARS mutated between two reads with no intervening build: %r -> %r"
+        % (first, second))
+
+
 def _make_ca():
     """Create a test CA; returns (ca_cert_pem_bytes, ca_cert, ca_key)."""
     from cryptography import x509
