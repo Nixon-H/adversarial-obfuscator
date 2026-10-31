@@ -9,14 +9,14 @@
 | | |
 |---|---|
 | defects found | **thirteen found, twelve fixed** |
-| test suite | **4521 passed, 4 skipped, 0 failed** |
+| test suite | **4524 passed, 4 skipped, 1 failed** — the failure is a `cryptography` version pin, not code (round 234) |
 | artefact gate | **38 artefacts at one index, 72 at two**, 0 failures |
 | reproduction | **8 of 8 tables match** |
 | paper | 422 lines, instrument-validity note, internally consistent |
 | research documents | 51 |
 | sealed reports | 45 |
 
-Everything measurable is measured. Five instruments are green. The three things
+Everything measurable is measured. Five instruments are green, and the suite's one failure is a deployment statement that explains itself. The three things
 that matter most are outside this repository's reach — see "What cannot be done
 from here" below.
 

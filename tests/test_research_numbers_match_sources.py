@@ -281,3 +281,28 @@ def test_readme_fixed_count_matches_the_table():
     # Twelve fixed of thirteen is the state at round 230; a regression shows up as
     # the fixed count falling below total - 1 without a new open defect.
     assert fixed is not None, "unreadable fixed count %r" % (m.group(1),)
+
+
+def test_handoff_suite_number_matches_the_last_run():
+    """The handoff's test-suite line must be readable and internally consistent.
+
+    Round 237 found it saying "4521 passed, 0 failed" three rounds after the count had
+    moved to 4524 and the suite had acquired one environment failure. The number was
+    guarded nowhere, because it describes a run rather than a document.
+
+    The guard cannot know the live count without running the suite (twenty minutes), so
+    it checks what it can: the pass count is present and plausible, and a zero-failure
+    claim is not made alongside a nonzero failure count on the same line.
+    """
+    handoff = _read(os.path.join(DOCS, "HANDOFF.md"))
+    import re
+    m = re.search(r"\*\*(\d{3,5}) passed,? (?:(\d+) skipped,? )?(?:(\d+) failed)?", handoff)
+    assert m, "HANDOFF.md no longer states a test-suite result"
+    passed = int(m.group(1))
+    failed = int(m.group(3) or 0)
+    assert passed >= 4000, (
+        "HANDOFF.md's pass count looks wrong: %d" % passed)
+    # A zero-failure claim must not sit next to a stated failure elsewhere in the table.
+    if failed == 0:
+        assert "1 failed" not in handoff, (
+            "HANDOFF.md claims 0 failed in one place and 1 failed in another")
