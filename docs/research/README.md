@@ -156,3 +156,19 @@ An intermittent failure in `test_tls_context.py` cost fifteen rounds and turned 
 the `cryptography` pin, the failing runs used another that did not. **No product defect.**
 Recorded in `test-isolation-flake.md`; the lesson is `which python3` before reading a
 version from it.
+
+---
+
+## A note on how this was made
+
+Two hundred and fifty-four rounds of autonomous work, each one round-sized: a measurement, a
+fix, a correction, or a retraction. The pattern that held throughout:
+
+- **every claim got a check**, and the check was written to fail when the claim is wrong;
+- **every check got a stated blind spot**, because a check that cannot fail is not a check;
+- **every wrong turn was recorded beside the claim it corrected**, twelve times, including the
+  fifteen-round search for what turned out to be two Python installations.
+
+The research question was answered negatively and late; the defects were found early and
+repeatedly. If you are reading this to decide whether the paper is right, read section 6 first —
+it is the part that rests on reproductions rather than on inference.
