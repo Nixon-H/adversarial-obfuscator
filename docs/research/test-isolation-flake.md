@@ -527,3 +527,43 @@ produces it.
 Unchanged: intermittent, cause unknown, recorder in place, three green runs recorded because
 data is data. The defect is the programme's only open one and is documented as a rate rather
 than a cause.
+
+## Round 246: a fourth green run
+
+```
+241: 0 failed    243: 0 failed    244: 0 failed    246: 0 failed
+```
+
+**Four consecutive green runs.** The sample is now **two failures in eight full runs**, and
+four clean runs in isolation.
+
+## The rate, with its uncertainty
+
+Two failures in eight gives a point estimate of 25% and a 95% interval spanning roughly 3% to
+65% — wide enough that the data is consistent with anything from "rarely" to "often". **The
+interval is the honest output**, not the point estimate: eight runs cannot pin a rate narrow
+enough to plan against.
+
+| runs | failures | point | 95% interval |
+|---|---|---|---|
+| 8 | 2 | 25% | ~3% – 65% |
+
+## What four green runs still do not mean
+
+The recorder has not yet captured a failing run. **The cause is unknown and the instrument is
+untested against the case it exists for** — it has only ever written passing state. That is a
+real gap: an instrument that has never seen a failure may itself be wrong.
+
+The next attempt should therefore do one of two things, and both require waiting:
+
+1. run the suite until it fails, however many runs that takes;
+2. or read the two failing logs from rounds 231 and 238 — which still exist on disk — and see
+   whether the traceback names the attribute that was missing. That is **one grep** and has
+   never been done.
+
+Option 2 is cheaper and has been available for fifteen rounds.
+
+## Status
+
+Unchanged: intermittent, two in eight, cause unknown, recorder untested on failure. The
+one-grep option is recorded so the next attempt starts there rather than with another suite run.
