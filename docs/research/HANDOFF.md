@@ -64,29 +64,35 @@ appears immediately.
 
 ---
 
-## Resolved: the "intermittent" failure was a version mismatch
+## Resolved, and there was no defect: two interpreters
 
 `tests/test_tls_context.py` failed in 2 of 8 full runs and passed in isolation every time.
 Fifteen rounds went into an ordering hypothesis that six runs refuted, a recorder, and four
-green runs. The answer was in a log captured at round 238:
+green runs.
+
+Round 250 found the answer, and it is not a defect:
 
 ```
-AttributeError: module 'cryptography.utils' has no attribute 'DeprecatedIn50'.
-Did you mean: 'DeprecatedIn40'?
+cryptography in the suite's python: 50.0.2, has DeprecatedIn50   <- satisfies the 50.0.0 pin
+cryptography in another python:     46.0.7                      <- produced the tracebacks
 ```
 
-**The installed `cryptography` is 46.0.7**; the TLS path expects a version whose `utils`
-module defines `DeprecatedIn50`. It is the same mismatch the version-pin test reports
-deterministically — not a `VARS` leak, not ordering, not the obfuscator.
+**Two Python installations exist on this machine.** Rounds 231 and 238 ran under the old one;
+rounds 241 onward under the new one. Rounds 234 and 247 read the version from a plain
+`python3 -c` and concluded the environment was broken — reading the **wrong interpreter**.
 
-**The lesson is the round, not the fix:** the failing exception was captured in round 238 and
-never read. `grep AttributeError /tmp/full238.log` is what round 232 should have run before
-opening a single source file.
+| observation | explanation |
+|---|---|
+| TLS tests fail with missing `DeprecatedIn50` | that run used the 46 interpreter |
+| the pin test reports 46.0.7 | same run, same interpreter |
+| both pass later with no environment change | the **interpreter** changed, not the environment |
 
-**What remains open** is the pin itself. Round 234 declined to change `requirements.txt` to
-match the installed version, because weakening a declared floor to make a test pass is not a
-fix. That reasoning still holds; the correct action is a maintainer's decision between pinning
-to a version that exists and relaxing the assertion to a warning.
+**Nothing in the product is wrong.** The pin is satisfied and the TLS tests pass.
+
+**The lesson:** `which python3` before `import cryptography`. Five times in this programme an
+instrument was not the instrument — a short grep range, a reducer that altered its input, a dict
+read backwards, an AST read predicting a runtime count, and now a version read from the wrong
+binary. Every one produced a confident, specific, wrong answer.
 
 ## The five rules this programme paid for
 
