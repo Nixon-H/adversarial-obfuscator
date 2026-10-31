@@ -343,3 +343,38 @@ the real one.
 
 Flake unresolved. `VARS` mutation confirmed impossible **inside** the file; the leak, if it is
 `VARS`, enters before the first test. `TLS_CTX_SOURCE` remains an untested channel.
+
+## Round 240: the diff instrument is in place; the full run has not finished
+
+The one command round 239 specified is now built: the first test in `test_tls_context`
+writes its view of the module-level state to the path in `NX_VARS_RECORD`, so a full run and
+an isolated run produce two files that can be diffed.
+
+```
+NX_VARS_RECORD=/tmp/vars_isolated.json pytest tests/test_tls_context.py   -> 32,452 bytes
+NX_VARS_RECORD=/tmp/vars_full.json     pytest tests/                      -> (still running)
+```
+
+The isolated record exists and has 66 `VARS` entries plus the `TLS_CTX_SOURCE` length and id.
+The full run was at 81% when the round's clock ran out, so the comparison has not been made.
+
+## What the isolated record already shows
+
+`TLS_CTX_SOURCE` is **1,099 bytes** and `VARS` has **66 entries**. Both are small enough that
+the diff will be a short list of named values rather than a wall of text — the instrument is
+fit for the next round to use immediately.
+
+## What is honest to say
+
+**The diff has still not been run.** Round 238 said it was the next step and did not run it;
+round 239 said the same and added a stability check instead; round 240 built the instrument
+and ran out of clock. Three rounds, one command, not yet executed end to end.
+
+That pattern is now the most expensive thing in this defect: **not a wrong diagnosis, but a
+correct one repeatedly deferred.** The instrument exists, so the cost from here is one suite
+run and one `diff`.
+
+## Status
+
+Flake unresolved. Instrument ready. The comparison is the first thing the next round should do,
+and it needs nothing built.

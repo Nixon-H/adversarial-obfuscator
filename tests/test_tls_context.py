@@ -65,6 +65,24 @@ def _vars_snapshot():
 
 
 def test_vars_snapshot_is_stable():
+    """Diagnostic: write VARS and TLS_CTX_SOURCE identity to a file for diffing.
+
+    Round 239 identified this diff as decisive and did not run it. It runs now:
+    the first test in this file records its view of the two module-level values,
+    a full-suite run and an isolated run produce different files, and diffing them
+    names the leaked channel.
+    """
+    from obfuscator.core import sources as _src
+    import json
+    import os as _os
+    rec = {"vars": {k: repr(v) for k, v in _src.VARS.items()},
+           "tls_len": len(_src.TLS_CTX_SOURCE),
+           "tls_id": id(_src.TLS_CTX_SOURCE)}
+    out = _os.environ.get("NX_VARS_RECORD")
+    if out:
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(rec, f, indent=2, sort_keys=True)
+    assert rec["tls_len"] > 0
     """If VARS changes between two reads with no build in between, something leaked."""
     first = _vars_snapshot()
     second = _vars_snapshot()
