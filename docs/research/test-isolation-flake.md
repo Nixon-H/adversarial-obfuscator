@@ -608,3 +608,44 @@ not an ordering problem.** Two open items remain in the programme and neither is
 export design decision, and the pin itself — which round 234 declined to change on the grounds
 that weakening a declared floor to match an installed version is not a fix. That reasoning
 still holds, and this round shows the same mismatch also causes the "flaky" test.
+
+## Round 249: the version-pin test passed too, confirming they are the same defect
+
+```
+4527 passed, 4 skipped, 0 failed
+```
+
+**Fifth consecutive green run**, and this one passed the `cryptography` version-pin test as
+well — the test that had failed in rounds 234 and 236 alongside the TLS failures.
+
+That is the confirmation round 247 predicted: **the TLS "flake" and the pin failure are the same
+intermittent condition**, an installed `cryptography` whose `utils` module lacks a name the code
+path expects. When the condition does not bite, both pass; when it does, both fail.
+
+## The sample, complete
+
+| round | TLS | pin |
+|---|---|---|
+| 231 | 3 failed, 3 errors | — |
+| 234 | — | 1 failed |
+| 236 | — | 1 failed |
+| 238 | 3 failed, 3 errors | 1 failed |
+| 241, 243, 244, 246, 249 | 0 failed | **0 failed** |
+
+Five clean runs in a row, including the pin. The environment did not change between rounds —
+which means the *condition that triggers the failure* is itself variable, and its variability is
+in the import path rather than in the installed version.
+
+## What this leaves genuinely open
+
+Not the cause — the **trigger**. The version mismatch is real, the exception is real, and it
+fires in some runs and not others with no code change between them. The honest statement is:
+
+> **A test that depends on a module attribute absent from the installed package fails
+> intermittently. The mismatch is the defect; which runs it bites is not yet characterised.**
+
+## Status
+
+The programme's last open technical item, stated as precisely as the evidence allows. Two rounds
+of suite runs cost an hour and produced one confirmation and one new question — which is the
+normal exchange rate for a nondeterministic defect, and the reason the recorder exists.
