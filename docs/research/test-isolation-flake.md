@@ -649,3 +649,50 @@ fires in some runs and not others with no code change between them. The honest s
 The programme's last open technical item, stated as precisely as the evidence allows. Two rounds
 of suite runs cost an hour and produced one confirmation and one new question — which is the
 normal exchange rate for a nondeterministic defect, and the reason the recorder exists.
+
+## Round 250: there is no version defect; the runs used different interpreters
+
+```
+cryptography version: 50.0.2
+path: ~/.local/lib/python3.13/site-packages/cryptography
+has DeprecatedIn50: True
+DeprecatedIn* names: [... 'DeprecatedIn47', 'DeprecatedIn50']
+```
+
+**The installed `cryptography` satisfies the pin** (`50.0.0`) and defines the very attribute the
+traceback said was missing.
+
+## So what actually happened
+
+Round 234 read `46.0.7` from a plain `python3 -c "import cryptography"` and concluded the
+environment was below the declared floor. Round 247 read `DeprecatedIn50` out of a log and
+concluded the same. **Both readings were of a different interpreter than the one pytest used.**
+
+Two Python installations exist on this machine. One has `cryptography` 46.0.7 and produced the
+failures in rounds 231 and 238. The other has 50.0.2 and is what the suite runs under now, which
+is why rounds 241 onward are green.
+
+| observation | explanation |
+|---|---|
+| TLS tests fail with a missing `DeprecatedIn50` | that run used the 46 interpreter |
+| pin test fails reporting 46.0.7 | same run, same interpreter |
+| both pass in later runs | those runs used the 50 interpreter |
+| no code or environment change between green runs | **true — the interpreter changed, not the environment I was inspecting** |
+
+## What this corrects
+
+**There is no product defect here at all.** The `requirements.txt` pin is satisfied. The TLS
+tests pass. The "intermittent failure" was a **different Python** being invoked for some runs.
+
+Three rounds of diagnosis (234, 247, 249) treated a version mismatch as real. It was real **in
+one interpreter** and irrelevant in the other, and I never checked **which** interpreter I was
+interrogating.
+
+## The final lesson
+
+**`which python3` before `import cryptography`.** Every earlier conclusion about this defect was
+built on a version number obtained from an interpreter that may not have been the one under test.
+
+That is the same error the programme has made five times: **the instrument was not the
+instrument.** A short grep range, an invalid fixture, a reducer that altered its input, a dict
+read backwards, and now a version read from the wrong binary.
