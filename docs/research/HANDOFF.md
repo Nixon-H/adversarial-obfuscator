@@ -64,6 +64,31 @@ appears immediately.
 
 ---
 
+## Known intermittent failure
+
+`tests/test_tls_context.py` fails **sometimes** in a full-suite run:
+
+```
+3 failed, 3 errors, all AttributeError in that file   (rounds 231, 238)
+4527 passed, 0 failed                                  (round 241)
+```
+
+It passes **alone every time** (8 passed, three runs). Round 241 established that `VARS` is
+regenerated per process by design and that `TLS_CTX_SOURCE` is byte-identical between runs,
+so neither is the changed input. The failure is **intermittent across runs**, not ordered
+across files.
+
+**What is known:** the recorder in `tests/test_tls_context.py` writes the module-level state
+to `NX_VARS_RECORD` whenever that variable is set, so **the next failing run leaves its own
+state behind**. Comparing that file against a passing run's is the experiment; it can only
+run when a failure occurs.
+
+**What is not known:** the cause. Eleven rounds of investigation, nine of them under an
+ordering hypothesis the evidence did not support.
+
+**Do not** conclude the suite is broken from one red run, and do not conclude it is fixed
+from one green one. Both have happened here.
+
 ## The five rules this programme paid for
 
 Each of these was learned by getting it wrong at least once. They are listed in the
