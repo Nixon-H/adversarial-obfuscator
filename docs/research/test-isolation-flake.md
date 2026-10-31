@@ -479,3 +479,51 @@ until it fails**, not reasoning about it.
 Unchanged and honestly stated: intermittent, two failures in six runs, cause unknown, recorder
 in place. Two green runs in a row are **consistent with** the observed rate and are **not
 evidence of a fix.**
+
+## Round 244: a third green run
+
+```
+241: 4527 passed, 0 failed
+243: 4527 passed, 0 failed
+244: 4527 passed, 0 failed
+```
+
+**Three consecutive green runs.**
+
+## The sample, updated
+
+| round | result |
+|---|---|
+| 231 | 3 failed, 3 errors |
+| 234 | pin only |
+| 236 | pin only |
+| 238 | 3 failed, 3 errors |
+| 241 | 0 failed |
+| 243 | 0 failed |
+| 244 | 0 failed |
+
+**Two TLS failures in seven full runs**, three clean runs in isolation.
+
+## What three green runs change
+
+Nothing about the cause. They **narrow the rate**: if the failure were as common as one in
+two, three clean runs would be unlikely (p ≈ 0.125); at one in three it is unremarkable
+(p ≈ 0.30). The evidence is consistent with the rate at or below one in three and with no
+hypothesis at all about what triggers it.
+
+**It does not make the defect less real.** A failure that occurs in 2 of 7 runs will occur in
+production reviews, and the recorder is still waiting for its next occurrence to leave state
+behind.
+
+## Why this round did not add a hypothesis
+
+The programme's record on this defect is nine rounds of an ordering hypothesis that six runs
+then refuted. Adding a second hypothesis from three green runs would be the same error with a
+different story. **The next useful datum is a failing run**, and no amount of green ones
+produces it.
+
+## Status
+
+Unchanged: intermittent, cause unknown, recorder in place, three green runs recorded because
+data is data. The defect is the programme's only open one and is documented as a rate rather
+than a cause.
