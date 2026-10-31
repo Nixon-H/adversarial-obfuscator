@@ -64,30 +64,29 @@ appears immediately.
 
 ---
 
-## Known intermittent failure
+## Resolved: the "intermittent" failure was a version mismatch
 
-`tests/test_tls_context.py` fails **sometimes** in a full-suite run:
+`tests/test_tls_context.py` failed in 2 of 8 full runs and passed in isolation every time.
+Fifteen rounds went into an ordering hypothesis that six runs refuted, a recorder, and four
+green runs. The answer was in a log captured at round 238:
 
 ```
-3 failed, 3 errors, all AttributeError in that file   (rounds 231, 238)
-4527 passed, 0 failed                                  (round 241)
+AttributeError: module 'cryptography.utils' has no attribute 'DeprecatedIn50'.
+Did you mean: 'DeprecatedIn40'?
 ```
 
-It passes **alone every time** (8 passed, three runs). Round 241 established that `VARS` is
-regenerated per process by design and that `TLS_CTX_SOURCE` is byte-identical between runs,
-so neither is the changed input. The failure is **intermittent across runs**, not ordered
-across files.
+**The installed `cryptography` is 46.0.7**; the TLS path expects a version whose `utils`
+module defines `DeprecatedIn50`. It is the same mismatch the version-pin test reports
+deterministically — not a `VARS` leak, not ordering, not the obfuscator.
 
-**What is known:** the recorder in `tests/test_tls_context.py` writes the module-level state
-to `NX_VARS_RECORD` whenever that variable is set, so **the next failing run leaves its own
-state behind**. Comparing that file against a passing run's is the experiment; it can only
-run when a failure occurs.
+**The lesson is the round, not the fix:** the failing exception was captured in round 238 and
+never read. `grep AttributeError /tmp/full238.log` is what round 232 should have run before
+opening a single source file.
 
-**What is not known:** the cause. Eleven rounds of investigation, nine of them under an
-ordering hypothesis the evidence did not support.
-
-**Do not** conclude the suite is broken from one red run, and do not conclude it is fixed
-from one green one. Both have happened here.
+**What remains open** is the pin itself. Round 234 declined to change `requirements.txt` to
+match the installed version, because weakening a declared floor to make a test pass is not a
+fix. That reasoning still holds; the correct action is a maintainer's decision between pinning
+to a version that exists and relaxing the assertion to a warning.
 
 ## The five rules this programme paid for
 
