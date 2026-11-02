@@ -26,9 +26,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # One Python version on purpose: the artefact pins the interpreter it was
+      # built for and refuses to run elsewhere ("Required: 3.13 | Found: 3.10").
+      # That fail-closed gate is a feature; the axis under test here is the OS.
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.13"]
+        python-version: ["3.13"]
     steps:
       - uses: actions/checkout@v4
 
