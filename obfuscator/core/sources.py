@@ -6040,7 +6040,7 @@ VM_SEED_VAL = {vm_seed_val}
 {FUNC_LOG}("[DEBUG] Classes loaded...")
 # [THE 1% RULE] Verify Master Key via FHE/ORAM pipeline (Hardware Accelerated)
 try:
-    _BATCH_SIZE_ = 1024
+    _BATCH_SIZE_ = {FHE_BATCH_SIZE}
     _HMAC_KEY_ENC_ = [__import__('secrets').randbelow(100) + 1 for _ in range(_BATCH_SIZE_)]
     _fhe_ = {VAR_FHE_CLS}(batch_size=_BATCH_SIZE_)
     _oram_ = {VAR_ORAM_CLS}(size=_BATCH_SIZE_)

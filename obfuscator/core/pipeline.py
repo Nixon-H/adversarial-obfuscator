@@ -2850,6 +2850,10 @@ def _VERIFY_INTEGRITY():
     except Exception:
         _bp_vm_threshold = 50.0
     ast_options = {
+        # Portable: no native core, so one file runs on every OS. The FHE/ORAM
+        # layer falls back to pure Python with a small batch; everything else is
+        # unchanged.
+        'portable': getattr(args, 'portable', False),
         'cfg_flatten': True,
         'opaque_predicates': True,
         'exception_flow': True,
@@ -3154,7 +3158,7 @@ def _VERIFY_INTEGRITY():
             # yields a wrong key and therefore wrong plaintext, instead of
             # merely failing a comparison the attacker can NOP out.
             _key_raw_hex = _key_raw.hex()
-            if _core_so and os.path.exists(_core_so):
+            if _core_so and os.path.exists(_core_so) and not ast_options.get('portable'):
                 try:
                     import hashlib as _hashlib_mix
                     with open(_core_so, "rb") as _mix_fh:
@@ -3454,6 +3458,10 @@ def _VERIFY_INTEGRITY():
                 'allowed_regions': repr(ast_options.get('allowed_regions', [])),
                 'blocked_regions': repr(ast_options.get('blocked_regions', [])),
                 'ATTR_MAP': secure_map_str,
+                # Portable builds run the pure-Python FHE fallback, which is the
+                # same scheme but far slower; a 1024-element batch never finishes
+                # without the C core, so portable mode uses a small batch.
+                'FHE_BATCH_SIZE': (32 if ast_options.get('portable') else 1024),
                 'fhe_source': FHE_SOURCE,
                 'oram_source': ORAM_SOURCE,
                 'semantic_synth_source': SEMANTIC_SYNTH_SOURCE,
@@ -3478,7 +3486,7 @@ def _VERIFY_INTEGRITY():
             # C-core integrity: the packed .so is verified against the hash
             # of the exact bytes we packed, before anything loads it.  The
             # core was the one packed component with no check at all.
-            if _core_so and os.path.exists(_core_so):
+            if _core_so and os.path.exists(_core_so) and not ast_options.get('portable'):
                 try:
                     _core_sha = getattr(args, "_core_sha", None)
                     if not _core_sha:
@@ -3796,6 +3804,10 @@ def build_parser():
     build.add_argument('--one-shot', action='store_true', help='Self-destruct')
     build.add_argument('--net-url', help='Auth URL (if not using auto=cf)')
     build.add_argument('--tls-ca-bundle', help='PEM CA bundle for the emitted key fetch. The artifact verifies the certificate chain AND the hostname against the system trust store plus this CA (it never disables verification)')
+    build.add_argument('--portable', action='store_true', default=False,
+                        help='Skip the native core so one file runs on every OS. '
+                             'The FHE/ORAM layer falls back to pure Python with a small '
+                             'batch; every other protection is unchanged.')
     build.add_argument('--section-split', dest='section_split', action='store_true', default=True,
                        help='Ship the payload as N independently sealed sections instead of one blob, so the whole encrypted payload is never resident in a single buffer. Needs a fallback payload to split, so it is not available with --native-only (default: on)')
     build.add_argument('--no-section-split', dest='section_split', action='store_false',
@@ -4076,12 +4088,14 @@ def main():
             # is still left in dist/ for callers that ship the pair.
             _dist_dir = os.path.join(os.path.dirname(os.path.abspath(args.source)), "dist")
             _core_so = getattr(args, "_core_so", None)
-            if _core_so is None:
+            if _core_so is None and not getattr(args, "portable", False):
                 try:
                     from obfuscator.core.c_core_build import build_c_core as _build_c_core
                     _core_so = _build_c_core(_dist_dir)
                 except Exception as _core_exc:
                     print("  [!] C core build failed: %s" % (_core_exc,))
+            if getattr(args, "portable", False):
+                _core_so = None
             _pack_extras = [("nixon_core.so", _core_so)] if _core_so else []
             for suffix in ["Debug", "Silent"]:
                 t = generated_files_map.get(suffix)
