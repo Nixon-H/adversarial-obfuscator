@@ -9,12 +9,14 @@ on:
     branches: [master, main]
     paths:
       - 'tests/fixtures/portable/**'
-      - 'scripts/ci/check_portable_artefact.py'
+      # The whole directory, not one file: a commit that only touched
+      # audit_artefact.py did not trigger this workflow at all.
+      - 'scripts/ci/**'
       - '.github/workflows/portable-artefact.yml'
   pull_request:
     paths:
       - 'tests/fixtures/portable/**'
-      - 'scripts/ci/check_portable_artefact.py'
+      - 'scripts/ci/**'
   workflow_dispatch:
 
 permissions:
