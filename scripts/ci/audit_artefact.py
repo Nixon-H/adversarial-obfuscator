@@ -13,7 +13,9 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-ARTEFACT = os.path.join(HERE, "tests", "fixtures", "portable", "secure_demo_protected.py")
+ARTEFACT = os.environ.get(
+    "AUDIT_ARTEFACT",
+    os.path.join(HERE, "tests", "fixtures", "portable", "secure_demo_protected.py"))
 SOURCE = os.path.join(HERE, "tests", "fixtures", "portable", "secure_demo_source.py")
 
 EXPECTED = None

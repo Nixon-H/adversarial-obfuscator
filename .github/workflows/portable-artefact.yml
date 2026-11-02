@@ -85,3 +85,28 @@ jobs:
       # other working directories, hash seeds, read-only dirs, tampered copies.
       - name: Audit the artefact under varied environments
         run: python scripts/ci/audit_artefact.py
+
+  audit-selftest:
+    # An audit that cannot fail proves nothing. Replace the artefact with a file
+    # that prints the wrong thing and require every check to catch it.
+    name: audit has teeth
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Every check must fail against a broken artefact
+        run: |
+          printf 'print("wrong output")\n' > /tmp/broken.py
+          set +e
+          AUDIT_ARTEFACT=/tmp/broken.py python scripts/ci/audit_artefact.py > /tmp/selftest.log 2>&1
+          rc=$?
+          set -e
+          tail -3 /tmp/selftest.log
+          grep -q "12 checks, 12 failed" /tmp/selftest.log || {
+            echo "::error::the audit did not fail on a broken artefact -- its checks are not real"
+            exit 1
+          }
+          test "$rc" -ne 0 || { echo "::error::audit exited 0 on a broken artefact"; exit 1; }
+          echo "all 12 checks caught the broken artefact"
