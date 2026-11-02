@@ -30,9 +30,16 @@ every build.
 
 **The result is a negative one about the instrument, not about the defence.**
 A specification-derived property set is semantic: it asserts things that a
-semantics-preserving transformation preserves. It therefore has **no channel**
-by which transform-family variation could reach it, and any null it produces is
-predicted by its own construction.
+semantics-preserving transformation preserves. It has **no semantic channel** by
+which transform-family variation could reach it.
+
+**But it does have a structural one, and an earlier version of this abstract
+missed it.** Transform families insert different numbers of module-level
+callables, and this counter tracks module size. Measured directly: family A
+inserts 4 callables and costs 8 probes, families B and C insert 5 and cost 9, on
+every task sampled. The A-vs-B difference is +0.33 and the B-vs-C difference is
+0.00 **only because B and C insert equal counts**, so it cancels. The 0.00 is an
+artefact of the family choice, not evidence of an absent channel (section 5.1).
 
 We report that plainly, and we report what survives: a benchmark whose gates
 and reproduction are reusable, a calibration showing what the counter does
@@ -183,10 +190,36 @@ concerns *transform-family* differences. If family variation has no channel to
 the counter, the expected difference is zero by construction and no bound
 applies; if it has a channel, §5.3 does not measure it.
 
-The honest statement is the first: **a semantic property set cannot observe a
-semantics-preserving transformation's provenance.** The null is what the design
-predicts, and it is reported here as a description of the instrument's
-limitation rather than as a result about the defence.
+The honest statement would be the first — **a semantic property set cannot observe a
+semantics-preserving transformation's provenance** — except that the instrument turns out to
+have a **structural** channel, and this section originally missed it.
+
+### 5.1b The channel is structural, and it was measured
+
+| task | A | B | C |
+|---|---|---|---|
+| `sumselected` | 4 callables, **8 probes** | 5, **9** | 5, **9** |
+| `countchars` | 4, **6** | 5, **7** | 5, **7** |
+| `clamp01` | 4, **7** | 5, **8** | 5, **8** |
+
+Family A inserts one fewer module-level callable than B and C, and costs exactly one probe
+less. B and C insert equal counts and cost the same. Since §5.2 shows the counter tracks
+module size, **the family comparison measures callable-count difference, not family diversity**:
+
+- A-vs-B = **+0.33** — one extra probe in one of three seed pairings;
+- B-vs-C = **0.00** — only because B and C insert the same number of callables.
+
+The 0.00 is an artefact of the family choice. It is **not** evidence of an absent channel, and
+this paper withdraws the claim that the null is predicted by construction.
+
+**What survives:** the property set is blind to *semantic* transformation. **What does not:**
+the inference that it is therefore blind to provenance. It is blind to semantics and sensitive
+to structure, and the benchmark conflated the two — which is the paper's actual finding, and a
+sharper one than the claim it replaces.
+
+**The experiment this implies:** re-run the A/B/C comparison with callable count matched across
+families. If the difference then vanishes, the channel is entirely structural; if it does not,
+there is a second one. Not run here.
 
 ### 5.2 Module size does
 
@@ -366,9 +399,11 @@ found by the instrumentation the study required.
 
 For function identification in Python source, per-build transform-family
 diversity produced no measurable change in the cost this instrument measures —
-and that null is **predicted by the instrument's construction**, not evidence
-about diversification: a property set derived from the specification is
-semantic, and a semantics-preserving transform has no channel to it. An earlier
+and that null is **an artefact of the families compared**, not evidence about
+diversification: the property set is semantic and cannot observe a semantic
+transform, but the families insert different numbers of module-level callables
+and the counter tracks callable count (section 5.1b). The 0.00 for B-vs-C holds
+only because those two families insert equal counts. An earlier
 draft reported a two-probe bound; section 5.1 withdraws it as a non-sequitur,
 because the calibration measures semantic differences within an artefact while
 the null concerns differences between families.
@@ -379,8 +414,8 @@ of nine tasks and invariant to the order in which candidates are tried.
 
 We do not claim the families are equally hard. We claim that a specification
 applied unchanged to every build is insensitive to the family that produced it,
-that this insensitivity is predicted by the design, and that the observable
-cost in this setting is module size.
+and that the observable cost in this setting is **module size** — including the size the
+transform families themselves add, which is the channel an earlier draft denied.
 
 We report this as a negative result with the instrument, the benchmark, the
 retraction record, and the reproduction script attached, so that a reader can
