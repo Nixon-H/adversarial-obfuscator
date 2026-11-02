@@ -220,8 +220,11 @@ magnitude it can detect bounds the null.
 **Substituting the target for a sibling**, all nine tasks: the counter moves by
 a mean absolute **5.11** probes (3 to 8 per task), in every task.
 
-So the design detects an effect of about **two probes**. The diversity
-difference of 0.00 is bounded at that magnitude.
+So the design detects an effect of about **two probes**. It does **not** follow that the
+diversity difference of 0.00 is bounded at that magnitude: section 5.1 withdraws exactly that
+inference, because the calibration measures semantic differences within an artefact while the
+null concerns differences between families. An earlier draft stated the bound here; it is
+withdrawn on the same grounds as in 5.1.
 
 This does **not** convert the null into evidence about the defence. It shows the
 counter responds to semantics; it does not create a channel from transform
@@ -235,7 +238,7 @@ evaluator independently confirms it is the target.
 
 ## 6. Thirteen correctness defects found by building this benchmark
 
-None of the following was the object of study. All five were found because the
+None of the following was the object of study. All of them were found because the
 benchmark demanded something the project's own tests did not: behavioural
 identity per build, then execution of the artefact rather than inspection of it.
 
@@ -257,7 +260,7 @@ identity per build, then execution of the artefact rather than inspection of it.
 
 ### 6.1 The defects that produce code that does not run
 
-Three of the five produce artefacts that are syntactically valid, compile, and
+Three of them produce artefacts that are syntactically valid, compile, and
 then fail — at import or at first call. They are invisible to any test that
 checks the input compiles, and the project's tests checked the input.
 
@@ -291,7 +294,7 @@ checks the input compiles, and the project's tests checked the input.
 ### 6.3 Why they were not caught
 
 Every one is invisible to a test that checks **the input** runs. Three are
-invisible to a test that checks **the output** compiles. All five are visible to
+invisible to a test that checks **the output** compiles. All of them are visible to
 one that compiles **and imports** the output over real modules.
 
 The internal fixtures could not have found ten of them: they used no
@@ -301,7 +304,7 @@ used all three within minutes.
 
 ### 6.4 The one defect that cannot be fixed inside a module
 
-The twelfth defect found (round 212) is different in kind. `attr/_cmp.py` declares a
+The defect in row 13 of the table is different in kind. `attr/_cmp.py` declares a
 public function `cmp_using` and **no `__all__`**. The renamer renames it, correctly by its
 own rules, and `attr/__init__.py`'s `from ._cmp import cmp_using` then fails.
 

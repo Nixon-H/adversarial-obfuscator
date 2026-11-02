@@ -1,0 +1,264 @@
+# Cold review of `docs/research/paper-draft.md`
+
+**Reviewer:** an independent engineering reader (the "iceman" agent), not a
+programming-languages or security researcher. I wrote the blind specification in
+`docs/research/blind-specification.md` first and read the paper afterwards, so I
+had no access to its framing while writing the specs.
+
+**What I checked by running, not reading:** `scripts/transfer/reproduce.py`
+(all eight tables), `scripts/transfer/artefact_gate.py`'s module list and
+`docs/research/gate-count.json`, the task files, the identity/attacker code in
+`scripts/transfer/evaluate_tasks.py` and `scripts/transfer/accumulating_attack.py`,
+and direct measurements of variant modules (function counts per transform family,
+probe counts, per-task monotonicity, permutation endpoints).
+
+`reproduce.py` passes: singleton 51, module-size 2.0/3.4/5.8/8.6, diversity
++0.33/+0.33/0.00, fixed-build 9 9 9 9 9, fault-control 9→11, authoring 38,
+calibration 9/11/20/20, blind-baseline 8/12/16/20. I independently reproduced
+per-task monotonicity (9 of 9) and permutation endpoints (all 24 permutations of
+`sumselected` end at 9). Those claims stand.
+
+The rest of this review is about the claims that do not.
+
+---
+
+## 1. The strongest objection to the central claim
+
+The central claim is: "A specification-derived property set is semantic: it
+asserts things that a semantics-preserving transformation preserves. It therefore
+has **no channel** by which transform-family variation could reach it, and any
+null it produces is predicted by its own construction" (lines 31–35).
+
+**That is true of the property set's truth values and false of the counter the
+paper actually measures, and the paper's own data show it.** The endpoint is
+probe count over the candidate set, and the candidate set is not a semantic
+object: it is the set of module-level functions, which the obfuscator controls
+and which differs by transform family.
+
+Measurement: for all 17 tasks at seeds 11/22/33, generate a variant under each
+family and count `types.FunctionType` in the module namespace.
+
+| family | passes | functions per task | 
+|---|---|---|
+| A (`rename, dead_code, mba, cfg_flatten`) | all 17 tasks, all 3 seeds | 4 or 5 |
+| B (`rename, dead_code, opaque_pred, string_encode`) | all 17 tasks, all 3 seeds | 5 or 6 |
+| C (`rename, mba, string_encode`) | all 17 tasks, all 3 seeds | 5 or 6 |
+
+B − A = +1 on every one of the 51 (task, seed) combinations; C − B = 0 on all
+51. The extra callable cannot be a task function: family A's modules already
+contain the target plus all three siblings (four functions), so B's fifth is
+injected by the pipeline.
+
+Now combine that with the paper's own surviving result: §5.2 says probe count
+rises with the number of candidates (2.0 at one candidate to 8.6 at four). So
+transform family has a mechanical route to the counter — through the number of
+module-level callables it injects. The diversity table (lines 168–176) is
+exactly what that channel predicts: A-vs-B and A-vs-C are +0.33 (not the 0.00
+the "no channel" argument predicts), and B-vs-C is 0.00 because **B and C inject
+the same number of callables**, not because the counter is blind to provenance.
+
+The +0.33 is not noise: I computed the per-task differences, and they are
+identical (0.33) in all 17 tasks — one extra probe on one of the three seeds,
+every time. The paper calls this "one probe cheaper" (line 174) when the table's
+own mean is 0.33; it then declines to explain it. It is the channel, showing up
+at the resolution of one probe.
+
+Two consequences:
+
+1. The sentence "the null is what the design predicts" is not true for A-vs-B.
+   The design as described predicts 0.00 for every pair; it does not.
+2. The B-vs-C null is an artefact of matching on callable count (5–6 in both
+   families) while the counter is known to be driven by callable count. A null
+   obtained by matching the two arms on the one variable that moves the endpoint
+   is not evidence that the endpoint cannot see the treatment; it is evidence
+   that the treatment was held constant on the relevant dimension.
+
+The paper's defence — that the *property set's verdict* is invariant — is
+correct but does not reach the claim. The title is "Why a Frozen Specification
+Cannot Measure the **Cost** of Diversification." The cost it measures is
+sensitive to a non-semantic property of the build, and the paper's own §5.2
+identifies that property as the dominant one. So the honest thesis is narrower:
+*a spec-derived property set cannot observe semantic differences, and the cost
+endpoint it feeds is dominated by candidate-set size, which the transform can
+and does change.* That thesis the data support. The stronger "no channel"
+thesis the data refute.
+
+---
+
+## 2. Claims the attached evidence does not support
+
+Line numbers refer to `docs/research/paper-draft.md`.
+
+| # | Quoted claim | What is wrong / what would be needed |
+|---|---|---|
+| 1 | "Every number is regenerated by `scripts/transfer/reproduce.py` … no figure here was typed from memory." (5–8) | `reproduce.py` prints eight tables. It does not regenerate the sd column, 5.11, "3 to 8 per task", 314 bytes / 0.08% / eight ASTs, 38 artefacts, 17 tasks, 13 defects, 60 files, or "one probe cheaper". `table_singleton()` even computes the non-singleton count and then discards it (`main()` prints only `cells`, so the printed row is "51", not "51 cells, 0 non-singleton"). Needed: restrict the sentence to the eight tables, or extend `reproduce.py` to print every number the paper quotes (including the singleton zero). |
+| 2 | "A further five external sources (three single-file libraries and two vendored packages, 38 artefacts) are gated for execution" (24–26) | 38 is the **whole gate at `--variants 1`**: 9 synthetic + 8 corpus + 1 internal stress fixture + 20 external modules (14 package modules, 4 external-task modules, `strutils.py`, `iterutils.py`) (`gate-count.json`; `_modules()`). The 20 external modules come from more files/packages than the paper lists — `bulk/iterutils.py` is a boltons file the list omits. §7 also says "one vendored packages" against the abstract's "two". Needed: "38 artefacts total at one index, 20 of them external", a complete source list, and one consistent package count. |
+| 3 | "eight drawn from real programs — each a target function among same-arity siblings" (22–24) | The eight are `scripts/transfer/real_tasks.py` modules under `corpus/held_out`, `corpus/calibration`, `corpus/development` — in-repo programs with `_demo` harnesses, not third-party real programs. Their siblings are not all same-arity (`rle_decode(code)` and `xor_bytes(data, key)` sit beside `rle_encode(text)`). Needed: "eight from this repository's corpus"; drop "same-arity" or state it as approximate. |
+| 4 | "no channel by which transform-family variation could reach it" (33–34) | See §1: family A injects one fewer callable than B/C on all 51 task-seed pairs; probe count is driven by callable count (§5.2); A-vs-B is +0.33. Needed: restate as "no channel through the property set's truth values", and report the candidate-count channel and its measured effect. |
+| 5 | "any null it produces is predicted by its own construction" (34–35) | The premise "semantics-preserving" is not independently established. The behavioural gate is the task's own property set plus three evaluator inputs (`evaluate_tasks.py`); the paper's own `build-nondeterminism.md` says: "What this does **not** establish: that the *behaviour* is identical. That requires the differential test suite"; and `research-readiness-audit-2026-10-29.md` says "passing a few vectors is a semantic smoke gate, not proof of equivalence." Needed: a differential oracle over the whole module, independent of the property set, before the word "semantics-preserving" bears the argument. |
+| 6 | "An attacker whose four properties always return true … spends 8.0 probes at one candidate and 20.0 at four" (204–207) | With exactly one candidate, `apply()` early-stops before probing (`len(remaining) <= 1`), so the cost would be 0.0, not 8.0. Measured: the "1 candidate" module contains **two** `FunctionType`s (the target plus one injected helper), and the "4 candidates" module contains five. So the column is task candidates, not candidates, and the blind baseline's 8.0 = 4 props × 2 functions. Needed: define the candidate set as all module-level callables, recount the rows (2/3/4/5), or exclude injected helpers from both arms. Until then the table's axis label is wrong and the 25%/43% comparison mixes denominators. |
+| 7 | "Family A is one probe cheaper than B and C" (174) | The table says +0.33. The measured effect is exactly one probe on one of three seeds, identical in all 17 tasks. Needed: "0.33 probes in the seed-alternating design, i.e. one probe on one of three seeds." |
+| 8 | "invariant to the order the functions appear in" (46–47) and "every permutation ends at 9" (200–201) | True for `sumselected` (I verified all 24 permutations), and §7 admits "established on one task's permutations, not all" (358). The abstract states it unqualified. Needed: qualify in the abstract, or run the permutation check on all tasks. |
+| 9 | "So the design detects an effect of about **two probes**. The diversity difference of 0.00 is bounded at that magnitude." (223–224) | Directly contradicts §5.1: "If family variation has no channel to the counter, the expected difference is zero by construction and **no bound applies**" (182–184), and §5.3's own next paragraph ("This does not convert the null into evidence about the defence"). This is the retracted non-sequitur, still present in the retracting paper. Needed: delete the bound sentence; it is the exact claim §5.1 exists to withdraw. |
+| 10 | "thirteen correctness defects … four of which produce artefacts that compile and then fail" (49–51); "All five were found" (238–239); "Three of the five produce artefacts that are syntactically valid, compile, and then fail" (260–261) | Three different counts for the same list. The table has 13 rows; §6's "five" is the subset documented in `artefact_gate.py` (expiry, false opaque, dataclass, unbound import, match), never introduced as a subset; the abstract's "four" matches neither (seven rows fail at import, three run and misbehave, three do not compile). Needed: one count, and an explicit "five of the thirteen" where the subset is meant. |
+| 11 | "The twelfth defect found (round 212)" (303) | Table row 13 is the same `attr/_cmp.py` defect ("public exports renamed, importer not"). Needed: "thirteenth". |
+| 12 | "it would have caught every defect above" (335–336) | Compile-and-import cannot catch defect 1, the 30-day expiry: at build time the artefact imports and runs; it fails a month later. It also cannot catch defect 13 by importing the module alone; the failure is in the *importer* (`attr/__init__.py`), which the recommendation does not say to import. Needed: "every defect except the time-dependent one", or add a clock-shifted run and package-importer import. |
+| 13 | "No source-level analogue exists." (94–95) | A universal negative from an eight-query, fifteen-source screen (the paper itself calls it "not a systematic review", 75–78). Needed: "none was found in the screen", with the search log cited. |
+| 14 | "| evidence documents | `docs/research/` (60 files) |" (396) | 62 `.md` files existed before this review's two additions (65 directory entries including `gate-count.json` and two subdirectories). Needed: update the count or remove it. |
+| 15 | "a specification buys roughly a factor of two at small sizes" (208–209) | The table gives 2.0 vs 8.0 = 4× at one candidate and 8.6 vs 20 = 2.3× at four; the quoted "25% … 43%" are right, the "factor of two at small sizes" is not (it is 4× at the smallest size and ~2× only at the largest). Needed: "2.3× at four candidates, 4× at one". |
+| 16 | "51 cells, zero non-singleton" (232) | The computation is real (`reproduce.py` computes it), but the printed table shows only "51"; the zero is computed and discarded. Needed: print it, so a reader sees the zero rather than the claim. |
+
+Three smaller points, not table rows:
+
+- **The reproduction script has its own stale number.** `reproduce.py`'s
+  `table_module_size` docstring says "Documents claim 2.0 probes at one
+  candidate, 8.3 at four" while the same function returns and prints 8.6, and
+  `cost-is-build-independent.md` records the round-68 correction from 8.3 to
+  8.6. The paper quotes 8.6 correctly; the script that is supposed to be the
+  check still carries the old figure in its docstring. This is the same
+  failure mode the paper accuses earlier documents of, one layer down.
+- **Terminology collision.** "Family" means transform family in §5.1 and task
+  provenance (synthetic/corpus) in §5.4 ("Across both families at three build
+  indices: 51 cells"). A reader arriving from §5.1 will read §5.4 as
+  2 transform families × 3 build indices and expect 102, not 51.
+- **The sd column** (0.00 for all three pairs) is reproducible in principle but
+  not printed by `reproduce.py`; it is zero because every task's difference is
+  the identical 0.33 (one probe on one seed). A degenerate sd reported to two
+  decimals reads as a precision that does not exist. Nothing is false; it is
+  uninformative, and it is cited as if it were a dispersion estimate.
+
+## 3. Does the paper over- or under-claim relative to its artefacts?
+
+**It over-claims in five places.**
+
+1. **"Real programs."** Eight task functions drawn from five in-repository demo
+   modules with `_demo` CLIs are described in the abstract as "drawn from real
+   programs" and "same-arity siblings". The body (§4.1) is accurate — "this
+   repository's own corpus" — but the abstract is what a reader takes away, and
+   a reviewer checking the corpus will find small authored modules.
+2. **"Every number is regenerated".** This is the paper's central claim to
+   trustworthiness, and it is false for a material fraction of the numbers:
+   the 5.11 calibration, the sd column, the nondeterminism figures, the gate
+   count, the document count, the "one probe cheaper" prose.
+3. **"No channel."** Over-claimed relative to its own measurement: the channel
+   is candidate count, it is measured, and the A-vs-B row is it.
+4. **"Caught every defect."** Over-claimed relative to the gate that exists
+   (the expiry fuse is time-dependent; the cross-module export defect needs the
+   importer, not the artefact).
+5. **"No source-level analogue exists."** Over-claimed relative to a
+   fifteen-source screen.
+
+**It under-claims in three places, and these matter more.**
+
+1. **It under-reads its own only positive family effect.** A-vs-B +0.33 is
+   explained away as "single-probe resolution" when it is a deterministic,
+   universal, correctly-signed effect of exactly the mechanism §5.2 describes.
+   That is the most interesting thing in §5.1 and it is treated as noise.
+2. **It under-describes the candidate set.** §5.2's "candidates" column is task
+   candidates; the counter sees injected helpers. The blind baseline's 8.0 at
+   "one candidate" is the tell, and the paper does not notice it. This is not a
+   small bookkeeping point: it is the variable that produces both the module-size
+   result and the A-vs-B effect.
+3. **It under-claims the feasibility of the control its own §7 says is the
+   primary limitation.** §7: "The external sources … do **not** provide an
+   independent **specification**, because the properties are still written by
+   this paper's author. That is the primary limitation: twelve-plus projects
+   specified by someone else would be, and this is not that." A single different
+   author is cheaper than twelve projects, and it was done during this review
+   (see Appendix). The paper should have had that control, and its absence is a
+   choice, not a resource limit.
+
+**Balance:** the artefact bundle is unusually complete — reproduction script,
+per-defect documents, a retraction record, a gate with a recorded count, and a
+novelty log that states its own limits. The problem is not missing attachments;
+it is that the paper's strongest sentences run ahead of them, and the one place
+where the data contradict the thesis is the one place the prose does not look.
+
+## 4. One thing I would do next with a month
+
+**Re-run the diversity endpoint with the candidate set held fixed and semantics
+verified by an oracle the property set does not own.**
+
+Concretely: (a) define the candidate set once per task from the *original*
+module's public functions and evaluate only those names in every build, so
+injected helpers cannot enter either arm (or count them explicitly and report
+the count per family); (b) verify semantic preservation with a differential
+oracle — generated inputs plus each function's own doctests, run against the
+original and every build, independent of the task's properties; (c) then measure
+probe count and, separately, an adaptive attacker that sees only the artefact.
+Families must be matched on everything the counter can see except the transform
+(pass count, module size, callable count, seed protocol).
+
+Why this one: it is the only experiment that makes a null informative. As the
+paper stands, a zero is explained by "no channel" and a non-zero by a defect,
+so no outcome can count against the thesis. Fixing the candidate set removes the
+one channel the data actually show; the differential oracle removes the
+assumption that the transforms are semantics-preserving; and an adaptive
+attacker with no frozen spec is the endpoint that could, in principle, register
+a diversification effect at all. If that design still produces 0.00, the
+negative result is about the defence. If it does not, the paper has found the
+channel it denied.
+
+## 5. Is it publishable as a methods note?
+
+**No — not as written.**
+
+What blocks it, in order:
+
+1. **The central claim is contradicted by the paper's own measurements** (A-vs-B
+   +0.33 with a measured one-callable difference; B-vs-C 0.00 with callable
+   counts matched). A methods note whose thesis is "the instrument has no
+   channel" cannot survive its own table showing a channel.
+2. **The semantics-preservation premise is assumed, not tested.** The paper's own
+   build-nondeterminism note says behaviour identity was not established, and the
+   audit calls the vector check a smoke gate. Without an independent oracle, the
+   "predicted by construction" argument is conditional on the very thing the
+   project's defect record shows was repeatedly false.
+3. **The §5.3 bound sentence remains**, contradicting §5.1's retraction in the
+   same document. A reader who reads only §5.3 takes away the retracted claim.
+4. **The numbers do not reconcile**: 13/5/4 defects, twelfth/thirteenth, two/one
+   vendored packages, 38 external/total, 60 files, "every number".
+5. **The candidate set is undefined**, so "8.0 probes at one candidate" is
+   incoherent and the module-size axis is mislabelled.
+
+It becomes publishable, in my judgement, as a short workshop methods note or
+experience report, after: (a) restating the thesis as "a spec-derived property
+set cannot observe semantic differences, and the cost endpoint is dominated by
+candidate-set size, which the transform controls — here is the measured channel";
+(b) adding the independent-author control (it exists now) and an independent
+differential oracle; (c) fixing the counts and dropping the bound sentence; and
+(d) reporting callable counts per family alongside every cost number. That
+version would be a genuinely useful cautionary note, because its negative result
+would be about the instrument and its positive result (module size) would be
+properly attributed. The current version asks the reader to accept the
+instrument's blindness as a premise and then presents the blindness as a finding.
+
+---
+
+## Appendix: the independent-author control that §7 says is missing
+
+`docs/research/blind-specification.md` and `scripts/transfer/blind_tasks.py`
+(sha256 `3cb7f06a22806f2f2ddab4a475f022819b064a03425201bde65d579516387489`,
+sealed 2026-11-02T01:50:23Z) contain six tasks specified from docstrings alone by
+this reviewer, who had not read the paper, the benchmark tasks, or the defect
+documents. Three modules, two functions each, 26 properties, three evaluator
+inputs per function.
+
+Result: **18 of 18 cells evaluator-unique and attacker-singleton** at k = 0, 2, 4
+(75/41/34 candidates in the three modules). `scripts/transfer/evaluate_blind.py`
+reproduces it.
+
+What this does and does not say:
+
+- It says the "specifications were written by the benchmark's author" limitation
+  is not fatal to the *identification* gate: a different author, working only
+  from docstrings, produced specs that pin their functions on every build. The
+  property-set instrument works as designed.
+- It does **not** rescue the "no channel" thesis. If anything it sharpens the
+  problem: a docstring-derived spec is exactly the kind of object that is
+  invariant to transform family, so it cannot see family variation by
+  construction — which is the paper's point, but also why the paper cannot use
+  it to measure diversification.
+- It is six functions, not twelve projects, and it deliberately avoided floats,
+  error behaviour, and boundary cases (see the confidence section of the blind
+  document). It is a control, not a corpus.
