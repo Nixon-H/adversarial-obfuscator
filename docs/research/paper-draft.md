@@ -205,6 +205,16 @@ Family A is one probe cheaper than B and C; **B and C are identical** at
 single-probe resolution. Replicated on the eight corpus tasks, where
 B-versus-C is 0.00 on all eight.
 
+**The sd of 0.00 is not a null: it is a fingerprint.** All seventeen tasks give a difference of
+exactly $+\tfrac{1}{3}$ probes — one extra probe in one of the three seed pairings, identically in
+every task. A constant difference in every task is the signature of a *systematic* cause, and the
+cause is the one-callable gap of §5.1b: family A always inserts exactly one fewer module-level
+callable. If the difference were noise it would vary across tasks; if there were no cause it would
+be 0.00 rather than $+\tfrac{1}{3}$.
+
+Read that way, the sd column is evidence **for** the confound rather than against an effect — the
+opposite of how an earlier draft presented it.
+
 **This is not a bound on a defence effect, and we no longer report it as one.**
 An earlier version of this section said the difference was "bounded at about two
 probes" by the calibration in §5.3. That was a non-sequitur: §5.3 measures

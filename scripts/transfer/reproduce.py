@@ -165,6 +165,27 @@ def table_authoring():
 
 
 
+def table_diversity_sd():
+    """Documents claim sd 0.00 for all three pairs. That is the point, not a defect."""
+    per_task = []
+    for kind, name, src, props in _tasks():
+        def probes(fam, seed):
+            code = generate_variant(src, 4, {"master_seed": seed, "pass_sets": [fam]})
+            td = tempfile.mkdtemp(prefix="nxk_rep_")
+            path = os.path.join(td, "b.py")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(code)
+            return AccumulatingAttack().apply(path, props)["probes"]
+
+        seed_only = [probes(FAM_A, s) for s in (11, 22, 33)]
+        varying = [probes(FAM_A, 11), probes(FAM_B, 22), probes(FAM_A, 33)]
+        per_task.append(round(statistics.mean(varying) - statistics.mean(seed_only), 3))
+    return ("diversity-sd",
+            {"per_task": sorted(set(per_task)), "tasks": len(per_task),
+             "sd": round(statistics.pstdev(per_task), 3)}, None,
+            "sd 0.00: every task differs by exactly one third of a probe")
+
+
 def table_sibling_substitution():
     """Documents claim a mean absolute 5.11 probes, range 3 to 8, in every task."""
     deltas = []
@@ -233,7 +254,8 @@ def table_blind_baseline():
 def main():
     rows = [table_singleton(), table_module_size(), table_diversity(),
             table_fixed_build(), table_fault_control(), table_authoring(),
-            table_calibration(), table_sibling_substitution(), table_blind_baseline()]
+            table_calibration(), table_sibling_substitution(),
+            table_diversity_sd(), table_blind_baseline()]
     width = max(len(r[0]) for r in rows)
     print("%-*s | %-58s | documents claim" % (width, "measurement", "regenerated"))
     print("-" * (width + 62 + 40))
