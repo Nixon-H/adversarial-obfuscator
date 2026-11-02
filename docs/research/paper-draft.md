@@ -111,11 +111,10 @@ identification is possible), and method (a specification-derived property set
 authored once and applied frozen).
 
 **On the framing, CoDiver's partition diversity** denies analysis-knowledge
-transfer in virtualised code, where a stale opcode map fails structurally. No
-source-level analogue exists. This paper does **not** report such a mechanism: it
-reports that the instrument it built cannot measure the question, and why — which
-is a narrower claim than a measurement of cost, and a different one from a
-mechanism.
+transfer in virtualised code, where a stale opcode map fails structurally. **The screen found no
+source-level analogue** — eight queries over two sessions, fifteen sources, so that is a bounded
+statement and not a claim of absence. This paper does **not** report such a mechanism: it reports
+a controlled measurement, and the measurement says the family effect was the callable count.
 
 The nearest benchmark is JsDeObsBench (36,260 obfuscated JavaScript programs);
 it differs in language, attacker (LLM), and the absence of a cross-build
