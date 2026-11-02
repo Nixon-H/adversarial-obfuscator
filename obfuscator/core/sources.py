@@ -6175,6 +6175,15 @@ def _nx_self_fail(reason):
             pass
 def {FUNC_SELF}():
     try:
+        # Imported locally: the interpreter-integrity guard is allowed to null
+        # the module-level hashlib/hmac aliases when it decides the host is
+        # hostile, and it did exactly that on Windows CI -- the self-check then
+        # died with "'NoneType' object has no attribute 'sha256'" and the
+        # artifact exited 137 with no explanation. A check that decides whether
+        # the artifact is intact must not depend on a name another hardening
+        # path is permitted to burn.
+        import hashlib as _nx_self_sha
+        import hmac as _nx_self_mac
         with open(__file__, 'rb') as f: lines = f.readlines()
         # The lines that hold the EXPECTED values are excluded from the
         # hash: a value cannot be part of what it describes.  They are
@@ -6196,11 +6205,11 @@ def {FUNC_SELF}():
             _nx_self_fail("merkle expected=%s got=%s bytes=%d lines=%d"
                           % (_nx_er[:16], str(root_hash)[:16], len(content), len(lines)))
         secret = bytes.fromhex(_HMAC_KEY_)
-        sig = _nixon_エイチマック에이치.new(secret, content, _nixon_ハッシュ해시.sha256).hexdigest()
+        sig = _nx_self_mac.new(secret, content, _nx_self_sha.sha256).hexdigest()
         if sig != _nx_eh:
             _nx_self_fail("hmac expected=%s got=%s bytes=%d"
                           % (str(_nx_eh)[:16], str(sig)[:16], len(content)))
-        return _nixon_ハッシュ해시.sha256(content).digest()
+        return _nx_self_sha.sha256(content).digest()
     except SystemExit:
         raise
     except Exception as e:
