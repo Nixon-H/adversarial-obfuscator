@@ -66,3 +66,20 @@ jobs:
           grep -q "nixon_core" tests/fixtures/portable/secure_demo_protected.py \
             && { echo "artefact references nixon_core"; exit 1; } || echo "no native reference"
           find . -name "nixon_core*" -not -path "./.git/*" | head -5
+
+  audit-environments:
+    name: audit ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # Twelve environments a single happy-path run cannot cover: odd paths,
+      # other working directories, hash seeds, read-only dirs, tampered copies.
+      - name: Audit the artefact under varied environments
+        run: python scripts/ci/audit_artefact.py
