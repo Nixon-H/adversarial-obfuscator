@@ -227,10 +227,17 @@ class ExceptionFlowTransformer(ast.NodeTransformer):
                          args=[ast.Call(func=ast.Name(id='iter', ctx=ast.Load()),
                                         args=[ast.List(elts=[], ctx=ast.Load())],
                                         keywords=[])], keywords=[]),
-        lambda: ast.Call(func=ast.Attribute(
-                             value=ast.Dict(keys=[], values=[]),
-                             attr='__getitem__', ctx=ast.Load()),
-                         args=[ast.Constant(value=0)], keywords=[]),
+        # Index 6 must raise _exc_types[6] == RuntimeError. It used to be
+        # `{}.__getitem__(0)`, which raises KeyError -- so the block's handler
+        # caught RuntimeError, nothing matched, the fallback re-raised, and the
+        # exception escaped the function (opt-level 5 crashed on a KeyError).
+        # The trigger list is aligned to _exc_types by index, so this entry must
+        # raise RuntimeError; `raise` is used because no single expression raises
+        # it dependably.
+        lambda: ast.Raise(
+            exc=ast.Call(func=ast.Name(id='RuntimeError', ctx=ast.Load()),
+                         args=[], keywords=[]),
+            cause=None),
     ]
     def __init__(self):
         self.transform_count = 0
@@ -290,7 +297,9 @@ class ExceptionFlowTransformer(ast.NodeTransformer):
             if block_idx < len(blocks) - 1:
                 next_exc_idx = exc_map[block_idx + 1]
                 trigger = self._triggers[next_exc_idx % len(self._triggers)]()
-                trigger_stmts.append(ast.Expr(value=trigger))
+                # A trigger may be an expression or a statement (`raise`).
+                trigger_stmts.append(trigger if isinstance(trigger, ast.stmt)
+                                     else ast.Expr(value=trigger))
             else:
                 trigger_stmts.append(ast.Assign(
                     targets=[ast.Name(id=loop_var, ctx=ast.Store())],

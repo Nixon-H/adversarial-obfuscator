@@ -148,6 +148,29 @@ def _scope_declared_names(tree):
     return names
 
 
+def _builtin_exception_names():
+    """Every builtin exception class name, derived rather than listed.
+
+    `ZeroDivisionError` was missing from all three hardcoded `reserved` sets, so
+    `except ZeroDivisionError:` was renamed to a name nothing binds and the
+    artefact raised NameError. A hand-maintained list of exception names can
+    only ever be incomplete; `builtins` cannot.
+    """
+    import builtins as _b
+    names = set()
+    for name in dir(_b):
+        try:
+            obj = getattr(_b, name)
+        except Exception:
+            continue
+        if isinstance(obj, type) and issubclass(obj, BaseException):
+            names.add(name)
+    return names
+
+
+_BUILTIN_EXCEPTIONS = _builtin_exception_names()
+
+
 class SymbolRenamer(ast.NodeTransformer):
     def __init__(self, mapping=None):
         self.mapping = mapping if mapping is not None else {}
@@ -286,6 +309,12 @@ class SymbolRenamer(ast.NodeTransformer):
         # default-argument fix failed on exactly that.
         if old_name in self._renamed_values:
             return old_name
+        # Builtin exception names must be checked BEFORE the dynamic_unbounds
+        # branch, which renames without consulting `reserved`. `except
+        # ZeroDivisionError:` reached that branch first and became `_nx_f640f1`
+        # (md5("ZeroDivisionError")[:6]), a name nothing binds.
+        if old_name in _BUILTIN_EXCEPTIONS:
+            return old_name
         if hasattr(self, 'dynamic_unbounds') and old_name in self.dynamic_unbounds:
             if old_name not in self.mapping:
                 self.mapping[old_name] = "_nx_" + __import__('hashlib').md5(old_name.encode()).hexdigest()[:6]
@@ -293,7 +322,7 @@ class SymbolRenamer(ast.NodeTransformer):
                 self._renamed_values.add(self.mapping[old_name])
                 self._rename_log.append((old_name, self.mapping[old_name]))
             return self.mapping[old_name]
-        if old_name in self.reserved: 
+        if old_name in self.reserved or old_name in _BUILTIN_EXCEPTIONS:
             return old_name
         if old_name.startswith('_nixon_') or old_name.startswith('_NX_'):
             return old_name
@@ -1808,8 +1837,49 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
             return name in self.allow_internal_rename and name not in self.reserved
         except Exception:
             return False
+    def visit_arg(self, node):
+        """Reserve parameter names; their uses must not be encoded.
+
+        `rename_params` is False by design (call-site keyword contracts), so a
+        parameter keeps its spelling in the def. This class still encoded its
+        USES, which is why `def __init__(self, n)` kept `n` while
+        `self.n = n` became a reference to an encoded name that nothing binds.
+        Reserving here runs before the body is visited, because `args` precedes
+        `body` in FunctionDef.
+        """
+        try:
+            if node.arg:
+                self.reserved.add(node.arg)
+        except Exception:
+            pass
+        return node
+    def visit_Import(self, node):
+        """Reserve plain imports so the binding and its uses agree.
+
+        This class previously had no visit_Import at all: `import zlib` kept its
+        spelling while every use of `zlib` was encoded, so the artefact raised
+        NameError on the mangled name. The reserved set held a hardcoded list of
+        common modules, which covered `hashlib` and `secrets` but not `zlib` --
+        a list that can only ever be incomplete.
+
+        Reserving the actual bindings from the AST is the same fix SymbolRenamer
+        uses for `numbers` and `hexversion`, and it cannot go stale.
+        """
+        for alias in node.names:
+            if alias.asname:
+                self.reserved.add(alias.asname)
+            else:
+                self.reserved.add(alias.name.split(".")[0])
+        return node
+    def visit_ImportFrom(self, node):
+        """Reserve `from X import Y` bindings for the same reason."""
+        for alias in node.names:
+            if alias.name == "*":
+                continue
+            self.reserved.add(alias.asname or alias.name)
+        return node
     def _encode_name(self, name):
-        if name in self.reserved or name.startswith('_'):
+        if name in self.reserved or name in _BUILTIN_EXCEPTIONS or name.startswith('_'):
             return name
         if name in self.encoded_map: 
             return self.encoded_map[name]
@@ -1876,7 +1946,20 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
         except Exception:
             _depth = 0
         if _depth > 0 and not self._is_internal_allowed(node.name):
-            self.generic_visit(node)
+            # This early return used to call generic_visit WITHOUT setting
+            # _local_params, so a method's parameter uses were encoded while the
+            # arg node kept its spelling: `def __init__(self, n)` kept `n`, but
+            # `self.n = n` became a reference to an encoded name nothing binds.
+            # The parameter bookkeeping must wrap this branch exactly as it
+            # wraps the module-level one below.
+            _prev_params = getattr(self, '_local_params', None)
+            _accum = set(_prev_params) if _prev_params else set()
+            _accum.update(self._collect_params(node))
+            self._local_params = _accum
+            try:
+                self.generic_visit(node)
+            finally:
+                self._local_params = _prev_params
             return node
         node.name = self._encode_name(node.name)
         _prev_params = getattr(self, '_local_params', None)
