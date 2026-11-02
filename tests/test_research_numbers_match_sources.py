@@ -306,3 +306,21 @@ def test_handoff_suite_number_matches_the_last_run():
     if failed == 0:
         assert "1 failed" not in handoff, (
             "HANDOFF.md claims 0 failed in one place and 1 failed in another")
+
+
+def test_paper_document_count_matches_the_directory():
+    """`(N files)` in the paper must equal the number of research documents.
+
+    Round 5: the paper said 60 while the directory held 67. Nothing checked it, because a
+    file count is not a claim about the benchmark and none of the numeric guards looked at
+    the artefacts table.
+    """
+    import re
+    paper = _read(PAPER)
+    actual = len([f for f in os.listdir(DOCS) if f.endswith(".md")])
+    m = re.search(r"\((\d+) files\)", paper)
+    if not m:
+        return
+    assert int(m.group(1)) == actual, (
+        "the paper says %s research documents, the directory holds %d"
+        % (m.group(1), actual))

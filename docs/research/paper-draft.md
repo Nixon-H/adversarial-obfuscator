@@ -11,10 +11,11 @@ discriminate (not merely enumerate), and on every task/seed cell with callable c
 any that differ. No table figure was typed from memory.
 
 **Not every number is covered by it**, and an earlier version of this line claimed they were. The
-script regenerates the 5.11 sibling-substitution figure as a ninth table, and §4.3's build-spread
-figures are reproducible from the measurement described there. Still **transcribed** and checkable
-only by other means: the standard-deviation column, the 38-artefact gate total
-(`artefact_gate.py`), the 20 external artefacts, and the document count.
+script regenerates the 5.11 sibling-substitution figure (ninth table) and the per-task diversity
+differences and their standard deviation (tenth). Every other number is now checkable by one of:
+`artefact_gate.py` (the 38-artefact total and the 20 external artefacts, recorded in
+`gate-count.json`), the measurement described in §4.3 (the build spread), or
+`tests/test_research_numbers_match_sources.py` (the document count).
 
 Sections that rest on a single benchmark family say so.
 
@@ -516,7 +517,7 @@ check the claim and, if they have a corpus, extend it.
 | attacker | `scripts/transfer/accumulating_attack.py` |
 | evaluation | `scripts/transfer/evaluate_tasks.py` |
 | reproduction | `scripts/transfer/reproduce.py` — eight tables, one command |
-| evidence documents | `docs/research/` (67 files) |
+| evidence documents | `docs/research/` (68 files) |
 | defect documents | one per defect, all cited here: `table-key-folding-defect.md`, `nonlocal-binding-defect.md`, `typing-runtime-import-defect.md`, `default-arg-closure-defect.md`, `enum-member-load-defect.md`, `renamed-local-scope-defect.md`, `invented-return-tuple-defect.md`, `match-pattern-rename-defect.md`, `future-import-defect.md`, `requests-urllib3-attempt.md` |
 | sealed reports | `research-reports/` |
 
