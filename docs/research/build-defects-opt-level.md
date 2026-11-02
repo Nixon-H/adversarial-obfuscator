@@ -55,3 +55,44 @@ reproduces the source output **exactly** (verified by `diff`) and is 280x the so
 **using the tool as a user would** — building a realistic module at the highest settings —
 and neither the artefact gate nor any test covers them, because the gate's 38 artefacts were
 generated at the default level with payloads that avoid these constructs.
+
+---
+
+## Defect 16: the watermark's fragmentation left dangling branches
+
+`embed_fragmentation_watermark` split a function at `len(blocks) // 2` and moved the tail into
+`_wm_frag_<name>_<bit>`. The kept half's last block still branched to the first moved block, so
+`llvmgen` emitted `br label %bb0` in a function that never defines `%bb0`, and `llc` rejected the
+module:
+
+```
+llc: error: ...:234:18: error: use of undefined value '%bb0'
+```
+
+That is what blocked `phase_llvm_codegen` and therefore the entire IR -> LLVM -> encrypt ->
+native path.
+
+**Fix.** A split is only sound if the kept half ends in `ret` or `unreachable`. SSA values cannot
+cross into a fragment without parameter passing, so a mid-flow split is not repairable — the
+transform now declines those functions instead of corrupting them. 126 watermark tests pass, and
+`tests/test_opt_level_behaviour.py::test_fragmentation_never_leaves_a_dangling_branch` asserts
+that every branch target in every function is defined by that function; it fails when the guard
+is removed.
+
+## What still blocks the native stages
+
+With both defects fixed, `llvmgen` now reports the honest limitation underneath:
+
+```
+IR contains 19 instruction(s) this lowering cannot express:
+  @_nx_fake_api_decrypt: string literal "sk_live_" used as a value:
+  LLVM has no bare string value and this IR models strings as i32 handle
+```
+
+The IR models strings as `i32` handles, so a string literal passed as a value cannot be lowered.
+The decoy templates use string concatenation heavily (`"https://..." + str(key_id)`), and the
+entry function uses `"__main__"`.
+
+This is a **capability gap in the IR**, not a naming or control-flow defect, and no small fix
+closes it. Until irgen/llvmgen model string literals, the native path can only carry payloads
+that avoid string values — which is most real code.

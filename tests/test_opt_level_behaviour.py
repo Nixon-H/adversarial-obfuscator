@@ -236,3 +236,40 @@ def test_injected_decoys_never_reference_an_unbound_name():
         method(tree)
     missing = _undefined_names(tree)
     assert not missing, f"injected module loads names nothing binds: {sorted(missing)}"
+
+
+def test_fragmentation_never_leaves_a_dangling_branch():
+    """Splitting a function mid-flow moved the block its last kept block jumped to.
+
+    llvmgen then emitted `br label %bb0` with no `bb0` in that function, and llc
+    rejected the module with "use of undefined value '%bb0'". SSA values cannot
+    cross into a fragment without parameter passing, so such a split cannot be
+    repaired; the transform must decline it.
+    """
+    from irgen.compile import IrFunction, IrModule
+    from scripts.watermark.semantic_watermark import embed_fragmentation_watermark
+
+    module = IrModule("fragtest")
+    func = IrFunction("victim", None)
+    a = func.new_block("a")
+    b = func.new_block("b")
+    c = func.new_block("c")
+    a.set_terminator("jmp", target_label=b.label)
+    b.set_terminator("jmp", target_label=c.label)
+    c.set_terminator("ret")
+    module.functions.append(func)
+
+    embed_fragmentation_watermark(module, [1, 1, 1], seed=0)
+
+    for fn in module.functions:
+        labels = {blk.label for blk in fn.blocks}
+        for blk in fn.blocks:
+            term = getattr(blk, "terminator", None)
+            if term is None:
+                continue
+            for key in ("target_label", "true_label", "false_label"):
+                label = getattr(term, key, None)
+                if label is not None:
+                    assert label in labels, (
+                        f"{fn.name}: block {blk.label} branches to {label}, "
+                        f"which that function does not define")

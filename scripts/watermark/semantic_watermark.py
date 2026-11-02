@@ -408,6 +408,18 @@ def embed_fragmentation_watermark(
                 bit_idx += 1
                 continue
 
+            # A split is only sound if the kept half ends in a return. Splitting
+            # mid-flow moves the block that the last kept block jumps to into a
+            # different function, leaving a branch to a label that function does
+            # not define -- llvmgen emitted `br label %bb0` with no `bb0`, and llc
+            # rejected the module ("use of undefined value '%bb0'"). SSA values
+            # cannot cross into a fragment without parameter passing, so a
+            # mid-flow split is not repairable: skip those functions instead.
+            last_kept = func.blocks[split_point - 1]
+            term = getattr(last_kept, "terminator", None)
+            if term is None or getattr(term, "opcode", None) not in ("ret", "unreachable"):
+                continue
+
             frag_name = f"_wm_frag_{func.name}_{bit_idx}"
             fragment = IrFunction(frag_name, func.return_type)
 
