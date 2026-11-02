@@ -23,3 +23,20 @@ The artefact hashes **its own bytes** and refuses to run if they change (exit 13
 on Windows rewrites LF to CRLF on checkout, which changes every offset, so the self-check fails and
 the artefact dies. The first CI run of this fixture showed exactly that: `ubuntu-latest` passed,
 `windows-latest` exited 137. `-text` keeps the committed bytes intact on every platform.
+
+## Configuration matrix (audited)
+
+The portability audit has been run against more than one build configuration. Repeating one
+configuration tells you it is stable; a different configuration tells you the *builder* is.
+
+| configuration | size | audit |
+|---|---|---|
+| `--section-count 6 --zips 2 --opt-level 5` (the committed fixture) | 660,152 | 12/12, 30 passes |
+| `--section-count 8 --zips 1 --opt-level 4` | 436,216 | 12/12 |
+| `--section-count 2 --zips 3 --opt-level 3` | — | 12/12 |
+
+Every configuration is `--portable`: no native core, so the same file runs on any OS.
+
+**The audit has been shown to fail on demand**: pointed at a file that prints the wrong thing, all
+12 checks fail (CI job `audit has teeth`). Without that, a green audit and a check that cannot fire
+look identical.
