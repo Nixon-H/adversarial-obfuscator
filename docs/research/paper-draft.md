@@ -11,10 +11,11 @@ with counts matched.
 any that differ. No table figure was typed from memory.
 
 **Not every number is covered by it**, and an earlier version of this line claimed they were. The
-script does not regenerate: the 5.11 mean-absolute-probe figure (§5.3), the standard-deviation
-column, the 314-byte / 8-AST counts, the 38-artefact gate total, or the document count. Those are
-transcribed, and a reader checking them must run `matched_families.py` and
-`artefact_gate.py` as well.
+script now regenerates the 5.11 sibling-substitution figure as a ninth table. Still **transcribed**
+and checkable only by other means: the standard-deviation column, the 314-byte / 8-AST build
+spread (§4.3 — the source it was measured on is not recorded, so it cannot be re-run; the eight
+distinct ASTs are reproducible), the 38-artefact gate total (`artefact_gate.py`), the 20 external
+artefacts, and the document count.
 
 Sections that rest on a single benchmark family say so.
 

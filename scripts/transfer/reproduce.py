@@ -165,6 +165,28 @@ def table_authoring():
 
 
 
+def table_sibling_substitution():
+    """Documents claim a mean absolute 5.11 probes, range 3 to 8, in every task."""
+    deltas = []
+    for name, t in SYNTH.items():
+        if not t["siblings"]:
+            continue
+
+        def probes(fn_name):
+            src = fn_name + "\n" + "\n".join(t["siblings"])
+            code = generate_variant(src, 4, {"master_seed": 4242})
+            td = tempfile.mkdtemp(prefix="nxk_rep_")
+            path = os.path.join(td, "b.py")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(code)
+            return AccumulatingAttack().apply(path, t["props"])["probes"]
+
+        deltas.append(abs(probes(t["siblings"][0]) - probes(t["target"])))
+    mean = round(statistics.mean(deltas), 2)
+    return "sibling-substitution", {"mean": mean, "min": min(deltas),
+                                    "max": max(deltas)}, None, "5.11 probes, range 3 to 8"
+
+
 def table_calibration():
     """Documents claim 9, 11, 20, 20 probes for zero to three faults."""
     t = SYNTH["sumselected"]
@@ -211,7 +233,7 @@ def table_blind_baseline():
 def main():
     rows = [table_singleton(), table_module_size(), table_diversity(),
             table_fixed_build(), table_fault_control(), table_authoring(),
-            table_calibration(), table_blind_baseline()]
+            table_calibration(), table_sibling_substitution(), table_blind_baseline()]
     width = max(len(r[0]) for r in rows)
     print("%-*s | %-58s | documents claim" % (width, "measurement", "regenerated"))
     print("-" * (width + 62 + 40))
