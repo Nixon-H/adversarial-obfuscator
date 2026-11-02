@@ -147,7 +147,7 @@ rather than trusted.
 | from code the project did not write | **ten of thirteen** |
 | test suite | 4527 passed, 4 skipped |
 | artefact gate | 38 artefacts, 0 failures |
-| reproduction | 8 of 8 tables |
+| reproduction | 10 of 10 tables |
 | document guards | 21 |
 | sealed reports | 65 |
 
