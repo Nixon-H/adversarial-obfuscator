@@ -424,10 +424,10 @@ The defect in row 13 of the table is different in kind. `attr/_cmp.py` declares 
 public function `cmp_using` and **no `__all__`**. The renamer renames it, correctly by its
 own rules, and `attr/__init__.py`'s `from ._cmp import cmp_using` then fails.
 
-Every other defect could be repaired inside the module being transformed. This one cannot:
-the export contract exists **only in another file**, which a per-module transform never
-sees. The three possible exits are all product decisions rather than fixes, and each was
-measured against the existing suite:
+Every other defect could be repaired inside the module being transformed. This one cannot be
+repaired from inside the module: the export contract exists **only in another file**, which a
+per-module transform never sees. Three exits were costed first, and each was measured against the
+existing suite:
 
 | exit | what it costs |
 |---|---|
@@ -436,8 +436,25 @@ measured against the existing suite:
 | require `__all__` and refuse without it | unusable: most packages declare none |
 
 The first was implemented and reverted; the other two are bounded by the architecture and by
-usability respectively. **No test wants any of them**, which is the operational definition of
-a decision rather than a bug.
+usability respectively. **No test wants any of them.**
+
+**A fourth exit works and does not break the contract**, because the caller knows what the
+transform cannot see. A scan of the module's siblings yields the names they import from it, and
+those names are reserved from renaming:
+
+```python
+imported = sibling_imports(module_path)        # obfuscator/cross_module.py
+out, _ = apply_ast_mutation(src, {"imported_names": imported})
+```
+
+That is a **narrowing** of what gets renamed, never an expansion, and it reuses the additive
+reservation already used for `__all__` exports. Verified by a test that builds a package where
+`_mod.py` exports `cmp_using` and `__init__.py` imports it: without the option the import fails,
+with it the package imports, and a public name no sibling imports is still renamed.
+
+The defect therefore remains **for callers that do not supply the scan** — a single-module
+transform invoked without package context cannot detect it — but it is no longer unfixable, and the
+remaining cost is a caller-side scan rather than a contract change.
 
 **This is worth stating because the current behaviour picks none of them.** A module with
 public functions and no `__all__` is obfuscated into something that cannot be imported by
