@@ -6193,11 +6193,13 @@ def {FUNC_SELF}():
         tree_root = {FUNC_MERKLE_BUILD}(chunks)
         root_hash = tree_root.hash if tree_root else ""
         if not constant_time_compare(root_hash.encode(), _nx_er.encode()):
-            _nx_self_fail("merkle")
+            _nx_self_fail("merkle expected=%s got=%s bytes=%d lines=%d"
+                          % (_nx_er[:16], str(root_hash)[:16], len(content), len(lines)))
         secret = bytes.fromhex(_HMAC_KEY_)
         sig = _nixon_エイチマック에이치.new(secret, content, _nixon_ハッシュ해시.sha256).hexdigest()
         if sig != _nx_eh:
-            _nx_self_fail("hmac")
+            _nx_self_fail("hmac expected=%s got=%s bytes=%d"
+                          % (str(_nx_eh)[:16], str(sig)[:16], len(content)))
         return _nixon_ハッシュ해시.sha256(content).digest()
     except SystemExit:
         raise
@@ -6215,7 +6217,7 @@ def {FUNC_SELF}():
         # A self-check that could not RUN is a failed self-check.  It
         # used to log and continue, so editing the check's own code was
         # enough to disable it: the artifact carried on and exited 0.
-        _nx_self_fail("self-check error")
+        _nx_self_fail("self-check error: %s" % (e,))
 
 def {FUNC_LIVE_CHK}():
     digest = _nixon_ハッシュ해시.sha256()
