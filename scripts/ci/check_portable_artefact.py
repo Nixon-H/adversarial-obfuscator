@@ -56,8 +56,19 @@ def main():
         failures.append("artefact exited %d" % a_rc)
     if s_rc != 0:
         failures.append("source exited %d" % s_rc)
-    if a_out != s_out:
+    # The loader writes the payload's output with os.write on some paths, which
+    # does not translate newlines, while the plain source uses print, which does
+    # on Windows. Compare the content, not the platform's line-ending convention.
+    if a_out.replace("\r\n", "\n") != s_out.replace("\r\n", "\n"):
         failures.append("output differs from source")
+        try:
+            import difflib
+            for line in list(difflib.unified_diff(
+                    s_out.splitlines(), a_out.splitlines(),
+                    "expected", "artefact", lineterm=""))[:20]:
+                print(line)
+        except Exception:
+            pass
     # No native library may be referenced or required.
     text = open(ARTEFACT, encoding="utf-8", errors="replace").read()
     if "nixon_core" in text:
