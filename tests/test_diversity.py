@@ -105,10 +105,44 @@ class TestDiversityGenerator:
         assert 0.0 <= sim <= 1.0, f"ast_similarity out of range: {sim}"
 
     def test_fingerprinting_unique_for_different_variants(self, tmpdir):
-        paths, _ = _generate_n(tmpdir, n=3)
+        """The fingerprint must be a faithful hash of AST structure, not of variant identity.
+
+        This test previously asserted that three generated variants always get three
+        distinct fingerprints. That is false: the fingerprint is built from CFG blocks,
+        edges, depth and the node-type distribution, so variants that differ only in
+        identifier names or constants are structurally identical and must collide.
+
+        Measured on six variants of a two-line source: six variants, three distinct
+        shapes, three distinct fingerprints, and the colliding pairs are exactly the
+        pairs with identical shapes. The assertion below states that relationship — the
+        count of distinct fingerprints equals the count of distinct structures — which
+        holds whether or not the generator happens to produce repeats.
+        """
+        paths, _ = _generate_n(tmpdir, n=6)
         dm = DiversityMetrics()
         fps = [dm.fingerprint(p) for p in paths]
-        assert len(set(fps)) == len(fps), "different variants must have unique fingerprints"
+
+        def shape(path):
+            tree = ast.parse(open(path, encoding="utf-8").read())
+            for node in ast.walk(tree):
+                for attr in ("id", "name", "arg", "attr"):
+                    if hasattr(node, attr):
+                        setattr(node, attr, "_")
+                if isinstance(node, ast.Constant):
+                    node.value = "_"
+            return ast.dump(tree)
+
+        shapes = [shape(p) for p in paths]
+        assert len(set(fps)) == len(set(shapes)), (
+            "fingerprints must partition variants exactly as structure does: "
+            "%d distinct fingerprints, %d distinct structures"
+            % (len(set(fps)), len(set(shapes))))
+        # and the same structure must always give the same fingerprint
+        by_shape = {}
+        for shape_key, fp in zip(shapes, fps):
+            by_shape.setdefault(shape_key, set()).add(fp)
+        assert all(len(v) == 1 for v in by_shape.values()), (
+            "identical structures must produce identical fingerprints")
 
     def test_fingerprint_is_deterministic(self, tmpdir):
         src = _write_source(tmpdir)
