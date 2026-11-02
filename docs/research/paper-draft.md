@@ -1,8 +1,8 @@
 # Diversification Adds Nothing Beyond the Callables It Inserts
 
-**A 17-task controlled comparison.** The claim is scoped to this benchmark: on the 7 tasks
-where residual discrimination cost exceeds the callable count, and on all 51 task/seed cells
-with counts matched.
+**A controlled comparison over 11 load-bearing tasks — two of them specified by someone other than
+this paper's author.** The claim is scoped: on the 11 tasks where the attacker must actually
+discriminate (not merely enumerate), and on every task/seed cell with callable counts matched.
 
 **A controlled comparison in Python source obfuscation, with a reusable benchmark.**
 
@@ -259,6 +259,24 @@ Bias checks that were run: pad additivity over 459 measurements with 0 deviation
 pre-padding regenerated the artefact with 0/153 count and 0/153 probe differences, so the
 obfuscator's own insertion does not react to padding; symmetric padding to max+2 still gives
 0.00; survival trajectories identical in 51/51 cells.
+
+**The result replicates on independently specified tasks.** Six tasks were specified by an author
+who had not read this paper, from docstrings alone, over three third-party modules; four further
+tasks are the author's own external tasks. On all ten, matched probe counts are **identical across
+families** and every pairing is exactly 0.00.
+
+Two limits, stated because they bound the claim:
+
+1. **Only two of those ten tasks are load-bearing.** Under the attacker's actual candidate base
+   (the module's own callables, not the declared candidate count), four blind tasks and two prior
+   ones have the first property eliminate every sibling — the equality there is arithmetic. The
+   informative ones are `is_prime` and `median_high` (blind) and `all_equal` and `median_low`
+   (prior). The load-bearing base is therefore **11 tasks: 7 hand-written, 2 blind, 2 prior — and
+   only the 2 blind tasks are independent of this paper's author.**
+2. **B-vs-C is structurally blind by construction.** Those two families insert exactly one helper
+   each, so their comparison cannot differ in callable count on any task measured. A negative
+   result for B-vs-C is therefore uninformative in this design; only A-vs-B and A-vs-C test the
+   question.
 
 ### 5.2 Module size does
 
