@@ -12,6 +12,7 @@ Added after two build defects found only by using the tool as a user would:
 None was visible to the artefact gate, whose payloads avoid these constructs. This test builds
 the payload at every level and compares what it prints to what the source prints.
 """
+import ast
 import contextlib
 import io
 
@@ -187,3 +188,51 @@ def test_fault_triggers_raise_the_exception_their_handler_catches():
                 f"catches {declared}; the exception would escape the function")
         else:
             raise AssertionError(f"trigger {idx} raised nothing; expected {declared}")
+
+
+def _undefined_names(tree):
+    """Names loaded but never bound anywhere in the module, and not builtins."""
+    import builtins
+
+    bound = set(dir(builtins))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                bound.add((alias.asname or alias.name).split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name != "*":
+                    bound.add(alias.asname or alias.name)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bound.update(node.names)
+    used = {n.id for n in ast.walk(tree)
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+    return used - bound
+
+
+def test_injected_decoys_never_reference_an_unbound_name():
+    """The provenance poisoner injected code using `secrets` with no import.
+
+    Two templates were affected. The module then referenced a name nothing binds:
+    invisible while the decoys are never called, fatal to static analysis of the
+    output, and a NameError the moment one is.
+    """
+    from scripts.provenance.poisoner import ProvenancePoisoner
+
+    poisoner = ProvenancePoisoner()
+    tree = ast.parse("def target(x):\n    return x + 1\n")
+    for generator in ("_generate_fake_apis", "_generate_fake_protocol_parsers"):
+        method = getattr(poisoner, generator, None)
+        if method is None:
+            raise AssertionError(f"poisoner no longer has {generator}; update this test")
+        method(tree)
+    missing = _undefined_names(tree)
+    assert not missing, f"injected module loads names nothing binds: {sorted(missing)}"

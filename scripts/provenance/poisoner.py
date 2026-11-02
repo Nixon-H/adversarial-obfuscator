@@ -149,6 +149,8 @@ class ProvenancePoisoner:
 
     def _generate_fake_apis(self, tree: ast.Module) -> None:
         api_defs_source = r'''
+import secrets as _nx_api_secrets
+
 def _nx_fake_http_request(url, headers):
     status = 200
     body = '{"status":"ok"}'
@@ -165,13 +167,13 @@ def _nx_fake_api_verify(endpoint, token):
 def _nx_fake_api_decrypt(ciphertext, key_id):
     url = "https://api.crypto.service/decrypt/v2/" + str(key_id)
     payload = {"data": str(ciphertext)}
-    headers = {"X-API-Key": "sk_live_" + secrets.token_hex(16)}
+    headers = {"X-API-Key": "sk_live_" + _nx_api_secrets.token_hex(16)}
     response = _nx_fake_http_request(url, headers)
     return response.body
 
 def _nx_fake_api_attest(challenge):
     url = "https://attest.nx/verify"
-    nonce = secrets.token_hex(8)
+    nonce = _nx_api_secrets.token_hex(8)
     headers = {"X-Nonce": nonce}
     response = _nx_fake_http_request(url, headers)
     return response.status == 200
@@ -187,6 +189,7 @@ def _nx_fake_api_attest(challenge):
 
     def _generate_fake_protocol_parsers(self, tree: ast.Module) -> None:
         proto_source = r'''
+import secrets as _nx_proto_secrets
 import struct as _nx_proto_struct
 
 def _nx_proto_crc16(data):
@@ -227,7 +230,7 @@ def _nx_proto_handshake(peer_id):
             buf.append(peer_id)
             state = 1
         elif state == 1:
-            challenge = secrets.token_bytes(32)
+            challenge = _nx_proto_secrets.token_bytes(32)
             buf.append(challenge)
             state = 2
         elif state == 2:
