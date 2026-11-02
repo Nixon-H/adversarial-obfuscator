@@ -73,7 +73,8 @@ def table_singleton():
             cells += 1
             if len(_score(code, props)) != 1:
                 non_singleton += 1
-    return "singleton", cells, non_singleton, "51 cells, 0 non-singleton"
+    return ("singleton", {"cells": cells, "non_singleton": non_singleton},
+            None, "51 cells, 0 non-singleton")
 
 
 def table_module_size():
