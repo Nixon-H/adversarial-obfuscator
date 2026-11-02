@@ -1,0 +1,49 @@
+name: Portable artefact (all OS)
+
+# Tests the claim that ONE committed file runs on every OS with no native library.
+# The same bytes are run on Linux, Windows and macOS: that is the only way to test
+# portability, and rebuilding per-OS would test the builder instead.
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'tests/fixtures/portable/**'
+      - 'scripts/ci/check_portable_artefact.py'
+      - '.github/workflows/portable-artefact.yml'
+  pull_request:
+    paths:
+      - 'tests/fixtures/portable/**'
+      - 'scripts/ci/check_portable_artefact.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  run-artefact:
+    name: ${{ matrix.os }} / py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # No dependencies installed on purpose: the artefact must run on a bare
+      # interpreter, and the checker imports nothing from the project.
+      - name: Run the committed artefact and compare to its source
+        run: python scripts/ci/check_portable_artefact.py
+
+      - name: Confirm no native library is required
+        shell: bash
+        run: |
+          grep -q "nixon_core" tests/fixtures/portable/secure_demo_protected.py \
+            && { echo "artefact references nixon_core"; exit 1; } || echo "no native reference"
+          find . -name "nixon_core*" -not -path "./.git/*" | head -5

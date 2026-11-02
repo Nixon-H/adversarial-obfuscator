@@ -17,7 +17,6 @@ Kept to `apply_ast_mutation` rather than a full build because a build is ~20s pe
 """
 import importlib.util
 import os
-import sys
 import tempfile
 
 import pytest
