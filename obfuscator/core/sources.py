@@ -6088,8 +6088,14 @@ def _check_interpreter_integrity():
         return True
     except: return True
 if not _check_interpreter_integrity():
-    _nixon_ハッシュ해시 = None
-    globals()['_nixon_ハッシュ해시'] = None
+    # This used to null the hashlib alias here. It bought no security -- an
+    # attacker can `import hashlib` -- and it broke the artefact: the Merkle
+    # builder and the self-integrity check both run later and use hashlib, so on
+    # a host where this guard fires (every Windows runner, apparently) the
+    # loader died with "'NoneType' object has no attribute 'sha256'" and exit
+    # 137. The guard still reports itself; it just no longer disables the
+    # library the integrity check depends on.
+    globals()['_nixon_INTEGRITY_SUSPECT'] = True
 '''
 LOADER_BODY = r'''def {FUNC_TRIGGER_ALERT}(reason):
     url = {FUNC_STR_DEC}({VAR_CANARY_URL})
