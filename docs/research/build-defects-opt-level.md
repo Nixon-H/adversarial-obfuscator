@@ -1,5 +1,10 @@
 # Two Build Defects Found While Producing a Maximum-Security Artefact
 
+> **Status: both fixed** (commit `f835e21`). Four root causes, all one rule — a name must have
+> one authority. `tests/test_opt_level_behaviour.py` holds a guard for each, and each guard was
+> verified to fail when its defect is reinstated. The text below records the defects as they
+> were found, which is why it reads in the present tense.
+
 **Date:** 2026-11-02. Found by building a payload at every opt-level with the advanced
 protection set, not by any existing test.
 
