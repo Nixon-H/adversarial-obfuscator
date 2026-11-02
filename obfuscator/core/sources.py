@@ -6156,6 +6156,16 @@ def _nx_self_fail(reason):
             _nx_sysf.stderr.flush()
         except Exception:
             pass
+        # Write the reason to fd 2 with os.write, which is unbuffered and
+        # survives os._exit; print() would be lost. Without this the artifact
+        # died silently and the cause could not be attributed (a Windows CI leg
+        # exited 137 with no output and no way to tell integrity from anything
+        # else).
+        try:
+            _nx_osf.write(2, ("[FATAL] self-integrity check failed: "
+                              + str(reason) + "\n").encode("utf-8", "replace")[:256])
+        except Exception:
+            pass
         _nx_osf._exit(137)
     except Exception:
         try:
