@@ -17,6 +17,7 @@ ARTEFACT = os.path.join(HERE, "tests", "fixtures", "portable", "secure_demo_prot
 SOURCE = os.path.join(HERE, "tests", "fixtures", "portable", "secure_demo_source.py")
 
 EXPECTED = None
+CHECK_TIMEOUT = 120
 
 
 def normalise(text):
@@ -28,8 +29,15 @@ def run(path, cwd=None, env=None):
     e.setdefault("PYTHONIOENCODING", "utf-8")
     if env:
         e.update(env)
-    p = subprocess.run([sys.executable, path], cwd=cwd or os.path.dirname(path),
-                       capture_output=True, timeout=900, env=e)
+    try:
+        p = subprocess.run([sys.executable, path], cwd=cwd or os.path.dirname(path),
+                           capture_output=True, timeout=CHECK_TIMEOUT, env=e)
+    except subprocess.TimeoutExpired:
+        # A hang must be reported as a named failure with the environment that
+        # caused it, not left to stall the job. This is how the Windows/macOS
+        # audit legs stalled for 15 minutes without saying where.
+        raise AssertionError("timed out after %ds (cwd=%s env=%s)"
+                             % (CHECK_TIMEOUT, cwd, env))
     return p.returncode, normalise(p.stdout.decode("utf-8", "replace"))
 
 
@@ -44,12 +52,16 @@ RESULTS = []
 
 
 def check(name, fn):
+    # Printed BEFORE the work: if a check hangs, the last line in the log names
+    # it, which is the whole point of a diagnostic.
+    print("%-46s ..." % name, flush=True)
     try:
         ok, detail = fn()
     except Exception as exc:  # noqa: BLE001 - the message is the finding
         ok, detail = False, "%s: %s" % (type(exc).__name__, exc)
     RESULTS.append((name, ok, detail))
-    print("%-46s %s%s" % (name, "PASS" if ok else "FAIL", "" if ok else "  <- " + detail))
+    print("%-46s %s%s" % (name, "PASS" if ok else "FAIL", "" if ok else "  <- " + detail),
+          flush=True)
 
 
 def c_direct():
