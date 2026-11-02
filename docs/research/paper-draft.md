@@ -11,11 +11,10 @@ discriminate (not merely enumerate), and on every task/seed cell with callable c
 any that differ. No table figure was typed from memory.
 
 **Not every number is covered by it**, and an earlier version of this line claimed they were. The
-script now regenerates the 5.11 sibling-substitution figure as a ninth table. Still **transcribed**
-and checkable only by other means: the standard-deviation column, the 314-byte / 8-AST build
-spread (§4.3 — the source it was measured on is not recorded, so it cannot be re-run; the eight
-distinct ASTs are reproducible), the 38-artefact gate total (`artefact_gate.py`), the 20 external
-artefacts, and the document count.
+script regenerates the 5.11 sibling-substitution figure as a ninth table, and §4.3's build-spread
+figures are reproducible from the measurement described there. Still **transcribed** and checkable
+only by other means: the standard-deviation column, the 38-artefact gate total
+(`artefact_gate.py`), the 20 external artefacts, and the document count.
 
 Sections that rest on a single benchmark family say so.
 
@@ -174,11 +173,20 @@ paid once per task, not per build.
 
 ### 4.3 Builds
 
-Pipeline builds with pinned transform selection. **Not byte-reproducible**: eight
-builds of one source gave a 314-byte spread (0.08%) and **eight distinct ASTs**.
-Builds are therefore never treated as paired for any inference that assumes a
-shared artefact; the cost endpoint is unaffected because the variation is far
-below its resolution.
+Pipeline builds with pinned transform selection. **Not byte-reproducible**, and by far more than an
+earlier draft reported.
+
+Eight builds of `urllib3/_collections.py` (17,762 bytes of source) produce outputs of
+30,424 / 30,514 / 30,771 / 33,515 / 31,661 / 28,612 / 30,605 / 34,208 bytes — a **5,596-byte
+spread, 17.9% of the mean** — and **eight distinct ASTs**. The same measurement on a small
+synthetic task gives 1,018 bytes, also about 18%. An earlier draft claimed a 314-byte spread
+(0.08%); that figure could not be reproduced on any source tried, and it is **withdrawn**.
+
+So builds are never treated as paired for any inference that assumes a shared artefact. The cost
+endpoint nevertheless appears stable: on the task measured, the probe count was **identical
+(9,9,9,9,9,9,9,9) across the same eight seeds** despite the 18% structural variation. That is an
+empirical observation on one task, not a consequence of the variation being small — and it is the
+only reason the unpaired design is defensible.
 
 ## 5. Results
 
