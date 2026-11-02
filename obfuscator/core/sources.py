@@ -463,6 +463,14 @@ def apply_ast_mutation(source_code, options=None):
         if options.get('symbol_rename'):
             renamer = SymbolRenamer()
             renamer.reserved.update({'NATIVE_BLOBS', 'FALLBACK_BLOB', 'BLOB_KEY'})
+            # Cross-module export defect (defect 13): a module-level public name
+            # that a SIBLING module imports cannot be renamed, because the
+            # importer is not rewritten. A single-module transform cannot see the
+            # sibling, so the caller passes the names it found:
+            #   options={"imported_names": sibling_imports(path)}
+            # Reuses the same additive reserve helper as __all__ exports.
+            if options.get('imported_names'):
+                renamer.reserve_all_names(options['imported_names'])
             # AUDIT GAPS #52/#75: trial-gate + hwid-unlock loader helpers and
             # their _NX_* markers must survive whole-artifact renames.
             renamer.reserved.update({
