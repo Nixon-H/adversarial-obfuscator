@@ -217,9 +217,33 @@ the inference that it is therefore blind to provenance. It is blind to semantics
 to structure, and the benchmark conflated the two — which is the paper's actual finding, and a
 sharper one than the claim it replaces.
 
-**The experiment this implies:** re-run the A/B/C comparison with callable count matched across
-families. If the difference then vanishes, the channel is entirely structural; if it does not,
-there is a second one. Not run here.
+**The experiment was run.** With callable counts equalised across families — one no-op callable
+added to A, none to B or C — the comparison is **exactly 0.00 on all three pairings and all 17
+tasks**:
+
+| pairing | before | counts matched |
+|---|---|---|
+| A-vs-B | +0.33 | **+0.00** |
+| A-vs-C | +0.33 | **+0.00** |
+| B-vs-C | 0.00 | **+0.00** |
+
+Matched probe counts are identical A = B = C in **all 51 task/seed cells**, so the zero is exact
+rather than rounding. **The entire measured family effect is the one-callable gap.**
+
+Two caveats, stated because they bound the result:
+
+1. **On 10 of 17 tasks the probe count equals the callable count**, so the equality is partly
+   arithmetic. The load-bearing evidence is the 7 tasks with residual discrimination cost
+   `c = probes − k > 0`, where `c` is identical across families (spread **0**).
+2. **The pads are maximally inert** — they fail the first property and cost exactly one probe —
+   so they cannot emulate an inserted callable that would *pass* a property. A family that adds
+   a callable indistinguishable from the target's siblings would cost more than one probe, and
+   that case is not tested here.
+
+Bias checks that were run: pad additivity over 459 measurements with 0 deviations; source-side
+pre-padding regenerated the artefact with 0/153 count and 0/153 probe differences, so the
+obfuscator's own insertion does not react to padding; symmetric padding to max+2 still gives
+0.00; survival trajectories identical in 51/51 cells.
 
 ### 5.2 Module size does
 
