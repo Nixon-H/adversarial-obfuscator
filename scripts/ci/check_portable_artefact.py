@@ -31,6 +31,14 @@ def run(path):
 
 
 def main():
+    # The artefact's identifiers are unicode. Piping its stderr to a Windows
+    # console raised UnicodeEncodeError on cp1252 and failed the job *after* the
+    # artefact had printed the correct output -- a CI bug, not a portability one.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     print("platform:", sys.platform, "| python:", sys.version.split()[0])
     print("artefact:", os.path.basename(ARTEFACT), os.path.getsize(ARTEFACT), "bytes")
 
