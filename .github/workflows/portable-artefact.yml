@@ -39,6 +39,22 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # The artefact hashes its own bytes. If a checkout rewrites them, the
+      # self-check refuses to run -- so print what each OS actually received.
+      - name: Bytes received by this runner
+        if: always()
+        shell: bash
+        run: |
+          python - <<'EOF'
+          import hashlib, os
+          p = "tests/fixtures/portable/secure_demo_protected.py"
+          b = open(p, "rb").read()
+          print("size:", len(b))
+          print("sha256:", hashlib.sha256(b).hexdigest())
+          print("crlf:", b.count(b"\r\n"), "lf:", b.count(b"\n"))
+          print("first bytes:", b[:40])
+          EOF
+
       # No dependencies installed on purpose: the artefact must run on a bare
       # interpreter, and the checker imports nothing from the project.
       - name: Run the committed artefact and compare to its source
