@@ -2971,12 +2971,25 @@ HARDENING_SOURCE = r'''class {CLS_HARD}:
         return True
 def {FUNC_HARD}():
     import sys as _s_
-    if not {CLS_HARD}.{METHOD_PTRACE_SELF}(): _s_.exit(0)
-    if not {CLS_HARD}.{METHOD_CHECK_PARENT}(): _s_.exit(1)
-    if not {CLS_HARD}.{METHOD_LINUX_HARD}(): _s_.exit(2)
-    if not {CLS_HARD}.{METHOD_WIN_DEBUG}(): _s_.exit(3)
-    if not {CLS_HARD}.{METHOD_THREAD_TIMING}(): _s_.exit(4)
-    if not {CLS_HARD}.{METHOD_SYM_DETECT}(): _s_.exit(5)
+    # Each exit names the check that fired, on stderr, before dying. Silently
+    # exiting 1 is indistinguishable from a crash: the macOS CI runs spent
+    # rounds as "artefact exited 1 with no stdout and no stderr" because this
+    # function said nothing. Naming the check does not help an attacker -- they
+    # can read the source -- and it is the difference between a diagnosis and a
+    # mystery.
+    def _nx_hard_die(code, what):
+        try:
+            _s_.stderr.write("[BLOCKED] " + str(what) + " (exit " + str(code) + ")\n")
+            _s_.stderr.flush()
+        except Exception:
+            pass
+        _s_.exit(code)
+    if not {CLS_HARD}.{METHOD_PTRACE_SELF}(): _nx_hard_die(0, "ptrace-self")
+    if not {CLS_HARD}.{METHOD_CHECK_PARENT}(): _nx_hard_die(1, "parent-process")
+    if not {CLS_HARD}.{METHOD_LINUX_HARD}(): _nx_hard_die(2, "linux-hardening")
+    if not {CLS_HARD}.{METHOD_WIN_DEBUG}(): _nx_hard_die(3, "windows-debugger")
+    if not {CLS_HARD}.{METHOD_THREAD_TIMING}(): _nx_hard_die(4, "thread-timing")
+    if not {CLS_HARD}.{METHOD_SYM_DETECT}(): _nx_hard_die(5, "symbol-detect")
     {CLS_HARD}.{METHOD_SECCOMP}()
     return True'''
 NANOMITE_SOURCE = r'''
