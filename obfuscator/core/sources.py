@@ -4,7 +4,7 @@ from .utils import (
     FUNC_NEXT_H, FUNC_PIPE_WRAP, FUNC_PROT_EXEC, FUNC_REM_ENT, FUNC_SEC_WIPE, FUNC_STACK_XOR,
     FUNC_STATE_DEC1, FUNC_STATE_EXEC, FUNC_STATE_INIT, FUNC_STATE_LOAD, FUNC_STATE_ON1,
     FUNC_STATE_ON2, FUNC_STATE_PAD, FUNC_STATE_REC, FUNC_STATE_STG0, FUNC_STATE_VM, FUNC_STATE_ZIP1,
-    UI
+    UI, deep_recursion
 )
 from .transforms import (
     ASTMutator, BogusExceptionHandler, BuiltinAliaser, CallGraphObfuscator, CodeChecksumInjector,
@@ -338,6 +338,15 @@ class ExceptionFlowTransformer(ast.NodeTransformer):
         self.transform_count += 1
         return node
 def apply_ast_mutation(source_code, options=None):
+    # Deep transforms (nested unparse, recursive flattening) need a raised
+    # recursion limit, but importing this module must not raise it: on Windows
+    # the 1 MB native stack turns a global high limit into an ACCESS_VIOLATION.
+    # Scoped here so only the work pays for it.
+    with deep_recursion():
+        return _apply_ast_mutation_inner(source_code, options)
+
+
+def _apply_ast_mutation_inner(source_code, options=None):
     if options is None: options = {}
     # Batch-2 MBA levels: validate early so an invalid mba_level raises
     # ValueError instead of being swallowed by the broad except below.

@@ -1,7 +1,48 @@
 import sys, os, zipfile, base64, io, shutil, tempfile, random, hashlib, lzma, struct, time, json, argparse, uuid, re, platform, subprocess, hmac, secrets, ctypes, importlib.util, warnings, string, multiprocessing, socket, threading, concurrent.futures  # noqa: F401 (this line binds a name used by an embedded template)
-sys.setrecursionlimit(10000)
+# Do NOT raise the recursion limit at import.
+#
+# This line used to be `sys.setrecursionlimit(10000)`, set as a side effect of
+# importing a library. On Windows a thread's native stack is 1 MB (Linux and
+# macOS give 8 MB), so a limit that the interpreter accepts on those platforms
+# overflows the real stack there -- and a native stack overflow is an
+# ACCESS_VIOLATION (0xC0000005) that kills the process before Python can raise
+# RecursionError or print anything. That is exactly the crash observed on
+# windows-latest / CPython 3.14 importing obfuscator.core, at a point where no
+# Python-level work was happening.
+#
+# Code that genuinely needs deeper recursion should raise the limit around the
+# operation that needs it, not for every importer of this module.
 sys.stderr.flush()
 warnings.filterwarnings("ignore")
+
+#: Recursion depth the transform needs. Kept here, applied only around the work
+#: that needs it -- never as an import side effect (see the comment above):
+#: on Windows the native stack is 1 MB, so a global high limit turns deep
+#: recursion into an ACCESS_VIOLATION that no except clause can catch.
+DEEP_RECURSION_LIMIT = 10000
+
+
+class deep_recursion:
+    """Raise the recursion limit for the duration of a deep operation."""
+
+    def __init__(self, limit=DEEP_RECURSION_LIMIT):
+        self.limit = limit
+        self.previous = None
+
+    def __enter__(self):
+        self.previous = sys.getrecursionlimit()
+        if self.limit > self.previous:
+            sys.setrecursionlimit(self.limit)
+        return self
+
+    def __exit__(self, *exc_info):
+        try:
+            sys.setrecursionlimit(self.previous)
+        except Exception:
+            pass
+        return False
+
+
 _console = sys.stdout
 
 #: Default file for the build log when logging is redirected.
