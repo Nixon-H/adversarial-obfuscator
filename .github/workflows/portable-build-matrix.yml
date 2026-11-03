@@ -104,9 +104,10 @@ jobs:
           python scripts/ci/diagnose_build_crash.py
         continue-on-error: true
 
-      - name: Compile vs import bisect
+      - name: Bisect is inside the script (see its output above)
         if: always()
         continue-on-error: true
+        run: echo "see the 'compile vs import' section in the previous step's output"
         run: |
           echo "== py_compile only (no execution)"
           python -m py_compile obfuscator/core/sources.py && echo "compile OK" || echo "compile CRASHED"

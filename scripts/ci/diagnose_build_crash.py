@@ -49,6 +49,25 @@ def main():
                  "obfuscator.core.transforms", "obfuscator.core.pipeline"):
         try_import(name)
 
+    say("--- compile vs import, each in its own process (no shell quoting)")
+    for label, code in (
+        ("py_compile sources", "import py_compile; py_compile.compile('obfuscator/core/sources.py', doraise=True); print('compiled', flush=True)"),
+        ("import transforms", "import sys; sys.path.insert(0, %r); import obfuscator.core.transforms as t; print('transforms', flush=True)" % (ROOT,)),
+        ("import sources", "import sys; sys.path.insert(0, %r); import obfuscator.core.sources as s; print('sources', flush=True)" % (ROOT,)),
+        ("import pipeline", "import sys; sys.path.insert(0, %r); import obfuscator.core.pipeline as p; print('pipeline', flush=True)" % (ROOT,)),
+    ):
+        say("run: %s" % label)
+        try:
+            r = subprocess.run([sys.executable, "-c", code], cwd=ROOT,
+                               capture_output=True, timeout=600)
+            out = r.stdout.decode("utf-8", "replace").strip()
+            err = r.stderr.decode("utf-8", "replace").strip()
+            say("  rc=%d out=%r" % (r.returncode, out[:120]))
+            if err:
+                say("  err=%r" % err[-400:])
+        except Exception as exc:  # noqa: BLE001
+            say("  harness error: %s" % (exc,))
+
     say("--- builder phases in a child process (a crash here is the AV)")
     launcher = (
         "import sys; sys.path.insert(0, %r); "
