@@ -103,6 +103,20 @@ def main():
     if failures:
         for f in failures:
             print("FAIL:", f)
+        # Keep the failing artefact where CI can upload it. Without the bytes a
+        # one-in-twenty failure is undiagnosable: the whole point is to compare
+        # a bad build against a good one.
+        try:
+            keep = os.path.join(ROOT, "ci-artifacts")
+            os.makedirs(keep, exist_ok=True)
+            shutil.copy2(built, os.path.join(keep, "failing_artefact.py"))
+            shutil.copy2(SOURCE, os.path.join(keep, "source.py"))
+            with open(os.path.join(keep, "report.txt"), "w", encoding="utf-8") as fh:
+                fh.write("platform: %s\npython: %s\n" % (sys.platform, sys.version))
+                fh.write("\n".join(failures))
+            print("kept the failing artefact in", keep)
+        except Exception as exc:  # noqa: BLE001
+            print("could not keep the artefact:", exc)
         return 1
     print("PASS: built on", sys.platform, "and ran correctly")
     return 0
