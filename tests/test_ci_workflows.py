@@ -1,0 +1,93 @@
+"""Tests for the CI helpers themselves, not the product.
+
+Two of this project's bugs were self-inflicted and would have been caught here:
+
+* a step with two ``run:`` keys -- ``yaml.safe_load`` accepts the duplicate
+  silently, GitHub rejects the whole file, and the run reports **0 jobs**;
+* an audit script whose checks could not fail, so a green run proved nothing.
+
+Both are checkable without a runner, which is why they are tests and not
+something only the workflow notices after a push.
+"""
+import os
+import subprocess
+import sys
+
+import pytest
+import yaml
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WORKFLOWS = os.path.join(ROOT, ".github", "workflows")
+
+
+class _StrictLoader(yaml.SafeLoader):
+    """SafeLoader that refuses duplicate mapping keys."""
+
+
+def _no_duplicates(loader, node, deep=False):
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise ValueError("duplicate key %r on line %d"
+                             % (key, key_node.start_mark.line + 1))
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_StrictLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _no_duplicates)
+
+
+def _workflow_files():
+    if not os.path.isdir(WORKFLOWS):
+        return []
+    return [os.path.join(WORKFLOWS, n) for n in sorted(os.listdir(WORKFLOWS))
+            if n.endswith((".yml", ".yaml"))]
+
+
+def test_there_are_workflows_to_check():
+    assert _workflow_files(), "no workflow files found; the rest of this file would be vacuous"
+
+
+@pytest.mark.parametrize("path", _workflow_files(), ids=os.path.basename)
+def test_workflow_parses_without_duplicate_keys(path):
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    # A duplicate key makes GitHub reject the file and run zero jobs, while
+    # yaml.safe_load accepts it. This is the check that catches that.
+    data = yaml.load(text, Loader=_StrictLoader)  # noqa: S506 - strict local loader
+    assert isinstance(data, dict), "%s is not a mapping" % path
+    assert "jobs" in data, "%s has no jobs" % path
+
+
+@pytest.mark.parametrize("path", _workflow_files(), ids=os.path.basename)
+def test_every_step_has_exactly_one_of_run_or_uses(path):
+    with open(path, encoding="utf-8") as handle:
+        data = yaml.load(handle.read(), Loader=_StrictLoader)  # noqa: S506
+    for job_name, job in (data.get("jobs") or {}).items():
+        for index, step in enumerate(job.get("steps") or []):
+            has_run = "run" in step
+            has_uses = "uses" in step
+            assert has_run or has_uses, (
+                "%s job %s step %d has neither run nor uses" % (path, job_name, index))
+            assert not (has_run and has_uses), (
+                "%s job %s step %d has both run and uses" % (path, job_name, index))
+
+
+def test_the_audit_fails_on_a_broken_artefact(tmp_path):
+    """An audit that cannot fail proves nothing.
+
+    Runs the real checker against a file that prints the wrong thing and
+    requires every check to report failure.
+    """
+    broken = tmp_path / "broken.py"
+    broken.write_text('print("not the right output")\n', encoding="utf-8")
+    env = dict(os.environ, AUDIT_ARTEFACT=str(broken))
+    proc = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "scripts", "ci", "audit_artefact.py")],
+        cwd=ROOT, capture_output=True, timeout=1800, env=env)
+    out = proc.stdout.decode("utf-8", "replace")
+    assert proc.returncode != 0, "the audit exited 0 against a broken artefact"
+    assert "12 checks, 12 failed" in out, (
+        "expected every check to fail; got:\n" + out[-2000:])
