@@ -5947,6 +5947,17 @@ if _nixon_システム시스템.version_info[:2] != _REQUIRED_VERSION and not (_
 {VAR_CANARY_URL} = "{canary_url_enc}"
 {audit_hook_source}
 def {FUNC_LOG}(msg):
+    # [FATAL] and [BLOCKED] always reach stderr, even in the Silent build.
+    # They used to be gated behind VAR_IS_DEBUG, so a failed payload decode in
+    # the silent variant exited 1 with nothing on either stream -- which is
+    # indistinguishable from a crash and cost several diagnosis rounds.
+    _nx_m = str(msg)
+    if _nx_m.startswith("[FATAL]") or _nx_m.startswith("[BLOCKED]"):
+        try:
+            _nixon_システム시스템.stderr.write(_nx_m + chr(10))
+            _nixon_システム시스템.stderr.flush()
+        except Exception:
+            pass
     if {VAR_IS_DEBUG}:
         _nixon_システム시스템.stdout.write(str(msg) + "\n")
         _nixon_システム시스템.stdout.flush()
