@@ -57,6 +57,18 @@ def main():
         except Exception as exc:  # noqa: BLE001
             say("  harness error: %s" % (exc,))
 
+    say("--- importtime trace of the package (last completed import before death)")
+    try:
+        r = subprocess.run([sys.executable, "-X", "importtime", "-c",
+                            "import sys; sys.path.insert(0, %r); import obfuscator.core" % (ROOT,)],
+                           cwd=ROOT, capture_output=True, timeout=600)
+        say("  rc=%d" % r.returncode)
+        lines = r.stderr.decode("utf-8", "replace").strip().splitlines()
+        for line in lines[-14:]:
+            say("  " + line[:120])
+    except Exception as exc:  # noqa: BLE001
+        say("  harness error: %s" % (exc,))
+
     say("--- project")
     sys.path.insert(0, ROOT)
     for name in ("obfuscator", "obfuscator.core.sources",
