@@ -260,8 +260,9 @@ jobs:
             args: "--opt-level 2"
           - label: opt-level-4
             args: "--opt-level 4"
-          - label: stego
-            args: "--stego"
+          # --stego is deliberately absent: it emits an image carrier the
+          # harness does not load, so the artefact prints nothing and the check
+          # would report a failure of this script, not of the product.
           - label: pin-structure
             args: "--pin-structure"
           - label: strict-detections
