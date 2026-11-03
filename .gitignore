@@ -108,3 +108,4 @@ builds/
 config/*
 !config/default.json
 !config/baseline_report.json
+ci-artifacts/
