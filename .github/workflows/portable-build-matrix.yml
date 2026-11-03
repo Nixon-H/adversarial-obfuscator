@@ -83,3 +83,23 @@ jobs:
           NX_OPT_LEVEL: ${{ matrix.level }}
           NX_WATERMARK: ${{ matrix.label }}
         run: python scripts/ci/build_on_platform.py
+
+  diagnose-windows-314:
+    # Known crash: ACCESS_VIOLATION (0xC0000005) building on Windows + 3.14.
+    # An access violation cannot be caught, so print and flush before each step;
+    # the last line printed names the culprit.
+    name: diagnose windows py3.14 crash
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install builder dependencies
+        run: pip install --require-hashes -r requirements.lock
+      - name: Which step kills the process
+        run: |
+          python -VV
+          python -m pip list
+          python scripts/ci/diagnose_build_crash.py
+        continue-on-error: true
