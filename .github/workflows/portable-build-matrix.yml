@@ -103,3 +103,16 @@ jobs:
           python -m pip list
           python scripts/ci/diagnose_build_crash.py
         continue-on-error: true
+
+      - name: Compile vs import bisect
+        if: always()
+        continue-on-error: true
+        run: |
+          echo "== py_compile only (no execution)"
+          python -m py_compile obfuscator/core/sources.py && echo "compile OK" || echo "compile CRASHED"
+          echo "== import transforms first"
+          python -c "import sys; sys.path.insert(0,'.'); print('t:'); import obfuscator.core.transforms; print('transforms OK')"
+          echo "== import sources alone"
+          python -c "import sys; sys.path.insert(0,'.'); print('s:'); import obfuscator.core.sources; print('sources OK')"
+          echo "== import sources with dev mode"
+          python -X dev -c "import sys; sys.path.insert(0,'.'); import obfuscator.core.sources; print('sources OK in dev')"
