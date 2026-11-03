@@ -110,3 +110,23 @@ jobs:
           }
           test "$rc" -ne 0 || { echo "::error::audit exited 0 on a broken artefact"; exit 1; }
           echo "all 12 checks caught the broken artefact"
+
+  build-on-platform:
+    # The previous jobs ran a pre-built artefact, which proves the ARTEFACT is
+    # portable but not that the BUILDER is. This one builds here, on each OS,
+    # and then has to run what it produced.
+    name: build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install builder dependencies
+        run: pip install --require-hashes -r requirements.lock
+      - name: Build the portable artefact on this platform and run it
+        run: python scripts/ci/build_on_platform.py
