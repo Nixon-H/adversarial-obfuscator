@@ -1,27 +1,24 @@
 name: Portable build matrix
 
-# Every OS x every supported Python, building there and running what it built.
-# The artefact pins the interpreter it was made for, so a version can only be
-# covered by building on that version -- not by running one build everywhere.
+# Every supported OS x every supported Python, building ON that combination and
+# running what it built, plus every build configuration. The artefact pins the
+# interpreter it was built for, so a Python version can only be covered by
+# building on that version -- running one build everywhere would test only 3.13.
+#
+# Runs on every push: the point is a broad safety net, not a targeted check.
 
 on:
   push:
     branches: [master, main]
-    paths:
-      - 'scripts/ci/build_on_platform.py'
-      - 'tests/fixtures/portable/secure_demo_source.py'
-      - '.github/workflows/portable-build-matrix.yml'
   pull_request:
-    paths:
-      - 'scripts/ci/build_on_platform.py'
-      - '.github/workflows/portable-build-matrix.yml'
+    branches: [master, main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  os-python:
+  build-run:
     name: build+run ${{ matrix.os }} py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -45,13 +42,12 @@ jobs:
         run: python scripts/ci/build_on_platform.py
 
   configs:
-    # The same axis on control of configuration, so a green matrix cannot be a
-    # property of one build shape.
-    name: config ${{ matrix.label }}
-    runs-on: ubuntu-latest
+    name: config ${{ matrix.label }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
         include:
           - label: 2sections-3zips-L3
             sections: "2"
@@ -69,6 +65,9 @@ jobs:
             sections: "12"
             zips: "2"
             level: "5"
+        exclude:
+          - os: ubuntu-latest
+            label: 6sections-2zips-L5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -84,12 +83,59 @@ jobs:
           NX_WATERMARK: ${{ matrix.label }}
         run: python scripts/ci/build_on_platform.py
 
-  diagnose-windows-314:
+  audit-built:
+    # Build here, then put the thing it just built through the 12 environment checks.
+    name: build+audit ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install builder dependencies
+        run: pip install --require-hashes -r requirements.lock
+      - name: Build on this platform
+        run: python scripts/ci/build_on_platform.py
+      - name: Audit the committed fixture
+        run: python scripts/ci/audit_artefact.py
+
+  audit-has-teeth:
+    # An audit that cannot fail proves nothing: point it at a file that prints
+    # the wrong thing and require every check to catch it.
+    name: audit has teeth
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Every check must fail against a broken artefact
+        run: |
+          printf 'print("wrong output")\n' > /tmp/broken.py
+          set +e
+          AUDIT_ARTEFACT=/tmp/broken.py python scripts/ci/audit_artefact.py > /tmp/selftest.log 2>&1
+          rc=$?
+          set -e
+          tail -3 /tmp/selftest.log
+          grep -q "12 checks, 12 failed" /tmp/selftest.log || {
+            echo "::error::the audit did not fail on a broken artefact -- its checks are not real"
+            exit 1
+          }
+          test "$rc" -ne 0 || { echo "::error::audit exited 0 on a broken artefact"; exit 1; }
+          echo "all 12 checks caught the broken artefact"
+
+  diagnose:
     # Known crash: ACCESS_VIOLATION (0xC0000005) building on Windows + 3.14.
-    # An access violation cannot be caught, so print and flush before each step;
-    # the last line printed names the culprit.
+    # An access violation cannot be caught, so the script prints and flushes
+    # before each step and the last line names it. continue-on-error so the
+    # diagnosis reports without masking the red cell it is investigating.
     name: diagnose windows py3.14 crash
     runs-on: windows-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -102,18 +148,3 @@ jobs:
           python -VV
           python -m pip list
           python scripts/ci/diagnose_build_crash.py
-        continue-on-error: true
-
-      - name: Bisect is inside the script (see its output above)
-        if: always()
-        continue-on-error: true
-        run: echo "see the 'compile vs import' section in the previous step's output"
-        run: |
-          echo "== py_compile only (no execution)"
-          python -m py_compile obfuscator/core/sources.py && echo "compile OK" || echo "compile CRASHED"
-          echo "== import transforms first"
-          python -c "import sys; sys.path.insert(0,'.'); print('t:'); import obfuscator.core.transforms; print('transforms OK')"
-          echo "== import sources alone"
-          python -c "import sys; sys.path.insert(0,'.'); print('s:'); import obfuscator.core.sources; print('sources OK')"
-          echo "== import sources with dev mode"
-          python -X dev -c "import sys; sys.path.insert(0,'.'); import obfuscator.core.sources; print('sources OK in dev')"

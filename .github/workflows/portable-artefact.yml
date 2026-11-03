@@ -7,16 +7,8 @@ name: Portable artefact (all OS)
 on:
   push:
     branches: [master, main]
-    paths:
-      - 'tests/fixtures/portable/**'
-      # The whole directory, not one file: a commit that only touched
-      # audit_artefact.py did not trigger this workflow at all.
-      - 'scripts/ci/**'
-      - '.github/workflows/portable-artefact.yml'
   pull_request:
-    paths:
-      - 'tests/fixtures/portable/**'
-      - 'scripts/ci/**'
+    branches: [master, main]
   workflow_dispatch:
 
 permissions:
