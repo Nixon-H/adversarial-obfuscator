@@ -180,9 +180,10 @@ _PROT_READ = 1
 
 _libc: Any = None
 try:
-    _libc_path = ctypes.util.find_library("c")
-    if _libc_path:
-        _libc = ctypes.CDLL(_libc_path, use_errno=True)
+    # CDLL(None) resolves libc from the already-loaded process image. find_library
+    # can shell out to the toolchain on macOS, and a subprocess launched from a
+    # threaded build has been observed to block for minutes.
+    _libc = ctypes.CDLL(None, use_errno=True)
 except Exception:
     _libc = None
 

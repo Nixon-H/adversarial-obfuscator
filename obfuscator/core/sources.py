@@ -4649,9 +4649,12 @@ class {CROSS_PLATFORM_GUARD_CLS}:
     def {METHOD_MAC_DENY_ATTACH}():
         try:
             import ctypes
-            import ctypes.util
-            libc_path = ctypes.util.find_library("c")
-            libc = ctypes.CDLL(libc_path)
+            # Do NOT call ctypes.util.find_library here. On macOS it can shell out
+            # to the linker/otool, and a subprocess launched from this threaded
+            # artifact has been observed to block for minutes -- which is one of
+            # the two ways this artefact has hung. CDLL(None) resolves ptrace
+            # from the already-loaded libSystem, with no subprocess at all.
+            libc = ctypes.CDLL(None)
             libc.ptrace(31, 0, 0, 0)
         except: pass
         return False
