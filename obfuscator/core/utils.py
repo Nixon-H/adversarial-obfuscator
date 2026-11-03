@@ -454,15 +454,35 @@ def _print_banner():
 └───────────────────────────────────┘
 """
     print(banner)
-try:
-    # An availability probe: numpy is not used here, the import is the
-    # test.  Do not let a cleanup drop it -- without it HAS_NUMPY is
-    # always True and the numpy paths fail with NameError instead of
-    # taking their fallback.
-    import numpy as np  # noqa: F401
-    HAS_NUMPY = True
-except ImportError:
-    HAS_NUMPY = False
+def _probe_numpy():
+    """Is numpy importable *and* working?
+
+    This used to be a bare `import numpy` at module scope. On Windows with
+    CPython 3.14 numpy crashes the interpreter natively (ACCESS_VIOLATION,
+    0xC0000005) while importing `numpy._core.printoptions`, and a native crash
+    is not an ImportError, so the `except ImportError` guard did not run and
+    merely importing `obfuscator.core` killed the process.
+
+    The probe is a capability test, not a requirement: numpy is not used by this
+    module. So it runs here, catches everything an import can raise, and callers
+    that would have used numpy simply take their fallback path.
+    """
+    import subprocess as _sp
+    try:
+        # In a SUBPROCESS: on Windows + CPython 3.14 numpy dies with an
+        # ACCESS_VIOLATION while importing, and no except clause can catch a
+        # native crash -- it takes the interpreter with it. A child process can
+        # die without harming the builder.
+        r = _sp.run([sys.executable, "-c", "import numpy"],
+                    stdout=_sp.DEVNULL, stderr=_sp.DEVNULL, timeout=60)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+#: Kept as a module attribute for compatibility with callers that read it.
+#: Probed lazily rather than at import: see _probe_numpy.
+HAS_NUMPY = _probe_numpy()
 STRING_SESSION_KEY = secrets.token_bytes(32)
 def _next_h_impl(current, step):
     return int.from_bytes(hashlib.sha256(str(current).encode() + str(step).encode()).digest()[:8], 'little')
