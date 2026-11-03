@@ -237,24 +237,35 @@ jobs:
           if-no-files-found: ignore
 
   flags:
-    # Isolated flags: one transform on at a time, so a broken transform is named
-    # by the job that turned it on rather than hiding inside a bundle.
-    name: flag ${{ matrix.flag }}
+    # Isolated packing-CLI flags. NOTE the limitation, stated rather than hidden:
+    # `ai-obf build` exposes a small flag set -- the 273 flags that the ladder is
+    # made of belong to scripts/build.py, which this helper does not drive yet.
+    # So this job isolates what the packing CLI has, and the per-transform
+    # isolation of the ladder remains untested.
+    name: flag ${{ matrix.label }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        flag:
-          - "--fragment-strings"
-          - "--cfg-flatten"
-          - "--opaque-predicates"
-          - "--mba-subs"
-          - "--bogus-exceptions"
-          - "--rename-internal"
-          - "--honey-functions 8"
-          - "--llm-resilient"
-          - "--poison-level 5"
-          - "--section-count 2 --zips 3"
+        include:
+          - label: no-section-split
+            args: "--no-section-split"
+          - label: sections-2
+            args: "--section-split --section-count 2"
+          - label: sections-12
+            args: "--section-split --section-count 12"
+          - label: opt-level-1
+            args: "--opt-level 1"
+          - label: opt-level-2
+            args: "--opt-level 2"
+          - label: opt-level-4
+            args: "--opt-level 4"
+          - label: stego
+            args: "--stego"
+          - label: pin-structure
+            args: "--pin-structure"
+          - label: strict-detections
+            args: "--strict-detections"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -266,5 +277,5 @@ jobs:
         env:
           NX_PAYLOAD: ${{ github.workspace }}/tests/fixtures/portable/constructs_source.py
           NX_OPT_LEVEL: "5"
-          NX_EXTRA_FLAGS: ${{ matrix.flag }}
+          NX_EXTRA_FLAGS: ${{ matrix.args }}
         run: python scripts/ci/build_on_platform.py
