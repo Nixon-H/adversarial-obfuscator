@@ -18,10 +18,26 @@ def normalise(text):
     return text.replace("\r\n", "\n")
 
 
+HANG_WRAPPER = (
+    "import faulthandler, runpy, sys; "
+    "faulthandler.dump_traceback_later(%d, exit=True); "
+    "sys.argv = [%r]; "
+    "runpy.run_path(%r, run_name='__main__')"
+)
+
+
 def run_python(path, cwd, timeout=300):
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    argv = [sys.executable, path]
+    if os.environ.get("NX_HANG_TRACE") == "1":
+        # A hang is Python-level, so faulthandler can name the frame. dump
+        # _traceback_later fires even when the main thread never returns, which
+        # is exactly the macOS + 3.14 case: the build succeeds and the artefact
+        # then runs past the timeout with no output.
+        argv = [sys.executable, "-c",
+                HANG_WRAPPER % (max(30, timeout // 3), path, path)]
     try:
-        p = subprocess.run([sys.executable, path], cwd=cwd, capture_output=True,
+        p = subprocess.run(argv, cwd=cwd, capture_output=True,
                            timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         # Report a hang as a named failure instead of letting the traceback

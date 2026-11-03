@@ -39,6 +39,7 @@ jobs:
           NX_ZIPS: "2"
           NX_OPT_LEVEL: "5"
           NX_WATERMARK: "matrix"
+          NX_HANG_TRACE: "1"
         run: python scripts/ci/build_on_platform.py
       - name: Keep the failing artefact
         if: failure()
