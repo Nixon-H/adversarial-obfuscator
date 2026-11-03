@@ -18,10 +18,17 @@ def normalise(text):
     return text.replace("\r\n", "\n")
 
 
-def run_python(path, cwd):
+def run_python(path, cwd, timeout=300):
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
-    p = subprocess.run([sys.executable, path], cwd=cwd, capture_output=True,
-                       timeout=900, env=env)
+    try:
+        p = subprocess.run([sys.executable, path], cwd=cwd, capture_output=True,
+                           timeout=timeout, env=env)
+    except subprocess.TimeoutExpired:
+        # Report a hang as a named failure instead of letting the traceback
+        # escape. macOS + CPython 3.14 hit exactly this: the build succeeded and
+        # the artefact then ran for the full 900s and was killed, which the
+        # script surfaced as an unrelated-looking stack trace.
+        return -1, "", "TIMED OUT after %ds" % timeout
     return p.returncode, normalise(p.stdout.decode("utf-8", "replace")), p.stderr.decode("utf-8", "replace")
 
 
@@ -90,7 +97,7 @@ def main():
     if rc_s != 0:
         failures.append("source exited %d" % rc_s)
     if rc_a != 0:
-        failures.append("artefact exited %d" % rc_a)
+        failures.append("artefact exited %d%s" % (rc_a, " (timeout)" if rc_a == -1 else ""))
         print("--- stderr ---")
         print("\n".join(err_a.strip().splitlines()[:20]))
     if out_a != out_s:
