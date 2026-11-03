@@ -19,7 +19,14 @@ class TypeHintStripper(ast.NodeTransformer):
             self._clear_args(node.args)
         except Exception:
             pass
-        self.generic_visit(node)
+        # Inside a method the class-body flag must be off: a bare annotation
+        # there is a local hint, not a field.
+        depth = getattr(self, "_class_body_depth", 0)
+        self._class_body_depth = 0
+        try:
+            self.generic_visit(node)
+        finally:
+            self._class_body_depth = depth
         return node
     def visit_AsyncFunctionDef(self, node):
         return self.visit_FunctionDef(node)
@@ -32,23 +39,28 @@ class TypeHintStripper(ast.NodeTransformer):
         return node
     def visit_AnnAssign(self, node):
         if node.value is None:
+            # A bare annotation directly in a class body is a FIELD, not a hint:
+            # `@dataclass` reads exactly those statements to synthesise
+            # __init__. Deleting them leaves a class whose constructor takes no
+            # arguments. Anywhere else it is a hint and can go.
+            if getattr(self, "_class_body_depth", 0):
+                return node
             return None
         return ast.Assign(targets=[node.target], value=node.value, type_comment=None)
 
     def visit_ClassDef(self, node):
-        # A dataclass whose fields are bare annotations has a body made only
-        # of AnnAssign statements. Those annotations are LOAD-BEARING: they
-        # define the fields, so stripping them changes the class's behaviour
-        # even when the output still compiles. Keep them when they are all
-        # the class has, and only fall back to `pass` if the body would
-        # otherwise be empty (an empty class body is not valid Python).
-        only_annotations = bool(node.body) and all(
-            isinstance(stmt, ast.AnnAssign) for stmt in node.body
-        )
-        if only_annotations:
-            # Bare annotations ARE the dataclass fields. Leave them alone.
-            return node
-        self.generic_visit(node)
+        # The previous guard only kept annotations when they were ALL the class
+        # contained. Adding one method defeated it, generic_visit ran, and every
+        # field was deleted -- a dataclass with a method then raised
+        # "TypeError: __init__() takes 1 positional argument but 3 were given".
+        # "Only annotations" was the wrong condition; the right one is "in a
+        # class body".
+        depth = getattr(self, "_class_body_depth", 0)
+        self._class_body_depth = depth + 1
+        try:
+            self.generic_visit(node)
+        finally:
+            self._class_body_depth = depth
         if not node.body:
             node.body = [ast.Pass()]
         return node
@@ -1837,22 +1849,6 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
             return name in self.allow_internal_rename and name not in self.reserved
         except Exception:
             return False
-    def visit_arg(self, node):
-        """Reserve parameter names; their uses must not be encoded.
-
-        `rename_params` is False by design (call-site keyword contracts), so a
-        parameter keeps its spelling in the def. This class still encoded its
-        USES, which is why `def __init__(self, n)` kept `n` while
-        `self.n = n` became a reference to an encoded name that nothing binds.
-        Reserving here runs before the body is visited, because `args` precedes
-        `body` in FunctionDef.
-        """
-        try:
-            if node.arg:
-                self.reserved.add(node.arg)
-        except Exception:
-            pass
-        return node
     def visit_Import(self, node):
         """Reserve plain imports so the binding and its uses agree.
 
@@ -1973,6 +1969,19 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
         return node
     def visit_ClassDef(self, node):
         node.name = self._encode_name(node.name)
+        # A field declared as a bare annotation (`x: int`) is read by
+        # @dataclass to build __init__, and every use of it is an ATTRIBUTE
+        # (`self.x`), which this class never renames. Encoding the declaration
+        # therefore desynchronises the two: the instance gets `self.<encoded>`
+        # while the code asks for `self.x`, and the artefact dies with
+        # "AttributeError: object has no attribute 'x'". Reserve the field names
+        # for the same reason method names are preserved in a class body.
+        for stmt in node.body:
+            if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+                try:
+                    self.reserved.add(stmt.target.id)
+                except Exception:
+                    pass
         _prev = getattr(self, '_class_depth', 0)
         try:
             self._class_depth = _prev + 1
@@ -2014,8 +2023,23 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
         except Exception:
             pass
         return node
+    def visit_Module(self, node):
+        # Pre-pass: every name declared `nonlocal` or `global` anywhere must keep
+        # one spelling for the whole module. Encoding the declaration but not the
+        # binding (or the other way round) produces
+        # "SyntaxError: no binding for nonlocal 'count' found" at import, which is
+        # what a closure over a renamed counter did.
+        for sub in ast.walk(node):
+            if isinstance(sub, (ast.Nonlocal, ast.Global)):
+                for name in sub.names:
+                    try:
+                        self.reserved.add(name)
+                    except Exception:
+                        pass
+        self.generic_visit(node)
+        return node
     def visit_Nonlocal(self, node):
-        node.names = [self._encode_name(n) for n in node.names]
+        # Names are reserved by visit_Module, so this is the original spelling.
         return node
     def visit_Global(self, node):
         node.names = [self._encode_name(n) for n in node.names]

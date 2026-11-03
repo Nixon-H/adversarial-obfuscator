@@ -11,7 +11,12 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SOURCE = os.path.join(ROOT, "tests", "fixtures", "portable", "secure_demo_source.py")
+SOURCE = os.environ.get(
+    "NX_PAYLOAD",
+    os.path.join(ROOT, "tests", "fixtures", "portable", "secure_demo_source.py"))
+# Extra build flags, space separated, so one matrix can isolate individual
+# transforms instead of only ever testing the bundle.
+EXTRA_FLAGS = [f for f in os.environ.get("NX_EXTRA_FLAGS", "").split() if f]
 
 
 def normalise(text):
@@ -65,12 +70,13 @@ def main():
     zips = os.environ.get("NX_ZIPS", "2")
     level = os.environ.get("NX_OPT_LEVEL", "5")
     watermark = os.environ.get("NX_WATERMARK", "built-on-ci")
-    print("config: sections=%s zips=%s opt-level=%s watermark=%s"
-          % (sections, zips, level, watermark))
+    print("config: sections=%s zips=%s opt-level=%s watermark=%s extra=%s"
+          % (sections, zips, level, watermark, EXTRA_FLAGS))
+    print("payload:", os.path.basename(SOURCE))
     project_argv = ["ai-obf", "build", payload,
                     "--portable", "--section-split", "--section-count", sections,
                     "--zips", zips, "--opt-level", level, "--skip-cloud",
-                    "--watermark", watermark]
+                    "--watermark", watermark] + EXTRA_FLAGS
 
     # Run the builder as a subprocess. Importing pipeline.main and calling it
     # terminates the whole process when the build finishes, so the comparison
