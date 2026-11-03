@@ -280,3 +280,46 @@ jobs:
           NX_OPT_LEVEL: "5"
           NX_EXTRA_FLAGS: ${{ matrix.args }}
         run: python scripts/ci/build_on_platform.py
+
+  ladder-flags:
+    # Isolated ladder transforms. These live in scripts/build.py, not in
+    # `ai-obf build`, so they need their own helper -- this is the coverage the
+    # flag job could not reach.
+    name: ladder ${{ matrix.flag }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { flag: cfg-flatten, args: "--cfg-flatten" }
+          - { flag: opaque-predicates, args: "--opaque-predicates" }
+          - { flag: mba-subs, args: "--mba-subs" }
+          - { flag: fragment-strings, args: "--fragment-strings" }
+          - { flag: bogus-exceptions, args: "--bogus-exceptions" }
+          - { flag: rename-internal, args: "--rename-internal" }
+          - { flag: unicode-ids, args: "--unicode-ids" }
+          - { flag: class-dispatch, args: "--class-dispatch" }
+          - { flag: honey-functions, args: "--honey-functions 8" }
+          - { flag: poison-level-5, args: "--poison-level 5" }
+          - { flag: llm-resilient, args: "--llm-resilient" }
+          - { flag: randomization-3, args: "--randomization-level 3" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install builder dependencies
+        run: pip install --require-hashes -r requirements.lock
+      - name: Build with this ladder flag isolated and run it
+        env:
+          NX_PAYLOAD: ${{ github.workspace }}/tests/fixtures/portable/constructs_source.py
+          NX_OPT_LEVEL: "5"
+          NX_EXTRA_FLAGS: ${{ matrix.args }}
+        run: python scripts/ci/build_with_flag.py
+      - name: Keep the failing artefact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failing-ladder-${{ matrix.flag }}
+          path: ci-artifacts/
+          if-no-files-found: ignore
