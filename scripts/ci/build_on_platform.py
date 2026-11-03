@@ -36,10 +36,18 @@ def main():
     payload = os.path.join(work, "demo.py")
     shutil.copy(SOURCE, payload)
 
+    # Configurable so one matrix can cover several build shapes. Defaults are
+    # the strongest portable build.
+    sections = os.environ.get("NX_SECTIONS", "6")
+    zips = os.environ.get("NX_ZIPS", "2")
+    level = os.environ.get("NX_OPT_LEVEL", "5")
+    watermark = os.environ.get("NX_WATERMARK", "built-on-ci")
+    print("config: sections=%s zips=%s opt-level=%s watermark=%s"
+          % (sections, zips, level, watermark))
     project_argv = ["ai-obf", "build", payload,
-                    "--portable", "--section-split", "--section-count", "6",
-                    "--zips", "2", "--opt-level", "5", "--skip-cloud",
-                    "--watermark", "built-on-ci"]
+                    "--portable", "--section-split", "--section-count", sections,
+                    "--zips", zips, "--opt-level", level, "--skip-cloud",
+                    "--watermark", watermark]
 
     # Run the builder as a subprocess. Importing pipeline.main and calling it
     # terminates the whole process when the build finishes, so the comparison

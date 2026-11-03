@@ -1,0 +1,85 @@
+name: Portable build matrix
+
+# Every OS x every supported Python, building there and running what it built.
+# The artefact pins the interpreter it was made for, so a version can only be
+# covered by building on that version -- not by running one build everywhere.
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'scripts/ci/build_on_platform.py'
+      - 'tests/fixtures/portable/secure_demo_source.py'
+      - '.github/workflows/portable-build-matrix.yml'
+  pull_request:
+    paths:
+      - 'scripts/ci/build_on_platform.py'
+      - '.github/workflows/portable-build-matrix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  os-python:
+    name: build+run ${{ matrix.os }} py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install builder dependencies
+        run: pip install --require-hashes -r requirements.lock
+      - name: Build here and run the result
+        env:
+          NX_SECTIONS: "6"
+          NX_ZIPS: "2"
+          NX_OPT_LEVEL: "5"
+          NX_WATERMARK: "matrix"
+        run: python scripts/ci/build_on_platform.py
+
+  configs:
+    # The same axis on control of configuration, so a green matrix cannot be a
+    # property of one build shape.
+    name: config ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: 2sections-3zips-L3
+            sections: "2"
+            zips: "3"
+            level: "3"
+          - label: 8sections-1zip-L4
+            sections: "8"
+            zips: "1"
+            level: "4"
+          - label: 6sections-2zips-L5
+            sections: "6"
+            zips: "2"
+            level: "5"
+          - label: 12sections-2zips-L5
+            sections: "12"
+            zips: "2"
+            level: "5"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install builder dependencies
+        run: pip install --require-hashes -r requirements.lock
+      - name: Build this configuration here and run it
+        env:
+          NX_SECTIONS: ${{ matrix.sections }}
+          NX_ZIPS: ${{ matrix.zips }}
+          NX_OPT_LEVEL: ${{ matrix.level }}
+          NX_WATERMARK: ${{ matrix.label }}
+        run: python scripts/ci/build_on_platform.py
