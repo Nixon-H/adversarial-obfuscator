@@ -137,6 +137,12 @@ def main():
             with open(os.path.join(keep, "report.txt"), "w", encoding="utf-8") as fh:
                 fh.write("platform: %s\npython: %s\n" % (sys.platform, sys.version))
                 fh.write("\n".join(failures))
+                # The artefact's own output is the evidence. The first capture
+                # was useless without it: the file was there but the reason it
+                # exited was not, so the failure could not be attributed.
+                fh.write("\n\n--- artefact stdout ---\n" + out_a)
+                fh.write("\n--- artefact stderr ---\n" + err_a)
+                fh.write("\n--- source stdout ---\n" + out_s)
             print("kept the failing artefact in", keep)
         except Exception as exc:  # noqa: BLE001
             print("could not keep the artefact:", exc)
