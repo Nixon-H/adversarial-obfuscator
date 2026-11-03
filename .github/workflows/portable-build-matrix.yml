@@ -47,27 +47,67 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
         include:
-          - label: 2sections-3zips-L3
+          - os: ubuntu-latest
+            label: 2sections-3zips-L3
             sections: "2"
             zips: "3"
             level: "3"
-          - label: 8sections-1zip-L4
+          - os: ubuntu-latest
+            label: 8sections-1zip-L4
             sections: "8"
             zips: "1"
             level: "4"
-          - label: 6sections-2zips-L5
+          - os: ubuntu-latest
+            label: 6sections-2zips-L5
             sections: "6"
             zips: "2"
             level: "5"
-          - label: 12sections-2zips-L5
+          - os: ubuntu-latest
+            label: 12sections-2zips-L5
             sections: "12"
             zips: "2"
             level: "5"
-        exclude:
-          - os: ubuntu-latest
+          - os: windows-latest
+            label: 2sections-3zips-L3
+            sections: "2"
+            zips: "3"
+            level: "3"
+          - os: windows-latest
+            label: 8sections-1zip-L4
+            sections: "8"
+            zips: "1"
+            level: "4"
+          - os: windows-latest
             label: 6sections-2zips-L5
+            sections: "6"
+            zips: "2"
+            level: "5"
+          - os: windows-latest
+            label: 12sections-2zips-L5
+            sections: "12"
+            zips: "2"
+            level: "5"
+          - os: macos-latest
+            label: 2sections-3zips-L3
+            sections: "2"
+            zips: "3"
+            level: "3"
+          - os: macos-latest
+            label: 8sections-1zip-L4
+            sections: "8"
+            zips: "1"
+            level: "4"
+          - os: macos-latest
+            label: 6sections-2zips-L5
+            sections: "6"
+            zips: "2"
+            level: "5"
+          - os: macos-latest
+            label: 12sections-2zips-L5
+            sections: "12"
+            zips: "2"
+            level: "5"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
