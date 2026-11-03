@@ -6346,14 +6346,14 @@ def {FUNC_HW_BIND}():
             try:
                 if _nixon_オペレーション운영.path.exists("/system/build.prop"):
                     import _nixon_サブプロセス서브
-                    s = _nixon_サブプロセス서브.check_output(["getprop", "ro.serialno"]).decode().strip()
+                    s = _nixon_サブプロセス서브.check_output(["getprop", "ro.serialno"], timeout=5).decode().strip()
                     if s: ids.append(s)
             except: pass
         elif _nixon_プラットフォーム플랫폼.system() == "Windows":
-            ids.append(_nixon_サブプロセス서브.check_output(["wmic", "csproduct", "get", chr(85)+chr(85)+chr(73)+chr(68)]).decode().split()[-1].strip())
+            ids.append(_nixon_サブプロセス서브.check_output(["wmic", "csproduct", "get", chr(85)+chr(85)+chr(73)+chr(68)], timeout=5).decode().split()[-1].strip())
         elif _nixon_プラットフォーム플랫폼.system() == "Darwin":
             try:
-                out = _nixon_サブプロセス서브.check_output(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"]).decode()
+                out = _nixon_サブプロセス서브.check_output(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"], timeout=5).decode()
                 for line in out.split("\n"):
                     if "IOPlatformUUID" in line:
                         ids.append(line.split('=')[1].strip().strip('"'))
