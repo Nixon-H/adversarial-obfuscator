@@ -43,6 +43,20 @@ def main():
                  "cryptography.hazmat.primitives.asymmetric.rsa"):
         try_import(name)
 
+    say("--- each core submodule in its own process (names the crashing one)")
+    for sub in ("utils", "transforms", "sources", "pipeline"):
+        say("run: obfuscator.core.%s" % sub)
+        code = ("import sys; sys.path.insert(0, %r); "
+                "import obfuscator.core.%s as m; print('ok', flush=True)" % (ROOT, sub))
+        try:
+            r = subprocess.run([sys.executable, "-c", code], cwd=ROOT,
+                               capture_output=True, timeout=600)
+            say("  rc=%d out=%r err=%r" % (r.returncode,
+                                           r.stdout.decode("utf-8", "replace").strip()[:80],
+                                           r.stderr.decode("utf-8", "replace").strip()[-300:]))
+        except Exception as exc:  # noqa: BLE001
+            say("  harness error: %s" % (exc,))
+
     say("--- project")
     sys.path.insert(0, ROOT)
     for name in ("obfuscator", "obfuscator.core.sources",
