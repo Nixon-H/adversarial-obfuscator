@@ -203,3 +203,68 @@ jobs:
           python -VV
           python -m pip list
           python scripts/ci/diagnose_build_crash.py
+
+  payloads:
+    # Different payload TYPES, not just different build settings. The dataclass,
+    # nonlocal and global bugs were invisible until a payload using those
+    # constructs was built.
+    name: payload ${{ matrix.payload }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        payload: [secure_demo_source.py, constructs_source.py]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install builder dependencies
+        run: pip install --require-hashes -r requirements.lock
+      - name: Build this payload here and run it
+        env:
+          NX_PAYLOAD: ${{ github.workspace }}/tests/fixtures/portable/${{ matrix.payload }}
+          NX_OPT_LEVEL: "5"
+          NX_HANG_TRACE: "1"
+        run: python scripts/ci/build_on_platform.py
+      - name: Keep the failing artefact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failing-payload-${{ matrix.payload }}-${{ matrix.os }}
+          path: ci-artifacts/
+          if-no-files-found: ignore
+
+  flags:
+    # Isolated flags: one transform on at a time, so a broken transform is named
+    # by the job that turned it on rather than hiding inside a bundle.
+    name: flag ${{ matrix.flag }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        flag:
+          - "--fragment-strings"
+          - "--cfg-flatten"
+          - "--opaque-predicates"
+          - "--mba-subs"
+          - "--bogus-exceptions"
+          - "--rename-internal"
+          - "--honey-functions 8"
+          - "--llm-resilient"
+          - "--poison-level 5"
+          - "--section-count 2 --zips 3"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install builder dependencies
+        run: pip install --require-hashes -r requirements.lock
+      - name: Build with this flag isolated and run it
+        env:
+          NX_PAYLOAD: ${{ github.workspace }}/tests/fixtures/portable/constructs_source.py
+          NX_OPT_LEVEL: "5"
+          NX_EXTRA_FLAGS: ${{ matrix.flag }}
+        run: python scripts/ci/build_on_platform.py
