@@ -4,6 +4,7 @@ based on WeaknessProfile from benchmark feedback.
 """
 
 import ast
+import hashlib
 import base64
 import json
 import os
@@ -43,7 +44,11 @@ class AdaptiveRewriter:
 
         entry = {
             "profile": profile.to_dict(),
-            "source_hash": hash(source) & 0xFFFFFFFF,
+            # A stable hash. `hash()` of a str is randomised per process, so this
+            # value changed between two identical builds and contributed to
+            # non-reproducible artefacts.
+            "source_hash": int.from_bytes(
+                hashlib.sha256(source.encode("utf-8", "replace")).digest()[:4], "little"),
         }
 
         for action in profile.recommended_actions:

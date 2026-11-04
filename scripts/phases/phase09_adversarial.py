@@ -114,6 +114,9 @@ def phase_adversarial_loop(ir_path, opts):
     log("ADVERSARIAL", "Adversarial loop complete")
 
 
+import secrets
+
+
 def phase_adversarial_injection(payload, output, opts):
     """
     Inject adversarial dead code and prompt-injection patterns into the payload.
@@ -142,7 +145,16 @@ def phase_adversarial_injection(payload, output, opts):
         source = f.read()
 
     level = getattr(opts, "adversarial_level", 3)
-    seed = hash(payload + str(opts)) & 0xFFFFFFFF
+    # `hash()` of a str is randomised PER PROCESS (PYTHONHASHSEED), so this seed
+    # changed on every build and two identical commands produced different
+    # artefacts. That is why a failure seen in CI could never be rebuilt here.
+    # With --seed the build is reproducible; without it, diversity is kept by
+    # deriving from the process's own random source rather than a moving hash.
+    _explicit = getattr(opts, "seed", None)
+    if _explicit is not None:
+        seed = int(_explicit) & 0xFFFFFFFF
+    else:
+        seed = int.from_bytes(secrets.token_bytes(4), "little")
 
     modified = inject_adversarial_code(source, {
         "seed": seed,
