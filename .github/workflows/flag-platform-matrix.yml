@@ -36,7 +36,7 @@ jobs:
           - "--opaque-predicates"
           - "--fragment-strings"
           - "--class-dispatch"
-          - "--attention-poison"
+          - "--attention-poison 2"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
