@@ -2195,8 +2195,24 @@ class DynamicCodeGenerator(ast.NodeTransformer):
         self.template_counter = 0
         self.templates = {}
         self.use_rust_jit = use_rust_jit
+    def visit_ClassDef(self, node):
+        # The wrapper this transform emits defines its template as a module-level
+        # assignment. Applied to a METHOD, that assignment lands in the class body
+        # instead: the method then reads `_nx_tmpl_N` as a global, finds a class
+        # attribute, and raises "name '_nx_tmpl_N' is not defined". Only
+        # module-level functions are safe to rewrite this way.
+        depth = getattr(self, "_class_depth", 0)
+        self._class_depth = depth + 1
+        try:
+            self.generic_visit(node)
+        finally:
+            self._class_depth = depth
+        return node
+
     def visit_FunctionDef(self, node):
         self.generic_visit(node)
+        if getattr(self, "_class_depth", 0):
+            return node
         # A function that declares `nonlocal` (or `global`) cannot be round-tripped
         # through this transform: it unparses the function and exec()s the text in
         # a NEW scope, where the enclosing cell the `nonlocal` refers to does not
