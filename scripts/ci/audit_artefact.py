@@ -22,7 +22,7 @@ EXPECTED = None
 # macOS runners run the pure-Python FHE/ORAM bootstrap far slower than Linux:
 # ~40-60s per invocation was measured, so a 120s budget made the three-run check
 # fail as a timeout rather than as a difference.
-CHECK_TIMEOUT = 300
+CHECK_TIMEOUT = 150
 
 
 def normalise(text):
