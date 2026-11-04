@@ -42,6 +42,8 @@ NEEDS_EXTERNAL = {
     "--multi-tool": "needs several external analysis tools",
     "--independent-audit": "needs an external auditor",
     "--trust-boundary": "needs a declared boundary configuration",
+    "--sgx": "needs SGX hardware",
+    "--tee": "needs a trusted execution environment",
 }
 
 
