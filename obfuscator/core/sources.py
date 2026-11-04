@@ -5751,23 +5751,26 @@ TRIPLE_REDUNDANCY_SOURCE = r'''class {FAULT_CLS}:
         self.temporal_drift = 0.001
         
     def execute_redundant(self, func, *args):
-        import time
-        t1, r1 = time.time(), func(*args)
-        time.sleep(self.temporal_drift)
-        t2, r2 = time.time(), func(*args)
-        time.sleep(self.temporal_drift)
-        t3, r3 = time.time(), func(*args)
-        
-        if r1 == r2 == r3: return r1
-        if r1 == r2: return r1
-        if r2 == r3: return r2
-        if r1 == r3: return r1
-        
-        # All three different! Hardware fault attack detected = Self-destruct
-        import sys, os
-        try: os.remove(sys.argv[0])
-        except: pass
-        sys.exit(666)'''
+        # ONE call, no self-destruct.
+        #
+        # This used to call func three times and, if the three results differed,
+        # treat it as a hardware fault attack: delete the artefact and exit. Both
+        # halves were wrong.
+        #
+        # Re-running an arbitrary callable re-runs its SIDE EFFECTS. A counter
+        # closure incremented three times, a file written three times -- the
+        # results then always differ, so the self-destruct fired on a false
+        # positive and DELETED THE OPERATOR'S FILE. The 0-byte artefact that
+        # remained ran silently on every later attempt: the intermittent
+        # "exited 1 with no output" that cost this project several rounds.
+        #
+        # Reproduced deliberately: four concurrent runs left the artefact at 0
+        # bytes and every subsequent run of that path produced nothing, even from
+        # a fresh copy.
+        #
+        # A fault check must compare values it can recompute -- hashes of
+        # read-only state -- never by calling user code again.
+        return func(*args)'''
 
 LOADER_HEAD = r'''# -*- coding: utf-8 -*-
 _nixon_一=1;_nixon_字=chr;_nixon_序=ord;_nixon_串=str;_nixon_例=isinstance
