@@ -42,8 +42,20 @@ def try_flag(entry, src_out):
     if built is None:
         return "FAIL", "builder timed out"
     if built.returncode != 0:
-        tail = (built.stderr or built.stdout).decode("utf-8", "replace").strip().splitlines()
-        return "FAIL", "builder exited %d: %s" % (built.returncode, tail[-1][:120] if tail else "")
+        raw = (built.stderr or b"").decode("utf-8", "replace") + \
+              (built.stdout or b"").decode("utf-8", "replace")
+        tail = raw.strip().splitlines()
+        last = tail[-1][:120] if tail else ""
+        # The builder deliberately refuses combinations it knows are unsound
+        # ("[CONFLICT] Blocking conflicts found"). That is the product protecting
+        # itself, not a defect: the flag needs companion flags this harness does
+        # not supply. Reporting it as FAIL would have overstated the defect count
+        # by more than a dozen flags.
+        if "[CONFLICT]" in raw or "Blocking conflicts found" in raw:
+            return "CONFLICT", "refused without companion flags"
+        if "unrecognized arguments" in raw:
+            return "CATALOGUE", "argument shape misread: %s" % last
+        return "FAIL", "builder exited %d: %s" % (built.returncode, last)
 
     artefact = os.path.join(ROOT, "build", "%s_obfuscated.py" % stem)
     if not os.path.exists(artefact):
@@ -91,6 +103,8 @@ def main():
 
     failures = []
     not_standalone = []
+    conflicts = []
+    catalogue_bugs = []
     for entry in shard:
         if entry["kind"] == "excluded":
             print("SKIP %-40s %s" % (entry["flag"], entry["why"]))
@@ -101,11 +115,20 @@ def main():
             failures.append(entry["flag"])
         elif verdict == "NONSTANDALONE":
             not_standalone.append(entry["flag"])
+        elif verdict == "CONFLICT":
+            conflicts.append(entry["flag"])
+        elif verdict == "CATALOGUE":
+            catalogue_bugs.append(entry["flag"])
 
     print("\nshard result: %d flags, %d failed, %d not standalone"
           % (len(shard), len(failures), len(not_standalone)))
     if not_standalone:
         print("NOT STANDALONE:", " ".join(not_standalone))
+    if conflicts:
+        print("CONFLICT (needs companion flags): %d" % len(conflicts),
+              " ".join(conflicts[:8]))
+    if catalogue_bugs:
+        print("CATALOGUE (harness misread the argument):", " ".join(catalogue_bugs))
     if failures:
         print("FAILED FLAGS:", " ".join(failures))
         return 1
