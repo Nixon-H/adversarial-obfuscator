@@ -534,8 +534,8 @@ check the claim and, if they have a corpus, extend it.
 | attacker | `scripts/transfer/accumulating_attack.py` |
 | evaluation | `scripts/transfer/evaluate_tasks.py` |
 | reproduction | `scripts/transfer/reproduce.py` — ten tables, one command |
-| evidence documents | `docs/research/` (71 files) |
-| defect documents | one per defect, all cited here: `table-key-folding-defect.md`, `nonlocal-binding-defect.md`, `typing-runtime-import-defect.md`, `default-arg-closure-defect.md`, `enum-member-load-defect.md`, `renamed-local-scope-defect.md`, `invented-return-tuple-defect.md`, `match-pattern-rename-defect.md`, `future-import-defect.md`, `requests-urllib3-attempt.md` |
+| evidence documents | `docs/research/` (72 files) |
+| defect documents | one per defect, all cited here: `table-key-folding-defect.md`, `nonlocal-binding-defect.md`, `typing-runtime-import-defect.md`, `default-arg-closure-defect.md`, `enum-member-load-defect.md`, `renamed-local-scope-defect.md`, `invented-return-tuple-defect.md`, `match-pattern-rename-defect.md`, `future-import-defect.md`, `requests-urllib3-attempt.md`, `transform-defects-2026-11.md` |
 | sealed reports | `research-reports/` |
 
 ---
