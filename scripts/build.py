@@ -1231,7 +1231,7 @@ in config/default.json.
         log("CLASSIFIER", "Function-Level Adaptive Protection enabled")
         classifier = FunctionClassifier()
         selector = StrategySelector()
-        with open(opts.payload, 'r') as f:
+        with open(opts.payload, 'r', encoding='utf-8') as f:
             source = f.read()
         classifications = classifier.classify_from_source(source)
         adaptive_decisions = {}
@@ -1404,7 +1404,7 @@ in config/default.json.
                 from irgen.compile import compile_py_to_ir
                 from scripts.validation.mba_validator import MBAValidator
 
-                with open(opts.payload) as f:
+                with open(opts.payload, encoding='utf-8') as f:
                     orig_source = f.read()
 
                 validator = SMTValidator(timeout_ms=30000)
@@ -1705,7 +1705,7 @@ in config/default.json.
             try:
                 from scripts.preservation.stage_ast_ir import check_ast_ir
                 import ast as py_ast
-                with open(opts.payload) as f:
+                with open(opts.payload, encoding='utf-8') as f:
                     source = f.read()
                 tree = py_ast.parse(source)
                 from irgen.compile import compile_py_to_ir
@@ -1733,7 +1733,7 @@ in config/default.json.
         log("LEAKAGE", "Semantic leakage measurement enabled")
         try:
             from irgen.compile import compile_py_to_ir
-            with open(opts.payload) as f:
+            with open(opts.payload, encoding='utf-8') as f:
                 _orig_source = f.read()
             with open(obfuscated_output) as f:
                 _obf_source = f.read()
@@ -1756,7 +1756,7 @@ in config/default.json.
             from scripts.watermark.semantic_watermark import embed_watermark, verify_watermark
             from irgen.compile import compile_py_to_ir, ir_module_to_text
 
-            with open(opts.payload) as f:
+            with open(opts.payload, encoding='utf-8') as f:
                 payload_source = f.read()
 
             module = compile_py_to_ir(payload_source)
@@ -1855,7 +1855,7 @@ in config/default.json.
                 with open(ir_output) as f:
                     ir_text = f.read()
                 from irgen.compile import compile_py_to_ir
-                with open(opts.payload) as f:
+                with open(opts.payload, encoding='utf-8') as f:
                     source = f.read()
                 ir_module = compile_py_to_ir(source)
                 llvm_ir = lower_ir_to_llvm(ir_text)
@@ -1908,7 +1908,7 @@ in config/default.json.
             finder.find_gadgets()
             compiler = RopCompiler(finder=finder)
             import ast as _ast_rop
-            with open(opts.payload) as f:
+            with open(opts.payload, encoding='utf-8') as f:
                 _src_rop = f.read()
             _tree_rop = _ast_rop.parse(_src_rop)
             for fn in _tree_rop.body:
@@ -2106,7 +2106,7 @@ in config/default.json.
                 llvm_ir = lower_ir_to_llvm(ir_text)
                 from vm.bytecode_compiler import compile_to_bytecode
                 from irgen.compile import compile_py_to_ir
-                with open(opts.payload) as f:
+                with open(opts.payload, encoding='utf-8') as f:
                     source = f.read()
                 ir_module = compile_py_to_ir(source)
                 vm_bytecode = bytearray()
@@ -3209,7 +3209,7 @@ in config/default.json.
         log("DISTRIBUTED", "Distributed diversity pools enabled")
         from scripts.distributed.diversity_pool import DistributedDiversityPool
         dp = DistributedDiversityPool(rotation_interval=opts.dist_diversity_rotation)
-        with open(opts.payload) as f:
+        with open(opts.payload, encoding='utf-8') as f:
             base_source = f.read()
         variants = dp.generate_variants(base_source, opts.dist_diversity_variants)
         dp.setup_nodes(opts.dist_diversity_nodes)
@@ -3541,7 +3541,7 @@ in config/default.json.
         try:
             from scripts.proofs.semantic_preservation import SemanticPreservationProver
             prover = SemanticPreservationProver(timeout_ms=30000)
-            with open(opts.payload) as f:
+            with open(opts.payload, encoding='utf-8') as f:
                 src_a = f.read()
             obf_path = obfuscated_output if os.path.exists(obfuscated_output) else os.path.join(BUILD_DIR, obfuscated_name)
             if os.path.exists(obf_path):
@@ -3710,7 +3710,7 @@ in config/default.json.
                 min_security=opts.min_security,
             )
             import ast as _ast
-            with open(opts.payload) as f:
+            with open(opts.payload, encoding='utf-8') as f:
                 source = f.read()
             tree = _ast.parse(source)
             functions = [
