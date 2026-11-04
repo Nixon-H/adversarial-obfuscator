@@ -1,7 +1,8 @@
-def _nixon_उᎺεЄでუআĬ(_s):
-    _nx_junk_5171 = len('a')
+def _nixon_ǎףɺڞびႽڮ(_s):
+    _nx_junk_5800 = len('a')
+    _nx_junk_9b77 = len('a')
     import hashlib as _nx_ha, hmac as _nx_hm
-    _nx_k = bytes([223, 116, 235, 202, 160, 83, 91, 122, 192, 147, 230, 139, 10, 111, 217, 211, 146, 251, 174, 148, 145, 220, 219, 203, 3, 27, 25, 65, 255, 245, 249, 104])
+    _nx_k = bytes([163, 114, 65, 86, 115, 196, 91, 63, 247, 139, 100, 42, 67, 93, 200, 171, 218, 249, 137, 80, 83, 174, 89, 125, 87, 212, 114, 240, 204, 139, 14, 223])
     try:
         _nx_r = bytes.fromhex(_s)
     except ValueError:
@@ -18,12 +19,12 @@ def _nixon_उᎺεЄでუআĬ(_s):
     _nx_M = 4294967295
 
     def _nx_rl(_v, _n):
-        _nx_junk_7d50 = len('a')
+        _nx_junk_2e78 = len('a')
         return _v << _n & _nx_M | _v >> 32 - _n
 
     def _nx_qr(_x, _a, _b, _c, _d):
-        _nx_junk_de15 = len('a')
-        _nx_junk_7398 = len('a')
+        _nx_junk_e439 = len('a')
+        _nx_junk_f21b = len('a')
         _x[_a] = _x[_a] + _x[_b] & _nx_M
         _x[_d] ^= _x[_a]
         _x[_d] = _nx_rl(_x[_d], 16)
@@ -38,8 +39,9 @@ def _nixon_उᎺεЄでუআĬ(_s):
         _x[_b] = _nx_rl(_x[_b], 7)
 
     def _nx_bl(_ctr):
-        _nx_junk_97c9 = len('a')
-        _nx_junk_ca7a = len('a')
+        _nx_junk_ba7f = len('a')
+        _nx_junk_f95c = len('a')
+        _nx_junk_a595 = len('a')
         _ctr = _ctr & _nx_M
         _w = [int.from_bytes(_nx_k[_i:_i + 4], 'little') for _i in (0, 4, 8, 12, 16, 20, 24, 28)]
         _nn = [int.from_bytes(_nx_n[_i:_i + 4], 'little') for _i in (0, 4, 8)]
@@ -72,62 +74,60 @@ def _nixon_उᎺεЄでუআĬ(_s):
             _nx_p[_nx_o + _nx_i] = _nx_c[_nx_o + _nx_i] ^ _nx_q[_nx_i]
         _nx_o += _nx_nn
     return bytes(_nx_p).decode('utf-8')
-_nixon_ᚱȉჃগהᛃѣ = '5619f310d50e80b399ee0657df454bf76c729f48e49d170cc4466cf0f6f0f41acdfa84'
-_nixon_ęһᛣըש = '8bc79f11e32d79ba28f8347d934c113c7ede0c39f3e024d37444824043be863eef2b60'
-_nixon_ᎭתǑぼᎥ = '2507962d89adb7665b053a3d1732a2747581e9740856a75ba381792393c4c9a9'
-_nixon_ᏫʊеধぃȢů = '1a92b693f5e970a21db24099c5d765b4ee948c38345e82936c9ef1e4f1238d68536b34dbe87e43dcc3133e2e6d114eae71e8145f8552020d3024f160'
-_nixon_ゝॅĸρぐʃŢॡॺ = 'f8019b00562a7fa6cddf852834712d6442456d1804ba39d7930f77fbe8bcb81d7681b98d984d'
-_nixon_ᛢŐႧ妧ĺ۷דı٠Ǽ = 'ac6a9f0b8fb4e180186973c9470720af2dd1a017427b221c4582a2be6c619b2e34f719456cf1'
-_nixon_ᎦᎵijีまۓǾฉৈ = 'cbc5a6f235b1dc9fa0e9c3669621606cf1c251b6566ce0bc8425df1924139169bf83f3aa9eee'
-_nixon_בわცᏤॳʉधқ = '0588b038f6440238788d689b487e9e752b8c34fa205f707732daeb5bdef34daa59b62cf0e2e2'
-_nixon_ش雋糇ՠĩʤुめשȷ = '6fd157633118de32ea0b6ba09338f7ad6224c4b76af7ac325d30aa49fbe5b729b294a10616d55ccee5983ca4c280862561707d9562a1c086b3868172d1f4578424767bf0ba15bbf534a7a0f276bd13ff7c9cad7419feb392ef'
-_nixon_ЄႥげけᛠდ্י = 'ddb415f847d387b4823811eee64ed333fafc3ef0ec2f853cafbb76ac6b5d711ddb9788b05efb'
-_nixon_Ηงथפπ = 'b27a00367c6b865f0f9f1bc589fe6dc52c217f29cd1f0f9b47725d1c609a3f680d5d47c465c9ad6bd385ce9b5fce6be42ccb25'
-_nixon_ēɣʃҴѹろङยِ = '0018f7a3d31b72f6ff38da0bd7722c21253e07cf5c3cc078dfceb18c286d2e68981372513c9ff72ef4df29e9'
-_nixon_ҌऱijϞɅԸ = 'ca99b861a02de8bec46cce1781d40c63da5e987b7340f2aed3634903498f9831443ce435fd1316874338aefb'
-_nixon_บ۲ӡऄij = 'e129b97ccb5ee55567377dcc71eb7293272176dd70b14e33f817ae3168dd4b4f7578616a18543318761b5c0c'
-_nixon_Ꮀϛঢι۫ҷᏏټ = '24b2c6a1c2b011baf4a82f85131c63ad7fc189e2a1d557320956c66e70aaf790bd6c727fccbdf09bc90faf9c'
-_nixon_嗑ॼोϩᏀם賊ॢ = '57a9a3be11b581fc382ba43a3ce02365b38129e085f6a7cdae83bc4ad7df3ad2e2c7502a61af5382c53932b9'
-_nixon_دոশᏔᏀऺ = '03a4b3c5d18a7b71b95da83a0bef135cbb9a775653db29d55decd00d049e2ef95493db497a28a0677a4c19b8'
-_nixon_ႧᎣמᛖฬ = '412ae56ee14c8959b28f5ed1f5a9fe0a2d22a729b13885793d32573bf62a3c8112d6d81b94a3a89a730f5cd4'
-_nixon_κᏉξწɑᏤŕ = '61ca3a1374938761281ce6bf86439a7ee386d6266483e2d957692615d75b22053bcf8def3cbd6e3bba2a15fc'
-_nixon_ᏖϾゃļᛄЂǗ = '02c6cdde585d9762a1841fba996a68d9f0dafe381d7b5f64e0799f0e3a2d45c43ec5f4190189c51912dd6272'
-_nixon_ञŅšɚҹĆɌᎶศ = '067834558304e1823229c4ac21f798fcb3258cf3954da938728b0001bb25a011fde7656e14cd02777c6dad2d'
-_nixon_ɵɰऺᏮषؙ邯Ᏹᚫ = 'e2fd7dfde1e3c9b78b9584584f2e841a6a97f49a22b1f020f2247c41cfd16242b72dfe08a811fc266e4a8f8c'
-_nixon_ؤśऄნă = '5edb8d015f079854da8d5f5c06daab73432773d8ed7e7573cfa069b54cbc20f6871d68890c8d989a9d542bc09247a1ab8794'
-_nixon_ЮϩᏇяİ霎๐ = 'c680f7701de6528ba1c93e2d731febd73fcb18467380830ffd979b0ac952a14a9a266956'
-_nixon_ᛆოצᏐढ़ɧईา = '5acaba2b20642604e82b6752efb9c400ad9e4393a75a80db3b694799b10d65b5bf266f52fe'
-_nixon_でᚫŢπۉᚮشкӇك = 'a0d7f35ab6fe5f8db042ca90905f2a36a4a09e73e41103c54a1fbe2ce08dfcfbfe66'
-_nixon_жρۧӛɽ = 'f91dff1bd0a2785aaa3929722e13db5e67ed00800a7913e2edb9442cf2df754e917291df'
-_nixon_৬նɧڧᛈҺЩ = '0266a45b9f1ac07307c39bd09fbac8120e0034cd23cffea8c3f7e34a16b8c17524ae03'
-_nixon_קюɓ簿ʟᏕॄ = '35d7f8d3f2ba8dcabebcff7ee1ce4ba2141f8a83e92b4c7eee365f248492338e91394174cc'
-_nixon_ՈǨѯᛪۼ০Ϋॐ涸Ꮓ = '9bbd121681405a94527ce0da181164e07100c5d076f19827bc980ede9f59429ad64d537d4d'
-_nixon_džᏟঊႶπぉǖआ = '5babf30fd570a0a399df77d11d1a14c1fcd792a748dc4ad89acda3eac3fc2838cc0e'
-_nixon_ยӪצŝऌःϋღ = 'e442425e9cc0600a6cf5b97af3cce957302271942473320697b38ebab4db6491'
-_nixon_რɉɻʡɥנᎶ = '0691dca931d62b318484e40c8bd4bdacb93e8f533c0993c1b8175b462889a876'
-_nixon_ץৼՉ宼ᚱᚮთʘڮ = 'd2b988ad04d4be380ebd64c3ca1100d9fc02f076ce72006b416498921f1455329f038afe21'
-_nixon_պϬւǮהɽზ๙Ĵ = '94fecaee5207d54abe870a0dd888b1ea1e580fc29e146cca30e103e0c52cce4c99'
-_nixon_ǛতぬᎬᛠٓสऄ = '41d4e57d81a3a442bb9436219b99af7e06123f7161dcc9d657aa6b20aa5298ef1c7a6b30a7'
-_nixon_إɜɲφʞძるऎ = '44d41cf27dc636fb8b4450a41c37e771079e0b0429ff229bdfb8429a79d4c9ed55'
-_nixon_Ꭳᛦᛀ膝גいέɣ = 'c831abafd46e35211e9ccc285bea6d95cd65c17e4bffca6e1541b2740ad9e08eb928c1d8c8'
-_nixon_ᛐ薥ʡ粸ฮڴζႸ = 'e93936e036d0b55e4f20ce154e34c2ed9b329b32f73b46e3d3e12b0dade5def9542f7d3ef2'
-_nixon_ः़けদᚯᏣᎲर = '5e34913c32949c13a95f284269ec618921286de94aa6e02f7b73ef1f9de32814a27cce5548'
-_nixon_ȱתりԹמণ = 'c100cf6e9df533a65ae109eb9417e353b16cc6094ac19bc268f62d224514554fc40d09a2e7fcc8'
-_nixon_๋ब杣ჩᏕहᎯґა٦ = 'ca3321dd9fd381a34dc304436710eda64895616b3cc55b4b80c4bba58ed0fc832821a59d'
-_nixon_ॖᏪטႻЃ腇ლ = '720d9cade035b5ae8a03f8307cec82f5c47907a2f3966430b2f930a20f5bb1fcca52'
-_nixon_ᛥᏫʚჄᏔचआ = '519a2e9620b451165e8c481e78a8f82ed4b9900b097f3fcedc9a3a55dcd7bbc027a8'
-_nixon_ᚱР木ĸᏀЎΥ = '0315163812d3f17541c4ae6f40d3cfb05d2306c418ea3fda0ce41fba344c4565cc5cbe'
-_nixon_ǞړᛍΗٗ = 'abaf6c318d09b4c005651bfebc58dae607c210ebb316f536379c9cfd5d8e5f9a2252d1bbcd6ffa18'
-_nixon_どᚯჂפᏐ = '8a455d82c235d75a1e31593f6b2d36aaf9ac21d23adb93aee75db329821a05d81853a0d5'
-_nixon_दเწфř = '4ccf7a13c96581d991a95c8e34463c00c612c0122b2399d41023c4577c14f4ccf0d873513662'
-_nixon_ՑᏘטぉ邴ᛛᛩ = 'b041bb241fc6fe569c0af106938cc2253a07ac34aae68c6c0a383a2bc790c6f128c2'
-_nixon_ᏉᚰЄ篖ᛣΒよりथɡɷ = '5bb966ec5ec616eda87a038e99bc69e768c280db277a884eb0c24254ff86'
+_nixon_ʬй٩ĐႠΆᚮ = '536fa3b45eaf53d7b603500e801e22be21a29e3bc6fd78d2cb01a02b2b31b915c89422f0'
+_nixon_๋ĩւצəśסŴ = '05f03ba34e6827334bfe1c566686590f8df88b04415122f6eb76f1b0b1c833dc633039'
+_nixon_ŲřٔցᎣᛒ = '69118d6d0c0b064b1f07c59dd0f98e602bbbb829a705d517fcc80973c7c833a9814c45ee28677c506927d8f7260e01511920bf3a2a030c8196a0281a'
+_nixon_ঊমजʝۼ = '64b66eb5da75511e323530b9e0814fe397fe9e0610adab49b6895252e6b19143109474f78713'
+_nixon_ᚴ梋躞ঢ়ᛙคθ = 'bd7abb8dd052148c379b1a57b0be0c153af30efeafa563d9b8b0318cc58587a163d96a815343'
+_nixon_לך॑й۶४べष = 'be8370e658010caab7d855bcb45d92d517ecb44692eb8162b6050e64fe0dfa41de75aebe7a73'
+_nixon_ᛦᛓėԸवยঔঅぐ = '6a9d148fc47e92df65d0c1ed1c983b999897eb529f172474c01e317dcc97ae1759fff99a7d9d'
+_nixon_ڡ॑ѬᏑ众ʡЩउし = '72b3722b733904873a396436fbcd3aadcd864eef07dc81a2f0ec47b45428ae9a2bd4ba5d27b63d7156f7ecefbdf7a12a766026e151ac57f630ca49b683a320bb8481abb3367697ed4444d89234127e5ec398a204c3dd57556a'
+_nixon_朄ᚮথγᎽ = '5c8ffd994cf0cdbab0ce45f3a9d5540d29856d2c1b6c31297f14404c7466d0e4d2d21b160eae'
+_nixon_რɇ兕ɵшպĘ鲱 = '00b042e404b1749207a7516d5f9591d4e64562b54f135b62eeb42f28f72c37d557362e1558aaf193576095a045835728'
+_nixon_ঁᚬקᚰऴটႸฬՎ = '8f58ca0bbc234a219b9b10cd75b1b4efb7cb1819be6487c62cf6df461a267d93e5d4d61595fda9858ee3b4e9'
+_nixon_רɦ籁ńๆƥ = '6e3e3d405ecc23597ea25e07b69a24b272189340d2fea608bca515a552bab56af94a07ba0dab07599276609b'
+_nixon_ᚾՌัکკdžপᚫ繦Ꮀ = 'f429a74663e2399a2625c9b560d5fbf8e0c25d68bc04c44bfb05e2c6ab6b9e2b74c2e064ca960e980073fdc3'
+_nixon_びᚲžŎͲ = '1eb3fda7f171ede0fbde83c47e311606694e98cdcf2ab4349b9c23be240077ceb16dc6ed7f7f348bf585d0ca'
+_nixon_ճטქڴцङდŧ鵇ゞ = '98fa8c6d237a6221cf3f43474b9b32409ac6aeab34b26069828e7f5a55ad95579eea6f51fae0d244349a6fe8'
+_nixon_מгѮჭĥえũ१ɧึ = '1dfb35c43953eedfc37da05cb2a117279a4394744c68351ae12340e3b825d57324452e4b36b4c7929795c507'
+_nixon_耵ħᚮむځҸǹႱौ = 'f453bcdeae6211f9bde95defed97c6737adab37ff9d27d8bea6412e93391fc4cd56c554d600b46c073edbecd'
+_nixon_ȅד鏤ɽΠশय़ = 'ee0004319adffc5f2f751d10f486a8ff2bf3538084a58fec69e217784c75e3e152bc397b82a9d433f805d6b7'
+_nixon_ᏛჍγנほز = 'd984a99cb10f77b6e3cd8c5313aba22ed3a9c1d16ed11cad889095a8b6cb5730d10dd564471796af36da4834'
+_nixon_ゕᚲせז穖тלঌĩ = 'd1ed38497eae73723d26f6cd3c3ca9490bcdf95cf49c29fdc13815f9c084d48d4d6885439209a92bb7a0080d'
+_nixon_ƊăおᏛתম = 'd6e0274a803037616c461780332c3d0a73efb25efc7306c052b0eb773162b1573301a58af159c8c552d7e294bca49b2e3161'
+_nixon_พʅॎႩĚᚲɺ = 'fffc5240dcd56d551833be272e7c888806660d08e1165ccde5053e9a2314a04d0843e7d4f0'
+_nixon_ѝۄΰȇՋɳӂᏎᚲ = '790cc89d982d167529d1fc50d0f0eaf7bbed5184b57a9b4d9cc25010b16ca97b9d5bafb65b'
+_nixon_Ⴒиظʪđぢמלǫ = 'd92cbc91e905c99400b8cc27f4db2ba1326b3e20e2c7e411ecb01b840b31ed6727360743ab'
+_nixon_ᎠڏƀɗפϦɢա = '80cc99782286414ce4e91864c5ad53e3e27efba0ef9a1987b1ae4f9710a49634a1f60360f6'
+_nixon_ปٻᛡდʢ१ = '63f9a61d755a85ed8454f6d6723d8fa3d3cf590e4b602b6014e0e7a26c4ff33fce1440d1'
+_nixon_夰ؠΤใԲҿ = 'ca800158909c4d1854287dd2182ce00dc9165f8fa9a721c29f3c5c74a709f227d1e1720791'
+_nixon_ฦŝलͽsめᎬᏄを = '69e001be8d5cc45574d41e4c4bb724aea050181fc65aab67810959edf18e80ff666572a657'
+_nixon_קʥდหΑœ = '2ab2a2da377e597f4534abbfe2f3dc46a414fd620d6f85ddcb442a12fa1eefb1103f8e'
+_nixon_ηľঙιัฎज = '6c3ce992e2891fb7706eef4a9e784e24f54823cda4c393e4a23136d8c734049107c6'
+_nixon_俗ᛀにทকญǑᛌЧ = '705ad393981708427bc9503953dccd95d753342c3b4522675b3597178ddbaa37'
+_nixon_ॴᛀだǮॾՒő徍ᛆ = 'f128ab6834e1ccf25db3a337142d848440ae31de25f9e97f1f917a32452cc0f2'
+_nixon_ʟʒᚺ١ւَცᏣ = '480a816a5c8e4f29c48accf0615cc2072b521b052bb533207f71978c853769a04cc878f85f'
+_nixon_ב৯づע黴へʦЌᚫ = '27d30102981fda727a90da8de3a2c45494c1da11a16227b31b6283295778d55c09'
+_nixon_拌অͱ৪ᛢעΧ = '3ec2e427c8ab54078072032767c0001459605384f7ccd77db98207d7c54d96f4f44efe85'
+_nixon_ზこけբを = '9c6ef72d599c02781e09dc90139befcd484d1eb01361bf071086e872137f9aa7ea'
+_nixon_ぱॸʔز๓ぎいしฒ = '8c910a932894f539ad6f86edfc87a06924d9a21f2ae4d47b0d6b7b9225af73df90e143ab41'
+_nixon_๕Ꮝ菹สนNjēĚ = 'b2c9acdc4660b736c298749f752a3911065cd81e5172fae38fc438ae3883f94286a1e3ad62'
+_nixon_ήɢĺูᏟ = '3a8ece0d6ec3879e0afaca2574d0f028110ca1de44463854141acb79760df7697c4adfa26d727e'
+_nixon_սფĂ紣Ꭷ٤Ƶ = 'b96cdee8510d3cf625f63bb97fed42b7e721076c811497750bda6e66bcc2e1fd508c7a7a'
+_nixon_ژטい若ůᚦјȨばҝ = '3cec9048b0ef604cde1996412a8a4af678cd0203e67bfc5cdffb14ecd9973a78e018'
+_nixon_ɳजɻณŊъᚺƹ = 'eeb51914da1cdaf6ee23ee1f3f447d1a9a1a80c7509b5a92d524be92623a00a3c632'
+_nixon_載Զᛄონ = 'fa47e81d4676841cab74c84f0659464b940b5347eed9068274ac1510bd2aecf55908ae'
+_nixon_ӿǠᚲᏉ॑Ꮨ = '7acb4b1e509951fe28d67cc74f656f4048633ce2f43ba70aaa77dcbcdc56f3a41d049d7b8116134b'
+_nixon_იӧᚻĦςيٴɑۖᏏს = 'c6ed78364dea0e67db1c3ee642db77366382701f76707b0a847829880d5313891ae7b1ff'
+_nixon_Εנךοڕӽ = '09e18152d30ec232b69d0afb0697042641665203b5b5ab64de6fe333b79295a799adb303cf34'
+_nixon_Ꮣゝ०ᏩרᏱ瀀Ꭿू = 'ba01c4e8e2bbd5d0feae085667e8ce2f95a201b5309cb936e17214f097d204f3a720'
+_nixon_ٗӺหُʐϠ = 'ac272edf6a27f7c7b4b67e85103c59d87c7a0117b0123d0f7c572b0afe50'
 import hashlib as _h
-_nx_chk = {_nixon_उᎺεЄでუআĬ(_nixon_ᚱȉჃগהᛃѣ): _nixon_उᎺεЄでუআĬ(_nixon_ēɣʃҴѹろङยِ), _nixon_उᎺεЄでუআĬ(_nixon_ęһᛣըש): _nixon_उᎺεЄでუআĬ(_nixon_ҌऱijϞɅԸ), _nixon_उᎺεЄでუআĬ(_nixon_ᎭתǑぼᎥ): _nixon_उᎺεЄでუআĬ(_nixon_บ۲ӡऄij), _nixon_उᎺεЄでუআĬ(_nixon_ᏫʊеধぃȢů): _nixon_उᎺεЄでუআĬ(_nixon_Ꮀϛঢι۫ҷᏏټ), _nixon_उᎺεЄでუআĬ(_nixon_ゝॅĸρぐʃŢॡॺ): _nixon_उᎺεЄでუআĬ(_nixon_嗑ॼोϩᏀם賊ॢ), _nixon_उᎺεЄでუআĬ(_nixon_ᛢŐႧ妧ĺ۷דı٠Ǽ): _nixon_उᎺεЄでუআĬ(_nixon_دոশᏔᏀऺ), _nixon_उᎺεЄでუআĬ(_nixon_ᎦᎵijีまۓǾฉৈ): _nixon_उᎺεЄでუআĬ(_nixon_ႧᎣמᛖฬ), _nixon_उᎺεЄでუআĬ(_nixon_בわცᏤॳʉधқ): _nixon_उᎺεЄでუআĬ(_nixon_κᏉξწɑᏤŕ), _nixon_उᎺεЄでუআĬ(_nixon_ش雋糇ՠĩʤुめשȷ): _nixon_उᎺεЄでუআĬ(_nixon_ᏖϾゃļᛄЂǗ), _nixon_उᎺεЄでუআĬ(_nixon_ЄႥげけᛠდ্י): _nixon_उᎺεЄでუআĬ(_nixon_ञŅšɚҹĆɌᎶศ), _nixon_उᎺεЄでუআĬ(_nixon_Ηงथפπ): _nixon_उᎺεЄでუআĬ(_nixon_ɵɰऺᏮषؙ邯Ᏹᚫ)}
+_nx_chk = {_nixon_ǎףɺڞびႽڮ(_nixon_ʬй٩ĐႠΆᚮ): _nixon_ǎףɺڞびႽڮ(_nixon_ঁᚬקᚰऴটႸฬՎ), _nixon_ǎףɺڞびႽڮ(_nixon_๋ĩւצəśסŴ): _nixon_ǎףɺڞびႽڮ(_nixon_רɦ籁ńๆƥ), _nixon_ǎףɺڞびႽڮ(_nixon_ŲřٔցᎣᛒ): _nixon_ǎףɺڞびႽڮ(_nixon_ᚾՌัکკdžপᚫ繦Ꮀ), _nixon_ǎףɺڞびႽڮ(_nixon_ঊমजʝۼ): _nixon_ǎףɺڞびႽڮ(_nixon_びᚲžŎͲ), _nixon_ǎףɺڞびႽڮ(_nixon_ᚴ梋躞ঢ়ᛙคθ): _nixon_ǎףɺڞびႽڮ(_nixon_ճטქڴцङდŧ鵇ゞ), _nixon_ǎףɺڞびႽڮ(_nixon_לך॑й۶४べष): _nixon_ǎףɺڞびႽڮ(_nixon_מгѮჭĥえũ१ɧึ), _nixon_ǎףɺڞびႽڮ(_nixon_ᛦᛓėԸवยঔঅぐ): _nixon_ǎףɺڞびႽڮ(_nixon_耵ħᚮむځҸǹႱौ), _nixon_ǎףɺڞびႽڮ(_nixon_ڡ॑ѬᏑ众ʡЩउし): _nixon_ǎףɺڞびႽڮ(_nixon_ȅד鏤ɽΠশय़), _nixon_ǎףɺڞびႽڮ(_nixon_朄ᚮথγᎽ): _nixon_ǎףɺڞびႽڮ(_nixon_ᏛჍγנほز), _nixon_ǎףɺڞびႽڮ(_nixon_რɇ兕ɵшպĘ鲱): _nixon_ǎףɺڞびႽڮ(_nixon_ゕᚲせז穖тלঌĩ)}
 
 def _nx_verify():
-    _nx_junk_8727 = len('a')
-    _nx_junk_55da = len('a')
+    _nx_junk_3d48 = len('a')
+    _nx_junk_af05 = len('a')
     import inspect
     for fn, expected in _nx_chk.items():
         try:
@@ -135,65 +135,75 @@ def _nx_verify():
             if f and callable(f):
                 src = inspect.getsource(f)
                 if _h.sha256(src.encode()).hexdigest()[:16] != expected:
-                    raise RuntimeError(_nixon_उᎺεЄでუআĬ(_nixon_ؤśऄნă))
+                    raise RuntimeError(_nixon_ǎףɺڞびႽڮ(_nixon_ƊăおᏛתম))
         except Exception:
             pass
 import asyncio
-if sum(range(9)) != 7:
-    _nx_d0 = None
+import uuid, sys, multiprocessing
+try:
+    if uuid.getnode() >> (34 ^ 58) in [1385, 3113, 7188, 20566, 524327, 5469, 5395456]:
+        sys.exit()
+except Exception:
+    pass
+try:
+    if multiprocessing.cpu_count() < (0 << 2) + 2:
+        sys.exit()
+except Exception:
+    pass
 import dataclasses
-if 543 ^ 617 != 118:
+import uuid, sys, multiprocessing
+try:
+    if uuid.getnode() >> 24 in [1385, 3113, 7188, 20566, 524327, 5469, 5395456]:
+        sys.exit()
+except Exception:
     pass
+try:
+    if multiprocessing.cpu_count() < (0 << 4) + 2:
+        sys.exit()
+except Exception:
+    pass
+if False:
+    try:
+        import socket as _s1
+        _s1.socket().connect((_nixon_ǎףɺڞびႽڮ(_nixon_พʅॎႩĚᚲɺ), 42153))
+    except Exception:
+        pass
 import functools
-if sum([262, 81, 32, 78, 16, 5, 12, 11, 5, 1]) ^ 602 != (235 << 2) + 1:
-    pass
 
-class _nixon_馰ɾのտ甛:
+class _nixon_うڔক甙ᚮʬ:
 
     def __init__(self):
-        _nx_junk_c7a9 = len('a')
-        _nx_junk_2156 = len('a')
-        _nx_junk_2aa7 = len('a')
-        try:
-            if 13 ^ 13 == 0:
-                pass
-            else:
-                print(_nixon_उᎺεЄでუআĬ(_nixon_ЮϩᏇяİ霎๐))
-            self._value = 0
-        except _nixon_ǣᚵჶٔФႾӾͱ.BlockingIOError as _nixon_ƫせ萮न҄ᚪ:
-            _nx_state_dummy = 70217
-            pass
-
-    def __get__(self, obj, objtype=None):
-        _nx_junk_4c13 = len('a')
-        if 22 ^ 22 == 0:
+        _nx_junk_0daa = len('a')
+        _nx_junk_9857 = len('a')
+        _nx_junk_f736 = len('a')
+        if 26 == 26:
             pass
         else:
-            print(_nixon_उᎺεЄでუআĬ(_nixon_ᛆოצᏐढ़ɧईา))
+            print(_nixon_ǎףɺڞびႽڮ(_nixon_ѝۄΰȇՋɳӂᏎᚲ))
+        self._value = 0
+
+    def __get__(self, obj, objtype=None):
+        _nx_junk_cf25 = len('a')
+        _nx_junk_2648 = len('a')
         return self._value
 
     def __set__(self, obj, value):
-        _nx_junk_3977 = len('a')
-        _nx_junk_ee20 = len('a')
-        _nx_junk_4b3e = len('a')
-        self._value = value
+        _nx_junk_1207 = len('a')
+        try:
+            if 27 ^ (52 ^ 47) == 0:
+                pass
+            else:
+                print(_nixon_ǎףɺڞびႽڮ(_nixon_Ⴒиظʪđぢמלǫ))
+            self._value = value
+        except _nixon_ᏤԺהบ鶩ѕر.BlockingIOError as _nixon_बᎳ瑦ᛊᎦᏨᛄ:
+            _nx_state_dummy = 81935
+            pass
+_nx_k1 = bytes([x ^ 154 for x in b'CMCUCFDZ'])
+if sum([520, 84, 189, 15, 22, 4, 3, 1, 1, 1]) ^ 407 != (91 << 3) + 7:
+    pass
 
 class _nx_d6a0bc:
-    FEJHJJEEDDIACBCFJIEFDBCBHFABCBFI = _nixon_馰ɾのտ甛()
-if 0 == 1:
-    _db2 = {_nixon_उᎺεЄでუআĬ(_nixon_でᚫŢπۉᚮشкӇك): str(228)}
-import uuid, sys, multiprocessing
-_nx_j2 = bytes([x ^ 98 for x in str(235).encode()])
-try:
-    if uuid.getnode() >> sum([19, 4, 1]) in [1385, 3113, 7188, 20566, 524327, 5469, 5395456]:
-        sys.exit()
-except Exception:
-    pass
-try:
-    if multiprocessing.cpu_count() < 2:
-        sys.exit()
-except Exception:
-    pass
+    FEJHJJEEDDIACBCFJIEFDBCBHFABCBFI = _nixon_うڔক甙ᚮʬ()
 
 @dataclasses.dataclass
 class _nx_2a3cd5:
@@ -201,145 +211,185 @@ class _nx_2a3cd5:
     y: int
 
     def norm(self):
-        _nx_junk_7ce1 = len('a')
-        return (self.x * self.x + self.y * self.y) ** 0.5
+        _nx_junk_6ad0 = len('a')
+        try:
+            if 22 == 22:
+                pass
+            else:
+                print(_nixon_ǎףɺڞびႽڮ(_nixon_ᎠڏƀɗפϦɢա))
+            return (self.x * self.x + self.y * self.y) ** 0.5
+        except _nixon_ᏤԺהบ鶩ѕر.BlockingIOError as _nixon_बᎳ瑦ᛊᎦᏨᛄ:
+            _nx_state_dummy = 84344
+            pass
 
 def _nx_1fb1a0(fn):
-    _nx_junk_ac4b = len('a')
-    if ~35 == -((4 << 3) + 3) - 1:
-        if 9 == 9:
+    _nx_junk_58d5 = len('a')
+    if (50 ** 2 + 50) % 2 == 0:
+        if (0 << 4) + 11 == 11:
             pass
         else:
-            print(_nixon_उᎺεЄでუআĬ(_nixon_жρۧӛɽ))
+            print(_nixon_ǎףɺڞびႽڮ(_nixon_ปٻᛡდʢ१))
         _nx_8cd892 = {}
 
         @functools.wraps(fn)
         def HCCHFDFFIIBAEJFBJCEBBEAIJIDCFHFF(*args):
-            _nx_junk_ebee = len('a')
-            _nx_junk_fb36 = len('a')
-            _nx_junk_4fdd = len('a')
-            if args not in _nx_8cd892:
-                _nx_8cd892[args] = fn(*args)
-            return _nx_8cd892[args]
+            _nx_junk_53a4 = len('a')
+            _nx_junk_f197 = len('a')
+            _nx_junk_6fb5 = len('a')
+            if 64480800 % 3 == 0:
+                if (1 << 4) + 0 ^ sum([10, 6]) == 0:
+                    pass
+                else:
+                    print(_nixon_ǎףɺڞびႽڮ(_nixon_夰ؠΤใԲҿ))
+                if args not in _nx_8cd892:
+                    _nx_8cd892[args] = fn(*args)
+                return _nx_8cd892[args]
+            else:
+                pass
         return HCCHFDFFIIBAEJFBJCEBBEAIJIDCFHFF
     else:
         pass
+
+@_nx_1fb1a0
+def _nx_8cf19d(n):
+    _nx_junk_f41f = len('a')
+    _nx_junk_fda0 = len('a')
+    if 27 == 27:
+        pass
+    else:
+        print(_nixon_ǎףɺڞびႽڮ(_nixon_Ⴒиظʪđぢמלǫ))
+    return n * n
+
+def _nx_95fe0e(limit):
+    _nx_junk_cc50 = len('a')
+    try:
+        if 18 ^ 18 == 0:
+            pass
+        else:
+            print(_nixon_ǎףɺڞびႽڮ(_nixon_ฦŝलͽsめᎬᏄを))
+        for _nx_7b8b96 in range(limit):
+            if _nx_7b8b96 % 2 == 0:
+                yield _nx_7b8b96
+    except _nixon_ᏤԺהบ鶩ѕر.BlockingIOError as _nixon_बᎳ瑦ᛊᎦᏨᛄ:
+        _nx_state_dummy = 34787
+        pass
+if 0 == 1:
+    _db3 = {_nixon_ǎףɺڞびႽڮ(_nixon_קʥდหΑœ): str(349)}
+
+def _nx_b569cc(point):
+    _nx_junk_accc = len('a')
+    _nx_junk_ce1d = len('a')
+    match point:
+        case _nx_2a3cd5(x=0, y=0):
+            return _nixon_ǎףɺڞびႽڮ(_nixon_ηľঙιัฎज)
+        case _nx_2a3cd5(x=0):
+            return _nixon_ǎףɺڞびႽڮ(_nixon_俗ᛀにทকญǑᛌЧ)
+        case _nx_2a3cd5(y=0):
+            return _nixon_ǎףɺڞびႽڮ(_nixon_ॴᛀだǮॾՒő徍ᛆ)
+        case _nx_2a3cd5():
+            return _nixon_ǎףɺڞびႽڮ(_nixon_ʟʒᚺ١ւَცᏣ)
+        case _:
+            return _nixon_ǎףɺڞびႽڮ(_nixon_ב৯づע黴へʦЌᚫ)
 import uuid, sys, multiprocessing
-_nx_j3 = bytes([x ^ 213 for x in str(255).encode()])
 try:
     if uuid.getnode() >> 24 in [1385, 3113, 7188, 20566, 524327, 5469, 5395456]:
         sys.exit()
 except Exception:
     pass
-if 0 == 1:
-    _db5 = {_nixon_उᎺεЄでუআĬ(_nixon_৬նɧڧᛈҺЩ): str(461)}
+if sum(range(9)) != 37:
+    _nx_d3 = None
 try:
     if multiprocessing.cpu_count() < 2:
         sys.exit()
 except Exception:
     pass
-_nx_k5 = bytes([x ^ 141 for x in b'BRIFDMUV'])
-
-@_nx_1fb1a0
-def _nx_8cf19d(n):
-    _nx_junk_57db = len('a')
-    if 25 == 25:
+if False:
+    try:
+        import socket as _s5
+        _s5.socket().connect((_nixon_ǎףɺڞびႽڮ(_nixon_พʅॎႩĚᚲɺ), 46402))
+    except Exception:
         pass
-    else:
-        print(_nixon_उᎺεЄでუআĬ(_nixon_קюɓ簿ʟᏕॄ))
-    return n * n
-if 487 ^ 90 ^ 700 != 769:
-    pass
 
-def _nx_95fe0e(limit):
-    _nx_junk_5475 = len('a')
-    if 23 == sum([2, 2, 10, 4, 1, 2, 1, 1]):
-        pass
+def _nx_b2c599(values):
+    _nx_junk_5884 = len('a')
+    if ~~((4761 ^ 1296) - 2 * (~4761 & 1296)) == 33 * 105:
+        _nx_exc_state = 0
+        _nx_exc_result = None
+        _nx_exc_run = True
+        while _nx_exc_run:
+            try:
+                if _nx_exc_state == 0:
+                    _nx_state = 0
+                    _nx_loop = True
+                    int(None)
+                else:
+                    pass
+                if _nx_exc_state == 1:
+                    _nx_cfi_h = 0
+                    _nx_cfi_lut = [0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0]
+                    int('x')
+                else:
+                    pass
+                if _nx_exc_state == 2:
+                    while _nx_loop:
+                        if _nx_state == 0:
+                            _nx_7b8b96 = 0
+                            while (_nixon_ŬউぅʹЉƋᚳɯすȦ := values[_nx_7b8b96:_nx_7b8b96 + 2]) != []:
+                                _nx_7b8b96 += 2
+                            _nx_cfi_h = _nx_cfi_h * 1103515245 + 12345 + 0 * 2654435761 & 4294967295
+                            _nx_state = _nx_cfi_lut[_nx_cfi_h % ((128 << 2) + 0)]
+                        elif _nx_state == 1:
+                            return _nx_7b8b96
+                    _nx_exc_run = False
+                else:
+                    pass
+            except TypeError:
+                _nx_exc_state = 1
+            except ValueError:
+                _nx_exc_state = 2
+            except Exception:
+                raise
     else:
-        print(_nixon_उᎺεЄでუআĬ(_nixon_ՈǨѯᛪۼ০Ϋॐ涸Ꮓ))
-    for _nx_7b8b96 in range(limit):
-        if _nx_7b8b96 % 2 == 0:
-            yield _nx_7b8b96
+        pass
 import uuid, sys, multiprocessing
-_nx_j6 = bytes([x ^ 16 for x in str(764).encode()])
 try:
     if uuid.getnode() >> 24 in [1385, 3113, 7188, 20566, 524327, 5469, 5395456]:
         sys.exit()
 except Exception:
     pass
 try:
-    if multiprocessing.cpu_count() < (0 << 3) + 2:
+    if multiprocessing.cpu_count() < 2:
         sys.exit()
 except Exception:
     pass
 
-def _nx_b569cc(point):
-    _nx_junk_9d91 = len('a')
-    if 22 == 22:
-        pass
-    else:
-        print(_nixon_उᎺεЄでუআĬ(_nixon_ᛆოצᏐढ़ɧईา))
-    match point:
-        case _nx_2a3cd5(x=0, y=0):
-            return _nixon_उᎺεЄでუআĬ(_nixon_džᏟঊႶπぉǖआ)
-        case _nx_2a3cd5(x=0):
-            return _nixon_उᎺεЄでუআĬ(_nixon_ยӪצŝऌःϋღ)
-        case _nx_2a3cd5(y=0):
-            return _nixon_उᎺεЄでუআĬ(_nixon_რɉɻʡɥנᎶ)
-        case _nx_2a3cd5():
-            return _nixon_उᎺεЄでუআĬ(_nixon_ץৼՉ宼ᚱᚮთʘڮ)
-        case _:
-            return _nixon_उᎺεЄでუআĬ(_nixon_պϬւǮהɽზ๙Ĵ)
-
-def _nx_b2c599(values):
-    _nx_junk_d7b0 = len('a')
-    try:
-        _nx_state = 0
-        _nx_loop = True
-        _nx_cfi_h = 0
-        _nx_cfi_lut = [0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 0, 0]
-        while _nx_loop:
-            if _nx_state == 1:
-                return _nx_7b8b96
-            elif _nx_state == 0:
-                _nx_7b8b96 = 0
-                while (_nixon_ț蘢ঊץᚮञՍႨอ鴣 := values[_nx_7b8b96:_nx_7b8b96 + 2]) != []:
-                    _nx_7b8b96 += 2
-                _nx_cfi_h = _nx_cfi_h * 1103515245 + 12345 + ~~((sum([90, 14, 19, 36, 24, 15, 1]) * 0 + 0 * 2654435562 | 29600) & (sum([90, 14, 19, 36, 24, 15, 1]) * 0 + 0 * 2654435562 | ~29600) ^ 492849 ^ 492849) & 4294967295
-                _nx_state = _nx_cfi_lut[_nx_cfi_h % 512]
-    except _nixon_ǣᚵჶٔФႾӾͱ.BlockingIOError as _nixon_ƫせ萮न҄ᚪ:
-        _nx_state_dummy = 98037
-        pass
-
 def _nx_47cb51(values):
-    _nx_junk_2b8c = len('a')
-    try:
-        if 20 == 163 ^ 183:
+    _nx_junk_76cf = len('a')
+    _nx_junk_7b75 = len('a')
+    _nx_junk_2c08 = len('a')
+    if (85 ** 2 + 85) % 2 == 0:
+        if 55 ^ 58 == sum([11, 1, 1]):
             pass
         else:
-            print(_nixon_उᎺεЄでუআĬ(_nixon_ǛতぬᎬᛠٓสऄ))
-        _nixon_ぜيٴॺႵ५ = 0
+            print(_nixon_ǎףɺڞびႽڮ(_nixon_拌অͱ৪ᛢעΧ))
+        _nixon_壘īぴᚩӄშٔᏝ = 0
         try:
             if not values:
-                raise ValueError(_nixon_उᎺεЄでუআĬ(_nixon_إɜɲφʞძるऎ))
-            _nixon_ぜيٴॺႵ५ = sum(values)
+                raise ValueError(_nixon_ǎףɺڞびႽڮ(_nixon_ზこけբを))
+            _nixon_壘īぴᚩӄშٔᏝ = sum(values)
         except* ValueError:
-            _nixon_ぜيٴॺႵ५ = 0
-        return _nixon_ぜيٴॺႵ५
-    except _nixon_ǣᚵჶٔФႾӾͱ.BlockingIOError as _nixon_ƫせ萮न҄ᚪ:
-        _nx_state_dummy = 37954
+            _nixon_壘īぴᚩӄშٔᏝ = 0
+        return _nixon_壘īぴᚩӄშٔᏝ
+    else:
         pass
-if sum([244, 4, 1, 2, 1]) ^ sum([318, 103, 3, 5, 10, 2, 2]) != 327:
+_nx_k5 = bytes([x ^ 74 for x in b'LAPUAFQV'])
+if 355 ^ 324 != 39:
     pass
 
 def _nx_b1b3b4():
-    _nx_junk_3f2c = len('a')
-    _nx_junk_05f8 = len('a')
-    _nx_junk_44c7 = len('a')
-    if 16 ^ (249 ^ 233) == 0:
-        pass
-    else:
-        print(_nixon_उᎺεЄでუআĬ(_nixon_Ꭳᛦᛀ膝גいέɣ))
+    _nx_junk_0957 = len('a')
+    _nx_junk_98e5 = len('a')
+    count = 0
     if False:
         for _nx_i in range(2 ** 32):
             pass
@@ -353,11 +403,9 @@ def _nx_b1b3b4():
             if False:
                 pass
     _nx_fake_expr = (((((((((((((((1 + 2) * 3 ^ 4) + 5 | 6) & 7) + 8) * 9 ^ 10) + 11 | 12) & 13) + 14) * 15 ^ 16) + 17 | 18) & 19) + 20) * 21 ^ 22) + 23 | 24) & 25
-    count = 0
 
     def ИСЖВААЕДВАГСВДDДЗБЖЕБЖЖDБСБЕДАFА():
-        _nx_junk_c872 = len('a')
-        _nx_junk_1096 = len('a')
+        _nx_junk_b0cd = len('a')
         nonlocal count
         if False:
             for _nx_i in range(2 ** 32):
@@ -372,10 +420,10 @@ def _nx_b1b3b4():
                 if False:
                     pass
         _nx_fake_expr = (((((((((((((((1 + 2) * 3 ^ 4) + 5 | 6) & 7) + 8) * 9 ^ 10) + 11 | 12) & 13) + 14) * 15 ^ 16) + 17 | 18) & 19) + 20) * 21 ^ 22) + 23 | 24) & 25
-        if 27 == 27:
+        if sum([21, 2]) == 23:
             pass
         else:
-            print(_nixon_उᎺεЄでუআĬ(_nixon_ᛐ薥ʡ粸ฮڴζႸ))
+            print(_nixon_ǎףɺڞびႽڮ(_nixon_ぱॸʔز๓ぎいしฒ))
         count += 1
         return count
     return ИСЖВААЕДВАГСВДDДЗБЖЕБЖЖDБСБЕДАFА
@@ -383,42 +431,31 @@ def _nx_b1b3b4():
 async def _nx_45a691(values):
     await asyncio.sleep(0)
     return sorted(values, reverse=True)
+if sum([89, 29, 41, 1, 61, 1]) ^ 668 != 578:
+    pass
 
-def _nixon_Ꮙ҅麂ๆᚢա():
-    _nx_junk_313d = len('a')
-    _nx_junk_ea18 = len('a')
-    _nx_junk_68aa = len('a')
-    if 95 * ((95 ^ 1) + (59 ^ 57) * (95 & 1) + 791922 - 791922 + 306242 - 306242) % 2 == 0:
-        if 28 == 28:
+def _nixon_ʁᏮ舷נि():
+    _nx_junk_b93c = len('a')
+    if (27 | 27 == 27) == True:
+        if (10 << 1) + 1 == 21:
             pass
         else:
-            print(_nixon_उᎺεЄでუআĬ(_nixon_ः़けদᚯᏣᎲर))
-        _nixon_Ȭד墟Ժく = _nx_d6a0bc()
-        _nixon_Ȭד墟Ժく.slot = sum([2, 1, 2, 1, 1])
-        print(_nixon_उᎺεЄでუআĬ(_nixon_ȱתりԹמণ), _nixon_Ȭד墟Ժく.slot)
-        print(_nixon_उᎺεЄでუআĬ(_nixon_๋ब杣ჩᏕहᎯґა٦), [_nx_8cf19d(_nx_7b8b96) for _nx_7b8b96 in range(5)])
-        print(_nixon_उᎺεЄでუআĬ(_nixon_ॖᏪטႻЃ腇ლ), list(_nx_95fe0e(9)))
-        print(_nixon_उᎺεЄでუআĬ(_nixon_ᛥᏫʚჄᏔचआ), [_nx_b569cc(_nixon_ŚჃᚾৗႾ贶չᚯং) for _nixon_ŚჃᚾৗႾ贶չᚯং in (_nx_2a3cd5(0, 0), _nx_2a3cd5(0, 3), _nx_2a3cd5(4, 0), _nx_2a3cd5(2, 2))])
-        print(_nixon_उᎺεЄでუআĬ(_nixon_ᚱР木ĸᏀЎΥ), _nx_b2c599([1, 2, sum([3]), 4, 5]))
-        print(_nixon_उᎺεЄでუআĬ(_nixon_ǞړᛍΗٗ), _nx_47cb51([1, 2, 3]), _nx_47cb51([]))
+            print(_nixon_ǎףɺڞびႽڮ(_nixon_๕Ꮝ菹สนNjēĚ))
+        _nixon_風ঁڑӠუʈŧ = _nx_d6a0bc()
+        _nixon_風ঁڑӠუʈŧ.slot = (0 << 4) + 7
+        print(_nixon_ǎףɺڞびႽڮ(_nixon_ήɢĺูᏟ), _nixon_風ঁڑӠუʈŧ.slot)
+        print(_nixon_ǎףɺڞびႽڮ(_nixon_սფĂ紣Ꭷ٤Ƶ), [_nx_8cf19d(_nx_7b8b96) for _nx_7b8b96 in range(5)])
+        print(_nixon_ǎףɺڞびႽڮ(_nixon_ژטい若ůᚦјȨばҝ), list(_nx_95fe0e((4 << 1) + 1)))
+        print(_nixon_ǎףɺڞびႽڮ(_nixon_ɳजɻณŊъᚺƹ), [_nx_b569cc(_nixon_ڿ幜ლჽՂॱ০Ꭳि) for _nixon_ڿ幜ლჽՂॱ০Ꭳि in (_nx_2a3cd5(0, 0), _nx_2a3cd5(0, 3), _nx_2a3cd5(4, 0), _nx_2a3cd5(2, 2))])
+        print(_nixon_ǎףɺڞびႽڮ(_nixon_載Զᛄონ), _nx_b2c599([1, 2, 3, 4, 5]))
+        print(_nixon_ǎףɺڞびႽڮ(_nixon_ӿǠᚲᏉ॑Ꮨ), _nx_47cb51([1, 2, 3]), _nx_47cb51([]))
         ИСЖВААЕДВАГСВДDДЗБЖЕБЖЖDБСБЕДАFА = _nx_b1b3b4()
         ИСЖВААЕДВАГСВДDДЗБЖЕБЖЖDБСБЕДАFА()
         ИСЖВААЕДВАГСВДDДЗБЖЕБЖЖDБСБЕДАFА()
-        print(_nixon_उᎺεЄでუআĬ(_nixon_どᚯჂפᏐ), ИСЖВААЕДВАГСВДDДЗБЖЕБЖЖDБСБЕДАFА())
-        print(_nixon_उᎺεЄでუআĬ(_nixon_दเწфř), _nx_2a3cd5(3, 4).norm())
-        print(_nixon_उᎺεЄでუআĬ(_nixon_ՑᏘטぉ邴ᛛᛩ), asyncio.run(_nx_45a691([sum([1, 2]), 1, 2])))
-        print(_nixon_उᎺεЄでუআĬ(_nixon_ᏉᚰЄ篖ᛣΒよりथɡɷ))
+        print(_nixon_ǎףɺڞびႽڮ(_nixon_იӧᚻĦςيٴɑۖᏏს), ИСЖВААЕДВАГСВДDДЗБЖЕБЖЖDБСБЕДАFА())
+        print(_nixon_ǎףɺڞびႽڮ(_nixon_Εנךοڕӽ), _nx_2a3cd5(sum([1, 2]), 4).norm())
+        print(_nixon_ǎףɺڞびႽڮ(_nixon_Ꮣゝ०ᏩרᏱ瀀Ꭿू), asyncio.run(_nx_45a691([(0 << 2) + 3, 1, 2])))
+        print(_nixon_ǎףɺڞびႽڮ(_nixon_ٗӺหُʐϠ))
     else:
         pass
-import uuid, sys, multiprocessing
-try:
-    if uuid.getnode() >> 24 in [1385, 3113, 7188, 20566, 524327, 5469, 5395456]:
-        sys.exit()
-except Exception:
-    pass
-try:
-    if multiprocessing.cpu_count() < (0 << 3) + 2:
-        sys.exit()
-except Exception:
-    pass
-_nixon_Ꮙ҅麂ๆᚢա()
+_nixon_ʁᏮ舷נि()

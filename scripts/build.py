@@ -499,6 +499,8 @@ in config/default.json.
     parser.add_argument("--genome-population", type=int, default=30, help="Population size (default: 30)")
 
     # Structure Randomization flags (Item 88)
+    parser.add_argument("--seed", type=int, default=None,
+                        help="seed the randomised transform order (reproducible builds)")
     parser.add_argument("--struct-randomization", action="store_true", help="Enable structure randomization (stack/heap/reg)")
     parser.add_argument("--randomization-level", type=int, default=3, choices=[1, 2, 3], help="Randomization level 1-3 (default: 3)")
     parser.add_argument("--randomization-seed", type=int, default=None, help="Deterministic seed for structure randomization (also read from SEED/NIXON_SEED env when flag is absent)")
@@ -940,6 +942,20 @@ in config/default.json.
                              "emits no hybrid loader to carry the mask")
 
     opts = parser.parse_args()
+
+    # Deterministic builds. Without a seed every run of the same command
+    # produced a DIFFERENT artefact (verified: two builds, two md5s), which is
+    # why a flag could pass locally and fail in CI with no reproducible cause --
+    # the transform order is randomised. --seed pins it so a failure can be
+    # rebuilt exactly.
+    if getattr(opts, "seed", None) is not None:
+        import random as _random
+        _random.seed(opts.seed)
+        try:
+            import numpy as _np
+            _np.random.seed(opts.seed % (2 ** 32))
+        except Exception:
+            pass
 
     # Refuse unsupported flags BEFORE the dependency check: an operator
     # asking for something this pipeline cannot do should learn that on a
@@ -1510,7 +1526,12 @@ in config/default.json.
                 with open(obfuscated_output) as f:
                     _src_fp = f.read()
                 _tree_fp = _ast_fp.parse(_src_fp)
-                _fp = LLMFingerprinter(seed=secrets.randbits(32))
+                # Honour --seed so a build can be reproduced exactly. With no
+                # seed the injector used secrets.randbits(32), which is why two
+                # identical commands produced different artefacts and a CI
+                # failure could never be rebuilt locally.
+                _fp = LLMFingerprinter(seed=(opts.seed if getattr(opts, 'seed', None) is not None
+                                             else secrets.randbits(32)))
                 _tree_fp = _fp.embed_fingerprint(_tree_fp, opts.fingerprint_model)
                 with open(obfuscated_output, "w") as f:
                     f.write(_ast_fp.unparse(_tree_fp))

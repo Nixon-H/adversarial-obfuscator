@@ -16,6 +16,12 @@ DEFAULT_PAYLOAD = os.path.join(ROOT, "tests", "fixtures", "portable", "construct
 SOURCE = os.environ.get("NX_PAYLOAD", DEFAULT_PAYLOAD)
 LEVEL = os.environ.get("NX_OPT_LEVEL", "3")
 BUILD_TIMEOUT = int(os.environ.get("NX_BUILD_TIMEOUT", "600"))
+# Builds are NOT yet reproducible: two identical commands produce different
+# artefacts, so a CI failure cannot be rebuilt locally. --seed exists and pins
+# part of the pipeline, but at least one more RNG (still unidentified) is
+# unseeded. Until that is fixed, a flag that fails in CI may pass here for no
+# reason other than luck -- which is what the intermittent failures have been.
+SEED = os.environ.get("NX_BUILD_SEED", "")
 RUN_TIMEOUT = int(os.environ.get("NX_RUN_TIMEOUT", "300"))
 
 
@@ -37,7 +43,7 @@ def try_flag(entry, src_out):
     cmd = [sys.executable, "scripts/build.py", "--payload", SOURCE,
            "-o", out, "--force-output", "--opt-level", LEVEL,
            "--skip-irgen", "--skip-llvmgen", "--skip-encrypt", "--skip-relay",
-           "--skip-extras"] + entry["argv"]
+           "--skip-extras"] + (["--seed", SEED] if SEED else []) + entry["argv"]
     built = run(cmd, ROOT, BUILD_TIMEOUT)
     if built is None:
         # --code-genome alone exceeds 13 minutes. A slow build is not a broken
