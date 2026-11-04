@@ -6903,9 +6903,12 @@ def {FUNC_BOOT}():
             ctx["dec_padded"] = b""
             _nixon_システム시스템.stdout.flush()
         except Exception as e:
-            if {VAR_IS_DEBUG}:
-                {FUNC_LOG}(f"[FATAL] Exec failed: {{e}}"); _nixon_トレースバック트랙.print_exc()
-            else: _nixon_システム시스템.exit(1)
+            # Report in BOTH variants. This used to print only when
+            # VAR_IS_DEBUG was set and otherwise exit(1) silently, so a
+            # failed inner exec left an artefact that exited 1 having
+            # written nothing on either stream.
+            {FUNC_LOG}(f"[FATAL] Exec failed: {{e}}"); _nixon_トレースバック트랙.print_exc()
+            _nixon_システム시스템.exit(1)
         return S_EXIT
     dispatcher = {{
         S_INIT: {FUNC_STATE_INIT}, S_STG0: {FUNC_STATE_STG0}, S_REC: {FUNC_STATE_REC},
