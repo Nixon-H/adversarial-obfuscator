@@ -32,7 +32,6 @@ def norm(text):
 
 
 def try_flag(entry, src_out):
-    flag = entry["flag"]
     stem = os.path.splitext(os.path.basename(SOURCE))[0]
     out = os.path.join(ROOT, "build", "%s_iso.py" % stem)
     cmd = [sys.executable, "scripts/build.py", "--payload", SOURCE,
@@ -55,7 +54,12 @@ def try_flag(entry, src_out):
         return "FAIL", "artefact timed out"
     if res.returncode != 0:
         err = res.stderr.decode("utf-8", "replace").strip().splitlines()
-        return "FAIL", "artefact exited %d: %s" % (res.returncode, err[-1][:120] if err else "")
+        last = err[-1] if err else ""
+        if "No module named 'scripts" in last:
+            # The artefact is not standalone: it imports the builder's own
+            # package. Reported distinctly so it is never mistaken for a pass.
+            return "NONSTANDALONE", "artefact imports the source tree: %s" % last[:100]
+        return "FAIL", "artefact exited %d: %s" % (res.returncode, last[:120])
     if norm(res.stdout.decode("utf-8", "replace")) != src_out:
         return "FAIL", "output differs from source"
     return "PASS", ""
@@ -86,16 +90,22 @@ def main():
     src_out = norm(src.stdout.decode("utf-8", "replace"))
 
     failures = []
+    not_standalone = []
     for entry in shard:
         if entry["kind"] == "excluded":
             print("SKIP %-40s %s" % (entry["flag"], entry["why"]))
             continue
         verdict, detail = try_flag(entry, src_out)
-        print("%-4s %-40s %s" % (verdict, entry["flag"], detail))
+        print("%-13s %-40s %s" % (verdict, entry["flag"], detail))
         if verdict == "FAIL":
             failures.append(entry["flag"])
+        elif verdict == "NONSTANDALONE":
+            not_standalone.append(entry["flag"])
 
-    print("\nshard result: %d flags, %d failed" % (len(shard), len(failures)))
+    print("\nshard result: %d flags, %d failed, %d not standalone"
+          % (len(shard), len(failures), len(not_standalone)))
+    if not_standalone:
+        print("NOT STANDALONE:", " ".join(not_standalone))
     if failures:
         print("FAILED FLAGS:", " ".join(failures))
         return 1

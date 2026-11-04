@@ -132,6 +132,23 @@ def _count_imports(tree: ast.Module) -> int:
     return n
 
 
+def _scope_safe_index(body):
+    """Index where injected statements cannot break a scope declaration.
+
+    `nonlocal x` must precede any assignment to x in the same function. Junk
+    prepended at index 0 put an assignment above the declaration, producing
+    "SyntaxError: no binding for nonlocal 'count' found" -- found by isolating
+    --data-obfuscation on a payload with a closure.
+    """
+    i = 0
+    if body and isinstance(body[0], ast.Expr) and isinstance(
+            getattr(body[0], "value", None), ast.Constant) and isinstance(body[0].value.value, str):
+        i = 1
+    while i < len(body) and isinstance(body[i], (ast.Nonlocal, ast.Global)):
+        i += 1
+    return i
+
+
 def _find_func_nodes(tree: ast.Module) -> list:
     return [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
 
@@ -192,7 +209,8 @@ def _inject_func_dead_code(
                 code = _format_and_verify(_FUNC_TRAINING_LOOP, kwargs)
                 try:
                     stmts = _template_to_stmts(code)
-                    node.body = stmts + node.body
+                    _i = _scope_safe_index(node.body)
+                    node.body[_i:_i] = stmts
                 except Exception:
                     pass
             else:
@@ -214,7 +232,7 @@ def _inject_func_dead_code(
                         orelse=[],
                         finalbody=[]
                     )
-                    node.body.insert(0, wrapper)
+                    node.body.insert(_scope_safe_index(node.body), wrapper)
                 except Exception:
                     pass
 

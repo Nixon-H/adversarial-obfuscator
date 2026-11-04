@@ -92,6 +92,20 @@ class DataProtector:
                 if len(vars_in_function) < 2:
                     return node
 
+                # Never virtualize a name a NESTED function declares `nonlocal`.
+                # Moving `count = 0` into a state slot removes the binding the
+                # inner `nonlocal count` refers to, and the module dies at import
+                # with "SyntaxError: no binding for nonlocal 'count' found".
+                # Found by isolating --data-obfuscation.
+                _captured = set()
+                for _child in ast.walk(node):
+                    if _child is not node and isinstance(_child, (ast.Nonlocal, ast.Global)):
+                        _captured.update(_child.names)
+                if _captured:
+                    vars_in_function = [v for v in vars_in_function if v not in _captured]
+                    if len(vars_in_function) < 2:
+                        return node
+
                 rng = self.parent._rng
                 nvars = len(vars_in_function)
 
@@ -396,6 +410,19 @@ class DataProtector:
                             if isinstance(t, ast.Name) and not t.id.startswith("_"):
                                 if t.id not in vars_found:
                                     vars_found.append(t.id)
+
+                # Never virtualize a name a NESTED function declares `nonlocal`:
+                # replacing `count = 0` with a state slot removes the binding the
+                # inner `nonlocal count` refers to, and the module cannot be
+                # imported ("SyntaxError: no binding for nonlocal 'count' found").
+                # Every virtualization visitor needs this filter, not just one --
+                # found by isolating --data-obfuscation on a closure payload.
+                _captured = set()
+                for _child in ast.walk(node):
+                    if _child is not node and isinstance(_child, (ast.Nonlocal, ast.Global)):
+                        _captured.update(_child.names)
+                if _captured:
+                    vars_found = [v for v in vars_found if v not in _captured]
 
                 if not vars_found:
                     return node
