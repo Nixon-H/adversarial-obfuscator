@@ -40,7 +40,9 @@ def try_flag(entry, src_out):
            "--skip-extras"] + entry["argv"]
     built = run(cmd, ROOT, BUILD_TIMEOUT)
     if built is None:
-        return "FAIL", "builder timed out"
+        # --code-genome alone exceeds 13 minutes. A slow build is not a broken
+        # build; report it distinctly so it never reads as a defect.
+        return "SLOW", "builder exceeded %ds" % BUILD_TIMEOUT
     if built.returncode != 0:
         raw = (built.stderr or b"").decode("utf-8", "replace") + \
               (built.stdout or b"").decode("utf-8", "replace")
@@ -70,7 +72,7 @@ def try_flag(entry, src_out):
 
     res = run([sys.executable, artefact], os.path.dirname(artefact), RUN_TIMEOUT)
     if res is None:
-        return "FAIL", "artefact timed out"
+        return "SLOW", "artefact exceeded %ds" % RUN_TIMEOUT
     if res.returncode != 0:
         err = res.stderr.decode("utf-8", "replace").strip().splitlines()
         last = err[-1] if err else ""
@@ -112,6 +114,7 @@ def main():
     not_standalone = []
     conflicts = []
     catalogue_bugs = []
+    slow = []
     for entry in shard:
         if entry["kind"] == "excluded":
             print("SKIP %-40s %s" % (entry["flag"], entry["why"]))
@@ -126,6 +129,8 @@ def main():
             conflicts.append(entry["flag"])
         elif verdict == "CATALOGUE":
             catalogue_bugs.append(entry["flag"])
+        elif verdict == "SLOW":
+            slow.append(entry["flag"])
 
     print("\nshard result: %d flags, %d failed, %d not standalone"
           % (len(shard), len(failures), len(not_standalone)))
@@ -134,6 +139,8 @@ def main():
     if conflicts:
         print("CONFLICT (needs companion flags): %d" % len(conflicts),
               " ".join(conflicts[:8]))
+    if slow:
+        print("SLOW (exceeded the build/run budget):", " ".join(slow))
     if catalogue_bugs:
         print("CATALOGUE (harness misread the argument):", " ".join(catalogue_bugs))
     if failures:

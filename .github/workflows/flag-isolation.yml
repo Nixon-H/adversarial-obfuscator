@@ -63,6 +63,8 @@ jobs:
         env:
           NX_PAYLOAD: ${{ github.workspace }}/tests/fixtures/portable/constructs_source.py
           NX_OPT_LEVEL: ${{ github.event.inputs.level || '3' }}
+          # --code-genome alone takes more than thirteen minutes.
+          NX_BUILD_TIMEOUT: "1800"
         run: |
           # 274 flags over 28 shards: 10 per shard, last shard short.
           python scripts/ci/isolate_flags.py --start $(( ${{ matrix.shard }} * 10 )) --count 10
