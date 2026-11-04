@@ -27,6 +27,7 @@ Submodules remain importable as ``obfuscator.core.utils`` and so on.
 
 from .utils import (
     CloudBuilder,
+    DEEP_RECURSION_LIMIT,
     DEFAULT_LOG_FILE,
     DEFAULT_TOR_PROXY,
     GitHubBuildFarm,
@@ -112,6 +113,7 @@ from .sources import (
     create_exec_layer,
     create_initial_layer,
     create_intermediate_zip_layer,
+    deep_recursion,
     dis,
     encode_vm_bytecode,
     gc,
@@ -368,6 +370,7 @@ __all__ = [
     'ControlFlowFlattener',
     'DECOY_DECRYPT_SOURCE',
     'DECOY_VM_SOURCE',
+    'DEEP_RECURSION_LIMIT',
     'DEFAULT_LOG_FILE',
     'DEFAULT_TOR_PROXY',
     'DOH_SOURCE',
@@ -546,6 +549,7 @@ __all__ = [
     'create_intermediate_zip_layer',
     'ctypes',
     'datetime',
+    'deep_recursion',
     'deploy_contract',
     'dis',
     'enable_log_redirect',

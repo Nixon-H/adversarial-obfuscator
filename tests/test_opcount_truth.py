@@ -129,6 +129,11 @@ def test_no_bare_141_claim_in_code():
     bad = []
     skip_dirs = {"archive", "build", ".git", ".opencode", ".mypy_cache",
                  ".pytest_cache", "__pycache__", "h0h5-results",
+                 # Committed generated artefacts (the portable fixture): their
+                 # MORPH_MAP and seed constants are random, so "141" appears by
+                 # coincidence inside a hex string. Generated output is not a
+                 # claim, exactly like build/.
+                 "fixtures",
                  # Vendored third-party code for the external corpus: its
                  # constants are not this project's claims. recipes.py's
                  # Miller-Rabin base 4759123141 contains the digits by accident.
