@@ -1,5 +1,5 @@
 """Payload covering the constructs the demo does not: async, generators, dataclasses,
-match, decorators with arguments, walrus, except*, descriptors, closures, comprehensions.
+match, decorators with arguments, walrus, descriptors, closures, comprehensions.
 
 Prints a deterministic result so a build can be compared against its source.
 """
@@ -82,7 +82,10 @@ def eg_sum(values):
         if not values:
             raise ValueError("empty")
         result = sum(values)
-    except* ValueError:
+    except ValueError:
+        # `except*` (exception groups) needs 3.11; this payload must parse on the
+        # oldest Python the matrix covers (3.10), so the star form is exercised
+        # only in the 3.11+ payload.
         result = 0
     return result
 
