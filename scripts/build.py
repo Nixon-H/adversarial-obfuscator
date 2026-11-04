@@ -1281,7 +1281,7 @@ in config/default.json.
             from obfuscator.core.pipeline import build_pipeline as _adapt_pipe
             _protected = _adapt_pipe(source, extra_options=pipeline_opts)
             _adapt_path = opts.payload.replace('.py', '_adaptive.py')
-            with open(_adapt_path, 'w') as f:
+            with open(_adapt_path, 'w', encoding='utf-8') as f:
                 f.write(_protected)
             log("ADAPTIVE", f"Protected → {_adapt_path}")
 
@@ -1300,7 +1300,7 @@ in config/default.json.
                 from obfuscator.adaptive_rewriter import AdaptiveRewriter
                 _rewriter = AdaptiveRewriter()
                 _rewritten = _rewriter.rewrite(_profile, _protected)
-                with open(_adapt_path, 'w') as f:
+                with open(_adapt_path, 'w', encoding='utf-8') as f:
                     f.write(_rewritten)
                 log("ADAPTIVE", f"Applied {len(_profile.recommended_actions)} adaptive rewrites")
 
@@ -1322,7 +1322,7 @@ in config/default.json.
             try:
                 import ast as _ap_ast
                 from obfuscator.attention_poison import AttentionPoisonInjector
-                with open(preprocessed_payload) as _f:
+                with open(preprocessed_payload, encoding='utf-8') as _f:
                     _ap_src = _f.read()
                 _ap_tree = _ap_ast.parse(_ap_src)
                 _ap_injector = AttentionPoisonInjector(fan_out=opts.attention_poison)
@@ -1330,7 +1330,7 @@ in config/default.json.
                 _ap_ast.fix_missing_locations(_ap_tree)
                 _ap_out = _ap_ast.unparse(_ap_tree)
                 preprocessed_payload = opts.payload + ".attention_poison.py"
-                with open(preprocessed_payload, "w") as _f:
+                with open(preprocessed_payload, "w", encoding='utf-8') as _f:
                     _f.write(_ap_out)
                 log("ATTENTION_POISON", f"Written to {preprocessed_payload} (explosion ratio: {_ap_injector.explosion_ratio():.2f}x)")
             except Exception as _e:
@@ -1341,7 +1341,7 @@ in config/default.json.
             try:
                 import ast as _da_ast
                 from obfuscator.decoy_apis import SemanticDecoyApiInjector
-                with open(preprocessed_payload) as _f:
+                with open(preprocessed_payload, encoding='utf-8') as _f:
                     _da_src = _f.read()
                 _da_tree = _da_ast.parse(_da_src)
                 # Seed it: unseeded it uses secrets.SystemRandom(), which made
@@ -1352,7 +1352,7 @@ in config/default.json.
                 _da_ast.fix_missing_locations(_da_tree)
                 _da_out = _da_ast.unparse(_da_tree)
                 _da_path = preprocessed_payload + ".decoy.py"
-                with open(_da_path, "w") as _f:
+                with open(_da_path, "w", encoding='utf-8') as _f:
                     _f.write(_da_out)
                 preprocessed_payload = _da_path
                 log("DECOY_APIS", f"Written to {preprocessed_payload}")
@@ -1372,9 +1372,9 @@ in config/default.json.
 
         # Record certificate for obfuscation phase with real Z3 equivalence check
         if certificate_collector is not None:
-            with open(preprocessed_payload) as f:
+            with open(preprocessed_payload, encoding='utf-8') as f:
                 orig_src = f.read()
-            with open(obfuscated_output) as f:
+            with open(obfuscated_output, encoding='utf-8') as f:
                 obf_src = f.read()
             try:
                 import ast
@@ -1408,7 +1408,7 @@ in config/default.json.
                     orig_source = f.read()
 
                 validator = SMTValidator(timeout_ms=30000)
-                with open(obfuscated_output) as f:
+                with open(obfuscated_output, encoding='utf-8') as f:
                     obf_source = f.read()
                 obf_ir = compile_py_to_ir(obf_source)
 
@@ -1492,10 +1492,10 @@ in config/default.json.
         log("SPECULATION", "Applying speculation obfuscation...")
         try:
             from obfuscator.speculation_obfuscation import obfuscate_with_speculation
-            with open(obfuscated_output) as f:
+            with open(obfuscated_output, encoding='utf-8') as f:
                 source = f.read()
             spec_source = obfuscate_with_speculation(source, seed=opts.randomization_seed or 0xCAFEBABE)
-            with open(obfuscated_output, "w") as f:
+            with open(obfuscated_output, "w", encoding='utf-8') as f:
                 f.write(spec_source)
             log("SPECULATION", "Speculation obfuscation applied successfully")
         except Exception as e:
@@ -1512,13 +1512,13 @@ in config/default.json.
                 from scripts.provenance.poisoner import ProvenancePoisoner
                 from scripts.provenance.storylines import get_all_storylines
 
-                with open(obfuscated_output) as f:
+                with open(obfuscated_output, encoding='utf-8') as f:
                     _source = f.read()
                 _tree = _ast.parse(_source)
                 _poisoner = ProvenancePoisoner()
                 storyline_names = [sl["name"] for sl in get_all_storylines()[:opts.storyline_count]]
                 _tree = _poisoner.poison_with_storylines(_tree, storyline_names)
-                with open(obfuscated_output, "w") as f:
+                with open(obfuscated_output, "w", encoding='utf-8') as f:
                     f.write(_ast.unparse(_tree))
                 log("STORYLINES", f"Injected {len(storyline_names)} storylines")
             except Exception as e:
@@ -1536,7 +1536,7 @@ in config/default.json.
                 import ast as _ast_fp
                 from obfuscator.llm_fingerprint import LLMFingerprinter
 
-                with open(obfuscated_output) as f:
+                with open(obfuscated_output, encoding='utf-8') as f:
                     _src_fp = f.read()
                 _tree_fp = _ast_fp.parse(_src_fp)
                 # Honour --seed so a build can be reproduced exactly. With no
@@ -1546,7 +1546,7 @@ in config/default.json.
                 _fp = LLMFingerprinter(seed=(opts.seed if getattr(opts, 'seed', None) is not None
                                              else secrets.randbits(32)))
                 _tree_fp = _fp.embed_fingerprint(_tree_fp, opts.fingerprint_model)
-                with open(obfuscated_output, "w") as f:
+                with open(obfuscated_output, "w", encoding='utf-8') as f:
                     f.write(_ast_fp.unparse(_tree_fp))
                 log("LLM_FINGERPRINT", f"Fingerprint embedded: {opts.fingerprint_model}")
             except Exception as e:
@@ -1564,12 +1564,12 @@ in config/default.json.
                 import ast as _ast_rt
                 from obfuscator.reasoning_traps import ReasoningLoopInjector
 
-                with open(obfuscated_output) as f:
+                with open(obfuscated_output, encoding='utf-8') as f:
                     _src_rt = f.read()
                 _tree_rt = _ast_rt.parse(_src_rt)
                 _ri = ReasoningLoopInjector(seed=secrets.randbits(32))
                 _tree_rt = _ri.inject_loop(_tree_rt, depth=opts.trap_depth)
-                with open(obfuscated_output, "w") as f:
+                with open(obfuscated_output, "w", encoding='utf-8') as f:
                     f.write(_ast_rt.unparse(_tree_rt))
                 log("REASONING_TRAPS", "Trap functions injected")
             except Exception as e:
@@ -1587,12 +1587,12 @@ in config/default.json.
                 import ast as _ast_fi
                 from obfuscator.function_intent import FunctionIntentObfuscator
 
-                with open(obfuscated_output) as f:
+                with open(obfuscated_output, encoding='utf-8') as f:
                     _src_fi = f.read()
                 _tree_fi = _ast_fi.parse(_src_fi)
                 _fio = FunctionIntentObfuscator(seed=secrets.randbits(32))
                 _tree_fi = _fio.obfuscate_intent(_tree_fi)
-                with open(obfuscated_output, "w") as f:
+                with open(obfuscated_output, "w", encoding='utf-8') as f:
                     f.write(_ast_fi.unparse(_tree_fi))
                 log("FUNCTION_INTENT", f"Renamed {len(_fio.get_name_map())} functions")
             except Exception as e:
@@ -1735,7 +1735,7 @@ in config/default.json.
             from irgen.compile import compile_py_to_ir
             with open(opts.payload, encoding='utf-8') as f:
                 _orig_source = f.read()
-            with open(obfuscated_output) as f:
+            with open(obfuscated_output, encoding='utf-8') as f:
                 _obf_source = f.read()
             original_ir = compile_py_to_ir(_orig_source)
             obfuscated_ir = compile_py_to_ir(_obf_source)
@@ -1852,7 +1852,7 @@ in config/default.json.
             try:
                 from scripts.preservation.stage_ir_llvm import check_ir_llvm
                 from llvmgen.lower import lower_ir_to_llvm
-                with open(ir_output) as f:
+                with open(ir_output, encoding='utf-8') as f:
                     ir_text = f.read()
                 from irgen.compile import compile_py_to_ir
                 with open(opts.payload, encoding='utf-8') as f:
@@ -1889,7 +1889,7 @@ in config/default.json.
     # =========================================================================
     rop_cfg = {}
     if os.path.exists(DEFAULT_CONFIG):
-        with open(DEFAULT_CONFIG, "r") as f:
+        with open(DEFAULT_CONFIG, "r", encoding='utf-8') as f:
             default = json.load(f)
         rop_cfg = default.get("shadow_compiler", {}).get("llvmgen", {}).get("rop", {})
     if rop_cfg.get("enabled", False) or opts.rop:
@@ -1938,7 +1938,7 @@ in config/default.json.
     _ef_config = {}
     if os.path.exists(DEFAULT_CONFIG):
         try:
-            with open(DEFAULT_CONFIG, "r") as _f:
+            with open(DEFAULT_CONFIG, "r", encoding='utf-8') as _f:
                 _ef_config = json.load(_f).get("shadow_compiler", {}).get("encrypt", {})
         except (json.JSONDecodeError, KeyError):
             _ef_config = {}
@@ -2022,7 +2022,7 @@ in config/default.json.
 
     oram_cfg = {}
     if os.path.exists(DEFAULT_CONFIG):
-        with open(DEFAULT_CONFIG, "r") as f:
+        with open(DEFAULT_CONFIG, "r", encoding='utf-8') as f:
             default = json.load(f)
         oram_cfg = default.get("shadow_compiler", {}).get("runtime", {}).get("oram", {})
     if oram_cfg.get("enabled", False) or opts.oram:
@@ -2101,7 +2101,7 @@ in config/default.json.
             try:
                 from scripts.preservation.stage_llvm_vm import check_llvm_vm
                 from llvmgen.lower import lower_ir_to_llvm
-                with open(ir_output) as f:
+                with open(ir_output, encoding='utf-8') as f:
                     ir_text = f.read()
                 llvm_ir = lower_ir_to_llvm(ir_text)
                 from vm.bytecode_compiler import compile_to_bytecode
@@ -2329,7 +2329,7 @@ in config/default.json.
                 payload_source = f.read()
             watermarked = wm.embed(payload_source, "NixonCorp")
             wm_output = opts.output or obfuscated_output
-            with open(wm_output, "w") as f:
+            with open(wm_output, "w", encoding='utf-8') as f:
                 f.write(watermarked)
             log("UARCH_WATERMARK", f"Watermark embedded → {wm_output}")
             detected = wm.detect_watermark_from_timing(watermarked, "NixonCorp")
@@ -2403,13 +2403,13 @@ in config/default.json.
             os.makedirs(diversity_dir, exist_ok=True)
             for vtype, vcode in result.get("all", {}).items():
                 vpath = os.path.join(diversity_dir, f"uarch_variant_{vtype}.py")
-                with open(vpath, "w") as f:
+                with open(vpath, "w", encoding='utf-8') as f:
                     f.write(vcode)
                 log("UARCH_DIVERSITY", f"  Variant '{vtype}' → {vpath}")
             selected = result.get("selected", "")
             if selected:
                 sel_path = os.path.join(diversity_dir, "uarch_selected_variant.py")
-                with open(sel_path, "w") as f:
+                with open(sel_path, "w", encoding='utf-8') as f:
                     f.write(selected)
                 log("UARCH_DIVERSITY", f"  Selected variant ({result.get('selected_type', 'unknown')}) → {sel_path}")
             uarch_report = os.path.join(diversity_dir, "uarch_report.json")
@@ -2418,7 +2418,7 @@ in config/default.json.
                 "selected_type": result.get("selected_type", ""),
                 "variant_count": len(result.get("all", {})),
             }
-            with open(uarch_report, "w") as f:
+            with open(uarch_report, "w", encoding='utf-8') as f:
                 json.dump(report_data, f, indent=2)
             log("UARCH_DIVERSITY", f"Report → {uarch_report}")
         except Exception as e:
@@ -2804,7 +2804,7 @@ in config/default.json.
             if not os.path.exists(_prot_src_sat):
                 _prot_src_sat = os.path.join(BUILD_DIR, obfuscated_name)
             if os.path.exists(_prot_src_sat):
-                with open(_prot_src_sat) as f:
+                with open(_prot_src_sat, encoding='utf-8') as f:
                     _code_sat = f.read()
                 _cs = ContextSaturationMetrics()
                 _token_util = _cs.measure_token_utilization(_code_sat)
@@ -2847,9 +2847,9 @@ in config/default.json.
             if not os.path.exists(_prot_src_pr):
                 _prot_src_pr = os.path.join(BUILD_DIR, obfuscated_name)
             if os.path.exists(_orig_src_pr) and os.path.exists(_prot_src_pr):
-                with open(_orig_src_pr) as f:
+                with open(_orig_src_pr, encoding='utf-8') as f:
                     _orig_code = f.read()
-                with open(_prot_src_pr) as f:
+                with open(_prot_src_pr, encoding='utf-8') as f:
                     _prot_code = f.read()
                 _pr = PromptResistanceMetrics()
                 _intent_obs = _pr.measure_intent_obscurity(_orig_code, _prot_code)
@@ -2916,14 +2916,14 @@ in config/default.json.
                 print(text_summary)
 
                 bench_report_path = os.path.join(BUILD_DIR, "benchmark_report.json")
-                with open(bench_report_path, "w") as f:
+                with open(bench_report_path, "w", encoding='utf-8') as f:
                     json.dump(results, f, indent=2, default=str)
                 log("BENCHMARK", f"JSON report saved to {bench_report_path}")
 
                 if opts.benchmark_report:
                     html = report.generate_html(results)
                     html_path = os.path.join(BUILD_DIR, "benchmark_report.html")
-                    with open(html_path, "w") as f:
+                    with open(html_path, "w", encoding='utf-8') as f:
                         f.write(html)
                     log("BENCHMARK", f"HTML report saved to {html_path}")
         except ImportError as e:
@@ -2942,9 +2942,9 @@ in config/default.json.
             if not os.path.exists(prot_source):
                 prot_source = obfuscated_output
             if os.path.exists(payload_source) and os.path.exists(prot_source):
-                with open(payload_source) as f:
+                with open(payload_source, encoding='utf-8') as f:
                     _orig_at = f.read()
-                with open(prot_source) as f:
+                with open(prot_source, encoding='utf-8') as f:
                     _prot_at = f.read()
                 at_estimator = AnalystTimeEstimator()
                 analyst_time_result = at_estimator.estimate(_orig_at, _prot_at)
@@ -3313,7 +3313,7 @@ in config/default.json.
                 print("=" * 60)
 
                 es_path = os.path.join(BUILD_DIR, "evaluation_summary.json")
-                with open(es_path, "w") as f:
+                with open(es_path, "w", encoding='utf-8') as f:
                     json.dump(result, f, indent=2, default=str)
                 log("EVAL_SUMMARY", f"Report saved to {es_path}")
             else:
@@ -3366,7 +3366,7 @@ in config/default.json.
             if not os.path.exists(prot_source):
                 prot_source = obfuscated_output
             if os.path.exists(prot_source):
-                with open(prot_source) as f:
+                with open(prot_source, encoding='utf-8') as f:
                     _adapted_code = f.read()
 
                 # Try to use real benchmark results from build artifacts
@@ -3375,14 +3375,14 @@ in config/default.json.
                 _results = None
                 if os.path.exists(_bench_report_path):
                     try:
-                        with open(_bench_report_path) as _bf:
+                        with open(_bench_report_path, encoding='utf-8') as _bf:
                             _results = json.load(_bf)
                         log("ADAPTIVE", f"Using real benchmark results from {_bench_report_path}")
                     except Exception:
                         pass
                 if _results is None and os.path.exists(_bench_results_path2):
                     try:
-                        with open(_bench_results_path2) as _bf:
+                        with open(_bench_results_path2, encoding='utf-8') as _bf:
                             _results = json.load(_bf)
                         log("ADAPTIVE", f"Using real benchmark results from {_bench_results_path2}")
                     except Exception:
@@ -3418,7 +3418,7 @@ in config/default.json.
 
                     _rewriter = AdaptiveRewriter()
                     _adapted_code = _rewriter.rewrite(_profile, _adapted_code)
-                    with open(prot_source, "w") as f:
+                    with open(prot_source, "w", encoding='utf-8') as f:
                         f.write(_adapted_code)
                     log("ADAPTIVE", f"Applied {len(_profile.recommended_actions)} adaptive protections based on real benchmark feedback")
         except Exception as e:
@@ -3545,7 +3545,7 @@ in config/default.json.
                 src_a = f.read()
             obf_path = obfuscated_output if os.path.exists(obfuscated_output) else os.path.join(BUILD_DIR, obfuscated_name)
             if os.path.exists(obf_path):
-                with open(obf_path) as f:
+                with open(obf_path, encoding='utf-8') as f:
                     src_b = f.read()
                 result = prover.prove_equivalence(src_a, src_b, "obfuscation_pipeline")
                 status = "PASS" if result.equivalent else "FAIL"
@@ -3741,7 +3741,7 @@ in config/default.json.
                     if fname.endswith(".json") and fname != "certificate_chain.json":
                         fpath = os.path.join(cert_dir, fname)
                         try:
-                            with open(fpath) as _f:
+                            with open(fpath, encoding='utf-8') as _f:
                                 cert_data = json.load(_f)
                             pass_name = cert_data.get("pass_name", "")
                             validated = cert_data.get("validated", False)
@@ -3912,7 +3912,7 @@ in config/default.json.
         try:
             from scripts.watermark.uarch_watermark import MicroarchitecturalWatermark
             payload_path = opts.payload
-            with open(payload_path) as f:
+            with open(payload_path, encoding='utf-8') as f:
                 src = f.read()
             wm = MicroarchitecturalWatermark()
             watermarked = wm.embed(src, "NixonCorp-UARCH-122")
@@ -3939,7 +3939,7 @@ in config/default.json.
             uarch_info = detect_microarchitecture()
             gen = MicroarchitecturalDiversityGenerator()
             payload_path = opts.payload
-            with open(payload_path) as f:
+            with open(payload_path, encoding='utf-8') as f:
                 src = f.read()
             variants = gen.generate_all_variant_types(src)
             selected = select_variant_for_uarch(variants, uarch_info)
