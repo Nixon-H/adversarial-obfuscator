@@ -4,6 +4,43 @@ import random
 import secrets
 
 
+def _oram_inline_stmts():
+    """The ORAM implementation as AST statements, for embedding in an artefact.
+
+    Emitted instead of `import scripts.runtime.oram_sim`, which made every
+    --data-obfuscation artefact depend on the builder's source tree. The module
+    imports only stdlib (math, random, typing), so it can be carried inside the
+    payload and the result is self-contained.
+    """
+    import ast as _a
+    import os as _os
+    path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(
+        _os.path.abspath(__file__)))), "scripts", "runtime", "oram_sim.py")
+    with open(path, encoding="utf-8") as fh:
+        tree = _a.parse(fh.read())
+
+    # Rename the two public classes to _nx_-prefixed names. The renamers leave
+    # `_nx_` identifiers alone, so inlining cannot be broken by one pass
+    # renaming `PathORAM` in the base-class reference and another not renaming
+    # it in the class definition ("NameError: name 'PathORAM' is not defined").
+    _RENAMES = {"PathORAM": "_nx_oram_base", "PythonORAM": "_nx_oram"}
+
+    for sub in _a.walk(tree):
+        if isinstance(sub, _a.Name) and sub.id in _RENAMES:
+            sub.id = _RENAMES[sub.id]
+        elif isinstance(sub, _a.ClassDef) and sub.name in _RENAMES:
+            sub.name = _RENAMES[sub.name]
+
+    keep = []
+    for stmt in tree.body:
+        # `from __future__` must stay first in a module; typing is stdlib and
+        # harmless, so keep imports and definitions, drop nothing else.
+        if isinstance(stmt, _a.ImportFrom) and stmt.module == "__future__":
+            continue
+        keep.append(stmt)
+    return keep
+
+
 class DataProtector:
     """Applies data-oriented obfuscation to a Python AST.
 
@@ -637,19 +674,12 @@ class DataProtector:
                 oram_init = ast.Assign(
                     targets=[ast.Name(id=self._oram_name, ctx=ast.Store())],
                     value=ast.Call(
-                        func=ast.Attribute(
-                            value=ast.Attribute(
-                                value=ast.Attribute(
-                                    value=ast.Name(id="scripts", ctx=ast.Load()),
-                                    attr="runtime",
-                                    ctx=ast.Load(),
-                                ),
-                                attr="oram_sim",
-                                ctx=ast.Load(),
-                            ),
-                            attr="PythonORAM",
-                            ctx=ast.Load(),
-                        ),
+                        # Reference the class inlined into the artefact by
+                        # visit_Module. The old dotted reference required the
+                        # builder's own source tree on sys.path, so a
+                        # --data-obfuscation artefact was not standalone
+                        # ("ModuleNotFoundError: No module named 'scripts'").
+                        func=ast.Name(id="_nx_oram", ctx=ast.Load()),
                         args=[ast.Constant(value=64)],
                         keywords=[],
                     ),
@@ -748,9 +778,11 @@ class DataProtector:
                     node.body.insert(0, ast.Import(
                         names=[ast.alias(name="struct", asname=None)],
                     ))
-                    node.body.insert(0, ast.Import(
-                        names=[ast.alias(name="scripts.runtime.oram_sim", asname=None)],
-                    ))
+                    # Insert as ONE block, in order. Inserting each statement
+                    # at index 0 in a loop reverses them, so `class PythonORAM`
+                    # landed before the base class it inherits from:
+                    # "NameError: name '_nx_oram_base' is not defined".
+                    node.body[0:0] = _oram_inline_stmts()
                 return node
 
         return ORAMProtector(self, sensitive).visit(tree)
