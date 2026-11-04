@@ -158,7 +158,14 @@ def encrypt(key, data):
     return result
 """
     result = _run(source, level=3)
-    assert "PythonORAM" in result, "Sensitive vars should get ORAM protection"
+    # The ORAM implementation is now INLINED into the artefact rather than
+    # imported from the builder's own package, and its classes carry an
+    # _nx_-prefixed name so the renamers leave the inheritance chain intact.
+    # Both properties are asserted: protection present, and self-contained.
+    assert "_nx_oram" in result, "Sensitive vars should get ORAM protection"
+    assert "scripts.runtime.oram_sim" not in result, (
+        "the artefact must not import the builder's package; it would not run "
+        "outside the source tree")
 
 
 def test_oram_stress_sequential():
