@@ -76,6 +76,29 @@ def sample_value(name, meta):
     return "2"
 
 
+def probe(flag):
+    """Ask argparse itself whether this flag needs a value.
+
+    The AST heuristic misread several flags (--driver-check was classified as
+    taking a value and the build then failed with "unrecognized arguments: 2").
+    The parser is built inside main() so it cannot be imported; running it with a
+    bogus payload reaches argument parsing first and exits in milliseconds.
+    """
+    import subprocess
+    try:
+        r = subprocess.run(
+            [sys.executable, BUILD, "--payload", "/nonexistent/probe.py", flag],
+            capture_output=True, timeout=30)
+    except Exception:
+        return None
+    err = (r.stderr or b"").decode("utf-8", "replace")
+    if "expected one argument" in err:
+        return "value"
+    if "invalid choice" in err:
+        return "value"
+    return "boolean"
+
+
 def catalogue():
     entries = []
     for name, meta in sorted(collect().items()):
@@ -84,6 +107,17 @@ def catalogue():
             entries.append({"flag": name, "kind": "excluded", "why": NEEDS_EXTERNAL[name]})
             continue
         if bool_flag:
+            # Confirm with the real parser: a wrong guess here shows up as a
+            # build failure that looks like a product bug.
+            verdict = probe(name)
+            if verdict == "value":
+                value = sample_value(name, meta)
+                if value is None:
+                    entries.append({"flag": name, "kind": "excluded",
+                                    "why": "needs a filesystem path"})
+                    continue
+                entries.append({"flag": name, "kind": "value", "argv": [name, value]})
+                continue
             entries.append({"flag": name, "kind": "boolean", "argv": [name]})
             continue
         if meta["nargs"] in ("*", "+"):
