@@ -113,3 +113,35 @@ Both are real defences, so they are opt-in rather than removed.
 A function declaring `nonlocal` cannot be replayed from source in a fresh scope —
 the enclosing cell does not exist there. The JIT transform skips those functions.
 That is a limit of the technique, not a defect to fix.
+
+## Determinism: the cause of every "intermittent" failure
+
+Two builds of the same payload produced different artefacts. That is why a flag
+passed locally and failed in CI, why each sweep reported a different set of red
+shards, and why every theory about the flakiness (recursion limit, shell quoting,
+a `.so` dependency, `FUNC_HARD`) was untestable.
+
+Bisected by opt-level, comparing builds with the **encryption key masked** — the
+key is random by design and masked comparisons are the only honest test:
+
+| level | two runs |
+|---|---|
+| 0 | identical |
+| 1 | identical |
+| 2 | identical |
+| 3 | **different** |
+
+`resolve(3) - resolve(2)` is exactly one flag: `decoys`. The seed never reached
+it — `phase01_obfuscate.py` built its option dict without `'seed'`, so the decoy
+injector fell back to `secrets.SystemRandom()`.
+
+Fixed by threading `--seed` into the transform options. Level-3 builds are now
+identical once the per-build key is masked, which is as reproducible as a build
+can be.
+
+Three earlier "fixes" (two `hash()` uses and the fingerprinter seed) were real
+bugs but downstream of the actual cause. Two of my own reproducibility
+measurements were bogus: one checksummed a stale file twice, one diffed paths that
+were never written. The masked bisect is what settled it.
+
+**Result: all 29 flag-isolation shards green.**
