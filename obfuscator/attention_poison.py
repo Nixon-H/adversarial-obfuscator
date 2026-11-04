@@ -50,6 +50,14 @@ class AttentionPoisonInjector(ast.NodeTransformer):
         if len(node.body) <= 1:
             return node
 
+        # A body containing `nonlocal` / `global` must not be wrapped in branch
+        # blocks: the declarations move inside an `if`, and any assignment to
+        # the same name now lexically precedes its declaration --
+        #   "SyntaxError: name 'count' is assigned to before nonlocal declaration"
+        # which is what isolating --attention-poison produced for any closure.
+        if any(isinstance(ch, (ast.Nonlocal, ast.Global)) for ch in ast.walk(node)):
+            return node
+
         # A non-tail Return (or more than one top-level Return) means later
         # code is unreachable or early-exit semantics matter; hoisting only
         # the last Return would silently change behavior. Skip such bodies.

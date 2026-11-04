@@ -1,0 +1,77 @@
+name: Flag isolation (manual)
+
+# Every ladder flag, isolated: one build per flag, on a payload that exercises
+# classes, closures, generators, dataclasses, match and async.
+#
+# MANUAL ONLY while the project stabilises. When it is stable, add
+# `push:` to the `on:` block below and this becomes the regression net that
+# catches a broken transform within minutes of the commit that broke it.
+#
+# The catalogue is generated from scripts/build.py itself, so a new flag is
+# picked up without editing this file.
+
+on:
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: "Number of parallel shards (274 flags / shards per job)"
+        default: "28"
+        required: false
+      level:
+        description: "opt-level used for the isolated builds"
+        default: "3"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  catalogue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      shards: ${{ steps.cat.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - id: cat
+        name: Catalogue the ladder flags
+        run: |
+          python scripts/ci/flag_catalogue.py
+          echo "shards=${{ github.event.inputs.shards || '28' }}" >> "$GITHUB_OUTPUT"
+
+  isolate:
+    needs: catalogue
+    name: flags shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install builder dependencies
+        run: pip install --require-hashes -r requirements.lock
+      - name: Build and run each flag in this shard
+        env:
+          NX_PAYLOAD: ${{ github.workspace }}/tests/fixtures/portable/constructs_source.py
+          NX_OPT_LEVEL: ${{ github.event.inputs.level || '3' }}
+        run: |
+          # 274 flags over 28 shards: 10 per shard, last shard short.
+          python scripts/ci/isolate_flags.py --start $(( ${{ matrix.shard }} * 10 )) --count 10
+      - name: Keep the failing artefact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failing-flag-shard-${{ matrix.shard }}
+          path: |
+            ci-artifacts/
+            build/*_obfuscated.py
+          if-no-files-found: ignore

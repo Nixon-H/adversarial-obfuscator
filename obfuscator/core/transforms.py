@@ -1273,7 +1273,8 @@ class OpaquePredicateInjector(ast.NodeTransformer):
                 comparators=[ast.Constant(value=_nonce)],
             )
             if node.body:
-                node.body.insert(0, ast.If(test=_true_cond, body=[ast.Pass()], orelse=dead))
+                node.body.insert(_scope_safe_insert_index(node.body),
+                                 ast.If(test=_true_cond, body=[ast.Pass()], orelse=dead))
             
         if len(node.body) > 2 and random.random() < 0.60:
             _has_scope_decl = any(isinstance(ch, (ast.Nonlocal, ast.Global)) for ch in ast.walk(node))
@@ -1464,11 +1465,45 @@ class InstructionSubstitutor(ast.NodeTransformer):
                     comparators=[ast.Constant(value=0)]
                 )
         return node
+_NX_FTABLE_SERIAL = 0
+
+
+def _scope_safe_insert_index(body):
+    """Where a new statement may be inserted without breaking a scope declaration.
+
+    `nonlocal x` / `global x` must precede any assignment to x in the same
+    function. Injecting junk at index 0 put an assignment ABOVE the declaration
+    and produced
+      "SyntaxError: name 'count' is assigned to before nonlocal declaration"
+    for any closure -- found by isolating --attention-poison on a payload that
+    has one. A docstring must also stay first.
+    """
+    i = 0
+    if body and isinstance(body[0], ast.Expr) and isinstance(
+            getattr(body[0], "value", None), ast.Constant) and isinstance(body[0].value.value, str):
+        i = 1
+    while i < len(body) and isinstance(body[i], (ast.Nonlocal, ast.Global)):
+        i += 1
+    return i
+
+
 class CallGraphObfuscator(ast.NodeTransformer):
     def __init__(self):
         self.func_table = {}
         self._builtin_aliases = {}
-        self.table_var = '_nx_ftable'
+        # One table name per INSTANCE. The transform can run more than once over
+        # the same module (a second optimisation pass), and two instances both
+        # emitting `_nx_ftable` meant the later assignment silently replaced the
+        # earlier one: a call site written for `bytes` then resolved through a
+        # table whose entry 0 was `sum`, so a key that should have been bytes
+        # became an int and the artefact died with
+        #   "TypeError: can't concat int to bytes".
+        # Found by isolating --adaptive; the failure is silent at build time
+        # because each table is individually well-formed.
+        global _NX_FTABLE_SERIAL
+        _NX_FTABLE_SERIAL += 1
+        suffix = "" if _NX_FTABLE_SERIAL == 1 else "_%d" % _NX_FTABLE_SERIAL
+        self.table_var = '_nx_ftable' + suffix
         self.func_counter = 0
     def visit_Module(self, node):
         self.generic_visit(node)
@@ -2146,9 +2181,15 @@ def stego_encode(source_code):
     ZWNJ = '\u200c'
     binary_data = ''.join(format(b, '08b') for b in source_code.encode('utf-8'))
     hidden = ''.join(ZWS if bit == '0' else ZWNJ for bit in binary_data)
+    # Decode to BYTES, then UTF-8. The old bootstrap did chr(int(bits,2)) per
+    # 8-bit group, which builds a str of code points 0..255 rather than text:
+    # every non-ASCII byte became two Latin-1 characters, and since the
+    # artefact is full of Unicode identifiers the decoded source was invalid
+    # ('invalid non-printable character U+0090'). Steganography round-trips
+    # bytes; the text layer has to be decoded afterwards.
     bootstrap = r'''# -*- coding: utf-8 -*-
 _="{hidden}"
-exec("".join(chr(int("".join("0"if c=="\\u200b"else"1"for c in _[i:i+8]),2))for i in range(0,len(_),8)))
+exec(bytes(int("".join("0" if c=="\u200b" else "1" for c in _[i:i+8]), 2) for i in range(0, len(_), 8)).decode("utf-8"))
 '''
     return bootstrap.format(hidden=hidden)
 def stego_wrap_output(final_script, output_path):
@@ -2251,7 +2292,11 @@ def {node.name}(*args, **kwargs):
     import builtins
     {template_name} = "{encrypted.encode('unicode_escape').decode('ascii')}"
     _code = "".join(chr(ord(c) ^ {key}) for c in {template_name})
-    _ns = {{}}
+    # Exec into the MODULE's namespace, not an empty dict. A function that reads
+    # any global -- a masking key, a lookup table, a constant -- raised
+    # "NameError: name '_nx_M' is not defined" inside "<jit_N>" the moment it was
+    # called, and the traceback pointed at the template rather than the payload.
+    _ns = dict(globals())
     _compiled = builtins.compile(_code, "<jit_{template_name}>", "exec")
     builtins.exec(_compiled, _ns)
     return _ns["{node.name}"](*args, **kwargs)
@@ -2296,7 +2341,9 @@ def {node.name}(*args, **kwargs):
                 return _result.stdout
         except Exception:
             pass
-    _ns = {{}}
+    # Same reason as the Python wrapper: module globals must be visible, or any
+    # function touching a global fails with NameError inside the template.
+    _ns = dict(globals())
     exec(_compiled, _ns)
     return _ns["{node.name}"](*args, **kwargs)
 '''
