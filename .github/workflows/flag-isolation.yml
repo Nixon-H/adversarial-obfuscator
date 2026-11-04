@@ -63,6 +63,10 @@ jobs:
         env:
           NX_PAYLOAD: ${{ github.workspace }}/tests/fixtures/portable/constructs_source.py
           NX_OPT_LEVEL: ${{ github.event.inputs.level || '3' }}
+          # Pin both kinds of process randomness: str hashing (PYTHONHASHSEED)
+          # and the transform order (NX_BUILD_SEED).
+          PYTHONHASHSEED: "0"
+          NX_BUILD_SEED: "12345"
           # --code-genome alone takes more than thirteen minutes.
           NX_BUILD_TIMEOUT: "1800"
         run: |

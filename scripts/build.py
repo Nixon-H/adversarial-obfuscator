@@ -40,6 +40,16 @@ validation can optionally abort the build on semantic divergence.
 """
 
 import argparse
+# Seed BEFORE the heavy modules are imported: a transform that draws random
+# numbers at import time consumed entropy before the --seed below ran, so two
+# seeded builds still differed. NX_BUILD_SEED is read here, at the top.
+import os as _os_early
+import random as _random_early
+if _os_early.environ.get("NX_BUILD_SEED"):
+    try:
+        _random_early.seed(int(_os_early.environ["NX_BUILD_SEED"]))
+    except ValueError:
+        pass
 import json
 import os
 import secrets
