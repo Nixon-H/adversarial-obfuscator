@@ -86,7 +86,11 @@ def atomic_write(path, data, mode="w"):
     # makes the temp file private to this writer.
     unique = "%s.%d.%s" % (path, os.getpid(), os.urandom(6).hex())
     try:
-        with open(unique, mode) as f:
+        # Always UTF-8 for text. Windows defaults to cp1252, and every artefact
+        # this project writes contains non-ASCII identifiers by design, so an
+        # unqualified open here fails on Windows with UnicodeEncodeError.
+        _kw = {} if "b" in mode else {"encoding": "utf-8"}
+        with open(unique, mode, **_kw) as f:
             f.write(data)
         os.rename(unique, path)
     except BaseException:
