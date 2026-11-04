@@ -149,6 +149,20 @@ def main():
                 fh.write("\n\n--- artefact stdout ---\n" + out_a)
                 fh.write("\n--- artefact stderr ---\n" + err_a)
                 fh.write("\n--- source stdout ---\n" + out_s)
+                # The artefact wrote nothing at all. Find out where its output
+                # went: this project has redirected stdout to build.log before,
+                # and the artefact runs with cwd=dist, so anything it created
+                # lands there.
+                import glob as _glob
+                fh.write("\n--- dist directory ---\n")
+                for name in sorted(os.listdir(os.path.dirname(built))):
+                    fh.write("  " + name + "\n")
+                for log in _glob.glob(os.path.join(os.path.dirname(built), "*.log")):
+                    fh.write("\n--- %s ---\n" % os.path.basename(log))
+                    try:
+                        fh.write(open(log, encoding="utf-8", errors="replace").read()[-4000:])
+                    except Exception as exc:
+                        fh.write("<unreadable: %s>" % exc)
             print("kept the failing artefact in", keep)
         except Exception as exc:  # noqa: BLE001
             print("could not keep the artefact:", exc)
