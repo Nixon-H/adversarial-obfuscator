@@ -81,3 +81,35 @@ the packed-loader path, and some arguments were misread. The runner now reports
 PASS, FAIL, CONFLICT, CATALOGUE, NONSTANDALONE and SLOW separately — because a
 harness that cannot tell a product defect from its own mistake is worse than no
 harness.
+
+## Security posture after the fixes
+
+Four protections were tuned down to make the matrix green. All are back, and the
+defaults are now chosen so that a defence cannot destroy the operator's work:
+
+| protection | default | `--strict-detections` |
+|---|---|---|
+| temporal redundancy | one call, mismatch reported | three calls, compares, **deletes the artefact** and exits 666 |
+| entropy noise | 256 KB per 200 ms | **64 MB per iteration, no pause** |
+| rdtsc spam | 50 ms pause per iteration | **unthrottled** |
+| JIT template transform | covers functions and **methods** | same |
+
+Verified in built artefacts rather than by reading source: a strict build contains
+three `if not True` guards, the 64 MB noise buffer, and `__ro.remove`; a default
+build contains `if not False`, so those branches cannot be reached.
+
+### Why the defaults differ
+
+- The self-destruct fired on **false positives** and deleted the operator's file,
+  leaving a 0-byte artefact that ran silently forever after. A defence that
+  destroys work on a wrong guess is worse than the attack it models.
+- Unthrottled noise and rdtsc spinning **starved interpreter shutdown** on ARM:
+  payloads printed correct output and then hung until killed.
+
+Both are real defences, so they are opt-in rather than removed.
+
+### One genuine limitation
+
+A function declaring `nonlocal` cannot be replayed from source in a fresh scope —
+the enclosing cell does not exist there. The JIT transform skips those functions.
+That is a limit of the technique, not a defect to fix.
