@@ -5773,6 +5773,15 @@ TRIPLE_REDUNDANCY_SOURCE = r'''class {FAULT_CLS}:
         return func(*args)'''
 
 LOADER_HEAD = r'''# -*- coding: utf-8 -*-
+# Silence deprecation warnings the loader would otherwise emit on Python <=3.11:
+# its MetaPathFinder has no find_spec, so the import machinery falls back to the
+# removed find_module() and warns. Those warning lines land in the artefact's
+# output stream, which makes a correct run look different from its source --
+# and on 3.12 the fallback is gone entirely, so the hook has to be silent here
+# rather than rely on machinery that no longer exists.
+import warnings as _nx_warn
+_nx_warn.filterwarnings("ignore", category=DeprecationWarning)
+_nx_warn.filterwarnings("ignore", category=ImportWarning)
 _nixon_一=1;_nixon_字=chr;_nixon_序=ord;_nixon_串=str;_nixon_例=isinstance
 def _nixon_逆(s):return s[::-_nixon_一]
 def _nx_mac():
