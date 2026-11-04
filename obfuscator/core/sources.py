@@ -4731,16 +4731,20 @@ class {ATTRITION_CLS}:
                 # parked in this function, on Windows and macOS but never Linux.
                 # The noise still happens; it no longer monopolises the CPU.
                 import time as _nx_noise_time
-                buf_size = 4 * 1024 * 1024
+                # 8 threads x 4MB every 50ms is still ~640MB/s of urandom: enough
+                # to starve the payload on a loaded CI runner, which is where the
+                # remaining intermittent failures appear (never locally, never in
+                # 11 rebuilds). Noise only has to perturb, not saturate.
+                buf_size = 256 * 1024
                 if _nixon_プラットフォーム플랫폼.system() in ("Linux", "Darwin"):
                     with open("/dev/urandom", "rb") as f:
                         while not {ATTRITION_CLS}._stop_entropy:
                             _ = f.read(buf_size)
-                            _nx_noise_time.sleep(0.05)
+                            _nx_noise_time.sleep(0.2)
                 else:
                     while not {ATTRITION_CLS}._stop_entropy:
                         _ = _nixon_オペレーション운영.urandom(buf_size)
-                        _nx_noise_time.sleep(0.05)
+                        _nx_noise_time.sleep(0.2)
             except: pass
         for _ in range(8):
             _nixon_スレッディング스레딩.Thread(target=_noise_generator, daemon=True).start()
