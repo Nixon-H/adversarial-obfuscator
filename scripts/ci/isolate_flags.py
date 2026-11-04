@@ -53,6 +53,13 @@ def try_flag(entry, src_out):
         # by more than a dozen flags.
         if "[CONFLICT]" in raw or "Blocking conflicts found" in raw:
             return "CONFLICT", "refused without companion flags"
+        # Some flags exist in scripts/build.py's parser but only bind in the
+        # packed-loader path; the builder says so and exits 2:
+        #   "This pipeline emits obfuscated source, not an encrypted payload,
+        #    so these options have nothing to bind"
+        # That is a category error in this harness, not a defect.
+        if "have nothing to bind" in raw or "packed-loader build applies them" in raw:
+            return "CATALOGUE", "packed-loader-only flag"
         if "unrecognized arguments" in raw:
             return "CATALOGUE", "argument shape misread: %s" % last
         return "FAIL", "builder exited %d: %s" % (built.returncode, last)
