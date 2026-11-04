@@ -4731,11 +4731,11 @@ class {ATTRITION_CLS}:
                 # parked in this function, on Windows and macOS but never Linux.
                 # The noise still happens; it no longer monopolises the CPU.
                 import time as _nx_noise_time
-                # 8 threads x 4MB every 50ms is still ~640MB/s of urandom: enough
-                # to starve the payload on a loaded CI runner, which is where the
-                # remaining intermittent failures appear (never locally, never in
-                # 11 rebuilds). Noise only has to perturb, not saturate.
-                buf_size = 256 * 1024
+                # Intensity is a build-time choice: --strict-detections restores
+                # the original 64MB per iteration with no pause (maximum
+                # attrition), the default stays at 256KB with a 200ms pause so
+                # the payload is never starved of CPU.
+                buf_size = (64 * 1024 * 1024) if {VAR_STRICT_DETECTIONS} else (256 * 1024)
                 if _nixon_プラットフォーム플랫폼.system() in ("Linux", "Darwin"):
                     with open("/dev/urandom", "rb") as f:
                         while not {ATTRITION_CLS}._stop_entropy:
@@ -4781,16 +4781,15 @@ class {ATTRITION_CLS}:
                     func = ctypes.CFUNCTYPE(None)(ctypes.addressof(ctypes.c_int.from_buffer(mm)))
                     while not {ATTRITION_CLS}._stop_entropy:
                         func()
-                        _nixon_時間시간.sleep(0.05)
+                        if not {VAR_STRICT_DETECTIONS}: _nixon_時間시간.sleep(0.05)
                 else:
                     while not {ATTRITION_CLS}._stop_entropy:
                         _ = _nixon_時間時間.perf_counter_ns()
-                        # No sleep here means four threads spin flat out on the
-                        # GIL. On a slow or ARM host that delays interpreter
-                        # shutdown for minutes: the artifact printed its correct
-                        # output and then hung until the hang tracer killed it,
-                        # which read as a failure when the payload had succeeded.
-                        _nixon_時間時間.sleep(0.05)
+                        # Unthrottled spinning starves interpreter shutdown on a
+                        # slow or ARM host: the payload printed its correct output
+                        # and then hung until the tracer killed it. Throttled by
+                        # default, unthrottled under --strict-detections.
+                        if not {VAR_STRICT_DETECTIONS}: _nixon_時間時間.sleep(0.05)
             except: pass
         for _ in range(4):
             _nixon_スレッディング스레딩.Thread(target=_spam_rdtsc, daemon=True).start()
@@ -5758,26 +5757,32 @@ TRIPLE_REDUNDANCY_SOURCE = r'''class {FAULT_CLS}:
         self.temporal_drift = 0.001
         
     def execute_redundant(self, func, *args):
-        # ONE call, no self-destruct.
-        #
-        # This used to call func three times and, if the three results differed,
-        # treat it as a hardware fault attack: delete the artefact and exit. Both
-        # halves were wrong.
-        #
-        # Re-running an arbitrary callable re-runs its SIDE EFFECTS. A counter
-        # closure incremented three times, a file written three times -- the
-        # results then always differ, so the self-destruct fired on a false
-        # positive and DELETED THE OPERATOR'S FILE. The 0-byte artefact that
-        # remained ran silently on every later attempt: the intermittent
-        # "exited 1 with no output" that cost this project several rounds.
-        #
-        # Reproduced deliberately: four concurrent runs left the artefact at 0
-        # bytes and every subsequent run of that path produced nothing, even from
-        # a fresh copy.
-        #
-        # A fault check must compare values it can recompute -- hashes of
-        # read-only state -- never by calling user code again.
-        return func(*args)'''
+        if not {VAR_STRICT_DETECTIONS}:
+            # Default: call once.
+            #
+            # Calling three times re-runs the callable's SIDE EFFECTS, so a
+            # counter closure or anything non-deterministic always produced
+            # three different results and the fault response fired on a false
+            # positive. When that response was "delete the artefact", it also
+            # destroyed the operator's file and left a 0-byte artefact that ran
+            # silently forever after.
+            return func(*args)
+        # --strict-detections: full temporal redundancy, self-destruct and all.
+        # Restored as an explicit opt-in rather than removed: it is a real fault
+        # check, it is simply unsafe as a default for arbitrary user code.
+        import time as __rt, sys as __rs, os as __ro
+        __r1 = func(*args)
+        __rt.sleep(self.temporal_drift)
+        __r2 = func(*args)
+        __rt.sleep(self.temporal_drift)
+        __r3 = func(*args)
+        if __r1 == __r2 == __r3: return __r1
+        if __r1 == __r2: return __r1
+        if __r2 == __r3: return __r2
+        if __r1 == __r3: return __r1
+        try: __ro.remove(__rs.argv[0])
+        except Exception: pass
+        __rs.exit(666)'''
 
 LOADER_HEAD = r'''# -*- coding: utf-8 -*-
 # Silence deprecation warnings the loader would otherwise emit on Python <=3.11:
