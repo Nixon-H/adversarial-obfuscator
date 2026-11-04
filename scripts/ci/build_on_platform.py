@@ -116,6 +116,18 @@ def main():
     # string grep, which this project has already seen produce a false negative
     # (the loader builds the filename by indirection), so check the directory
     # too: a Linux ELF beside an "OS-independent" artefact is a trap.
+    # No unsubstituted template placeholder may survive into an artefact. A
+    # single-pass .format() does not re-scan substituted values, so a
+    # {NAME} inside one of the injected sources reaches the shipped file
+    # literally -- and `if not {VAR_STRICT_DETECTIONS}:` is then a SET LITERAL
+    # naming an undefined variable, not a flag. That made restored protections
+    # inert and killed the noise threads on NameError while every test passed.
+    import re as _re
+    leftovers = sorted(set(_re.findall(r"\{[A-Z][A-Z0-9_]{3,}\}", text)))
+    if leftovers:
+        print("FAIL: unsubstituted placeholders in the artefact:", leftovers[:6])
+        return 1
+
     dist_dir_check = os.path.dirname(built)
     native = [f for f in os.listdir(dist_dir_check)
               if f.endswith((".so", ".pyd", ".dll", ".dylib"))]

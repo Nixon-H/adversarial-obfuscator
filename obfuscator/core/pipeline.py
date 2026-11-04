@@ -3283,7 +3283,6 @@ def _VERIFY_INTEGRITY():
                 'temporal_degrade_source': TEMPORAL_DEGRADE_SOURCE,
                 'code_bloat_source': CODE_BLOAT_SOURCE,
                 'cross_platform_guard_source': CROSS_PLATFORM_GUARD_SOURCE,
-                'attrition_warfare_source': ATTRITION_WARFARE_SOURCE,
                 'VAR_CROSS_PLATFORM_GUARD_CLS': VARS["CROSS_PLATFORM_GUARD_CLS"],
                 'VAR_ATTRITION_CLS': VARS["ATTRITION_CLS"],
                 'VAR_LOGIC_ENTANGLE_CLS': VARS["LOGIC_ENTANGLE_CLS"],
@@ -3465,7 +3464,17 @@ def _VERIFY_INTEGRITY():
                 'fhe_source': FHE_SOURCE,
                 'oram_source': ORAM_SOURCE,
                 'semantic_synth_source': SEMANTIC_SYNTH_SOURCE,
-                'triple_redundancy_source': TRIPLE_REDUNDANCY_SOURCE,
+                # Substituted HERE for the same reason importer_source is: a
+                # one-pass .format() does not re-scan a substituted value, so a
+                # placeholder inside this source reached the artefact literally
+                # -- `if not {VAR_STRICT_DETECTIONS}:` was a set literal naming an
+                # undefined variable, which would have raised NameError the first
+                # time strict behaviour was exercised. Found by grepping a built
+                # artefact for unsubstituted placeholders.
+                'triple_redundancy_source': TRIPLE_REDUNDANCY_SOURCE.replace(
+                    "{VAR_STRICT_DETECTIONS}", str(bool(getattr(args, 'strict_detections', False)))),
+                'attrition_warfare_source': ATTRITION_WARFARE_SOURCE.replace(
+                    "{VAR_STRICT_DETECTIONS}", str(bool(getattr(args, 'strict_detections', False)))),
                 'VAR_FHE_CLS': VARS["FHE_CLS"],
                 'VAR_ORAM_CLS': VARS["ORAM_CLS"],
                 'VAR_SYNTH_CLS': VARS["SYNTH_CLS"],
