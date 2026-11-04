@@ -122,8 +122,18 @@ def main():
     # literally -- and `if not {VAR_STRICT_DETECTIONS}:` is then a SET LITERAL
     # naming an undefined variable, not a flag. That made restored protections
     # inert and killed the noise threads on NameError while every test passed.
+    # Only REAL template placeholders count. A bare {NAME} can be a legitimate
+    # set literal in generated code -- `{LKME}` is a set containing the name LKME,
+    # and flagging it was a false positive in this guard.
     import re as _re
-    leftovers = sorted(set(_re.findall(r"\{[A-Z][A-Z0-9_]{3,}\}", text)))
+    _known = set()
+    for _src in ("obfuscator/core/sources.py", "obfuscator/core/pipeline.py"):
+        try:
+            _known.update(_re.findall(r"\{([A-Z][A-Z0-9_]{2,})\}",
+                                      open(_src, encoding="utf-8").read()))
+        except OSError:
+            pass
+    leftovers = sorted(set(_re.findall(r"\{([A-Z][A-Z0-9_]{2,})\}", text)) & _known)
     if leftovers:
         print("FAIL: unsubstituted placeholders in the artefact:", leftovers[:6])
         return 1
