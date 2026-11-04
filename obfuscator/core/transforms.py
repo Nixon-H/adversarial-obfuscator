@@ -2197,6 +2197,15 @@ class DynamicCodeGenerator(ast.NodeTransformer):
         self.use_rust_jit = use_rust_jit
     def visit_FunctionDef(self, node):
         self.generic_visit(node)
+        # A function that declares `nonlocal` (or `global`) cannot be round-tripped
+        # through this transform: it unparses the function and exec()s the text in
+        # a NEW scope, where the enclosing cell the `nonlocal` refers to does not
+        # exist. The result is a SyntaxError at run time --
+        #   "no binding for nonlocal 'count' found (<jit__nx_tmpl_0>, line 2)"
+        # -- inside the generated template, not in the payload file, so it read as
+        # a mystery for several rounds while the real cause sat here.
+        if any(isinstance(n, (ast.Nonlocal, ast.Global)) for n in ast.walk(node)):
+            return node
         if len(node.body) >= 3 and random.random() < 0.2:
             try:
                 func_code = ast.unparse(node)
