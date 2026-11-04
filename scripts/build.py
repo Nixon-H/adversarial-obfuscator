@@ -1344,7 +1344,10 @@ in config/default.json.
                 with open(preprocessed_payload) as _f:
                     _da_src = _f.read()
                 _da_tree = _da_ast.parse(_da_src)
-                _da_injector = SemanticDecoyApiInjector(count=opts.decoy_api_count)
+                # Seed it: unseeded it uses secrets.SystemRandom(), which made
+                # every level>=1 build different and no CI failure reproducible.
+                _da_injector = SemanticDecoyApiInjector(
+                    count=opts.decoy_api_count, seed=getattr(opts, 'seed', None))
                 _da_tree = _da_injector.inject(_da_tree)
                 _da_ast.fix_missing_locations(_da_tree)
                 _da_out = _da_ast.unparse(_da_tree)

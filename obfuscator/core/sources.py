@@ -668,7 +668,11 @@ def _apply_ast_mutation_inner(source_code, options=None):
         if options.get('decoy_apis'):
             from obfuscator.decoy_apis import SemanticDecoyApiInjector
             count = options.get('decoy_api_count', 5)
-            di = SemanticDecoyApiInjector(count=count)
+            # Pass the build seed. Without it the injector falls back to
+            # secrets.SystemRandom(), so decoy names and shapes changed on every
+            # build -- the first non-determinism in the ladder (level 0 is
+            # reproducible, level 1 is not, and this is what level 1 adds).
+            di = SemanticDecoyApiInjector(count=count, seed=options.get('seed'))
             if isinstance(tree, ast.Module):
                 tree = di.inject(tree)
             print(f"    [+] Decoy APIs: injected {count} fake APIs")
