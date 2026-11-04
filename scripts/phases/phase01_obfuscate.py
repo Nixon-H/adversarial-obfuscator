@@ -110,6 +110,13 @@ def phase_obfuscate(payload, output, opts):
         if getattr(opts, 'decoy_apis', False):
             extra_opts['decoy_apis'] = True
             extra_opts['decoy_api_count'] = getattr(opts, 'decoy_api_count', 5)
+        # Thread --seed into the transform options. Without it the decoy injector
+        # falls back to secrets.SystemRandom(), and `decoys` is the ONLY flag that
+        # level 3 adds over level 2 -- which is why level 2 builds are identical
+        # across runs while level 3 builds are not.
+        _sd = getattr(opts, 'seed', None)
+        if _sd is not None:
+            extra_opts['seed'] = _sd
         if getattr(opts, 'adaptive_adversarial', False):
             extra_opts['adaptive_rewrite'] = True
         if getattr(opts, 'rename_internal', False):
