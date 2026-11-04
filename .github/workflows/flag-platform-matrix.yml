@@ -21,7 +21,22 @@ permissions:
   contents: read
 
 jobs:
+  catalogue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      flags: ${{ steps.list.outputs.flags }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - id: list
+        name: Derive the flag list from the catalogue
+        run: echo "flags=$(python scripts/ci/matrix_flags.py)" >> "$GITHUB_OUTPUT"
+
   matrix:
+    needs: catalogue
     name: ${{ matrix.flag }} / ${{ matrix.os }} / py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
@@ -30,13 +45,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-        flag:
-          - "--cfg-flatten"
-          - "--mba-subs"
-          - "--opaque-predicates"
-          - "--fragment-strings"
-          - "--class-dispatch"
-          - "--attention-poison 2"
+        # Taken from scripts/ci/flag_catalogue.py, so the matrix cannot drift
+        # from the flags' real argument shapes.
+        flag: ${{ fromJSON(needs.catalogue.outputs.flags) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
