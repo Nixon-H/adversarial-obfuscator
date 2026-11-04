@@ -83,7 +83,7 @@ def phase_provenance_poison(payload: str, output: str, opts) -> None:
         log("SKIP", "No poisoning categories enabled")
         return
 
-    with open(payload, "r") as f:
+    with open(payload, "r", encoding='utf-8') as f:
         source = f.read()
 
     try:
@@ -97,7 +97,7 @@ def phase_provenance_poison(payload: str, output: str, opts) -> None:
     tree = poisoner.poison(tree, {"categories": enabled_categories})
 
     result = ast.unparse(tree)
-    with open(output, "w") as f:
+    with open(output, "w", encoding='utf-8') as f:
         f.write(result)
 
     size = os.path.getsize(output)

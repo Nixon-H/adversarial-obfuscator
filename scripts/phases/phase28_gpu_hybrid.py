@@ -62,7 +62,7 @@ def phase_gpu_hybrid():
         log("GPU_HYBRID", f"GPU available: {gpu_avail}, paths distinct: {paths_distinct}")
 
         out_path = os.path.join(BUILD_DIR, "gpu_hybrid_result.json")
-        with open(out_path, "w") as f:
+        with open(out_path, "w", encoding='utf-8') as f:
             json.dump({
                 "status": "ok",
                 "gpu_available": gpu_avail,

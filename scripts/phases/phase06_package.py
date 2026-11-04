@@ -111,7 +111,7 @@ def phase_package(payload, obfuscated_output, obfuscated_name, opts):
         from scripts.artifacts.manifest import write_manifest
         _artefact = os.path.join(BUILD_DIR, obfuscated_name)
         _mpath = write_manifest(BUILD_DIR, _artefact)
-        with open(_mpath) as _mf:
+        with open(_mpath, encoding='utf-8') as _mf:
             _m = json.load(_mf)
         log("PACKAGE", "  Manifest: %s (%d loader gates, %d C symbols, %d features)"
             % (os.path.basename(_mpath), len(_m["loader_gates"]),

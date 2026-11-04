@@ -417,9 +417,9 @@ def build_native_vm(build_dir):
     try:
         unique_name = f"native_vm_{uuid.uuid4().hex}"
         pyx_path = os.path.join(build_dir, f"{unique_name}.pyx")
-        with open(pyx_path, "w") as f: f.write(CYTHON_VM_SOURCE)
+        with open(pyx_path, "w", encoding='utf-8') as f: f.write(CYTHON_VM_SOURCE)
         setup_py = os.path.join(build_dir, "setup.py")
-        with open(setup_py, "w") as f:
+        with open(setup_py, "w", encoding='utf-8') as f:
             f.write(f"from setuptools import setup\nfrom Cython.Build import cythonize\nsetup(name='{unique_name}', ext_modules=cythonize('{unique_name}.pyx', compiler_directives={{'language_level': 3}}))")
         cmd = [sys.executable, "setup.py", "build_ext", "--inplace"]
         result = subprocess.run(cmd, cwd=build_dir, capture_output=True)
@@ -433,7 +433,7 @@ def build_native_vm(build_dir):
 def compile_payload_to_cython(source_path, output_dir):
     print("    [+] Compiling payload to native binary (Cython)...")
     if os.path.isfile(source_path):
-        with open(source_path, 'r') as f:
+        with open(source_path, 'r', encoding='utf-8') as f:
             source_code = f.read()
         source_files = {'__main__.py': source_code}
     else:
@@ -443,7 +443,7 @@ def compile_payload_to_cython(source_path, output_dir):
                 if file.endswith('.py'):
                     full_path = os.path.join(root, file)
                     rel_path = os.path.relpath(full_path, source_path)
-                    with open(full_path, 'r') as f:
+                    with open(full_path, 'r', encoding='utf-8') as f:
                         source_files[rel_path] = f.read()
     cython_dir = tempfile.mkdtemp(prefix='cython_build_')
     try:
@@ -465,7 +465,7 @@ def compile_payload_to_cython(source_path, output_dir):
 # cython: infer_types=True
 {code}
 '''
-            with open(pyx_path, 'w') as f: f.write(cython_code)
+            with open(pyx_path, 'w', encoding='utf-8') as f: f.write(cython_code)
         pyx_file = '__main__.pyx'
         setup_content = f'''from setuptools import setup, Extension
 from Cython.Build import cythonize
@@ -486,7 +486,7 @@ setup(
 )
 '''
         setup_path = os.path.join(cython_dir, 'setup.py')
-        with open(setup_path, 'w') as f: f.write(setup_content)
+        with open(setup_path, 'w', encoding='utf-8') as f: f.write(setup_content)
         cmd = [sys.executable, 'setup.py', 'build_ext', '--inplace']
         result = subprocess.run(cmd, cwd=cython_dir, capture_output=True, text=True)
         if result.returncode != 0:
@@ -555,7 +555,7 @@ def generate_report(base_name, build_info, all_outputs):
         # splitext, not str.replace: a directory whose name contains
         # ".py" would otherwise be mangled.
         report_path = os.path.splitext(base_name)[0] + '.report.json'
-        with open(report_path, 'w') as f: json.dump(report, f, indent=2)
+        with open(report_path, 'w', encoding='utf-8') as f: json.dump(report, f, indent=2)
     except Exception: pass
 def encrypt_payload(data, key, nonce, use_aes_ctr=True):
     if use_aes_ctr is None:
@@ -725,7 +725,7 @@ def test_protected_file(filepath, original_source):
             obf_filtered.append(stripped)
         if orig_lines != obf_filtered:
             try:
-                with open(original_source, 'r', errors='ignore') as f: orig_content = f.read()
+                with open(original_source, 'r', errors='ignore', encoding='utf-8') as f: orig_content = f.read()
                 if "__NATIVE_BLOBS_PLACEHOLDER__" in orig_content:
                     print("    [!] Hybrid Template detected. Output mismatch expected/ignored.")
                     results['comparison'] = {'outputs_match': True, 'return_codes_match': results['original']['returncode'] == results['obfuscated']['returncode'], 'cipher_engine': cipher_engine}
@@ -1037,7 +1037,7 @@ class CloudflareDeployer:
                 url = f"{self.base_url}/accounts/{self.account_id}/{endpoint}"
                 body = json.dumps(data).encode() if data else None
                 req = urllib.request.Request(url, data=body, headers=self.headers, method=method)
-                with urllib.request.urlopen(req, timeout=15) as r:
+                with urllib.request.urlopen(req, timeout=15, encoding='utf-8') as r:
                     try:
                         res = json.loads(r.read())
                         return res if isinstance(res, dict) else None
@@ -1621,7 +1621,7 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         "        for _n in sorted(_o.listdir('/sys/class/net')):\n"
         "            if _n == 'lo': continue\n"
         "            try:\n"
-        "                with open('/sys/class/net/' + _n + '/address') as _f:\n"
+        "                with open('/sys/class/net/' + _n + '/address', encoding='utf-8') as _f:\n"
         "                    _m = _f.read().strip().lower().replace(':', '')\n"
         "            except Exception: continue\n"
         "            if len(_m) == 12 and _m != '0' * 12: return _m\n"
@@ -2344,7 +2344,7 @@ echo [+] Launching...
 cd /d "%~dp0"
 {launch_cmd}
 """
-    with open(bat_path, "w") as f:
+    with open(bat_path, "w", encoding='utf-8') as f:
         f.write(bat_content)
     print(f" [+] Generated Windows Smart-Launcher: {bat_path}")
     mac_path = os.path.join(base_dir, mac_name)
@@ -2361,7 +2361,7 @@ xattr -d com.apple.quarantine "$DIR/{filename}" 2>/dev/null
 echo "[+] Starting..."
 {mac_launch}
 """
-    with open(mac_path, "w") as f:
+    with open(mac_path, "w", encoding='utf-8') as f:
         f.write(sh_content)
     os.chmod(mac_path, 0o755) 
     print(f" [+] Generated macOS Smart-Launcher: {mac_path}")
@@ -2768,12 +2768,12 @@ def build_project(args):
         deployer = CloudflareDeployer(args.cf_token, args.cf_account)
         key_file = f".nixon_key_{project_hash}"
         try:
-            with open(key_file, "r") as f:
+            with open(key_file, "r", encoding='utf-8') as f:
                 args._cf_hmac_key = f.read().strip()
             UI.dot_item("Master Key", "Loaded existing HMAC Key", "OK")
         except FileNotFoundError:
             args._cf_hmac_key = secrets.token_hex(32)
-            with open(key_file, "w") as f:
+            with open(key_file, "w", encoding='utf-8') as f:
                 f.write(args._cf_hmac_key)
             try:
                 os.chmod(key_file, 0o600)
@@ -3026,7 +3026,7 @@ def _VERIFY_INTEGRITY():
                         rel_path = os.path.relpath(full_path, build_dir)
                         if file == "__main__.py" or file == os.path.basename(source):
                             try:
-                                with open(full_path, 'r') as f: src_content = f.read()
+                                with open(full_path, 'r', encoding='utf-8') as f: src_content = f.read()
                                 code_obj = compile(src_content, rel_path, 'exec')
                                 marshalled = marshal.dumps(code_obj)
                                 enc_marshalled = bytearray(marshalled)
@@ -3509,7 +3509,7 @@ def _VERIFY_INTEGRITY():
                         "        import hashlib as _h, os as _o\n"
                         "        _p = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)),"
                         ' "nixon_core.so")\n'
-                        "        with open(_p, \"rb\") as _f:\n"
+                        "        with open(_p, \"rb\", encoding='utf-8') as _f:\n"
                         "            return _h.sha256(_f.read()).hexdigest() == \"%s\"\n"
                         "    except Exception:\n"
                         "        return False\n"
@@ -3523,7 +3523,7 @@ def _VERIFY_INTEGRITY():
                         "        import hashlib as _h, os as _o\n"
                         "        _p = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)),"
                         ' "nixon_core.so")\n'
-                        "        with open(_p, \"rb\") as _f:\n"
+                        "        with open(_p, \"rb\", encoding='utf-8') as _f:\n"
                         "            _d = _h.sha256(_f.read()).digest()\n"
                         "        return bytes([_b ^ _d[_i %% len(_d)]"
                         " for _i, _b in enumerate(_k)])\n"
@@ -4309,7 +4309,7 @@ def main():
             mgr = CloudflareDeployer(cm.get("cf_token"), cm.get("cf_account"))
             hw_hash = hashlib.sha256(args.hwid.encode()).hexdigest()
             if args.token_file:
-                with open(args.token_file,'r')as f: c = f.read().strip()
+                with open(args.token_file,'r', encoding='utf-8')as f: c = f.read().strip()
                 mgr.add_license(hw_hash, c, "Auth-CLI")
                 print(" [+] Success")
         elif args.command == 'clean':
@@ -4380,7 +4380,7 @@ def main():
                         print(f"\n[SUCCESS] Artifacts downloaded to: {dist_dir}")
     except KeyboardInterrupt: print("\n[-] Cancelled."); sys.exit(0)
     except Exception as e:
-        with open("build_error.log", "w") as f:
+        with open("build_error.log", "w", encoding='utf-8') as f:
             f.write(traceback.format_exc())
         UI.fatal(f"Critical Build Error: {e}")
         print(f"     [!] Details logged to: {os.path.abspath('build_error.log')}")

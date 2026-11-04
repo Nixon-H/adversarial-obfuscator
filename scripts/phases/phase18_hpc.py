@@ -73,6 +73,6 @@ def phase_hpc(ir_output=None, obfuscated_output=None):
             results["tests"].append({"name": test, "ok": False, "error": str(e)})
             results["status"] = "partial"
     out_path = os.path.join(BUILD_DIR, "phase18_hpc.json")
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding='utf-8') as f:
         json.dump(results, f, indent=2)
     log("HPC", f"Results written to {out_path}")

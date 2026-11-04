@@ -99,7 +99,7 @@ def phase_class_dispatch(num_classes=4):
             config["variant_metadata"].append(v_info)
 
         config_path = os.path.join(BUILD_DIR, "class_dispatch_config.json")
-        with open(config_path, "w") as f:
+        with open(config_path, "w", encoding='utf-8') as f:
             json.dump(config, f, indent=2)
         log("CLASS_DISPATCH", f"Config written to {config_path}")
     except ImportError as e:

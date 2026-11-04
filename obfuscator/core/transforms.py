@@ -351,7 +351,7 @@ class SymbolRenamer(ast.NodeTransformer):
                  return old_name
         return self.mapping[old_name]
     def save_rename_log(self, filepath):
-        with open(filepath + '.renamelog', 'w') as f:
+        with open(filepath + '.renamelog', 'w', encoding='utf-8') as f:
             for old, new in self._rename_log:
                 f.write(f"{old} -> {new}\n")
     def visit_FunctionDef(self, node):
@@ -2331,7 +2331,7 @@ def {node.name}(*args, **kwargs):
             _tmp_fd, _tmp = tempfile.mkstemp(suffix=".jit")
             os.close(_tmp_fd)
             _tmp_fd = None
-            with open(_tmp, "w") as _f:
+            with open(_tmp, "w", encoding='utf-8') as _f:
                 _f.write(_code)
             _result = subprocess.run(
                 [_jit_bin, "jit", "exec", _tmp],

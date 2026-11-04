@@ -61,7 +61,7 @@ def extract_zip_confined(zip_path: str, output_dir: str) -> None:
 def extract_tar_confined(tar_path: str, output_dir: str,
                           mode: str = "r:*") -> None:
     """Extract *tar_path* into *output_dir*, refusing to escape it."""
-    with tarfile.open(tar_path, mode) as t:
+    with tarfile.open(tar_path, mode, encoding='utf-8') as t:
         for member in t.getmembers():
             confined_member_path(output_dir, member.name)
         if hasattr(tarfile, "data_filter"):

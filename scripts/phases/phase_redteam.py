@@ -76,7 +76,7 @@ def phase_redteam(args, binary_path, source_path):
         }
 
         summary_path = os.path.join(output_dir, "redteam_summary.json")
-        with open(summary_path, "w") as f:
+        with open(summary_path, "w", encoding='utf-8') as f:
             json.dump(summary, f, indent=2, default=str)
 
         pipeline_log("REDTEAM", f"Red team summary → {summary_path}")

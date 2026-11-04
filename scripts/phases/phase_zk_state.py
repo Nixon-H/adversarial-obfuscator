@@ -133,7 +133,7 @@ def phase_zk_state(args, ir_module=None):
     build_dir = getattr(args, "build_dir", BUILD_DIR)
     os.makedirs(build_dir, exist_ok=True)
     manifest_path = os.path.join(build_dir, "zk_state_manifest.json")
-    with open(manifest_path, "w") as f:
+    with open(manifest_path, "w", encoding='utf-8') as f:
         json.dump(manifest, f, indent=2)
 
     log("ZK_STATE", f"Manifest → {manifest_path}")

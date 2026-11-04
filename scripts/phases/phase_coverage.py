@@ -59,19 +59,19 @@ def phase_coverage(args, ir_module, pipeline_state=None):
 
     json_path = os.path.join(output_dir, "protection_coverage.json")
     json_data = coverage_to_json(coverage_map)
-    with open(json_path, "w") as f:
+    with open(json_path, "w", encoding='utf-8') as f:
         json.dump(json_data, f, indent=2)
     log("COVERAGE", f"JSON coverage map → {json_path}")
 
     html_path = os.path.join(output_dir, "protection_coverage.html")
     html_data = coverage_to_html(coverage_map)
-    with open(html_path, "w") as f:
+    with open(html_path, "w", encoding='utf-8') as f:
         f.write(html_data)
     log("COVERAGE", f"HTML coverage report → {html_path}")
 
     txt_path = os.path.join(output_dir, "protection_coverage.txt")
     txt_data = coverage_to_text(coverage_map)
-    with open(txt_path, "w") as f:
+    with open(txt_path, "w", encoding='utf-8') as f:
         f.write(txt_data)
     log("COVERAGE", f"Text coverage summary → {txt_path}")
 

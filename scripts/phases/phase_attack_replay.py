@@ -80,7 +80,7 @@ def phase_attack_replay(args: Any) -> Optional[List[ReplayResult]]:
         )
 
         if os.path.exists(redteam_report_path):
-            with open(redteam_report_path) as f:
+            with open(redteam_report_path, encoding='utf-8') as f:
                 redteam_data = json.load(f)
         else:
             redteam_data = {}

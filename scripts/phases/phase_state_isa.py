@@ -70,7 +70,7 @@ def phase_state_isa(history_len: int = 8, seed: int = 0):
         "enabled": True,
     }
     config_path = os.path.join(BUILD_DIR, "state_isa_config.json")
-    with open(config_path, "w") as f:
+    with open(config_path, "w", encoding='utf-8') as f:
         json.dump(config, f, indent=2)
     log("STATE_ISA", f"Rotation schedule ({len(schedule)} thresholds) written to {config_path}")
     return config

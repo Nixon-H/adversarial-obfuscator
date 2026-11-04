@@ -71,7 +71,7 @@ def phase_rolling_keys(payload_path=None):
         "rolling_key": binder._rolling_key.hex() if binder._rolling_key else None,
     }
     config_path = os.path.join(BUILD_DIR, "rolling_keys_config.json")
-    with open(config_path, "w") as f:
+    with open(config_path, "w", encoding='utf-8') as f:
         json.dump(rolling_config, f, indent=2)
     log("ROLLING_KEYS", f"Rolling key state persisted to {config_path}")
     log("ROLLING_KEYS", "Rolling key schedules configured successfully")

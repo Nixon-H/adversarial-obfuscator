@@ -106,7 +106,7 @@ def phase_assumptions(args) -> AssumptionReport:
 
     report_path = os.path.join(BUILD_DIR, "assumption_report.json")
     os.makedirs(BUILD_DIR, exist_ok=True)
-    with open(report_path, "w") as f:
+    with open(report_path, "w", encoding='utf-8') as f:
         f.write(report.to_json())
 
     log("ASSUMPTIONS", f"Report written to {report_path}")

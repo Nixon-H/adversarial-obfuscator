@@ -45,7 +45,7 @@ def phase_tee(tee_type="software"):
         cwd=RUNTIME_DIR, capture_output=True, text=True, timeout=60, env=env,
     )
     out_path = os.path.join(BUILD_DIR, "tee_result.json")
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding='utf-8') as f:
         json.dump({"tee_type": tee_type, "returncode": result.returncode, "stdout": result.stdout[-500:], "stderr": result.stderr[-500:]}, f)
     if result.returncode == 0:
         log("TEE", "TEE tests passed")

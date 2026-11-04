@@ -47,7 +47,7 @@ def phase_fhe_vm(args, ir_module=None):
             from irgen.compile import compile_py_to_ir
             payload = getattr(args, 'payload', None)
             if payload and os.path.exists(payload):
-                with open(payload) as f:
+                with open(payload, encoding='utf-8') as f:
                     source = f.read()
                 ir_module = compile_py_to_ir(source)
             else:
@@ -149,7 +149,7 @@ def phase_fhe_vm(args, ir_module=None):
 
     manifest_path = os.path.join(BUILD_DIR, 'fhe_vm_manifest.json')
     try:
-        with open(manifest_path, 'w') as f:
+        with open(manifest_path, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, indent=2, default=str)
         log("FHE_VM", f"Manifest written to {manifest_path}")
     except Exception as e:

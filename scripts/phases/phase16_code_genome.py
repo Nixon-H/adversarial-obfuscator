@@ -42,7 +42,7 @@ def phase_code_genome(base_genome_path=None, generations=50, population_size=30)
 
     source_text = None
     if base_genome_path and os.path.exists(base_genome_path):
-        with open(base_genome_path, "r") as f:
+        with open(base_genome_path, "r", encoding='utf-8') as f:
             source_text = f.read()
 
     if not source_text:
@@ -59,7 +59,7 @@ def phase_code_genome(base_genome_path=None, generations=50, population_size=30)
         )
 
         out_source_path = os.path.join(BUILD_DIR, "evolved_genome.py")
-        with open(out_source_path, "w") as f:
+        with open(out_source_path, "w", encoding='utf-8') as f:
             f.write(best_genome.to_source())
 
         out_bin_path = os.path.join(BUILD_DIR, "evolved_genome.bin")
@@ -67,7 +67,7 @@ def phase_code_genome(base_genome_path=None, generations=50, population_size=30)
             f.write(best_genome.to_bytes())
 
         out_history_path = os.path.join(BUILD_DIR, "evolution_history.json")
-        with open(out_history_path, "w") as f:
+        with open(out_history_path, "w", encoding='utf-8') as f:
             f.write(json.dumps([{"gen": g, "fitness": f_} for g, f_ in history], indent=2))
 
         log("CODE_GENOME", f"Best fitness: {fitness:.6f}")
@@ -86,7 +86,7 @@ def phase_code_genome(base_genome_path=None, generations=50, population_size=30)
         )
 
         out_ir_path = os.path.join(BUILD_DIR, "evolved_ir_genome.ir")
-        with open(out_ir_path, "w") as f:
+        with open(out_ir_path, "w", encoding='utf-8') as f:
             f.write(ir_best.to_ir_text())
 
         out_ir_bin_path = os.path.join(BUILD_DIR, "evolved_ir_genome.bin")
@@ -94,7 +94,7 @@ def phase_code_genome(base_genome_path=None, generations=50, population_size=30)
             f.write(ir_best.encode())
 
         out_ir_history_path = os.path.join(BUILD_DIR, "evolution_ir_history.json")
-        with open(out_ir_history_path, "w") as f:
+        with open(out_ir_history_path, "w", encoding='utf-8') as f:
             f.write(json.dumps([{"gen": g, "fitness": f_} for g, f_ in ir_history], indent=2))
 
         log("CODE_GENOME", f"IR genome best fitness: {ir_fitness:.6f}")

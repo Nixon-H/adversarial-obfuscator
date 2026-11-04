@@ -55,7 +55,7 @@ def collect_metric_samples(args: Any) -> dict:
     for rp in redteam_paths:
         if os.path.exists(rp):
             try:
-                with open(rp) as f:
+                with open(rp, encoding='utf-8') as f:
                     data = json.load(f)
                 score = data.get("combined_security_score") or data.get("security_score")
                 if score is not None:
@@ -66,7 +66,7 @@ def collect_metric_samples(args: Any) -> dict:
     metrics_path = os.path.join(build_dir, "metrics_report.json")
     if os.path.exists(metrics_path):
         try:
-            with open(metrics_path) as f:
+            with open(metrics_path, encoding='utf-8') as f:
                 data = json.load(f)
             overall = data.get("overall")
             if overall is not None:
@@ -80,7 +80,7 @@ def collect_metric_samples(args: Any) -> dict:
     bench_path = os.path.join(build_dir, "benchmark_report.json")
     if os.path.exists(bench_path):
         try:
-            with open(bench_path) as f:
+            with open(bench_path, encoding='utf-8') as f:
                 data = json.load(f)
             o = data.get("overall")
             if o is not None:
@@ -91,7 +91,7 @@ def collect_metric_samples(args: Any) -> dict:
     surv_path = os.path.join(build_dir, "survivability_report.json")
     if os.path.exists(surv_path):
         try:
-            with open(surv_path) as f:
+            with open(surv_path, encoding='utf-8') as f:
                 data = json.load(f)
             ci = data.get("combined_index")
             if ci is not None:
@@ -102,7 +102,7 @@ def collect_metric_samples(args: Any) -> dict:
     gate_path = os.path.join(build_dir, "security_gate_report.json")
     if os.path.exists(gate_path):
         try:
-            with open(gate_path) as f:
+            with open(gate_path, encoding='utf-8') as f:
                 data = json.load(f)
             gates = data.get("gates") or data.get("results", [])
             if isinstance(gates, list):
@@ -117,7 +117,7 @@ def collect_metric_samples(args: Any) -> dict:
     eval_path = os.path.join(build_dir, "evaluation_report.json")
     if os.path.exists(eval_path):
         try:
-            with open(eval_path) as f:
+            with open(eval_path, encoding='utf-8') as f:
                 data = json.load(f)
             summary = data.get("summary", {})
             for k, v in summary.items():
@@ -133,7 +133,7 @@ def collect_metric_samples(args: Any) -> dict:
     synthesis_path = os.path.join(build_dir, "synthesis_report.json")
     if os.path.exists(synthesis_path):
         try:
-            with open(synthesis_path) as f:
+            with open(synthesis_path, encoding='utf-8') as f:
                 data = json.load(f)
             plan = data.get("plan", data)
             score = plan.get("expected_security_score")

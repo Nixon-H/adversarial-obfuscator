@@ -77,7 +77,7 @@ def phase_evidence(args) -> EvidenceLedger:
     log("EVIDENCE", f"Evidence ledger written to {report_path}")
 
     report_path2 = os.path.join(build_dir, "evidence_report.json")
-    with open(report_path2, "w") as f:
+    with open(report_path2, "w", encoding='utf-8') as f:
         json.dump(report, f, indent=2)
     log("EVIDENCE", f"Evidence report written to {report_path2}")
 

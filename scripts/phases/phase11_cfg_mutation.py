@@ -61,7 +61,7 @@ def phase_cfg_mutation(ir_module_path, num_variants=4):
         log("CFG_MUTATION", f"  {func.name}: {num_blocks} blocks, {num_variants} variants")
 
     out_path = os.path.join(BUILD_DIR, "cfg_mutation_variants.json")
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding='utf-8') as f:
         json.dump(variant_data, f, indent=2)
     log("CFG_MUTATION", f"Written to {out_path}")
 

@@ -64,12 +64,12 @@ def phase_leakage(args, original_ir: Any, obfuscated_ir: Any) -> LeakageReport |
     os.makedirs(leakage_dir, exist_ok=True)
 
     report_path = os.path.join(leakage_dir, "leakage_report.json")
-    with open(report_path, "w") as f:
+    with open(report_path, "w", encoding='utf-8') as f:
         json.dump(report.to_dict(), f, indent=2)
     log("LEAKAGE", f"Report written to {report_path}")
 
     per_func_path = os.path.join(leakage_dir, "per_function_leakage.json")
-    with open(per_func_path, "w") as f:
+    with open(per_func_path, "w", encoding='utf-8') as f:
         json.dump(report.per_function_scores, f, indent=2)
     log("LEAKAGE", f"Per-function breakdown written to {per_func_path}")
 

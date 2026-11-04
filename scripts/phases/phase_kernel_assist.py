@@ -93,7 +93,7 @@ def phase_kernel_assist(args, ir_module=None):
     manifest_path = os.path.join(BUILD_DIR, 'kernel_assist_manifest.json')
     try:
         os.makedirs(BUILD_DIR, exist_ok=True)
-        with open(manifest_path, 'w') as f:
+        with open(manifest_path, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, indent=2, default=str)
         log("KERNEL_ASSIST", f"Manifest written to {manifest_path}")
     except Exception as e:

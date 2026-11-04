@@ -56,7 +56,7 @@ def phase_adversarial_loop(ir_path, opts):
 
     ad_config = {}
     if os.path.exists(DEFAULT_CONFIG):
-        with open(DEFAULT_CONFIG, "r") as f:
+        with open(DEFAULT_CONFIG, "r", encoding='utf-8') as f:
             default = json.load(f)
         ad_config = default.get("shadow_compiler", {}).get("adversarial_loop", {})
         if not ad_config.get("enabled", False) and not opts.adversarial_loop:
@@ -75,7 +75,7 @@ def phase_adversarial_loop(ir_path, opts):
 
         comp_cfg = {}
         if os.path.exists(DEFAULT_CONFIG):
-            with open(DEFAULT_CONFIG, "r") as f:
+            with open(DEFAULT_CONFIG, "r", encoding='utf-8') as f:
                 comp_cfg = json.load(f).get("shadow_compiler", {})
 
         engine = CompilerMutationEngine(comp_cfg)
@@ -91,7 +91,7 @@ def phase_adversarial_loop(ir_path, opts):
         history = []
         if os.path.exists(history_path):
             try:
-                with open(history_path, "r") as f:
+                with open(history_path, "r", encoding='utf-8') as f:
                     history = json.load(f)
             except (json.JSONDecodeError, IOError):
                 history = []
@@ -141,7 +141,7 @@ def phase_adversarial_injection(payload, output, opts):
         log("SKIP", "obfuscator.adversarial not importable, skipping")
         return
 
-    with open(payload, "r") as f:
+    with open(payload, "r", encoding='utf-8') as f:
         source = f.read()
 
     level = getattr(opts, "adversarial_level", 3)

@@ -88,7 +88,7 @@ def phase_embed_crypto_binding(payload_h_path: str):
         with open(chain_secret_path, "rb") as f:
             chain_secret = f.read()
 
-    with open(payload_h_path, "a") as f:
+    with open(payload_h_path, "a", encoding='utf-8') as f:
         f.write("\n// ============================================================\n")
         f.write("// Crypto Fragment Binding — execution-derived cryptographic chain\n")
         f.write("// ============================================================\n\n")

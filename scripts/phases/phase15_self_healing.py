@@ -42,6 +42,6 @@ def phase_self_healing(config_path=None):
         "heal_on_verify": True,
     }
     out_path = os.path.join(BUILD_DIR, "self_healing_config.json")
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding='utf-8') as f:
         json.dump(config, f, indent=2)
     log("SELF_HEALING", f"Written to {out_path}")

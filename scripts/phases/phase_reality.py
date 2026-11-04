@@ -39,14 +39,14 @@ def _build_pipeline_state(args: Any) -> dict:
     build_py_path = os.path.join(_ROOT, "scripts", "build.py")
     build_py_source = ""
     if os.path.isfile(build_py_path):
-        with open(build_py_path) as f:
+        with open(build_py_path, encoding='utf-8') as f:
             build_py_source = f.read()
 
     manifest = {}
     manifest_path = os.path.join(BUILD_DIR, "manifest.json")
     if os.path.isfile(manifest_path):
         try:
-            with open(manifest_path) as f:
+            with open(manifest_path, encoding='utf-8') as f:
                 manifest = json.load(f)
         except (json.JSONDecodeError, OSError):
             pass
@@ -55,7 +55,7 @@ def _build_pipeline_state(args: Any) -> dict:
     metrics_path = os.path.join(BUILD_DIR, "metrics_report.json")
     if os.path.isfile(metrics_path):
         try:
-            with open(metrics_path) as f:
+            with open(metrics_path, encoding='utf-8') as f:
                 metrics_report = json.load(f)
         except (json.JSONDecodeError, OSError):
             pass
@@ -64,7 +64,7 @@ def _build_pipeline_state(args: Any) -> dict:
     rt_path = os.path.join(BUILD_DIR, "redteam", "attack_report.json")
     if os.path.isfile(rt_path):
         try:
-            with open(rt_path) as f:
+            with open(rt_path, encoding='utf-8') as f:
                 redteam_report = json.load(f)
         except (json.JSONDecodeError, OSError):
             pass
@@ -73,7 +73,7 @@ def _build_pipeline_state(args: Any) -> dict:
     bm_path = os.path.join(BUILD_DIR, "benchmark_report.json")
     if os.path.isfile(bm_path):
         try:
-            with open(bm_path) as f:
+            with open(bm_path, encoding='utf-8') as f:
                 benchmark_report = json.load(f)
         except (json.JSONDecodeError, OSError):
             pass
@@ -82,7 +82,7 @@ def _build_pipeline_state(args: Any) -> dict:
     sg_path = os.path.join(BUILD_DIR, "security_gate_report.json")
     if os.path.isfile(sg_path):
         try:
-            with open(sg_path) as f:
+            with open(sg_path, encoding='utf-8') as f:
                 security_gate_report = json.load(f)
         except (json.JSONDecodeError, OSError):
             pass

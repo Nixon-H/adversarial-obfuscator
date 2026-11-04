@@ -46,7 +46,7 @@ def phase_ssa_mutation(ir_path=None, num_variants=4):
     if ir_path and os.path.exists(ir_path):
         try:
             from irgen.compile import compile_py_to_ir
-            with open(ir_path) as f:
+            with open(ir_path, encoding='utf-8') as f:
                 source = f.read()
             ir_mod = compile_py_to_ir(source)
             for func in getattr(ir_mod, 'functions', []):
@@ -69,6 +69,6 @@ def phase_ssa_mutation(ir_path=None, num_variants=4):
 
     config = generate_ssa_mutation_config(functions_ir, num_variants)
     out_path = os.path.join(BUILD_DIR, "ssa_mutation_variants.json")
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding='utf-8') as f:
         json.dump(config, f, indent=2)
     log("SSA_MUTATION", f"Written to {out_path} ({len(config)} functions, {num_variants} variants each)")

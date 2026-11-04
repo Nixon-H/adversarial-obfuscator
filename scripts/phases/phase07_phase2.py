@@ -56,7 +56,7 @@ def phase_classify(payload, config):
         log("SKIP", "obfuscator.classification not importable, skipping")
         return None
 
-    with open(payload, "r") as f:
+    with open(payload, "r", encoding='utf-8') as f:
         source = f.read()
     classifications = classify_functions(source, config)
     report = generate_classification_report(classifications, source)
@@ -83,7 +83,7 @@ def phase_variant_pool(source, config):
     log("VARIANT_POOL", "Generating variant pools for crown jewel functions")
     try:
         from irgen.variant_pool import generate_variants
-        with open(source) as f:
+        with open(source, encoding='utf-8') as f:
             src = f.read()
         variants = generate_variants(src, "target", num_variants=4, seed=b"build")
         log("VARIANT_POOL", f"Generated {len(variants)} variants")
@@ -133,7 +133,7 @@ def phase_provenance_removal(source, config, replace_mode=False):
     log("PROVENANCE", "Removing code provenance indicators")
     try:
         from obfuscator.provenance import replace_error_messages, encode_sensitive_strings, obfuscate_algorithmic_constants
-        with open(source) as f:
+        with open(source, encoding='utf-8') as f:
             src = f.read()
         tree = ast.parse(src)
 
@@ -144,7 +144,7 @@ def phase_provenance_removal(source, config, replace_mode=False):
             tree = obfuscate_algorithmic_constants(tree)
 
             output = ast.unparse(tree)
-            with open(source, "w") as f:
+            with open(source, "w", encoding='utf-8') as f:
                 f.write(output)
             log("PROVENANCE", "Applied automated replacements: error codes + string encoding + constant obfuscation")
         else:
@@ -166,12 +166,12 @@ def phase_dataflow_obfuscation(source, config):
         from obfuscator.dataflow import AffineStateEncoder, obfuscate_dataflow
         encoder = AffineStateEncoder(b"build_seed", num_registers=4)
         log("DATAFLOW", f"AffineStateEncoder initialized with {encoder.num_registers} registers")
-        with open(source) as f:
+        with open(source, encoding='utf-8') as f:
             src = f.read()
         tree = ast.parse(src)
         obfuscated_tree = obfuscate_dataflow(tree, config)
         output = ast.unparse(obfuscated_tree)
-        with open(source, "w") as f:
+        with open(source, "w", encoding='utf-8') as f:
             f.write(output)
         log("DATAFLOW", f"Applied data-flow obfuscation to {source} ({len(output)} bytes)")
     except (ImportError, Exception) as e:
@@ -204,7 +204,7 @@ def phase_watermark_embedding(ir_module, config):
             "meta": str(meta),
         }
         os.makedirs(BUILD_DIR, exist_ok=True)
-        with open(wm_path, "w") as f:
+        with open(wm_path, "w", encoding='utf-8') as f:
             json.dump(wm_data, f, indent=2)
         log("WATERMARK", f"Watermark metadata written to {wm_path}")
     except ImportError as e:
@@ -256,7 +256,7 @@ def phase_jit_generate(ir_module, config):
         log("JIT_GEN", f"Generated JIT template: {len(template)} bytes")
         jit_path = os.path.join(BUILD_DIR, "template.jit")
         os.makedirs(os.path.dirname(jit_path), exist_ok=True)
-        with open(jit_path, "w") as f:
+        with open(jit_path, "w", encoding='utf-8') as f:
             json.dump(template, f, indent=2)
         log("JIT_GEN", f"JIT template written to {jit_path}")
     except (ImportError, Exception) as e:
@@ -282,7 +282,7 @@ def phase_adaptive_classifier_loop(payload, opts):
         for iteration in range(3):
             log("ADAPTIVE_LOOP", f"Iteration {iteration + 1}/3")
 
-            with open(payload) as f:
+            with open(payload, encoding='utf-8') as f:
                 source = f.read()
 
             classifier = FunctionClassifier()
@@ -302,7 +302,7 @@ def phase_adaptive_classifier_loop(payload, opts):
             protected_path = payload.replace(".py", "_protected.py")
             from obfuscator.core.pipeline import build_pipeline
             protected = build_pipeline(source)
-            with open(protected_path, "w") as f:
+            with open(protected_path, "w", encoding='utf-8') as f:
                 f.write(protected)
 
             bm = AIBenchmark()
@@ -313,10 +313,10 @@ def phase_adaptive_classifier_loop(payload, opts):
 
             from obfuscator.adaptive_rewriter import AdaptiveRewriter
             rewriter = AdaptiveRewriter()
-            with open(protected_path) as f:
+            with open(protected_path, encoding='utf-8') as f:
                 current = f.read()
             rewritten = rewriter.rewrite(profile, current)
-            with open(protected_path, "w") as f:
+            with open(protected_path, "w", encoding='utf-8') as f:
                 f.write(rewritten)
 
             log("ADAPTIVE_LOOP", f"  Applied {len(profile.recommended_actions)} adaptive actions")

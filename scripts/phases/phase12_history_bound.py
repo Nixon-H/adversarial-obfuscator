@@ -75,7 +75,7 @@ def phase_execution_history_binding(config=None):
                 "fragment_ids": [bf.fragment_id for bf in bound],
             }
             history_path = os.path.join(BUILD_DIR, "history_bound_state.json")
-            with open(history_path, "w") as f:
+            with open(history_path, "w", encoding='utf-8') as f:
                 json.dump(history_state, f, indent=2)
             log("HISTORY_BOUND", f"Persisted history-bound state to {history_path}")
 

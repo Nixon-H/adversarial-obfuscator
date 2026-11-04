@@ -54,7 +54,7 @@ def phase_rop_compile(input_ir, output_rop, config):
         log("SKIP", f"rop_compiler not importable: {e}")
         return {"ok": False, "reason": f"rop_compiler not importable: {e}", "compiled": 0}
 
-    with open(input_ir, "r") as f:
+    with open(input_ir, "r", encoding='utf-8') as f:
         ir_text = f.read()
 
     parser = NixonIRParser(ir_text)

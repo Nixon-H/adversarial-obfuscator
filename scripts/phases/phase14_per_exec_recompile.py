@@ -44,6 +44,6 @@ def phase_per_exec_recompile(config_path=None):
         "emit_jit_code": True,
     }
     out_path = os.path.join(BUILD_DIR, "per_exec_recompile_config.json")
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding='utf-8') as f:
         json.dump(config, f, indent=2)
     log("PER_EXEC_RECOMPILE", f"Written to {out_path}")

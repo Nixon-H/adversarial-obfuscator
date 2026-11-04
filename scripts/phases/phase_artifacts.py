@@ -62,7 +62,7 @@ def phase_artifacts(args, all_metrics: dict | None = None) -> dict:
     for bp in bench_paths:
         if os.path.isfile(bp):
             try:
-                with open(bp) as f:
+                with open(bp, encoding='utf-8') as f:
                     benchmark_data = json.load(f)
                 log("ARTIFACTS", f"Loaded benchmark data from {bp}")
                 break
@@ -78,7 +78,7 @@ def phase_artifacts(args, all_metrics: dict | None = None) -> dict:
         for mp in metrics_paths:
             if os.path.isfile(mp):
                 try:
-                    with open(mp) as f:
+                    with open(mp, encoding='utf-8') as f:
                         metrics = json.load(f)
                     log("ARTIFACTS", f"Loaded metrics from {mp}")
                     break
@@ -134,7 +134,7 @@ def phase_artifacts(args, all_metrics: dict | None = None) -> dict:
 
     manifest = bundle.generate_manifest()
     manifest_path = os.path.join(output_dir, "manifest.json")
-    with open(manifest_path, "w") as f:
+    with open(manifest_path, "w", encoding='utf-8') as f:
         json.dump(manifest, f, indent=2)
 
     log("ARTIFACTS", f"All artifacts generated → {output_dir}")
@@ -229,7 +229,7 @@ def _build_knowledge_graph(args, build_dir: str) -> dict:
 def _load_json_if_exists(path: str, default: dict) -> dict:
     if os.path.isfile(path):
         try:
-            with open(path) as f:
+            with open(path, encoding='utf-8') as f:
                 return json.load(f)
         except (json.JSONDecodeError, Exception):
             pass

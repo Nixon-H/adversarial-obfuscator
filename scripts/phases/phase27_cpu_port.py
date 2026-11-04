@@ -46,7 +46,7 @@ def phase_cpu_port(seed=None):
         cwd=RUNTIME_DIR, capture_output=True, text=True, timeout=60, env=env,
     )
     out_path = os.path.join(BUILD_DIR, "cpu_port_result.json")
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding='utf-8') as f:
         json.dump({"returncode": result.returncode, "stdout": result.stdout[-500:], "stderr": result.stderr[-500:]}, f)
     if result.returncode == 0:
         log("CPU_PORT", "CPU port entangle tests passed")

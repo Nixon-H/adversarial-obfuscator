@@ -125,7 +125,7 @@ def phase_exposure(
 
     report_path = os.path.join(BUILD_DIR, "exposure_report.json")
     try:
-        with open(report_path, "w") as f:
+        with open(report_path, "w", encoding='utf-8') as f:
             json.dump(report.to_dict(), f, indent=2)
         log("EXPOSURE", f"Report written to {report_path}")
     except Exception as e:
@@ -133,7 +133,7 @@ def phase_exposure(
 
     csv_path = os.path.join(BUILD_DIR, "exposure_timeline.csv")
     try:
-        with open(csv_path, "w", newline="") as f:
+        with open(csv_path, "w", newline="", encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow(["component", "function", "event_type", "timestamp_ns", "data_hash"])
             for ev in tracker.get_events():

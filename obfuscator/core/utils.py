@@ -503,10 +503,10 @@ class ConfigManager:
     def _load(self):
         if not os.path.exists(self.CONFIG_FILE):return {}
         try:
-            with open(self.CONFIG_FILE,"r")as f:return json.load(f)
+            with open(self.CONFIG_FILE,"r", encoding='utf-8')as f:return json.load(f)
         except Exception:return {}
     def save(self):
-        with open(self.CONFIG_FILE,"w")as f:json.dump(self.config,f,indent=4)
+        with open(self.CONFIG_FILE,"w", encoding='utf-8')as f:json.dump(self.config,f,indent=4)
         print(f" [+] Configuration saved to {self.CONFIG_FILE}")
     def get(self,key,default=None):return self.config.get(key,default)
     def set(self,key,value):self.config[key]=value
@@ -1317,7 +1317,7 @@ def run():
 if __name__ == "__main__":
     run()
 """
-    with open("Universal_Loader.py", "w") as f:
+    with open("Universal_Loader.py", "w", encoding='utf-8') as f:
         f.write(loader_code)
     print("[+] Universal_Loader.py generated (Base85 Optimized).")
 if __name__ == "__main__":
@@ -1916,7 +1916,7 @@ def optimize_and_pack_binaries(dist_dir):
     else:
         print("    [!] Skipping UPX compression (not available)")
     tar_path = os.path.join(dist_dir, "binaries.tar")
-    with tarfile.open(tar_path, "w") as tar:
+    with tarfile.open(tar_path, "w", encoding='utf-8') as tar:
         for platform, fpath in binary_files.items():
             arcname = f"payload.{platform}" + (".exe" if platform == "windows" else ".bin")
             tar.add(fpath, arcname=arcname)
@@ -1930,7 +1930,7 @@ def generate_tar_loader_script(tar_path):
         tar_data = f.read()
     bio = _io.BytesIO()
     with tf.open(fileobj=_io.BytesIO(tar_data), mode="r") as src_tar:
-        with tf.open(fileobj=bio, mode="w:xz", preset=9) as dst_tar:
+        with tf.open(fileobj=bio, mode="w:xz", preset=9, encoding='utf-8') as dst_tar:
             for member in src_tar.getmembers():
                 dst_tar.addfile(member, src_tar.extractfile(member))
     xz_payload = bio.getvalue()

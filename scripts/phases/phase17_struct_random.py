@@ -52,6 +52,6 @@ def phase_struct_randomization(seed=None, level=3):
         "max_fields": 64,
     }
     out_path = os.path.join(BUILD_DIR, "struct_randomization_config.json")
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding='utf-8') as f:
         json.dump(config, f, indent=2)
     log("STRUCT_RANDOM", f"Written to {out_path} (seed={seed:#018x})")
