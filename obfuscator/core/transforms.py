@@ -2211,8 +2211,8 @@ class DynamicCodeGenerator(ast.NodeTransformer):
 
     def visit_FunctionDef(self, node):
         self.generic_visit(node)
-        if getattr(self, "_class_depth", 0):
-            return node
+        # Methods ARE eligible again: the wrapper keeps its template local, so it
+        # is valid in a class body. Only closures remain excluded -- see below.
         # A function that declares `nonlocal` (or `global`) cannot be round-tripped
         # through this transform: it unparses the function and exec()s the text in
         # a NEW scope, where the enclosing cell the `nonlocal` refers to does not
@@ -2238,10 +2238,18 @@ class DynamicCodeGenerator(ast.NodeTransformer):
 
     def _make_python_jit_wrapper(self, node, func_code, key, template_name):
         encrypted = ''.join(chr(ord(c) ^ key) for c in func_code)
+        # The encrypted template is a LOCAL, declared inside the function.
+        #
+        # It used to be a module-level assignment emitted alongside the def. In a
+        # class body that assignment became a class attribute while the method
+        # still resolved the name as a global, so the artefact raised
+        # "name '_nx_tmpl_N' is not defined". Keeping it local makes the wrapper
+        # valid at module scope AND inside a class, which is what restores
+        # coverage for methods.
         return f'''
-import builtins
-{template_name} = "{encrypted.encode('unicode_escape').decode('ascii')}"
 def {node.name}(*args, **kwargs):
+    import builtins
+    {template_name} = "{encrypted.encode('unicode_escape').decode('ascii')}"
     _code = "".join(chr(ord(c) ^ {key}) for c in {template_name})
     _ns = {{}}
     _compiled = builtins.compile(_code, "<jit_{template_name}>", "exec")
@@ -2251,10 +2259,12 @@ def {node.name}(*args, **kwargs):
 
     def _make_rust_jit_wrapper(self, node, func_code, key, template_name):
         b64_code = base64.b64encode(func_code.encode()).decode()
+        # Same reason as the Python wrapper: the encoded blob is a LOCAL so the
+        # wrapper is valid inside a class body as well as at module scope.
         return f'''
-import base64, ctypes, os, subprocess, tempfile
-_{template_name}_b64 = "{b64_code}"
 def {node.name}(*args, **kwargs):
+    import base64, ctypes, os, subprocess, tempfile
+    _{template_name}_b64 = "{b64_code}"
     _code = base64.b64decode(_{template_name}_b64).decode()
     _compiled = compile(_code, "<jit_{template_name}>", "exec")
     _jit_so = os.environ.get("RUNTIME_JIT_SO", "")
