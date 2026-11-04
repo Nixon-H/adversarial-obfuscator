@@ -4016,7 +4016,17 @@ def main():
             # The core is packed into the artefact AND its hash is baked
             # into the loader, which is assembled inside build_project.
             # Build it here so both phases own the same bytes.
-            args._core_so, args._core_sha = build_core_once(args.source)
+            #
+            # A --portable build must not produce it at all. It used to be built
+            # and left in dist/ regardless: a Linux ELF sitting beside an artefact
+            # advertised as OS-independent, which is both misleading and a trap
+            # for anyone who copies the folder to another platform. Verified that
+            # the artefact runs without it (3/3 runs, native file removed).
+            if getattr(args, "portable", False):
+                args._core_so, args._core_sha = None, None
+                UI.dot_item("C core", "skipped (portable build)", "SKIP")
+            else:
+                args._core_so, args._core_sha = build_core_once(args.source)
             generated_files_map = build_project(args)
             if not generated_files_map:
                 UI.fail("Build failed - no output generated")

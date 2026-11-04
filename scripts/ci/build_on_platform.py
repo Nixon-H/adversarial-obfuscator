@@ -112,6 +112,17 @@ def main():
         print("FAIL: the artefact built on this platform still references nixon_core")
         return 1
 
+    # A portable build must ship no native binary. The reference check above is a
+    # string grep, which this project has already seen produce a false negative
+    # (the loader builds the filename by indirection), so check the directory
+    # too: a Linux ELF beside an "OS-independent" artefact is a trap.
+    dist_dir_check = os.path.dirname(built)
+    native = [f for f in os.listdir(dist_dir_check)
+              if f.endswith((".so", ".pyd", ".dll", ".dylib"))]
+    if native:
+        print("FAIL: portable build shipped native binaries:", native)
+        return 1
+
     rc_a, out_a, err_a = run_python(built, os.path.dirname(built))
     rc_s, out_s, _ = run_python(SOURCE, ROOT)
 
