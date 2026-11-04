@@ -53,3 +53,30 @@ isolated packing flags, 12 isolated ladder transforms. Every job capped at 45 mi
 
 **Still not isolated:** 253 of 273 ladder flags. **Not testable here:** `--stego`, whose artefact
 is an image carrier this harness does not load.
+
+## Found by isolating single flags (same week, second pass)
+
+Building a flag catalogue (274 flags, generated from `scripts/build.py`) and
+running one flag at a time found seven more, all invisible in bundled builds:
+
+| flag | defect |
+|---|---|
+| `--adaptive` | two `_nx_ftable` assignments, the second silently replacing the first: a call site written for `bytes` resolved through a table whose entry 0 was `sum` → `TypeError: can't concat int to bytes` |
+| all flags | JIT templates `exec`'d into an **empty** namespace, so any wrapped function reading a module global raised `NameError` inside `<jit_N>` |
+| `--stego` | decoder compared against a double-escaped `"\\u200b"`, so every bit read as 1 and the payload decoded to `0xFF` bytes |
+| `--stego` | decoder built `chr()` code points instead of decoding UTF-8, corrupting every non-ASCII identifier |
+| `--attention-poison` | junk injected at `body[0]`, ahead of `nonlocal` → `SyntaxError` |
+| `--data-obfuscation` | storage virtualizer replaced `count = 0` with a state slot, deleting the cell a nested `nonlocal` needs |
+| `--adaptive` (open) | CI-only `NameError: _nx_M`; the transform pipeline is randomised, so some orderings emit a name they never bind |
+
+`--stego` had been written off as "cannot be tested by this harness". It never
+was: it was broken, twice.
+
+### Verdict classes, because "FAIL" was overstating
+
+The first sweep reported eighteen failing shards. Most were the harness's fault:
+the builder refuses unsound combinations (`[CONFLICT]`), some flags exist only in
+the packed-loader path, and some arguments were misread. The runner now reports
+PASS, FAIL, CONFLICT, CATALOGUE, NONSTANDALONE and SLOW separately — because a
+harness that cannot tell a product defect from its own mistake is worse than no
+harness.
