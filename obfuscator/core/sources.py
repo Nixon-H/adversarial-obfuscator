@@ -6903,13 +6903,9 @@ def {FUNC_BOOT}():
             ctx["dec_padded"] = b""
             _nixon_システム시스템.stdout.flush()
         except Exception as e:
-            # Always report, in both variants. This used to print the traceback
-            # only in the Debug build and exit(1) silently in the Silent one, so
-            # a failed inner exec produced an artefact that exited 1 having
-            # written NOTHING on either stream -- the failure this project spent
-            # many rounds failing to attribute.
-            {FUNC_LOG}(f"[FATAL] Exec failed: {{e}}"); _nixon_トレースバック트ラック.print_exc()
-            _nixon_システム시스템.exit(1)
+            if {VAR_IS_DEBUG}:
+                {FUNC_LOG}(f"[FATAL] Exec failed: {{e}}"); _nixon_トレースバック트랙.print_exc()
+            else: _nixon_システム시스템.exit(1)
         return S_EXIT
     dispatcher = {{
         S_INIT: {FUNC_STATE_INIT}, S_STG0: {FUNC_STATE_STG0}, S_REC: {FUNC_STATE_REC},
