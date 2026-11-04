@@ -373,6 +373,34 @@ identity per build, then execution of the artefact rather than inspection of it.
 | 12 | class-body alias value renamed | fails at import | external module 6 |
 | 13 | public exports renamed, importer not | fails to import from its own package | external module 6 |
 
+### 6.0b A separate study: eight further defects found by isolating flags
+
+*The D-prefixed rows below are a distinct later experiment, kept separate from the
+thirteen above so the benchmark's own count is not inflated by them.*
+
+A later pass over the same project applied **each of its 274 build flags alone**
+and executed the result. Eight more defects fell out, none reachable from the
+payloads used above:
+
+| # | flag | defect |
+|---|---|---|
+| D1 | `--adaptive` | two call-graph tables shared one name; the second silently replaced the first, so a call site written for `bytes` resolved through a table whose entry 0 was `sum` |
+| D2 | all | JIT-wrapped functions executed in an **empty** namespace, so any read of a module global raised `NameError` inside the generated template |
+| D3 | `--stego` | the decoder compared against a double-escaped `\\u200b`, so every bit read as 1 and the payload decoded to `0xFF` bytes |
+| D4 | `--stego` | the decoder built `chr()` code points instead of decoding UTF-8, corrupting every non-ASCII identifier |
+| D5 | `--attention-poison` | injected statements were placed at body[0], ahead of `nonlocal`, producing a `SyntaxError` |
+| D6 | `--data-obfuscation` | the storage virtualizer replaced a captured local with a state slot, deleting the cell a nested `nonlocal` needed |
+| D7 | `--data-obfuscation` | artefacts imported the builder's own package and could not run outside the source tree |
+| D8 | `--data-obfuscation` | inlining that implementation reversed statement order, defining a subclass before its base |
+
+The isolation pass also exposed a measurement problem worth recording: the first
+full sweep reported eighteen failing shards, and **most were defects in the
+harness**, not the product. The builder deliberately refuses unsound combinations,
+some flags bind only in a packed-loader path, and several argument shapes were
+misread. The runner now separates PASS, FAIL, CONFLICT, CATALOGUE, NONSTANDALONE
+and SLOW, because a harness that cannot distinguish a product defect from its own
+mistake is worse than no harness.
+
 ### 6.1 The defects that produce code that does not run
 
 **Ten of them** produce artefacts that are syntactically valid, compile, and then fail — at import
