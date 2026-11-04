@@ -1,0 +1,59 @@
+name: Flag x platform x Python (manual)
+
+# The cross product: a representative set of ladder transforms, each applied
+# ALONE, on every OS and every supported Python. This is where a transform that
+# depends on the interpreter or the filesystem shows up -- the noise-thread and
+# rdtsc starvation bugs were only visible on macOS/arm, and the Python <=3.11
+# warning pollution only on old interpreters.
+#
+# MANUAL ONLY while stabilising. Add `push:` to `on:` below when the project is
+# stable and this becomes the regression net.
+
+on:
+  workflow_dispatch:
+    inputs:
+      level:
+        description: "opt-level for the isolated builds"
+        default: "5"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    name: ${{ matrix.flag }} / ${{ matrix.os }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        flag:
+          - "--cfg-flatten"
+          - "--mba-subs"
+          - "--opaque-predicates"
+          - "--fragment-strings"
+          - "--class-dispatch"
+          - "--attention-poison"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install builder dependencies
+        run: pip install --require-hashes -r requirements.lock
+      - name: Build with this one flag and run the artefact
+        env:
+          NX_PAYLOAD: ${{ github.workspace }}/tests/fixtures/portable/constructs_source.py
+          NX_OPT_LEVEL: ${{ github.event.inputs.level || '5' }}
+          NX_EXTRA_FLAGS: ${{ matrix.flag }}
+        run: python scripts/ci/build_with_flag.py
+      - name: Keep the failing artefact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failing-${{ matrix.flag }}-${{ matrix.os }}-py${{ matrix.python }}
+          path: ci-artifacts/
+          if-no-files-found: ignore
