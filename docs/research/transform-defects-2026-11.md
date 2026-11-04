@@ -68,6 +68,7 @@ running one flag at a time found seven more, all invisible in bundled builds:
 | `--attention-poison` | junk injected at `body[0]`, ahead of `nonlocal` → `SyntaxError` |
 | `--data-obfuscation` | storage virtualizer replaced `count = 0` with a state slot, deleting the cell a nested `nonlocal` needs |
 | `--adaptive` (open) | CI-only `NameError: _nx_M`; the transform pipeline is randomised, so some orderings emit a name they never bind |
+| `--data-obfuscation` | artefacts imported `scripts.runtime.oram_sim`, so they could not run outside the source tree. The ORAM is stdlib-only and is now inlined; two further bugs surfaced doing it (a renamer split the inheritance chain, and inserting the block statement-by-statement reversed it) |
 
 `--stego` had been written off as "cannot be tested by this harness". It never
 was: it was broken, twice.
