@@ -62,6 +62,8 @@ def try_flag(entry, src_out):
         # That is a category error in this harness, not a defect.
         if "have nothing to bind" in raw or "packed-loader build applies them" in raw:
             return "CATALOGUE", "packed-loader-only flag"
+        if "expected one argument" in raw:
+            return "CATALOGUE", "value-shaped flag classified as boolean"
         if "unrecognized arguments" in raw:
             return "CATALOGUE", "argument shape misread: %s" % last
         return "FAIL", "builder exited %d: %s" % (built.returncode, last)

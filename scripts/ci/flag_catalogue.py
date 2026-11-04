@@ -36,6 +36,12 @@ NEEDS_EXTERNAL = {
     "--llm-api-key": "needs a credential", "--gh-token": "needs a credential",
     "--cf-token": "needs a credential", "--cf-account": "needs a credential",
     "--resume": "needs a previous run", "--watch": "never exits",
+    # External tooling this harness does not install or drive.
+    "--cross": "needs a cross-compilation toolchain",
+    "--self-audit": "needs the external audit tooling",
+    "--multi-tool": "needs several external analysis tools",
+    "--independent-audit": "needs an external auditor",
+    "--trust-boundary": "needs a declared boundary configuration",
 }
 
 
