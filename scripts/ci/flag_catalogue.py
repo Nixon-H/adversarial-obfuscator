@@ -18,6 +18,15 @@ BUILD = os.path.join(ROOT, "scripts", "build.py")
 # Flags that cannot run in a sandbox: they need the network, credentials, a GPU,
 # an external service, or they re-invoke the builder recursively. Kept explicit
 # and few -- the default is "isolate it".
+# Flags the harness itself owns: it must pass --payload, --output and the
+# --skip-* switches to get a build at all, so isolating them would test a
+# conflict of our own making rather than the product.
+HARNESS_OWNED = {
+    "--payload", "--output", "--opt-level", "--force-output",
+    "--skip-irgen", "--skip-llvmgen", "--skip-encrypt", "--skip-relay",
+    "--skip-extras", "--skip-debug", "--help", "--version",
+}
+
 NEEDS_EXTERNAL = {
     "--net-url": "needs a deployed server", "--bind": "needs a real bind host",
     "--webhook": "needs a receiver", "--tls-ca-bundle": "needs a CA bundle file",
@@ -103,6 +112,10 @@ def catalogue():
     entries = []
     for name, meta in sorted(collect().items()):
         bool_flag = meta["action"] in ("store_true", "store_false", "count")
+        if name in HARNESS_OWNED:
+            entries.append({"flag": name, "kind": "excluded",
+                            "why": "owned by the harness (payload/output/skip switches)"})
+            continue
         if name in NEEDS_EXTERNAL:
             entries.append({"flag": name, "kind": "excluded", "why": NEEDS_EXTERNAL[name]})
             continue
