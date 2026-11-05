@@ -59,3 +59,38 @@ def test_the_destructive_path_is_reachable_only_in_strict_mode():
     guard = REDUNDANCY.index("if not {VAR_STRICT_DETECTIONS}:")
     destructive = REDUNDANCY.index("__ro.remove")
     assert guard < destructive, "the strict guard must precede the self-destruct"
+
+
+def test_the_redundancy_wrapper_is_not_wired_into_any_artefact():
+    """Documents a fact that was misread as a security regression.
+
+    An audit of this project once ranked "removal of the redundancy
+    self-destruct" as the most severe change of a session. It was not: the class
+    is injected into every artefact and `execute_redundant` has no call sites --
+    before that change or after it. The three-call comparison never ran, so the
+    self-destruct never fired, in either mode.
+
+    This test fails if someone wires it up, which is the moment the self-destruct
+    becomes reachable and must be reconsidered (re-running arbitrary user code is
+    unsound; a closure always produces three different results).
+    """
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    callers = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in {".git", "archive", "__pycache__"}]
+        for name in filenames:
+            if not name.endswith(".py") or name.startswith("test_"):
+                continue
+            path = os.path.join(dirpath, name)
+            try:
+                text = open(path, encoding="utf-8", errors="replace").read()
+            except OSError:
+                continue
+            for line in text.splitlines():
+                stripped = line.strip()
+                if "execute_redundant" in stripped and not stripped.startswith("def "):
+                    callers.append((os.path.relpath(path, root), stripped[:80]))
+    assert not callers, (
+        "execute_redundant is now invoked; the self-destruct is reachable and "
+        "must be re-evaluated before shipping: %r" % (callers[:3],))
