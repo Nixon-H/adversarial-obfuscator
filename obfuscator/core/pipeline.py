@@ -3509,7 +3509,7 @@ def _VERIFY_INTEGRITY():
                         "        import hashlib as _h, os as _o\n"
                         "        _p = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)),"
                         ' "nixon_core.so")\n'
-                        "        with open(_p, \"rb\", encoding='utf-8') as _f:\n"
+                        "        with open(_p, \"rb\") as _f:\n"
                         "            return _h.sha256(_f.read()).hexdigest() == \"%s\"\n"
                         "    except Exception:\n"
                         "        return False\n"
@@ -3523,7 +3523,7 @@ def _VERIFY_INTEGRITY():
                         "        import hashlib as _h, os as _o\n"
                         "        _p = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)),"
                         ' "nixon_core.so")\n'
-                        "        with open(_p, \"rb\", encoding='utf-8') as _f:\n"
+                        "        with open(_p, \"rb\") as _f:\n"
                         "            _d = _h.sha256(_f.read()).digest()\n"
                         "        return bytes([_b ^ _d[_i %% len(_d)]"
                         " for _i, _b in enumerate(_k)])\n"

@@ -1,5 +1,5 @@
 """Constructs the current corpus does not use: async, generators,
-descriptors, except*, walrus, match with classes, decorators with arguments."""
+descriptors, walrus, match with classes, decorators with arguments."""
 
 import asyncio
 import functools
@@ -57,17 +57,20 @@ async def gather_two(a, b):
 
 
 def grouped(values):
-    # NOTE: `except*` forbids return/break/continue in its body, so the handler
-    # assigns and the function returns after the try/except. An earlier version
-    # of this module put `return 0` inside the handler, which made the FILE
-    # invalid Python -- and the obfuscator's SyntaxError was then correct
-    # behaviour reported as a defect.
+    # NOTE: this used `except*`, which is a SYNTAX ERROR before 3.11 -- and the
+    # fixture has to be valid on the oldest interpreter the project supports
+    # (3.10), because a fixture that does not compile is not a test of the
+    # obfuscator. The exception-group form is exercised by
+    # tests/fixtures/portable/constructs_source.py on 3.11+ instead.
+    #
+    # `except*` also forbids return/break/continue in its body, so the handler
+    # assigns and the function returns after the try/except.
     result = 0
     try:
         if not values:
             raise ValueError("empty")
         result = sum(values)
-    except* ValueError:
+    except ValueError:
         result = 0
     return result
 
