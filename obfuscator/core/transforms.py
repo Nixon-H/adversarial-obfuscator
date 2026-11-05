@@ -2251,9 +2251,18 @@ class DynamicCodeGenerator(ast.NodeTransformer):
         return node
 
     def visit_FunctionDef(self, node):
-        self.generic_visit(node)
-        # Methods ARE eligible again: the wrapper keeps its template local, so it
-        # is valid in a class body. Only closures remain excluded -- see below.
+        _depth = getattr(self, "_fn_depth", 0)
+        self._fn_depth = _depth + 1
+        try:
+            self.generic_visit(node)
+        finally:
+            self._fn_depth = _depth
+        # A NESTED function may capture a free variable from its enclosing scope;
+        # replaying its source in a fresh exec namespace leaves that name
+        # undefined. Seen as "NameError: name 'fn' is not defined" for a decorator
+        # wrapper that closes over `fn`. Only top-level functions are safe.
+        if _depth > 0:
+            return node
         # A function that declares `nonlocal` (or `global`) cannot be round-tripped
         # through this transform: it unparses the function and exec()s the text in
         # a NEW scope, where the enclosing cell the `nonlocal` refers to does not
