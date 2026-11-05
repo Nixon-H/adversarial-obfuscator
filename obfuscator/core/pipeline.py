@@ -3227,7 +3227,13 @@ def _VERIFY_INTEGRITY():
                 'VAR_ANTI_SANDBOX_CLS': VARS["ANTI_SANDBOX_CLS"],
                 'vm_source': vm_source,
                 'secure_mem_source': SECURE_MEM_SOURCE,
-                'integrity_check_source': INTEGRITY_CHECK_SOURCE,
+                # Substituted HERE, like the other sources: a one-pass .format()
+                # does not re-scan substituted values, so a placeholder inside
+                # this source would reach the artefact literally (the trap that
+                # made the strict-mode restoration inert).
+                'integrity_check_source': INTEGRITY_CHECK_SOURCE.replace(
+                    "{VAR_STRICT_ON}",
+                    str(bool(getattr(args, 'strict_detections', False)))),
                 'timing_sidechain_source': TIMING_SIDECHAIN_SOURCE,
                 'bytecode_patcher_source': BYTECODE_PATCHER_SOURCE,
                 'VAR_TIMING_SIDECHAIN_CLS': VARS["TIMING_SIDECHAIN_CLS"],

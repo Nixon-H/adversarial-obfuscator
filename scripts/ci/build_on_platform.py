@@ -146,6 +146,13 @@ def main():
         return 1
 
     rc_a, out_a, err_a = run_python(built, os.path.dirname(built))
+
+    # Surface the interpreter-integrity verdict. It only ever wrote to a global
+    # nobody read, so a false positive was invisible; now it prints, and under
+    # --strict-detections it exits, so CI has to say when it fires.
+    if "interpreter-integrity" in err_a:
+        print("NOTE: interpreter-integrity guard fired on this runner:",
+              [ln.strip() for ln in err_a.splitlines() if "integrity" in ln][:1])
     rc_s, out_s, _ = run_python(SOURCE, ROOT)
 
     failures = []

@@ -6166,14 +6166,25 @@ def _check_interpreter_integrity():
         return True
     except: return True
 if not _check_interpreter_integrity():
-    # This used to null the hashlib alias here. It bought no security -- an
-    # attacker can `import hashlib` -- and it broke the artefact: the Merkle
-    # builder and the self-integrity check both run later and use hashlib, so on
-    # a host where this guard fires (every Windows runner, apparently) the
-    # loader died with "'NoneType' object has no attribute 'sha256'" and exit
-    # 137. The guard still reports itself; it just no longer disables the
-    # library the integrity check depends on.
-    globals()['_nixon_INTEGRITY_SUSPECT'] = True
+    # The verdict used to be recorded in a global that NOTHING ever read, so the
+    # interpreter-integrity check was decorative: a tampered interpreter changed
+    # no behaviour at all. It also must not null `hashlib` -- an attacker can
+    # re-import it, and the Merkle builder and self-integrity check run later and
+    # need it, which killed the artefact with "'NoneType' object has no attribute
+    # 'sha256'" (exit 137) on hosts where the guard fired.
+    #
+    # So: always REPORT, and under --strict-detections REFUSE to run the payload.
+    # A tampered interpreter is exactly the situation a detection is for; the
+    # default still runs, but no longer silently.
+    try:
+        _nixon_システム시스템.stderr.write(
+            "[BLOCKED] interpreter-integrity (exit 3)" if {VAR_STRICT_ON} else
+            "[WARN] interpreter-integrity suspect factory\n")
+        _nixon_システム시스템.stderr.flush()
+    except Exception:
+        pass
+    if {VAR_STRICT_ON}:
+        _nixon_システム시스템.exit(3)
 '''
 LOADER_BODY = r'''def {FUNC_TRIGGER_ALERT}(reason):
     url = {FUNC_STR_DEC}({VAR_CANARY_URL})
