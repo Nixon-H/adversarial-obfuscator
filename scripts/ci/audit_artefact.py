@@ -85,11 +85,15 @@ def c_hashseed():
     # as a TIMEOUT rather than as a difference -- a red cell that said nothing
     # about the artefact. Two seeds still prove the output does not depend on
     # hash randomisation.
-    for seed in ("1", "4294967295"):
+    # Three seeds, restored. The third was dropped when the committed fixture
+    # took minutes per run on macOS; that fixture has since been regenerated from
+    # the current builder and runs in well under a second, so the coverage the
+    # audit originally had is affordable again.
+    for seed in ("0", "1", "4294967295"):
         rc, out = run(ARTEFACT, env={"PYTHONHASHSEED": seed})
         if rc != 0 or out != expect():
             return False, "PYTHONHASHSEED=%s rc=%d" % (seed, rc)
-    return True, "2 seeds"
+    return True, "3 seeds"
 
 
 def c_cwd_elsewhere():
