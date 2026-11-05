@@ -12,7 +12,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DEFAULT_PAYLOAD = os.path.join(ROOT, "tests", "fixtures", "portable", "secure_demo_source.py")
-SOURCE = os.environ.get("NX_PAYLOAD", DEFAULT_PAYLOAD)
+SOURCE = os.path.normpath(os.environ.get("NX_PAYLOAD", DEFAULT_PAYLOAD))
 EXTRA = [f for f in os.environ.get("NX_EXTRA_FLAGS", "").split() if f]
 LEVEL = os.environ.get("NX_OPT_LEVEL", "5")
 

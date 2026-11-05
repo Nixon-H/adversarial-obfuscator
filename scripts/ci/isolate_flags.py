@@ -13,7 +13,10 @@ from flag_catalogue import catalogue  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DEFAULT_PAYLOAD = os.path.join(ROOT, "tests", "fixtures", "portable", "constructs_source.py")
-SOURCE = os.environ.get("NX_PAYLOAD", DEFAULT_PAYLOAD)
+# normpath: the workflow passes ${{ github.workspace }}/tests/..., which on Windows
+# becomes mixed separators ("D:\\a\\...\\adversarial-obfuscator/tests/..."). Downstream
+# stages failed on that and the builder exited 1 after CLASSIFY with no message.
+SOURCE = os.path.normpath(os.environ.get("NX_PAYLOAD", DEFAULT_PAYLOAD))
 LEVEL = os.environ.get("NX_OPT_LEVEL", "3")
 BUILD_TIMEOUT = int(os.environ.get("NX_BUILD_TIMEOUT", "600"))
 # Builds are NOT yet reproducible: two identical commands produce different

@@ -11,9 +11,9 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-SOURCE = os.environ.get(
+SOURCE = os.path.normpath(os.environ.get(
     "NX_PAYLOAD",
-    os.path.join(ROOT, "tests", "fixtures", "portable", "secure_demo_source.py"))
+    os.path.join(ROOT, "tests", "fixtures", "portable", "secure_demo_source.py")))
 # Extra build flags, space separated, so one matrix can isolate individual
 # transforms instead of only ever testing the bundle.
 EXTRA_FLAGS = [f for f in os.environ.get("NX_EXTRA_FLAGS", "").split() if f]
