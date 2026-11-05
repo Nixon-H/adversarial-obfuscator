@@ -21,12 +21,19 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 _MODULE_DEAD_CODE = [
-    "{var} = __import__('torch', fromlist=['tensor']).tensor([[[[{val}]]]]).reshape(-1, {a}, {b}).unsqueeze(0).expand({c}, {d}, {e}, {f})",
-    "{var} = [((({seed} * {rows}) + i) % 97) - 48 for i in range({rows} * {cols})].reshape(-1, 1)",
-    "_, _, _, _, _, _, _, _, _, {var} = range(10)",
-    "{var} = [z for xs in [[[{n}]]] for ys in xs for z in ys for _ in range({count})]",
-    "{var} = __import__('hashlib').sha256(__import__('hashlib').md5(__import__('hashlib').sha1(b'seed').digest()).digest()).hexdigest()",
-    "{var} = __import__('hashlib').sha256(b'test').hexdigest()",
+    # Inert padding only: a fresh name bound to scalar arithmetic. No imports,
+    # no calls, no comprehensions.
+    #
+    # Earlier versions called numpy.random.RandomState(...).randn(...) and
+    # torch.tensor(...).reshape(...). Both were wrong twice over: numpy faults
+    # NATIVELY on CPython 3.14/Windows (killing artefacts), and the native IR
+    # compiler cannot represent the tensor expressions, so the shadow build
+    # failed with 'the IR cannot represent these names'. Junk meant to look like
+    # work should not drag native libraries into the artefact at all.
+    "{var} = ((({seed} * {rows}) + {cols}) % 97) - 48",
+    "{var} = ((({seed} + {val}) * {a}) % 89) - 44",
+    "{var} = (({seed} ^ {n}) + {count}) % 1000",
+    "{var} = (({seed} * {b}) - {c}) % 4096",
 ]
 
 _FUNC_BODY_DEAD_CODE = [
