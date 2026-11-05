@@ -138,6 +138,21 @@ def main():
             print("SKIP %-40s %s" % (entry["flag"], entry["why"]))
             continue
         verdict, detail = try_flag(entry, src_out)
+        if verdict == "FAIL":
+            # Keep THIS flag's artefact. Every flag writes to the same output
+            # path, so without this the upload contains whichever flag ran last
+            # and the failure cannot be inspected.
+            try:
+                import shutil as _sh
+                src = os.path.join(ROOT, "build", "%s_obfuscated.py"
+                                   % os.path.splitext(os.path.basename(SOURCE))[0])
+                if os.path.exists(src):
+                    keep = os.path.join(ROOT, "ci-artifacts")
+                    os.makedirs(keep, exist_ok=True)
+                    safe = entry["flag"].lstrip("-").replace(" ", "_")
+                    _sh.copy2(src, os.path.join(keep, "flag_%s.py" % safe))
+            except Exception:
+                pass
         print("%-13s %-40s %s" % (verdict, entry["flag"], detail))
         if verdict == "FAIL":
             failures.append(entry["flag"])
