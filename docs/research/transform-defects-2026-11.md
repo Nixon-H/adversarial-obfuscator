@@ -145,3 +145,26 @@ measurements were bogus: one checksummed a stale file twice, one diffed paths th
 were never written. The masked bisect is what settled it.
 
 **Result: all 29 flag-isolation shards green.**
+
+## Correction: the temporal-redundancy self-destruct never ran
+
+An audit of this session flagged the removal of the redundancy self-destruct as the
+most severe security regression. Checked against the tree, that is not what
+happened:
+
+`execute_redundant` has **no call sites** -- not now, and not before the change.
+`grep` finds one occurrence in `sources.py`, and it is the `def`. The class the
+template defines is injected into every artefact and then never invoked, so:
+
+* the three-call comparison never ran,
+* the self-destruct never fired,
+* and the "hardware fault attack" response was dead code in both modes.
+
+What the change did was stop a *dead* destructive routine from being reachable if
+someone later wired it up -- which is worth keeping, but it is not a reduction in
+protection that was ever in effect.
+
+The honest positions are: wire it up soundly (only for functions that can be shown
+free of side effects, since re-running user code is unsound in general), or delete
+it so it stops reading like a defence that exists. It is neither, today, and this
+note exists so the next reader does not trust the table above.
