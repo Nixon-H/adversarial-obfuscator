@@ -57,6 +57,11 @@ target-version = "py310"
 #             docs/research/h0h5-results/ are generated program output.
 exclude = [
     "archive",
+    # Vendored third-party packages (boltons, requests, urllib3, itertool
+    # recipes) kept as a corpus for the transfer study. Their style is not
+    # this project's to fix, and linting them made `make lint` fail on code
+    # nobody wrote here.
+    "scripts/transfer/corpus",
     "docs",
     "build",
     ".opencode",
@@ -76,3 +81,7 @@ select = ["F"]
 # duplicated keys, because that is what the decoy and poison tests
 # assert on.
 "tests/test_data/*" = ["F"]
+# Payload fixtures are BUILD INPUTS, not library code: they deliberately use
+# walrus assignments, unused locals and unusual constructs because the point is
+# to exercise transforms on them.
+"tests/fixtures/*" = ["F"]

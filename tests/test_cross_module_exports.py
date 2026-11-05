@@ -3,10 +3,8 @@
 The scan helper is exercised against a real package layout, and the option is shown
 to prevent the ImportError the defect produces.
 """
-import os
 import sys
 
-import pytest
 
 from obfuscator.core.sources import apply_ast_mutation
 from obfuscator.cross_module import sibling_imports
