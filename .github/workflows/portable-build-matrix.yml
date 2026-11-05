@@ -49,6 +49,45 @@ jobs:
           path: ci-artifacts/
           if-no-files-found: ignore
 
+  strict-mode:
+    # --strict-detections turns the hardened defences ON: three-call redundancy
+    # with self-destruct, 64 MB entropy noise, unthrottled rdtsc, and a blocking
+    # interpreter-integrity check. Until now CI only BUILT that mode (deep matrix)
+    # and never RAN the result, so nothing would have noticed if it shipped
+    # artefacts that hang or delete themselves.
+    #
+    # This job runs a real strict artefact on every OS. It is the prerequisite
+    # for making hardened behaviour the default: the default cannot be flipped
+    # until the hardened build is proven to run.
+    name: strict artefact on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install builder dependencies
+        run: pip install --require-hashes -r requirements.lock
+      - name: Build and run with --strict-detections
+        env:
+          NX_PAYLOAD: ${{ github.workspace }}/tests/fixtures/portable/constructs_source.py
+          NX_EXTRA_FLAGS: "--strict-detections"
+          NX_OPT_LEVEL: "5"
+          NX_HANG_TRACE: "1"
+        run: python scripts/ci/build_on_platform.py
+      - name: Keep the failing artefact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failing-strict-${{ matrix.os }}
+          path: ci-artifacts/
+          if-no-files-found: ignore
+
   audit-built:
     # Build here, then put the thing it just built through the 12 environment checks.
     name: build+audit ${{ matrix.os }}
