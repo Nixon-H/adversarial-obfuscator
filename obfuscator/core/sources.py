@@ -6156,8 +6156,16 @@ def _check_interpreter_integrity():
                 if bytes.fromhex("484f4f4b5f53454354494f4e") in content or bytes.fromhex("50595f4c4f47474552") in content or bytes.fromhex("6465627567676572") in content.lower():
                     return False
                 k32 = _nixon_シータイプ씨타입.windll.kernel32
+                # GetModuleHandleW returns 0 when the name does not match a
+                # loaded module -- including when this project guessed the DLL
+                # name wrongly ("python313.dll" vs "python313_d.dll", or an embed
+                # layout). Treating "cannot determine" as "tampered" made the
+                # guard fire on EVERY Windows runner, which is why it used to be
+                # neutered and why a --strict-detections artefact exited 3 there.
+                # Inconclusive is not a detection: only a positive marker match
+                # below reports anything.
                 h_mod = k32.GetModuleHandleW("python3" + str(_nixon_システム시스템.version_info.minor) + ".dll")
-                if not h_mod: return False
+                if not h_mod: return True
             except: pass
         safe_builtins = {"exec": "built-in function exec", "eval": "built-in function eval", "compile": "built-in function compile"}
         for name, expected in safe_builtins.items():
