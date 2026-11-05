@@ -34,19 +34,20 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - name: Windows + CPython 3.14 is not supported by the dependency stack
-        if: matrix.os == 'windows-latest' && matrix.python == '3.14'
-        run: |
-          echo "SKIPPED: numpy 2.2.4 publishes no cp314 wheel for Windows, so pip"
-          echo "compiles it from source there and fails. numpy's own 3.14 support is"
-          echo "experimental ('crashes are to be expected'). This is a dependency"
-          echo "limitation, not a defect in this project."
-          echo "See docs/research/transform-defects-2026-11.md."
       - name: Install builder dependencies
         if: "!(matrix.os == 'windows-latest' && matrix.python == '3.14')"
         run: pip install --require-hashes -r requirements.lock
+      - name: Install the stack WITHOUT numpy (Windows + CPython 3.14)
+        # numpy 2.2.4 publishes no cp314 wheel for Windows, so pip would compile
+        # it from source and fail. Nothing else in the lock depends on numpy and
+        # the project degrades gracefully without it (obfuscator/core/np_safe.py),
+        # so this pairing gets the rest of the stack and still runs every flag --
+        # rather than being excluded from the matrix.
+        if: matrix.os == 'windows-latest' && matrix.python == '3.14'
+        run: |
+          python scripts/ci/requirements_without.py numpy "$RUNNER_TEMP/req-no-numpy.txt"
+          pip install --require-hashes -r "$RUNNER_TEMP/req-no-numpy.txt"
       - name: Build and run 20 flags for this OS and interpreter
-        if: "!(matrix.os == 'windows-latest' && matrix.python == '3.14')"
         env:
           NX_PAYLOAD: ${{ github.workspace }}/tests/fixtures/portable/constructs_source.py
           NX_OPT_LEVEL: "3"
