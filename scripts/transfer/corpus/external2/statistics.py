@@ -138,7 +138,15 @@ from fractions import Fraction
 from decimal import Decimal
 from itertools import count, groupby, repeat
 from bisect import bisect_left, bisect_right
-from math import hypot, sqrt, fabs, exp, erf, tau, log, fsum, sumprod
+from math import hypot, sqrt, fabs, exp, erf, tau, log, fsum
+try:
+    from math import sumprod
+except ImportError:                     # math.sumprod arrived in Python 3.12
+    # This file is a fixture: it has to run on the oldest interpreter the
+    # project supports (3.10), so the 3.12+ name gets an equivalent fallback
+    # rather than making the whole module unimportable there.
+    def sumprod(p, q):
+        return fsum(a * b for a, b in zip(p, q))
 from math import isfinite, isinf, pi, cos, sin, tan, cosh, asin, atan, acos
 from functools import reduce
 from operator import itemgetter
