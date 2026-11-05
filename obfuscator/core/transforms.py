@@ -2306,16 +2306,17 @@ def {node.name}(*args, **kwargs):
     # "NameError: name '_nx_M' is not defined" inside "<jit_N>" the moment it was
     # called, and the traceback pointed at the template rather than the payload.
     _ns = dict(globals())
-    _before = set(_ns)
     _compiled = builtins.compile(_code, "<jit_{template_name}>", "exec")
     builtins.exec(_compiled, _ns)
-    # Call whatever the template just defined, by DELTA not by name. Looking the
-    # function up by a literal name made correctness depend on the wrapper's name
-    # and the template's name staying in step through every later renaming pass;
-    # when they diverged the lookup raised KeyError on a name that existed in
-    # neither place. The template defines exactly one new binding.
-    _new = [k for k in _ns if k not in _before]
-    return _ns[_new[-1]](*args, **kwargs)
+    # Take the name from the TEMPLATE SOURCE, not from a literal in the wrapper
+    # and not from a namespace delta (which is empty when the module already
+    # defines the same name). A literal made correctness depend on the wrapper and
+    # template names staying in step through every renaming pass; when they
+    # diverged the lookup raised KeyError for a name that existed nowhere.
+    import ast as _ast_jit
+    _defs = [n.name for n in _ast_jit.parse(_code).body
+             if isinstance(n, (_ast_jit.FunctionDef, _ast_jit.AsyncFunctionDef))]
+    return _ns[_defs[-1]](*args, **kwargs)
 '''
 
     def _make_rust_jit_wrapper(self, node, func_code, key, template_name):
@@ -2360,10 +2361,11 @@ def {node.name}(*args, **kwargs):
     # Same reason as the Python wrapper: module globals must be visible, or any
     # function touching a global fails with NameError inside the template.
     _ns = dict(globals())
-    _before = set(_ns)
     exec(_compiled, _ns)
-    _new = [k for k in _ns if k not in _before]
-    return _ns[_new[-1]](*args, **kwargs)
+    import ast as _ast_jit
+    _defs = [n.name for n in _ast_jit.parse(_code).body
+             if isinstance(n, (_ast_jit.FunctionDef, _ast_jit.AsyncFunctionDef))]
+    return _ns[_defs[-1]](*args, **kwargs)
 '''
 class EnhancedJunkInserter(ast.NodeTransformer):
     def __init__(self):
