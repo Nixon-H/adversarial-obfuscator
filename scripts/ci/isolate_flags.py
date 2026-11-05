@@ -58,7 +58,12 @@ def try_flag(entry, src_out):
         tail = [ln for ln in raw.strip().splitlines() if ln.strip()]
         # Keep several lines: a silent failure's last line is usually the last
         # NORMAL log line, with the traceback above it.
-        last = " | ".join(tail[-3:])[:400] if tail else ""
+        # A silent failure's useful text is whatever came BEFORE the last line.
+        # Ten lines, and stderr first when it exists, because that is where a
+        # traceback lands.
+        err_only = (built.stderr or b"").decode("utf-8", "replace").strip()
+        src_tail = err_only.splitlines() if err_only else tail
+        last = " | ".join([ln.strip() for ln in src_tail[-10:] if ln.strip()])[:1200]
         # The builder deliberately refuses combinations it knows are unsound
         # ("[CONFLICT] Blocking conflicts found"). That is the product protecting
         # itself, not a defect: the flag needs companion flags this harness does
