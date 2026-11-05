@@ -1,0 +1,55 @@
+name: Flags x all platforms x all Pythons (manual + release)
+
+# The full cross product: every one of the 274 ladder flags, isolated, on every
+# OS and every supported interpreter.
+#
+# 14 shards x 20 flags x 3 OSes x 5 Pythons = 210 jobs, 4,110 isolated builds.
+# Kept at 210 jobs rather than 4,110 by running 20 flags sequentially per job --
+# GitHub caps a matrix at 256 jobs.
+#
+# This is the release gate. It must be green before a release is considered
+# stable; it runs manually while stabilising and on every published release.
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  isolate:
+    name: ${{ matrix.os }} py${{ matrix.python }} shard ${{ matrix.shard }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 200
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install builder dependencies
+        run: pip install --require-hashes -r requirements.lock
+      - name: Build and run 20 flags for this OS and interpreter
+        env:
+          NX_PAYLOAD: ${{ github.workspace }}/tests/fixtures/portable/constructs_source.py
+          NX_OPT_LEVEL: "3"
+          NX_BUILD_TIMEOUT: "1800"
+          PYTHONHASHSEED: "0"
+          NX_BUILD_SEED: "12345"
+        run: python scripts/ci/isolate_flags.py --start $(( ${{ matrix.shard }} * 20 )) --count 20
+      - name: Keep the failing artefact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failing-${{ matrix.os }}-py${{ matrix.python }}-shard-${{ matrix.shard }}
+          path: |
+            ci-artifacts/
+            build/*_obfuscated.py
+          if-no-files-found: ignore

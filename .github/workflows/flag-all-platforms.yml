@@ -1,0 +1,51 @@
+name: Flags x all platforms (manual + release)
+
+# Every one of the 274 ladder flags, isolated, on all three operating systems at
+# the newest Python. This is coverage tier A1: it answers "does this flag work
+# everywhere" for the whole ladder, not for a sample.
+#
+# 14 shards x 20 flags x 3 OSes = 42 jobs.
+# Runs manually while stabilising, and automatically on every published release.
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  isolate:
+    name: ${{ matrix.os }} shard ${{ matrix.shard }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install builder dependencies
+        run: pip install --require-hashes -r requirements.lock
+      - name: Build and run 20 flags on this platform
+        env:
+          NX_PAYLOAD: ${{ github.workspace }}/tests/fixtures/portable/constructs_source.py
+          NX_OPT_LEVEL: "3"
+          NX_BUILD_TIMEOUT: "1800"
+          PYTHONHASHSEED: "0"
+          NX_BUILD_SEED: "12345"
+        run: python scripts/ci/isolate_flags.py --start $(( ${{ matrix.shard }} * 20 )) --count 20
+      - name: Keep the failing artefact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failing-${{ matrix.os }}-shard-${{ matrix.shard }}
+          path: |
+            ci-artifacts/
+            build/*_obfuscated.py
+          if-no-files-found: ignore
