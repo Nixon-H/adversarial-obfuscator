@@ -52,8 +52,10 @@ def try_flag(entry, src_out):
     if built.returncode != 0:
         raw = (built.stderr or b"").decode("utf-8", "replace") + \
               (built.stdout or b"").decode("utf-8", "replace")
-        tail = raw.strip().splitlines()
-        last = tail[-1][:120] if tail else ""
+        tail = [ln for ln in raw.strip().splitlines() if ln.strip()]
+        # Keep several lines: a silent failure's last line is usually the last
+        # NORMAL log line, with the traceback above it.
+        last = " | ".join(tail[-3:])[:400] if tail else ""
         # The builder deliberately refuses combinations it knows are unsound
         # ("[CONFLICT] Blocking conflicts found"). That is the product protecting
         # itself, not a defect: the flag needs companion flags this harness does
