@@ -185,7 +185,12 @@ class AdaptiveRewriter:
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef):
                 for _ in range(random.randint(1, 3)):
-                    junk_var = f"_nx_junk_{secrets.token_hex(2)}"
+                    # Derive the name from the GLOBAL random state, which --seed
+                    # pins, instead of secrets. The adaptive pass was the last
+                    # source of non-determinism in the ladder: every build picked
+                    # different junk names, so two seeded builds differed and a
+                    # Windows failure could not be reproduced.
+                    junk_var = "_nx_junk_%04x" % random.getrandbits(16)
                     node.body.insert(
                         0,
                         ast.Assign(

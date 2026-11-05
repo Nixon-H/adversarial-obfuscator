@@ -92,7 +92,16 @@ def phase_provenance_poison(payload: str, output: str, opts) -> None:
         log("ERROR", f"Syntax error in {payload}: {e}")
         return
 
-    seed = hash(payload + str(opts) + "provenance") & 0xFFFFFFFF
+    # Same defect that made the adversarial phase non-reproducible: a str hash is
+    # randomised per process, and str(opts) carries MACHINE-SPECIFIC absolute
+    # paths -- so the same payload produced different provenance poisoning on
+    # Windows and on Linux, and between runs. Honour --seed instead.
+    _explicit = getattr(opts, "seed", None)
+    if _explicit is not None:
+        seed = int(_explicit) & 0xFFFFFFFF
+    else:
+        import secrets as _secrets
+        seed = int.from_bytes(_secrets.token_bytes(4), "little")
     poisoner = ProvenancePoisoner(seed=seed)
     tree = poisoner.poison(tree, {"categories": enabled_categories})
 
