@@ -6149,72 +6149,64 @@ except Exception as _e:
 
 BLOB_KEY = bytes.fromhex("{NATIVE_BLOB_KEY_HEX}")'''
 INTEGRITY_CHECK_SOURCE = r'''
-def _check_interpreter_integrity():
+def _check_interpreter_integrity_reason():
+    """Return None when the interpreter looks clean, else WHY it did not.
+
+    A bare bool was not enough: on Windows this guard fired on every runner and
+    the only visible symptom was "integrity failed", with no way to tell which
+    of the checks was responsible. Three separate false positives were chased one
+    at a time that way. A reason code makes the next one a single CI run.
+    """
     try:
         if _nixon_オペレーション운영.name == 'nt':
             try:
                 exe_path = _nixon_システム시스템.executable
                 with open(exe_path, "rb") as f:
-                    content = f.read(1024*1024)
-                if bytes.fromhex("484f4f4b5f53454354494f4e") in content or bytes.fromhex("50595f4c4f47474552") in content or bytes.fromhex("6465627567676572") in content.lower():
-                    return False
+                    content = f.read(1024 * 1024)
+                if bytes.fromhex("484f4f4b5f53454354494f4e") in content:
+                    return "win-exe-HOOK_SECTION"
+                if bytes.fromhex("50595f4c4f47474552") in content:
+                    return "win-exe-PY_LOGGER"
                 k32 = _nixon_シータイプ씨타입.windll.kernel32
-                # GetModuleHandleW returns 0 when the name does not match a
-                # loaded module -- including when this project guessed the DLL
-                # name wrongly ("python313.dll" vs "python313_d.dll", or an embed
-                # layout). Treating "cannot determine" as "tampered" made the
-                # guard fire on EVERY Windows runner, which is why it used to be
-                # neutered and why a --strict-detections artefact exited 3 there.
-                # Inconclusive is not a detection: only a positive marker match
-                # below reports anything.
-                h_mod = k32.GetModuleHandleW("python3" + str(_nixon_システム시스템.version_info.minor) + ".dll")
-                if not h_mod: return True
-            except: pass
-        # Compare TYPE, not repr text. The previous check looked for the literal
-        # "built-in function exec" inside str(builtins.exec); that is fragile --
-        # it depends on CPython's repr wording and on the value being truthy, so
-        # any interpreter whose repr differs was reported as tampered. That is the
-        # other half of the Windows false positive this guard kept producing.
-        #
-        # A hook that replaces exec/eval/compile replaces them with a Python
-        # function or an object, so the type check catches the same attacks
-        # without depending on how CPython prints them.
+                h_mod = k32.GetModuleHandleW(
+                    "python3" + str(_nixon_システム시스템.version_info.minor))
+                # A zero handle means "no module by that name is loaded", which is
+                # also what an embed layout, a debug DLL or a naming mismatch
+                # returns. Inconclusive is not tampering, so it is not reported.
+                if not h_mod:
+                    pass
+            except Exception as _e:
+                return "win-probe-%s" % type(_e).__name__
         for _name in ("exec", "eval", "compile"):
             _actual = getattr(_nixon_ビルトイン빌트인, _name, None)
-            if _actual is None: return False
-            if type(_actual).__name__ != "builtin_function_or_method": return False
-        return True
-    except: return True
-if not _check_interpreter_integrity():
-    # The verdict used to be recorded in a global that NOTHING ever read, so the
-    # interpreter-integrity check was decorative: a tampered interpreter changed
-    # no behaviour at all. It also must not null `hashlib` -- an attacker can
-    # re-import it, and the Merkle builder and self-integrity check run later and
-    # need it, which killed the artefact with "'NoneType' object has no attribute
-    # 'sha256'" (exit 137) on hosts where the guard fired.
+            if _actual is None:
+                return "builtins-missing-%s" % _name
+            if type(_actual).__name__ != "builtin_function_or_method":
+                return "builtins-hooked-%s" % _name
+        return None
+    except Exception as _e:
+        return "probe-exception-%s" % type(_e).__name__
+_nixon_integrity_reason = _check_interpreter_integrity_reason()
+if _nixon_integrity_reason:
+    # The verdict used to be written to a global that NOTHING ever read, so the
+    # check was decorative: a tampered interpreter changed no behaviour. It also
+    # must not null `hashlib` -- an attacker can re-import it, and the Merkle
+    # builder and self-integrity check run later and need it, which killed the
+    # artefact with exit 137 on hosts where the guard fired.
     #
-    # So: always REPORT, and under --strict-detections REFUSE to run the payload.
-    # A tampered interpreter is exactly the situation a detection is for; the
-    # default still runs, but no longer silently.
+    # So: always REPORT (with the reason), and under --strict-detections REFUSE
+    # to run the payload.
     try:
         _nixon_システム시스템.stderr.write(
-            "[BLOCKED] interpreter-integrity (exit 3)" if {VAR_STRICT_ON} else
-            "[WARN] interpreter-integrity suspect factory\n")
+            ("[BLOCKED] interpreter-integrity: %s (exit 3)\n" if {VAR_STRICT_ON}
+             else "[WARN] interpreter-integrity suspect: %s\n") % _nixon_integrity_reason)
         _nixon_システム시스템.stderr.flush()
     except Exception:
         pass
-    # Refusing to run is only defensible where the check is trustworthy. On
-    # Windows it has now produced three separate false positives (module handle,
-    # builtins repr, and one more the runners keep surfacing), so a strict build
-    # would simply not run for ordinary Windows users -- which is worse than a
-    # warning, and is how this guard ended up muted in the first place.
-    #
-    # So: block where it is reliable, report everywhere. Making Windows blocking
-    # again requires a detection with a demonstrated zero false-positive rate on
-    # every runner, which is a testable claim rather than something to assume.
-    if {VAR_STRICT_ON} and _nixon_オペレーション운영.name != 'nt':
+    if {VAR_STRICT_ON}:
         _nixon_システム시스템.exit(3)
 '''
+
 LOADER_BODY = r'''def {FUNC_TRIGGER_ALERT}(reason):
     url = {FUNC_STR_DEC}({VAR_CANARY_URL})
     if url: {VAR_FUNC_CANARY}(reason, url)
