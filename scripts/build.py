@@ -961,21 +961,13 @@ in config/default.json.
     if getattr(opts, "seed", None) is not None:
         import random as _random
         _random.seed(opts.seed)
-        # Do NOT import numpy here to seed it. On Windows with CPython 3.14
-        # numpy faults natively (ACCESS_VIOLATION, 0xC0000005) while importing,
-        # and a native crash is not catchable -- the try/except below never runs,
-        # so `--seed` alone killed the builder on that pairing. The package
-        # already probes numpy safely in a subprocess; reuse that verdict.
-        try:
-            from obfuscator.core.utils import HAS_NUMPY as _HAS_NUMPY
-        except Exception:
-            _HAS_NUMPY = False
-        if _HAS_NUMPY:
-            try:
-                import numpy as _np
-                _np.random.seed(opts.seed % (2 ** 32))
-            except Exception:
-                pass
+        # Seeding numpy is deliberately NOT done here. On Windows with CPython
+        # 3.14 numpy faults natively (ACCESS_VIOLATION, 0xC0000005) during import,
+        # and a native crash is not catchable -- so any in-process `import numpy`
+        # on that pairing kills the builder regardless of the guard around it. A
+        # subprocess probe is not sufficient either: it can report numpy healthy
+        # while an in-process import still crashes, depending on import order.
+        # Python's own RNG is seeded above, which is what the transforms use.
 
     # Refuse unsupported flags BEFORE the dependency check: an operator
     # asking for something this pipeline cannot do should learn that on a
