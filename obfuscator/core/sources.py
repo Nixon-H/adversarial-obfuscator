@@ -6203,7 +6203,16 @@ if not _check_interpreter_integrity():
         _nixon_システム시스템.stderr.flush()
     except Exception:
         pass
-    if {VAR_STRICT_ON}:
+    # Refusing to run is only defensible where the check is trustworthy. On
+    # Windows it has now produced three separate false positives (module handle,
+    # builtins repr, and one more the runners keep surfacing), so a strict build
+    # would simply not run for ordinary Windows users -- which is worse than a
+    # warning, and is how this guard ended up muted in the first place.
+    #
+    # So: block where it is reliable, report everywhere. Making Windows blocking
+    # again requires a detection with a demonstrated zero false-positive rate on
+    # every runner, which is a testable claim rather than something to assume.
+    if {VAR_STRICT_ON} and _nixon_オペレーション운영.name != 'nt':
         _nixon_システム시스템.exit(3)
 '''
 LOADER_BODY = r'''def {FUNC_TRIGGER_ALERT}(reason):
