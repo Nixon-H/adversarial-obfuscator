@@ -9,3 +9,9 @@
 # The pin is also recorded in .github/workflows/build.yml; keep the two
 # in step.
 ruff==0.16.1
+# Test tooling. tests/test_ci_workflows.py parses the workflow YAML to catch a
+# duplicate key -- the bug that once made GitHub run ZERO jobs for an entire
+# workflow, because yaml.safe_load accepts duplicates and GitHub does not.
+# Pinned like ruff, but not hash-pinned: this file is installed without
+# --require-hashes and PyYAML is dev-only.
+pyyaml==6.0.2
