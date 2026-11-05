@@ -6170,10 +6170,19 @@ def _check_interpreter_integrity():
                 h_mod = k32.GetModuleHandleW("python3" + str(_nixon_システム시스템.version_info.minor) + ".dll")
                 if not h_mod: return True
             except: pass
-        safe_builtins = {"exec": "built-in function exec", "eval": "built-in function eval", "compile": "built-in function compile"}
-        for name, expected in safe_builtins.items():
-            actual = getattr(_nixon_ビルトイン빌트인, name, None)
-            if actual and expected not in str(actual): return False
+        # Compare TYPE, not repr text. The previous check looked for the literal
+        # "built-in function exec" inside str(builtins.exec); that is fragile --
+        # it depends on CPython's repr wording and on the value being truthy, so
+        # any interpreter whose repr differs was reported as tampered. That is the
+        # other half of the Windows false positive this guard kept producing.
+        #
+        # A hook that replaces exec/eval/compile replaces them with a Python
+        # function or an object, so the type check catches the same attacks
+        # without depending on how CPython prints them.
+        for _name in ("exec", "eval", "compile"):
+            _actual = getattr(_nixon_ビルトイン빌트인, _name, None)
+            if _actual is None: return False
+            if type(_actual).__name__ != "builtin_function_or_method": return False
         return True
     except: return True
 if not _check_interpreter_integrity():
