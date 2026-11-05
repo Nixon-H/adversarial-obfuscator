@@ -22,7 +22,7 @@ from typing import Any
 
 _MODULE_DEAD_CODE = [
     "{var} = __import__('torch', fromlist=['tensor']).tensor([[[[{val}]]]]).reshape(-1, {a}, {b}).unsqueeze(0).expand({c}, {d}, {e}, {f})",
-    "{var} = __import__('numpy', fromlist=['random']).random.RandomState({seed}).randn({rows}, {cols}).reshape(-1, 1)",
+    "{var} = [((({seed} * {rows}) + i) % 97) - 48 for i in range({rows} * {cols})].reshape(-1, 1)",
     "_, _, _, _, _, _, _, _, _, {var} = range(10)",
     "{var} = [z for xs in [[[{n}]]] for ys in xs for z in ys for _ in range({count})]",
     "{var} = __import__('hashlib').sha256(__import__('hashlib').md5(__import__('hashlib').sha1(b'seed').digest()).digest()).hexdigest()",
@@ -30,7 +30,7 @@ _MODULE_DEAD_CODE = [
 ]
 
 _FUNC_BODY_DEAD_CODE = [
-    "{var} = __import__('numpy', fromlist=['random']).random.RandomState({seed}).randn({rows}, {cols}).reshape(-1, 1)",
+    "{var} = [((({seed} * {rows}) + i) % 97) - 48 for i in range({rows} * {cols})].reshape(-1, 1)",
     "{var} = [z for xs in [[[{n}]]] for ys in xs for z in ys for _ in range({count})]",
     "_, _, _, _, _, _, _, _, _, {var} = range(10)",
     "{var} = __import__('hashlib').sha256(__import__('hashlib').md5(__import__('hashlib').sha1(b'seed').digest()).digest()).hexdigest()",
@@ -39,7 +39,11 @@ _FUNC_BODY_DEAD_CODE = [
 
 _FUNC_TRAINING_LOOP = (
     "for {loop_var} in range({epochs}):\n"
-    "    _ = __import__('numpy', fromlist=['random']).random.RandomState({seed}).randn({batch}, {dims})\n"
+    # Stdlib only. numpy faults natively on Windows/CPython 3.14 and a native
+    # crash cannot be caught, so any junk that imports it kills the artefact on
+    # that pairing -- which tier B found as exit 3221225477 with numpy's own
+    # "CRASHES ARE TO BE EXPECTED" banner.
+    "    _ = [((({seed} + i) * {batch}) % 89) - 44 for i in range({batch} * {dims})]\n"
     "    {loss_var} = float({loop_var}) * 0.001\n"
 )
 
