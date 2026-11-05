@@ -92,7 +92,12 @@ def atomic_write(path, data, mode="w"):
         _kw = {} if "b" in mode else {"encoding": "utf-8"}
         with open(unique, mode, **_kw) as f:
             f.write(data)
-        os.rename(unique, path)
+        # os.replace, not os.rename: on Windows rename FAILS when the target
+        # already exists (WinError 183), while on POSIX it silently replaces.
+        # Every second build in the same directory therefore failed on Windows --
+        # masked in CI because one build per job was the norm until the flag
+        # matrices started running twenty sequentially.
+        os.replace(unique, path)
     except BaseException:
         if os.path.exists(unique):
             os.remove(unique)

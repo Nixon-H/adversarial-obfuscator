@@ -286,7 +286,7 @@ def generate_payload_h(
     tmp = output_path + ".tmp"
     with open(tmp, "w", newline="\n") as f:
         f.write(content)
-    os.rename(tmp, output_path)
+    os.replace(tmp, output_path)  # Windows: rename fails if the target exists
 
     print(f"  [payload.h] {os.path.getsize(output_path)} B  → {output_path}")
     return output_path
