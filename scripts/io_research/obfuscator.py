@@ -30,7 +30,9 @@ known attacks on matrix branching programs.
 from __future__ import annotations
 
 import time
-import numpy as np
+# numpy is imported through the shim: a direct import faults NATIVELY on
+# Windows/CPython 3.14 and cannot be caught.
+from obfuscator.core.np_safe import np
 
 from .np_obfuscation import MatrixBranchingProgram, randomize_bp
 from .equivalence import verify_equivalence, compute_equivalence_score  # noqa: F401 (this line binds a name used by an embedded template)

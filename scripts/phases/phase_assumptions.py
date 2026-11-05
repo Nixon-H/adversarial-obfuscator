@@ -60,11 +60,10 @@ def _get_runtime_caps() -> dict:
     except ImportError:
         pass
 
-    try:
-        import numpy  # noqa: F401
-        caps["numpy"] = True
-    except ImportError:
-        pass
+    # Through the shim: a direct import faults NATIVELY on Windows/CPython 3.14,
+    # and a native crash is not an ImportError, so this probe killed the builder.
+    from obfuscator.core.np_safe import HAS_NUMPY as _NP_OK
+    caps["numpy"] = bool(_NP_OK)
 
     try:
         import angr  # noqa: F401

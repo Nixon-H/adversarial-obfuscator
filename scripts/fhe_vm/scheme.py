@@ -71,7 +71,9 @@ from typing import Optional
 
 import random
 
-import numpy as np
+# numpy is imported through the shim: a direct import faults NATIVELY on
+# Windows/CPython 3.14 and cannot be caught.
+from obfuscator.core.np_safe import np
 
 _sysrand = random.SystemRandom()
 

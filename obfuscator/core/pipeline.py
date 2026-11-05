@@ -402,7 +402,7 @@ def swizzle_bytecode(data, key):
         # Lazy import: numpy is optional, and `utils.np` only exists when
         # it is installed.  Importing it at module level made the whole
         # package unimportable on a numpy-less interpreter.
-        import numpy as np
+        from obfuscator.core.np_safe import np
         arr = np.frombuffer(data, dtype=np.uint8).copy()
         k = np.frombuffer(key, dtype=np.uint8)
         k_tiled = np.resize(k, len(arr))

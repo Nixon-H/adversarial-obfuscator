@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import numpy as np
+from obfuscator.core.np_safe import np  # native crash on Win/3.14
 
 from .np_obfuscation import MatrixBranchingProgram
 
