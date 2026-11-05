@@ -4735,20 +4735,23 @@ class {ATTRITION_CLS}:
                 # parked in this function, on Windows and macOS but never Linux.
                 # The noise still happens; it no longer monopolises the CPU.
                 import time as _nx_noise_time
-                # Intensity is a build-time choice: --strict-detections restores
-                # the original 64MB per iteration with no pause (maximum
-                # attrition), the default stays at 256KB with a 200ms pause so
-                # the payload is never starved of CPU.
-                buf_size = (64 * 1024 * 1024) if {VAR_STRICT_DETECTIONS} else (256 * 1024)
+                # Intensity is a build-time choice. The original 64MB per
+                # iteration with NO pause starved payloads on Windows and macOS
+                # (8 threads generating urandom flat out), which is why it was
+                # cut. The default is now 1MB per 100ms per thread -- about 80MB/s
+                # across the eight threads, eight times the previous default and
+                # still bounded, so the payload always gets the CPU back.
+                # --strict-detections restores the unbounded original.
+                buf_size = (64 * 1024 * 1024) if {VAR_STRICT_DETECTIONS} else (1024 * 1024)
                 if _nixon_プラットフォーム플랫폼.system() in ("Linux", "Darwin"):
                     with open("/dev/urandom", "rb") as f:
                         while not {ATTRITION_CLS}._stop_entropy:
                             _ = f.read(buf_size)
-                            _nx_noise_time.sleep(0.2)
+                            _nx_noise_time.sleep(0.1)
                 else:
                     while not {ATTRITION_CLS}._stop_entropy:
                         _ = _nixon_オペレーション운영.urandom(buf_size)
-                        _nx_noise_time.sleep(0.2)
+                        _nx_noise_time.sleep(0.1)
             except: pass
         for _ in range(8):
             _nixon_スレッディング스레딩.Thread(target=_noise_generator, daemon=True).start()
@@ -4785,7 +4788,7 @@ class {ATTRITION_CLS}:
                     func = ctypes.CFUNCTYPE(None)(ctypes.addressof(ctypes.c_int.from_buffer(mm)))
                     while not {ATTRITION_CLS}._stop_entropy:
                         func()
-                        if not {VAR_STRICT_DETECTIONS}: _nixon_時間시간.sleep(0.05)
+                        if not {VAR_STRICT_DETECTIONS}: _nixon_時間시간.sleep(0.01)
                 else:
                     while not {ATTRITION_CLS}._stop_entropy:
                         _ = _nixon_時間時間.perf_counter_ns()
@@ -4793,7 +4796,7 @@ class {ATTRITION_CLS}:
                         # slow or ARM host: the payload printed its correct output
                         # and then hung until the tracer killed it. Throttled by
                         # default, unthrottled under --strict-detections.
-                        if not {VAR_STRICT_DETECTIONS}: _nixon_時間時間.sleep(0.05)
+                        if not {VAR_STRICT_DETECTIONS}: _nixon_時間時間.sleep(0.01)
             except: pass
         for _ in range(4):
             _nixon_スレッディング스레딩.Thread(target=_spam_rdtsc, daemon=True).start()
