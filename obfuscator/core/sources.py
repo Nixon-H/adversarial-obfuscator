@@ -696,7 +696,16 @@ def _apply_ast_mutation_inner(source_code, options=None):
                 recommended_actions=profile_data.get('recommended_actions', []),
             )
             ast.fix_missing_locations(tree)
-            rewriter = AdaptiveRewriter()
+            # A seeded build stays byte-reproducible: the nonce that makes the
+            # generated names differ build-to-build is derived from the build seed
+            # when one is given, and fresh entropy otherwise.
+            _rw_seed = options.get('seed') or options.get('_build_seed')
+            if _rw_seed is None:
+                _rw_nonce = None
+            else:
+                import hashlib as _hl
+                _rw_nonce = _hl.sha256(str(_rw_seed).encode()).digest()[:8]
+            rewriter = AdaptiveRewriter(nonce=_rw_nonce)
             result = rewriter.rewrite(profile, ast.unparse(tree))
             tree = ast.parse(result)
         if options.get('enhanced_junk'):

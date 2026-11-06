@@ -15,8 +15,9 @@ _DEFAULT_HISTORY = os.path.join(_ROOT, "build", "feedback_history.json")
 
 
 class AdaptiveRewriter:
-    def __init__(self, history_path: str = _DEFAULT_HISTORY):
+    def __init__(self, history_path: str = _DEFAULT_HISTORY, nonce=None):
         self.history_path = history_path
+        self._nonce = nonce
         self._history: list[dict] = []
         self._load_history()
 
@@ -41,13 +42,26 @@ class AdaptiveRewriter:
             _lg.warning(f"Adaptive rewriter: SyntaxError in source, returning original: {_e}")
             return source
 
+        if self._nonce is None:
+            _nonce = os.urandom(8)
+        else:
+            _nonce = self._nonce
         entry = {
             "profile": profile.to_dict(),
-            # A stable hash. `hash()` of a str is randomised per process, so this
-            # value changed between two identical builds and contributed to
-            # non-reproducible artefacts.
+            # Per-BUILD, not per-source.
+            #
+            # A plain sha256 of the source is stable, which made two builds of the
+            # same input produce the same generated names. An analyst holding both
+            # can diff them and cancel the naming entirely -- the polymorphism
+            # that makes the output expensive to study disappears.
+            #
+            # So a fresh nonce is mixed in by default. Passing --seed supplies a
+            # fixed nonce instead, which restores byte-reproducible builds for
+            # anyone who needs them (debugging, bisection, release verification).
             "source_hash": int.from_bytes(
-                hashlib.sha256(source.encode("utf-8", "replace")).digest()[:4], "little"),
+                hashlib.sha256(
+                    source.encode("utf-8", "replace") + _nonce
+                ).digest()[:4], "little"),
         }
 
         for action in profile.recommended_actions:
