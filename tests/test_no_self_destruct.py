@@ -61,36 +61,31 @@ def test_the_destructive_path_is_reachable_only_in_strict_mode():
     assert guard < destructive, "the strict guard must precede the self-destruct"
 
 
-def test_the_redundancy_wrapper_is_not_wired_into_any_artefact():
-    """Documents a fact that was misread as a security regression.
+def test_the_redundancy_wrapper_is_wired_only_for_pure_functions():
+    """The wrapper is live now -- but only where re-invocation is sound.
 
-    An audit of this project once ranked "removal of the redundancy
-    self-destruct" as the most severe change of a session. It was not: the class
-    is injected into every artefact and `execute_redundant` has no call sites --
-    before that change or after it. The three-call comparison never ran, so the
-    self-destruct never fired, in either mode.
-
-    This test fails if someone wires it up, which is the moment the self-destruct
-    becomes reachable and must be reconsidered (re-running arbitrary user code is
-    unsound; a closure always produces three different results).
+    It previously had no call sites at all, because re-running arbitrary user code
+    re-runs its side effects: a counter closure always returns three different
+    values, so the check fired on correct code and the self-destruct destroyed the
+    artefact. The fix is not to remove the check but to apply it only to functions
+    that cannot have side effects.
     """
-    import os
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    callers = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in {".git", "archive", "__pycache__"}]
-        for name in filenames:
-            if not name.endswith(".py") or name.startswith("test_"):
-                continue
-            path = os.path.join(dirpath, name)
-            try:
-                text = open(path, encoding="utf-8", errors="replace").read()
-            except OSError:
-                continue
-            for line in text.splitlines():
-                stripped = line.strip()
-                if "execute_redundant" in stripped and not stripped.startswith("def "):
-                    callers.append((os.path.relpath(path, root), stripped[:80]))
-    assert not callers, (
-        "execute_redundant is now invoked; the self-destruct is reachable and "
-        "must be re-evaluated before shipping: %r" % (callers[:3],))
+    from obfuscator.core.sources import apply_ast_mutation
+    from obfuscator.core.transforms import is_pure_function
+    import ast
+
+    pure = "def add(a, b):\n    x = a + b\n    return x\nprint(add(2, 3))\n"
+    impure = ("def bump(c):\n    c.append(1)\n    return len(c)\n"
+              "print(bump([1]))\n")
+
+    out, _ = apply_ast_mutation(pure, {"opt_level": 0, "temporal_redundancy": True})
+    assert "add_impl" in out, "a pure function must be wrapped"
+
+    out2, _ = apply_ast_mutation(impure, {"opt_level": 0, "temporal_redundancy": True})
+    assert "bump_impl" not in out2, (
+        "an impure function must NOT be wrapped: re-invoking it re-runs its side "
+        "effects, which is what made the self-destruct fire on correct code")
+
+    # The purity test itself, directly.
+    assert is_pure_function(ast.parse(pure).body[0]) is True
+    assert is_pure_function(ast.parse(impure).body[0]) is False

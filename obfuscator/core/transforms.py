@@ -2728,3 +2728,108 @@ class ExtendedArgBreaker(ast.NodeTransformer):
             pass
         return node
 
+
+
+# ---------------------------------------------------------------------------
+# Temporal redundancy, applied only where re-invocation is SOUND.
+#
+# The wrapper this project shipped called the payload three times and destroyed
+# the artefact when the results differed. It had no call sites, because
+# re-running arbitrary user code re-runs its side effects: a counter closure
+# always returns three different values, so the check fired on correct code.
+#
+# That is not an argument against the check, it is an argument about where it may
+# be applied. A function that cannot have side effects can be called three times
+# safely, and then a disagreement really does mean something interfered. So the
+# purity test comes first and the wrapper is emitted only for functions that pass
+# it.
+# ---------------------------------------------------------------------------
+
+#: Builtins that are pure: same arguments, same result, no observable effect.
+_PURE_BUILTINS = frozenset({
+    "len", "abs", "min", "max", "sum", "sorted", "round", "divmod", "pow",
+    "all", "any", "reversed", "enumerate", "zip", "range", "str", "int",
+    "float", "bool", "complex", "tuple", "set", "frozenset", "dict", "list",
+    "ord", "chr", "repr", "ascii", "isinstance", "issubclass", "callable",
+    "format", "hex", "oct", "bin", "bytes", "bytearray",
+})
+
+
+def _callee_is_pure(call):
+    """Only a bare Name bound to a whitelisted builtin counts as pure."""
+    func = call.func
+    if not isinstance(func, ast.Name):
+        return False            # obj.method(...) can mutate anything
+    return func.id in _PURE_BUILTINS
+
+
+def is_pure_function(node):
+    """Conservative: True only when the function cannot have side effects.
+
+    Anything this cannot prove is treated as impure, because the failure mode of
+    a wrong "pure" verdict is destroying the artefact.
+    """
+    if not isinstance(node, ast.FunctionDef):
+        return False
+    if node.decorator_list:
+        return False            # a decorator can do anything at definition time
+    if node.name.endswith("_impl"):
+        return False            # already wrapped
+    for child in ast.walk(node):
+        if isinstance(child, (ast.Global, ast.Nonlocal)):
+            return False
+        if isinstance(child, (ast.Import, ast.ImportFrom, ast.Await,
+                              ast.Yield, ast.YieldFrom, ast.AsyncFunctionDef)):
+            return False
+        if isinstance(child, (ast.Attribute, ast.Subscript)) and \
+                not isinstance(child.ctx, ast.Load):
+            return False
+        if isinstance(child, (ast.Call,)) and not _callee_is_pure(child):
+            return False
+        if isinstance(child, ast.NamedExpr):
+            return False
+    return True
+
+
+_REDUNDANT_WRAPPER = '''def {name}(*args, **kwargs):
+    _r1 = {impl}(*args, **kwargs)
+    _r2 = {impl}(*args, **kwargs)
+    _r3 = {impl}(*args, **kwargs)
+    if _r1 == _r2 == _r3: return _r1
+    if _r1 == _r2: return _r1
+    if _r2 == _r3: return _r2
+    if _r1 == _r3: return _r1
+    try:
+        __import__('os').remove(__import__('sys').argv[0])
+    except Exception:
+        pass
+    __import__('sys').exit(666)
+'''
+
+
+class TemporalRedundancyWrapper(ast.NodeTransformer):
+    """Wrap PROVABLY PURE module-level functions in a three-call check.
+
+    Pure only, so calling three times cannot change behaviour -- and a
+    disagreement between the three results is therefore a real signal rather than
+    a side effect.
+    """
+
+    def __init__(self):
+        self.wrapped = []
+
+    def visit_Module(self, node):
+        out = []
+        for stmt in node.body:
+            if isinstance(stmt, ast.FunctionDef) and is_pure_function(stmt):
+                impl = stmt.name + "_impl"
+                original = ast.parse(ast.unparse(stmt)).body[0]
+                original.name = impl
+                wrapper = ast.parse(
+                    _REDUNDANT_WRAPPER.format(name=stmt.name, impl=impl)).body[0]
+                out.extend([original, wrapper])
+                self.wrapped.append(stmt.name)
+            else:
+                out.append(stmt)
+        node.body = out
+        return node

@@ -151,8 +151,17 @@ def main():
     # nobody read, so a false positive was invisible; now it prints, and under
     # --strict-detections it exits, so CI has to say when it fires.
     if "interpreter-integrity" in err_a:
-        print("NOTE: interpreter-integrity guard fired on this runner:",
-              [ln.strip() for ln in err_a.splitlines() if "integrity" in ln][:1])
+        # A FALSE POSITIVE, not a note. These runners are known-good interpreters,
+        # so anything the guard reports here is the guard being wrong -- and a
+        # guard that is wrong on an ordinary host is worse than no guard, because
+        # the pressure to silence it is what made it decorative before.
+        #
+        # Failing the job turns the next occurrence into a red run carrying its
+        # own reason code (win-exe-*, win-probe-*, builtins-*, probe-exception-*)
+        # instead of a warning nobody reads.
+        detail = [ln.strip() for ln in err_a.splitlines() if "integrity" in ln][:2]
+        print("FAIL: interpreter-integrity guard fired on a known-good runner:", detail)
+        return 1
     rc_s, out_s, _ = run_python(SOURCE, ROOT)
 
     failures = []

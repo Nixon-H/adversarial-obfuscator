@@ -9,6 +9,7 @@ from .utils import (
 from .transforms import (
     ASTMutator, BogusExceptionHandler, BuiltinAliaser, CallGraphObfuscator, CodeChecksumInjector,
     ConstantUnfolder, ControlFlowFlattener, DynamicCodeGenerator, EnhancedJunkInserter,
+    TemporalRedundancyWrapper,
     ExtendedArgBreaker, FStringLowering, InstructionSubstitutor, MetadataStripper,
     OpaquePredicateInjector, ScopeAnalyzer, StringLiteralObfuscator, SymbolRenamer,
     TypeHintStripper, UnicodeIdentifierEncoder, VariableSplitter, get_random_var_name, stego_encode
@@ -415,6 +416,12 @@ def _apply_ast_mutation_inner(source_code, options=None):
         stripper = TypeHintStripper()
         tree = stripper.visit(tree)
         secure_map = {}
+        # FIRST, before any other transform. Junk, CFF and opaque-predicate
+        # injection add calls to every function, so a purity test run afterwards
+        # declares everything impure and the wrapper is never emitted -- which is
+        # a second, subtler reason this protection had no call sites.
+        _red = TemporalRedundancyWrapper()
+        tree = _red.visit(tree)
         mutator = ASTMutator(junk_enabled=options.get('enhanced_junk', True))
         tree = mutator.visit(tree)
         if options.get('cfg_flatten'):

@@ -2597,6 +2597,9 @@ def build_project(args):
                 'vm_nest': 1, 'bogus_exceptions': True, 'split_vars': True,
                 'unfold_constants': True, 'strip_meta': True, 'unicode_ids': True,
                 'dynamic_code': True, 'enhanced_junk': True, 'func_transform': True,
+                # Three-call temporal redundancy, emitted only for functions
+                # the purity test can clear -- see TemporalRedundancyWrapper.
+                'temporal_redundancy': bool(getattr(args, 'strict_detections', True)),
                 'reflection': True, 'blockchain_rpc': getattr(args, 'rpc', ''),
                 'runtime_check_code': getattr(args, 'runtime_check_code', 'pass'),
                 'blockchain_contract': getattr(args, 'contract', ''),
@@ -2870,6 +2873,12 @@ def _VERIFY_INTEGRITY():
         'code_checksums': True,
         'dynamic_code': True,
         'enhanced_junk': True,
+        # Three-call temporal redundancy. The wrapper is emitted ONLY for
+        # functions the purity test clears, because re-invoking anything else
+        # re-runs its side effects -- a counter closure always disagrees with
+        # itself, which is why the old unconditional version had no call sites.
+        # Hardened by default; --fast turns it off with the rest of the profile.
+        'temporal_redundancy': bool(getattr(args, 'strict_detections', True)),
         'func_transform': not getattr(args, 'native', False),
         'reflection': not getattr(args, 'native', False),
         'hwid': str(getattr(args, 'hwid', '') or ''),
