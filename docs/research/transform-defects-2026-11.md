@@ -168,3 +168,27 @@ The honest positions are: wire it up soundly (only for functions that can be sho
 free of side effects, since re-running user code is unsound in general), or delete
 it so it stops reading like a defence that exists. It is neither, today, and this
 note exists so the next reader does not trust the table above.
+
+## Hardened by default (final state)
+
+The protections were opt-in for most of this work: `--strict-detections` had to be
+asked for, so a plain build carried the weaker posture. That is backwards for a
+protection tool, and it is now the other way round.
+
+`--strict-detections` defaults to **True**; `--fast` selects the reduced profile.
+
+The one value that changed in the process is the entropy noise, 64 MB per
+iteration with no pause -> **16 MB per 100 ms per thread**. That is a correction
+rather than a relaxation: the unbounded loop starved payloads on Windows and
+macOS, and an artefact that hangs protects nothing. Measured with the hardened
+profile: the constructs payload builds and runs in 0.56 s.
+
+The interpreter-integrity verdict blocks on **every** platform, including Windows.
+Its three false positives were each traced to a specific check -- a zero module
+handle read as tampering, a builtins *repr* comparison, and the paths that
+remained -- and each was fixed rather than exempted. The guard now names its
+reason (`win-exe-*`, `win-probe-*`, `builtins-*`, `probe-exception-*`), so a
+future false positive is one CI run instead of a bisect.
+
+Verified in a real default artefact: three `if not True` branches, the 16 MB noise
+buffer, `[BLOCKED] interpreter-integrity` with `exit(3)`, and the rdtsc spammer.
