@@ -699,7 +699,8 @@ def _apply_ast_mutation_inner(source_code, options=None):
             # A seeded build stays byte-reproducible: the nonce that makes the
             # generated names differ build-to-build is derived from the build seed
             # when one is given, and fresh entropy otherwise.
-            _rw_seed = options.get('seed') or options.get('_build_seed')
+            _rw_seed = (options.get('seed') or options.get('_build_seed')
+                        or os.environ.get('NX_BUILD_SEED'))
             if _rw_seed is None:
                 _rw_nonce = None
             else:

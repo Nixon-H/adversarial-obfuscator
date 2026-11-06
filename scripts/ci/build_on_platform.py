@@ -73,6 +73,16 @@ def main():
     print("config: sections=%s zips=%s opt-level=%s watermark=%s extra=%s"
           % (sections, zips, level, watermark, EXTRA_FLAGS))
     print("payload:", os.path.basename(SOURCE))
+    # PIN THE SEED. Several transforms choose which functions to touch with
+    # random.random(), so an unseeded build is a different artefact every run.
+    # That made a CI failure impossible to reproduce: a job went red once with a
+    # payload-exec error, 461 local iterations could not recreate it, and the
+    # re-run of the same commit passed. The variation was not the bug -- losing
+    # the ability to reproduce the bug was.
+    #
+    # NX_BUILD_SEED still overrides this, so a variation sweep is a decision
+    # rather than an accident.
+    os.environ.setdefault("NX_BUILD_SEED", "20261106")
     project_argv = ["ai-obf", "build", payload,
                     "--portable", "--section-split", "--section-count", sections,
                     "--zips", zips, "--opt-level", level, "--skip-cloud",

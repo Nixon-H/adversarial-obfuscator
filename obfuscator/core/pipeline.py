@@ -3954,6 +3954,21 @@ def build_parser():
 
 
 def main():
+    # NX_BUILD_SEED makes a `ai-obf build` reproducible. Several transforms pick
+    # which functions to touch with random.random(), so an unseeded build is a
+    # different artefact every run -- and a CI failure becomes impossible to
+    # recreate. scripts/build.py already honoured this variable; the CLI here did
+    # not, which is why a red matrix job could not be reproduced locally from the
+    # same commit.
+    #
+    # Only the environment can set it: there is no flag, so a normal interactive
+    # build keeps its per-build variation unless someone asks for a fixed seed.
+    _seed_env = os.environ.get("NX_BUILD_SEED")
+    if _seed_env:
+        try:
+            random.seed(int(_seed_env))
+        except (TypeError, ValueError):
+            pass
     # Explicit log setup: the redirect used to happen as a side effect
     # of importing obfuscator.core.utils, which created and truncated
     # ./build.log in whatever directory the tool happened to run in.
