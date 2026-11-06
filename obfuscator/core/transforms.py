@@ -2279,6 +2279,19 @@ class DynamicCodeGenerator(ast.NodeTransformer):
         # so this preserves semantics for closures that only READ their free
         # variables; `nonlocal` writes are rejected below, where the namespace
         # injection could not reproduce their effect.
+        # The analysis is STATIC: it sees names bound by the enclosing function's
+        # code, not names injected at run time through exec() or globals(). Both
+        # of those were measured rather than assumed, and neither diverges:
+        #
+        #   exec("x = 5") in the enclosing scope then `return x` from the nested
+        #   def raises NameError in the ORIGINAL too -- exec writes to locals(),
+        #   never to a cell, so there is no closure to lose;
+        #
+        #   globals()['y'] = 7 then `return y` works in both, because the template
+        #   execs with dict(globals()) at CALL time and sees the same global.
+        #
+        # So there is no gap here to close. A name the static pass cannot see is a
+        # name the original could not have resolved as a closure either.
         _free = set()
         if _depth > 0:
             _free = _free_names(node, _scope_stack)
