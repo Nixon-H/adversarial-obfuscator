@@ -2775,6 +2775,20 @@ def is_pure_function(node):
         return False            # a decorator can do anything at definition time
     if node.name.endswith("_impl"):
         return False            # already wrapped
+    # NO PARAMETERS. This is the argument-safety rule, and it is not optional.
+    #
+    # A pure function can still be non-deterministic given its arguments: a
+    # parameter that is an iterator is CONSUMED by the first call, so the second
+    # and third see an exhausted one and disagree. `all_equal(iterable)` did
+    # exactly that and destroyed a correct artefact in the artefact gate.
+    #
+    # Proving a function does not mutate its arguments is not enough either -- the
+    # caller may pass something already consumed, or something whose __eq__ lies.
+    # With no parameters there is nothing to be handed, so the three calls differ
+    # only if the code itself differs.
+    _a = node.args
+    if _a.args or _a.posonlyargs or _a.kwonlyargs or _a.vararg or _a.kwarg:
+        return False
     for child in ast.walk(node):
         if isinstance(child, (ast.Global, ast.Nonlocal)):
             return False

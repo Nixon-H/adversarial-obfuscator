@@ -77,12 +77,14 @@ def test_the_redundancy_wrapper_is_wired_only_for_pure_functions():
     from obfuscator.core.transforms import is_pure_function
     import ast
 
-    pure = "def add(a, b):\n    x = a + b\n    return x\nprint(add(2, 3))\n"
+    # Parameterless: a parameter could be an iterator the first call consumes,
+    # which is how `all_equal(iterable)` destroyed a correct artefact.
+    pure = "def total():\n    x = 2\n    return x + 3\nprint(total())\n"
     impure = ("def bump(c):\n    c.append(1)\n    return len(c)\n"
               "print(bump([1]))\n")
 
     out, _ = apply_ast_mutation(pure, {"opt_level": 0, "temporal_redundancy": True})
-    assert "add_impl" in out, "a pure function must be wrapped"
+    assert "total_impl" in out, "a pure function must be wrapped"
 
     out2, _ = apply_ast_mutation(impure, {"opt_level": 0, "temporal_redundancy": True})
     assert "bump_impl" not in out2, (
@@ -106,8 +108,10 @@ def test_the_wrapper_reaches_the_full_pipeline_output():
     import re
     from obfuscator.core.pipeline import build_pipeline
 
-    src = open(os.path.join(ROOT, "tests", "fixtures", "portable",
-                            "secure_demo_source.py"), encoding="utf-8").read()
+    src = ("def total():\n"
+           "    x = 2\n"
+           "    return x + 3\n"
+           "RESULT = total()\n")
     out = build_pipeline(src, extra_options={"opt_level": 0})
 
     wrappers = re.findall(r"\*args, \*\*kwargs\):\s*\n\s*\S+ = ", out)
