@@ -183,3 +183,38 @@ def test_a_capturing_closure_is_transformed_only_when_its_free_names_are_injecta
     ns2 = {}
     exec(compile(out2, "<nonlocal-jit>", "exec"), ns2)
     assert ns2["RESULT"] == [1, 2]
+
+
+def test_a_capturing_closure_is_transformed_on_the_rust_jit_path_too():
+    """Both JIT backends must inject a closure's free names.
+
+    The Rust path had no namespace-injection hook, so a capturing closure replayed
+    there would have seen its free variables as undefined -- which is why that path
+    skipped them. The compiled/interpreted tail is shared with the Python path, so
+    one injection covers every way it executes the template.
+    """
+    import ast
+    import random
+    from obfuscator.core.transforms import DynamicCodeGenerator
+
+    src = (
+        "def make(fn):\n"
+        "    store = {}\n"
+        "    def wrapper(*args):\n"
+        "        a = 1\n"
+        "        b = a + 1\n"
+        "        if args not in store:\n"
+        "            store[args] = fn(*args)\n"
+        "        return store[args]\n"
+        "    return wrapper\n"
+        "@make\n"
+        "def sq(n):\n"
+        "    return n * n\n"
+        "RESULT = sq(3)\n"
+    )
+    random.seed(1)
+    out = ast.unparse(DynamicCodeGenerator(use_rust_jit=True).visit(ast.parse(src)))
+    assert "_ns['fn']" in out, "the Rust path must inject the captured name"
+    ns = {}
+    exec(compile(out, "<rust-closure-jit>", "exec"), ns)
+    assert ns["RESULT"] == 9

@@ -2295,10 +2295,6 @@ class DynamicCodeGenerator(ast.NodeTransformer):
         _free = set()
         if _depth > 0:
             _free = _free_names(node, _scope_stack)
-            if _free and self.use_rust_jit:
-                # The Rust path has no namespace-injection hook, so a capturing
-                # closure would replay with its free names undefined.
-                return node
         # A function that declares `nonlocal` (or `global`) cannot be round-tripped
         # through this transform: it unparses the function and exec()s the text in
         # a NEW scope, where the enclosing cell the `nonlocal` refers to does not
@@ -2315,7 +2311,7 @@ class DynamicCodeGenerator(ast.NodeTransformer):
                 template_name = f'_nx_tmpl_{self.template_counter}'
                 self.template_counter += 1
                 if self.use_rust_jit:
-                    wrapper = self._make_rust_jit_wrapper(node, func_code, key, template_name)
+                    wrapper = self._make_rust_jit_wrapper(node, func_code, key, template_name, _free)
                 else:
                     wrapper = self._make_python_jit_wrapper(node, func_code, key, template_name, _free)
                 return ast.parse(wrapper).body
@@ -2364,8 +2360,19 @@ def {node.name}(*args, **kwargs):
     return _ns[_defs[-1]](*args, **kwargs)
 '''
 
-    def _make_rust_jit_wrapper(self, node, func_code, key, template_name):
+    def _make_rust_jit_wrapper(self, node, func_code, key, template_name, free_names=None):
         b64_code = base64.b64encode(func_code.encode()).decode()
+        # Same injection as the Python wrapper. The wrapper is emitted in the same
+        # scope as the original def, so a captured name is resolvable here and must
+        # be placed in the exec namespace before the template runs -- otherwise a
+        # closure replayed through this path would see its free variables as
+        # undefined. The compiled/interpreted tail below is shared, so one
+        # injection covers every way this path executes the template.
+        free_inject = ""
+        if free_names:
+            free_inject = (
+                "".join("    _ns[%r] = %s\n" % (n, n) for n in sorted(free_names))
+            )
         # Same reason as the Python wrapper: the encoded blob is a LOCAL so the
         # wrapper is valid inside a class body as well as at module scope.
         return f'''
@@ -2406,7 +2413,7 @@ def {node.name}(*args, **kwargs):
     # Same reason as the Python wrapper: module globals must be visible, or any
     # function touching a global fails with NameError inside the template.
     _ns = dict(globals())
-    exec(_compiled, _ns)
+{free_inject}    exec(_compiled, _ns)
     import ast as _ast_jit
     _defs = [n.name for n in _ast_jit.parse(_code).body
              if isinstance(n, (_ast_jit.FunctionDef, _ast_jit.AsyncFunctionDef))]
