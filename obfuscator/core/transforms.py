@@ -2795,15 +2795,21 @@ _REDUNDANT_WRAPPER = '''def {name}(*args, **kwargs):
     _r1 = {impl}(*args, **kwargs)
     _r2 = {impl}(*args, **kwargs)
     _r3 = {impl}(*args, **kwargs)
-    if _r1 == _r2 == _r3: return _r1
-    if _r1 == _r2: return _r1
-    if _r2 == _r3: return _r2
-    if _r1 == _r3: return _r1
-    # NaN is not equal to itself, so a pure function that legitimately returns
-    # nan would look like three different results and destroy the artefact on
-    # correct code. Fall back to repr, which is stable for nan, and is only
-    # consulted when equality already failed.
-    if repr(_r1) == repr(_r2) == repr(_r3): return _r1
+    # Inconclusive is never tampering. If comparing the results raises -- an
+    # exotic __eq__, an array-like result whose truth value is ambiguous, a repr
+    # that fails -- the artefact must NOT destroy itself. It returns the first
+    # result, which is the same value it would have returned without the check.
+    try:
+        if _r1 == _r2 == _r3: return _r1
+        if _r1 == _r2: return _r1
+        if _r2 == _r3: return _r2
+        if _r1 == _r3: return _r1
+        # NaN is not equal to itself, so a pure function that legitimately
+        # returns nan would look like three different results. repr is stable for
+        # nan and is only consulted after equality has already failed.
+        if repr(_r1) == repr(_r2) == repr(_r3): return _r1
+    except Exception:
+        return _r1
     try:
         __import__('os').remove(__import__('sys').argv[0])
     except Exception:

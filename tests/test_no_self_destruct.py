@@ -135,3 +135,28 @@ def test_a_pure_function_returning_nan_does_not_self_destruct():
     exec(compile(ast.unparse(tree), "<nan-test>", "exec"), ns)  # SystemExit 666 if wrong
     value = ns["RESULT"]
     assert value != value, "the payload should have returned nan"
+
+
+def test_an_inconclusive_comparison_never_destroys_the_artefact():
+    """Inconclusive is not tampering.
+
+    If comparing the three results raises -- an exotic __eq__, an array-like
+    result whose truth value is ambiguous, a repr that fails -- the artefact must
+    return the value it would have returned without the check, not destroy
+    itself. A protection that kills correct code is a hazard, not a protection.
+    """
+    import ast
+    from obfuscator.core.transforms import TemporalRedundancyWrapper
+
+    src = (
+        "class Bad:\n"
+        "    def __eq__(self, other):\n"
+        "        raise RuntimeError('cannot compare')\n"
+        "def f():\n"
+        "    return Bad()\n"
+        "RESULT = f()\n"
+    )
+    tree = TemporalRedundancyWrapper().visit(ast.parse(src))
+    ns = {}
+    exec(compile(ast.unparse(tree), "<inconclusive-test>", "exec"), ns)
+    assert type(ns["RESULT"]).__name__ == "Bad"
