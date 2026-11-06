@@ -26,6 +26,7 @@ jobs:
     # had run and the suite could rot for weeks unnoticed.
     runs-on: ubuntu-latest
     strategy:
+      max-parallel: 8
       fail-fast: false
       matrix:
         # Version matrix (py_matrix.py SUPPORTED): NYSER1 fields, loader

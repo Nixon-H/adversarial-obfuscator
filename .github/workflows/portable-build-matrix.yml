@@ -18,6 +18,7 @@ jobs:
     name: build+run ${{ matrix.os }} py${{ matrix.python }}
     runs-on: ${{ matrix.os }}
     strategy:
+      max-parallel: 12
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]

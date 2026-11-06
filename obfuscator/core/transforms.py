@@ -2357,7 +2357,21 @@ def {node.name}(*args, **kwargs):
     import ast as _ast_jit
     _defs = [n.name for n in _ast_jit.parse(_code).body
              if isinstance(n, (_ast_jit.FunctionDef, _ast_jit.AsyncFunctionDef))]
-    return _ns[_defs[-1]](*args, **kwargs)
+    # The name is emitted as a literal because the template defines exactly that
+    # name, and the wrapper is emitted with the same name, so the two are in step
+    # by construction. The AST scan stays as the fallback for a renaming pass that
+    # rewrites one and not the other.
+    #
+    # The scan ALONE raised IndexError: list index out of range when the replayed
+    # source parsed to no top-level def at all -- an intermittent flag-tier failure
+    # in constructs_source that could not be reproduced locally. A lookup that can
+    # be empty must never be indexed without checking.
+    _nm = "{node.name}"
+    if _nm not in _ns:
+        if not _defs:
+            raise NameError("JIT template for %r defined no function" % _nm)
+        _nm = _defs[-1]
+    return _ns[_nm](*args, **kwargs)
 '''
 
     def _make_rust_jit_wrapper(self, node, func_code, key, template_name, free_names=None):
@@ -2417,7 +2431,21 @@ def {node.name}(*args, **kwargs):
     import ast as _ast_jit
     _defs = [n.name for n in _ast_jit.parse(_code).body
              if isinstance(n, (_ast_jit.FunctionDef, _ast_jit.AsyncFunctionDef))]
-    return _ns[_defs[-1]](*args, **kwargs)
+    # The name is emitted as a literal because the template defines exactly that
+    # name, and the wrapper is emitted with the same name, so the two are in step
+    # by construction. The AST scan stays as the fallback for a renaming pass that
+    # rewrites one and not the other.
+    #
+    # The scan ALONE raised IndexError: list index out of range when the replayed
+    # source parsed to no top-level def at all -- an intermittent flag-tier failure
+    # in constructs_source that could not be reproduced locally. A lookup that can
+    # be empty must never be indexed without checking.
+    _nm = "{node.name}"
+    if _nm not in _ns:
+        if not _defs:
+            raise NameError("JIT template for %r defined no function" % _nm)
+        _nm = _defs[-1]
+    return _ns[_nm](*args, **kwargs)
 '''
 class EnhancedJunkInserter(ast.NodeTransformer):
     def __init__(self):
