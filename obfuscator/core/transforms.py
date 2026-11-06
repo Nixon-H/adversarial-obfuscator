@@ -2272,8 +2272,20 @@ class DynamicCodeGenerator(ast.NodeTransformer):
         # its own locals and module globals, which the template's dict(globals())
         # provides -- replays exactly like a top-level one. Excluding all of them
         # threw away the whole of that population for a reason that did not apply.
-        if _depth > 0 and _captures_enclosing(node, _scope_stack):
-            return node
+        # A nested function that CAPTURES can still be transformed: the wrapper is
+        # emitted in the same scope as the original, so the captured names are
+        # resolvable there and can be injected into the exec namespace before the
+        # template runs. Reading a cell is the same as reading its current value,
+        # so this preserves semantics for closures that only READ their free
+        # variables; `nonlocal` writes are rejected below, where the namespace
+        # injection could not reproduce their effect.
+        _free = set()
+        if _depth > 0:
+            _free = _free_names(node, _scope_stack)
+            if _free and self.use_rust_jit:
+                # The Rust path has no namespace-injection hook, so a capturing
+                # closure would replay with its free names undefined.
+                return node
         # A function that declares `nonlocal` (or `global`) cannot be round-tripped
         # through this transform: it unparses the function and exec()s the text in
         # a NEW scope, where the enclosing cell the `nonlocal` refers to does not
@@ -2292,13 +2304,22 @@ class DynamicCodeGenerator(ast.NodeTransformer):
                 if self.use_rust_jit:
                     wrapper = self._make_rust_jit_wrapper(node, func_code, key, template_name)
                 else:
-                    wrapper = self._make_python_jit_wrapper(node, func_code, key, template_name)
+                    wrapper = self._make_python_jit_wrapper(node, func_code, key, template_name, _free)
                 return ast.parse(wrapper).body
             except Exception: pass
         return node
 
-    def _make_python_jit_wrapper(self, node, func_code, key, template_name):
+    def _make_python_jit_wrapper(self, node, func_code, key, template_name, free_names=None):
         encrypted = ''.join(chr(ord(c) ^ key) for c in func_code)
+        # Free variables of a capturing closure. The wrapper is emitted in the
+        # same scope as the original def, so each name is resolvable here and can
+        # be placed in the exec namespace before the template is compiled.
+        # Sorted for reproducibility; the loop is only emitted when non-empty.
+        free_inject = ""
+        if free_names:
+            free_inject = (
+                "".join("    _ns[%r] = %s\n" % (n, n) for n in sorted(free_names))
+            )
         # The encrypted template is a LOCAL, declared inside the function.
         #
         # It used to be a module-level assignment emitted alongside the def. In a
@@ -2317,7 +2338,7 @@ def {node.name}(*args, **kwargs):
     # "NameError: name '_nx_M' is not defined" inside "<jit_N>" the moment it was
     # called, and the traceback pointed at the template rather than the payload.
     _ns = dict(globals())
-    _compiled = builtins.compile(_code, "<jit_{template_name}>", "exec")
+{free_inject}    _compiled = builtins.compile(_code, "<jit_{template_name}>", "exec")
     builtins.exec(_compiled, _ns)
     # Take the name from the TEMPLATE SOURCE, not from a literal in the wrapper
     # and not from a namespace delta (which is empty when the module already
@@ -2777,24 +2798,30 @@ def _bound_names(node):
     return bound
 
 
-def _captures_enclosing(node, enclosing):
-    """True when the body loads a name bound by an enclosing function scope.
+def _free_names(node, enclosing):
+    """Names the body loads that an enclosing function scope binds.
 
-    That is the exact condition under which replaying the source in a fresh
-    namespace is unsound: the template runs with dict(globals()), which provides
-    module globals but not the enclosing function's locals or cells.
+    These are the closure's free variables. Replaying the source with only
+    dict(globals()) leaves them undefined -- the template provides module globals
+    but not the enclosing function's locals or cells.
     """
     if not enclosing:
-        return False
+        return set()
     frame = set()
     for scope in enclosing:
         frame |= scope
     own = _bound_names(node)
-    for child in ast.walk(node):
-        if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
-            if child.id in frame and child.id not in own:
-                return True
-    return False
+    return {
+        child.id
+        for child in ast.walk(node)
+        if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load)
+        and child.id in frame and child.id not in own
+    }
+
+
+def _captures_enclosing(node, enclosing):
+    """True when the body loads a name bound by an enclosing function scope."""
+    return bool(_free_names(node, enclosing))
 
 
 #: Builtins that are pure: same arguments, same result, no observable effect.

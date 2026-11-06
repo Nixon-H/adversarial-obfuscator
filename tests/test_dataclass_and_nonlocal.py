@@ -130,3 +130,56 @@ def test_nested_function_coverage_follows_actual_capture():
     assert _captures_enclosing(by_name["closes_over_fn"], stack) is True
     assert _captures_enclosing(by_name["standalone"], stack) is False, (
         "a nested function that captures nothing must remain eligible")
+
+
+def test_a_capturing_closure_is_transformed_only_when_its_free_names_are_injectable():
+    """Closures that READ their free variables are transformable now.
+
+    The wrapper is emitted in the same scope as the original def, so each free
+    name is resolvable there and can be placed in the exec namespace before the
+    template runs. Reading a cell is the same as reading its current value, so
+    semantics are preserved.
+
+    `nonlocal` stays excluded: the replayed copy would rebind a local instead of
+    the cell, which the injection cannot reproduce.
+    """
+    import ast
+    import random
+    from obfuscator.core.transforms import DynamicCodeGenerator
+
+    read_only = (
+        "def cached(fn):\n"
+        "    store = {}\n"
+        "    def wrapper(*args):\n"
+        "        if args not in store:\n"
+        "            store[args] = fn(*args)\n"
+        "        return store[args]\n"
+        "    return wrapper\n"
+        "@cached\n"
+        "def sq(n):\n"
+        "    return n * n\n"
+        "RESULT = sq(3)\n"
+    )
+    random.seed(1)
+    out = ast.unparse(DynamicCodeGenerator().visit(ast.parse(read_only)))
+    ns = {}
+    exec(compile(out, "<closure-jit>", "exec"), ns)
+    assert ns["RESULT"] == 9, "the transformed closure must still compute correctly"
+    assert "sq(3)" not in out or "_ns[" in out, "the closure should have been wrapped"
+
+    writes_nonlocal = (
+        "def make_counter():\n"
+        "    count = 0\n"
+        "    def bump():\n"
+        "        nonlocal count\n"
+        "        count += 1\n"
+        "        return count\n"
+        "    return bump\n"
+        "C = make_counter()\n"
+        "RESULT = [C(), C()]\n"
+    )
+    random.seed(1)
+    out2 = ast.unparse(DynamicCodeGenerator().visit(ast.parse(writes_nonlocal)))
+    ns2 = {}
+    exec(compile(out2, "<nonlocal-jit>", "exec"), ns2)
+    assert ns2["RESULT"] == [1, 2]
