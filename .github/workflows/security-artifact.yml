@@ -47,7 +47,9 @@ name: Security artifact validation
 #   matching build.yml / shadow-build.yml conventions. `if: always()` so
 #   failure logs upload precisely when they matter most.
 
-on: [push, pull_request]
+on:
+  workflow_call:
+  workflow_dispatch:
 
 # Least privilege: read-only token (this job publishes nothing).
 permissions:

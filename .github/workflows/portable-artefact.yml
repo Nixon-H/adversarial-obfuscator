@@ -5,12 +5,8 @@ name: Portable artefact (all OS)
 # portability, and rebuilding per-OS would test the builder instead.
 
 on:
-  push:
-    branches: [master, main]
-  pull_request:
-    branches: [master, main]
+  workflow_call:
   workflow_dispatch:
-
 permissions:
   contents: read
 

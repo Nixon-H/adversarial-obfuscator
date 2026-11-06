@@ -1,15 +1,11 @@
 name: CI
 
 on:
-  push:
-  pull_request:
+  workflow_call:
   # Weekly run: the full matrix (the `test` job has no schedule guard any
   # more) plus the ruff-pin review. A green cron now means the suite is
   # green, not merely that lint-pin ran.
-  schedule:
-    - cron: "0 6 * * 1"    # Mondays
   workflow_dispatch:
-
 # Least privilege: the default GITHUB_TOKEN for this workflow is read-only.
 # Jobs that need more must declare it explicitly per-job.
 permissions:

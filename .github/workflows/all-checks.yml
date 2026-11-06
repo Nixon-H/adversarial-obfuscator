@@ -1,0 +1,97 @@
+name: All checks
+
+# ONE entry point. Every push runs everything.
+#
+# Previously each workflow owned its own trigger, so what a push actually proved
+# depended on which files happened to have a push trigger -- the exhaustive flag
+# tiers ran only on release, the deep matrix and fuzz sweep only weekly, and two
+# tiers only by hand. A green push therefore said much less than it looked like it
+# said.
+#
+# Now the individual workflows are reusable (workflow_call) and this file owns the
+# triggers. A push runs all of them; the weekly schedule runs the time-drift tiers
+# that only make sense on a clock; workflow_dispatch runs them on demand.
+#
+# Concurrency: this is deliberately the only workflow that fans out, so the total
+# load is unchanged from what the separate triggers used to produce -- it is just
+# no longer spread across files that could disagree about what "push" means.
+
+on:
+  push:
+    branches: [master, main]
+  schedule:
+    # Weekly, Monday 03:17 UTC. The time-drift tiers (deep matrix, fuzz sweep,
+    # real-clock gating) are the ones a schedule actually adds signal to.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: all-checks-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # --- correctness -------------------------------------------------------
+  ci:
+    name: CI (lint, unit suite, supply chain)
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Nixon Build Pipeline
+    uses: ./.github/workflows/build.yml
+
+  cross-platform:
+    name: Cross-Platform
+    uses: ./.github/workflows/cross-platform.yml
+
+  shadow:
+    name: Shadow Compiler Build
+    uses: ./.github/workflows/shadow-build.yml
+
+  # --- artefacts ---------------------------------------------------------
+  portable-artefact:
+    name: Portable artefact (all OS)
+    uses: ./.github/workflows/portable-artefact.yml
+
+  portable-matrix:
+    name: Portable build matrix
+    uses: ./.github/workflows/portable-build-matrix.yml
+
+  portable-deep:
+    name: Portable deep matrix
+    uses: ./.github/workflows/portable-deep-matrix.yml
+
+  security-artifact:
+    name: Security artifact validation
+    uses: ./.github/workflows/security-artifact.yml
+
+  # --- flag isolation, every tier ---------------------------------------
+  # These used to be release-only, weekly-only or manual. They are the long tail
+  # that actually proves each of the ~274 flags works on its own, so they belong
+  # in the per-push set.
+  flag-isolation:
+    name: Flag isolation (sharded)
+    uses: ./.github/workflows/flag-isolation.yml
+
+  flag-platform-matrix:
+    name: Flag x platform matrix
+    uses: ./.github/workflows/flag-platform-matrix.yml
+
+  flag-all-platforms:
+    name: Flag on all platforms (tier A1)
+    uses: ./.github/workflows/flag-all-platforms.yml
+
+  flag-all-pythons:
+    name: Flag on all Pythons (tier A2)
+    uses: ./.github/workflows/flag-all-pythons.yml
+
+  flag-exhaustive:
+    name: Flag exhaustive (tier B)
+    uses: ./.github/workflows/flag-exhaustive.yml
+
+  # --- scheduled signal --------------------------------------------------
+  fuzz-weekly:
+    name: Fuzz sweep
+    uses: ./.github/workflows/fuzz-weekly.yml

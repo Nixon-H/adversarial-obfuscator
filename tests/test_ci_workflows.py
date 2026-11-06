@@ -91,3 +91,46 @@ def test_the_audit_fails_on_a_broken_artefact(tmp_path):
     assert proc.returncode != 0, "the audit exited 0 against a broken artefact"
     assert "12 checks, 12 failed" in out, (
         "expected every check to fail; got:\n" + out[-2000:])
+
+
+def test_one_workflow_owns_the_push_trigger_and_calls_all_the_others():
+    """A push must run everything, and only one file may decide that.
+
+    The tiers used to have their own triggers: the exhaustive flag runs were
+    release-only, the deep matrix and fuzz sweep weekly-only, two tiers manual.
+    What a green push proved therefore depended on which file happened to have a
+    push trigger. This asserts the merged arrangement that replaces it.
+    """
+    import yaml
+
+    umbrella_path = os.path.join(WORKFLOWS, "all-checks.yml")
+    assert os.path.exists(umbrella_path), "the merged entry point is missing"
+    umbrella = yaml.safe_load(open(umbrella_path, encoding="utf-8"))
+    on = umbrella.get(True) or umbrella.get("on") or {}
+    assert "push" in on, "the merged workflow must run on push"
+    assert "schedule" in on, "the time-drift tiers need a scheduled trigger too"
+
+    called = {
+        job["uses"][2:] for job in umbrella["jobs"].values()
+        if str(job.get("uses", "")).startswith("./.")
+    }
+    assert called, "the merged workflow calls nothing"
+
+    # Everything callable must be called, except the entry point itself.
+    others = {
+        ".github/workflows/" + n for n in os.listdir(WORKFLOWS)
+        if n.endswith(".yml") and n != "all-checks.yml"
+    }
+    missing = others - called
+    assert not missing, "workflows never reached from a push: %s" % sorted(missing)
+
+    # And no other file may still claim the push trigger, or a push runs twice.
+    for name in sorted(os.listdir(WORKFLOWS)):
+        if not name.endswith(".yml") or name == "all-checks.yml":
+            continue
+        data = yaml.safe_load(open(os.path.join(WORKFLOWS, name), encoding="utf-8"))
+        on = data.get(True) or data.get("on") or {}
+        if isinstance(on, dict):
+            assert "push" not in on, (
+                "%s still triggers on push; the merged workflow owns that" % name)
+            assert "workflow_call" in on, "%s is not callable from the entry point" % name

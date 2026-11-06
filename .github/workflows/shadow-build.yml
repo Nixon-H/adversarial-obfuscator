@@ -1,14 +1,12 @@
 name: Shadow Compiler Build
 on:
-  push:
-    branches: [master, main]
+  workflow_call:
   workflow_dispatch:
     inputs:
       seed:
         description: 'Build seed (hex). Leave empty for random.'
         required: false
         default: ''
-
 # Least privilege: read-only default token.
 permissions:
   contents: read

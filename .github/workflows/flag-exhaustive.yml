@@ -11,10 +11,8 @@ name: Flags x all platforms x all Pythons (manual + release)
 # stable; it runs manually while stabilising and on every published release.
 
 on:
+  workflow_call:
   workflow_dispatch:
-  release:
-    types: [published]
-
 permissions:
   contents: read
 

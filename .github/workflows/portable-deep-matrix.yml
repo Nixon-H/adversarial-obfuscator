@@ -10,10 +10,8 @@ name: Portable build matrix (deep)
 # job limit.
 
 on:
+  workflow_call:
   workflow_dispatch:
-  schedule:
-    - cron: "0 4 * * 1"
-
 permissions:
   contents: read
 

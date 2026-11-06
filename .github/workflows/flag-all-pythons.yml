@@ -8,10 +8,8 @@ name: Flags x all Python versions (manual + release)
 # Runs manually while stabilising, and automatically on every published release.
 
 on:
+  workflow_call:
   workflow_dispatch:
-  release:
-    types: [published]
-
 permissions:
   contents: read
 

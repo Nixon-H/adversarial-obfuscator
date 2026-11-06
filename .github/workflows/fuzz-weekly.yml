@@ -6,15 +6,13 @@ name: Weekly long fuzz
 # exception type, hang, or sanitizer abort) — file an issue with the
 # artifact input attached.
 on:
-  schedule:
-    - cron: "0 3 * * 0"  # Sundays 03:00 UTC
+  workflow_call:
   workflow_dispatch:
     inputs:
       fuzz_seconds:
         description: "Seconds per target"
         required: false
         default: "600"
-
 # Least privilege: read-only default token (fuzzing only reads the repo).
 permissions:
   contents: read

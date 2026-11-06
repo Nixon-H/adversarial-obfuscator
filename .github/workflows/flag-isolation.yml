@@ -11,6 +11,7 @@ name: Flag isolation (manual)
 # picked up without editing this file.
 
 on:
+  workflow_call:
   workflow_dispatch:
     inputs:
       shards:
@@ -21,7 +22,6 @@ on:
         description: "opt-level used for the isolated builds"
         default: "3"
         required: false
-
 permissions:
   contents: read
 

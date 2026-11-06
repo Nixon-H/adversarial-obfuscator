@@ -10,13 +10,13 @@ name: Flag x platform x Python (manual)
 # stable and this becomes the regression net.
 
 on:
+  workflow_call:
   workflow_dispatch:
     inputs:
       level:
         description: "opt-level for the isolated builds"
         default: "5"
         required: false
-
 permissions:
   contents: read
 
