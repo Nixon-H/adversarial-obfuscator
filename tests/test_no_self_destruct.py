@@ -116,3 +116,22 @@ def test_the_wrapper_reaches_the_full_pipeline_output():
         "protection would be dead code again")
     # And the destructive response is reachable from it.
     assert "argv[0]" in out, "the wrapper has no fault response"
+
+
+def test_a_pure_function_returning_nan_does_not_self_destruct():
+    """NaN != NaN, so a naive equality check would look like tampering.
+
+    A pure function may legitimately return nan. Comparing the three results with
+    == alone would report three different values, and the fault response would
+    destroy the artefact on completely correct code -- exactly the class of false
+    positive that made this protection unusable before.
+    """
+    import ast
+    from obfuscator.core.transforms import TemporalRedundancyWrapper
+
+    src = 'def f():\n    return float("nan")\nRESULT = f()\n'
+    tree = TemporalRedundancyWrapper().visit(ast.parse(src))
+    ns = {"float": float}
+    exec(compile(ast.unparse(tree), "<nan-test>", "exec"), ns)  # SystemExit 666 if wrong
+    value = ns["RESULT"]
+    assert value != value, "the payload should have returned nan"
