@@ -201,14 +201,39 @@ class BGVPolynomial:
 
     @staticmethod
     def ring_multiply_full(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        """Negacyclic product, exact.
+
+        np.convolve accumulates in int64. With q ~ 2**30 and n = 8, eight products
+        of up to 2**60 sum past 2**63 and WRAP SILENTLY:
+
+            exact   9223372071214514208
+            int64   9223372036854775807   -> wrapped to 4611686035607257104
+
+        A wrapped product decrypts to garbage. It happened once in CI and could
+        never be reproduced, because the noise comes from random.SystemRandom() --
+        the overflow needs near-maximal coefficients AND the draw is unseeded, so
+        the failure is rare and unrecordable.
+
+        Python ints are arbitrary precision, so the accumulation is done here and
+        the result is returned as an object array. n is small (8 in the benchmark,
+        a few hundred at most), so the cost is a few thousand Python-level adds.
+        """
         n = len(a)
-        conv = np.convolve(a, b, mode='full')
-        result = np.zeros(n, dtype=np.int64)
-        for i in range(len(conv)):
-            idx = i % n
-            sign = 1 if idx == i else -1
-            result[idx] = result[idx] + sign * int(round(conv[i]))
-        return result
+        al = [int(x) for x in a]
+        bl = [int(x) for x in b]
+        out = [0] * n
+        for i in range(n):
+            ai = al[i]
+            if not ai:
+                continue
+            for j in range(n):
+                prod = ai * bl[j]
+                idx = i + j
+                if idx < n:
+                    out[idx] += prod
+                else:
+                    out[idx - n] -= prod
+        return np.array(out, dtype=object)
 
     @staticmethod
     def ring_add(a: np.ndarray, b: np.ndarray, q: int) -> np.ndarray:
@@ -370,9 +395,19 @@ class BGVScheme:
                   BGVPolynomial.ring_multiply_full(ct0_1, ct1_0)
         c2_full = BGVPolynomial.ring_multiply_full(ct0_1, ct1_1)
         delta = q // t
-        c0 = BGVPolynomial.mod_coeffs(np.round(c0_full.astype(np.float64) / delta).astype(np.int64), q)
-        c1 = BGVPolynomial.mod_coeffs(np.round(c1_full.astype(np.float64) / delta).astype(np.int64), q)
-        c2 = BGVPolynomial.mod_coeffs(np.round(c2_full.astype(np.float64) / delta).astype(np.int64), q)
+        # Exact integer scaling. Converting to float64 first loses the low bits of
+        # a value that can exceed 2**53, which perturbs the rounded quotient -- and
+        # the ring product is now exact, so there is nothing to gain by routing it
+        # through a float.
+        def _scale(x):
+            x = int(x)
+            if x >= 0:
+                return (x + delta // 2) // delta
+            return -(((-x) + delta // 2) // delta)
+
+        c0 = BGVPolynomial.mod_coeffs(np.array([_scale(v) for v in c0_full], dtype=object), q)
+        c1 = BGVPolynomial.mod_coeffs(np.array([_scale(v) for v in c1_full], dtype=object), q)
+        c2 = BGVPolynomial.mod_coeffs(np.array([_scale(v) for v in c2_full], dtype=object), q)
         ct_out = tuple(self._relinearize((c0, c1, c2)))
         if self.error_tracker:
             self.error_tracker.record_mul()
