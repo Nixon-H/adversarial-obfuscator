@@ -2824,6 +2824,19 @@ class TemporalRedundancyWrapper(ast.NodeTransformer):
     Pure only, so calling three times cannot change behaviour -- and a
     disagreement between the three results is therefore a real signal rather than
     a side effect.
+
+    Two costs are inherent to N-version redundancy and are accepted deliberately:
+
+    * **Three times the work.** A wrapped function runs three times, so heavy pure
+      functions cost triple. This is the price of being able to compare results at
+      all; there is no cheaper way to run a program more than once.
+    * **The wrapper is a ``*args, **kwargs`` shim.** Call sites are untouched and
+      keyword arguments still bind, but code that introspects the signature
+      (``inspect.signature``, ``__doc__``, ``__defaults__``) sees the shim rather
+      than the original. Module-level pure functions are the subset where that is
+      least likely to matter.
+
+    Neither cost applies to impure functions, because they are never wrapped.
     """
 
     def __init__(self):
