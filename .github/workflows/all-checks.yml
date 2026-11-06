@@ -30,7 +30,18 @@ permissions:
 
 concurrency:
   group: all-checks-${{ github.ref }}
-  cancel-in-progress: false
+  # SUPERSEDED PUSHES ARE CANCELLED.
+  #
+  # This workflow runs 536 jobs across every OS and Python version, so a run takes
+  # hours. With cancel-in-progress: false, the next push waited for that run to
+  # finish -- and with pushes arriving faster than runs complete, nothing ever
+  # started: two runs sat queued for over an hour with zero jobs scheduled, and
+  # cancelling the stale one unblocked the newer one immediately.
+  #
+  # A push that has been superseded by a newer commit does not need to finish; the
+  # newer commit's run proves the same thing against newer code. Deployments are a
+  # separate concern and this workflow publishes nothing.
+  cancel-in-progress: true
 
 jobs:
   # --- correctness -------------------------------------------------------
