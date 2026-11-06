@@ -4742,7 +4742,7 @@ class {ATTRITION_CLS}:
                 # across the eight threads, eight times the previous default and
                 # still bounded, so the payload always gets the CPU back.
                 # --strict-detections restores the unbounded original.
-                buf_size = (64 * 1024 * 1024) if {VAR_STRICT_DETECTIONS} else (1024 * 1024)
+                buf_size = (16 * 1024 * 1024) if {VAR_STRICT_DETECTIONS} else (1024 * 1024)
                 if _nixon_プラットフォーム플랫폼.system() in ("Linux", "Darwin"):
                     with open("/dev/urandom", "rb") as f:
                         while not {ATTRITION_CLS}._stop_entropy:

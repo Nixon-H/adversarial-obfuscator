@@ -3805,13 +3805,26 @@ def build_parser():
                        help='Embed an owner-supplied watermark message in the loader, '
                             'HMAC-tagged and checked at load time: a stripped or edited '
                             'watermark kills the artifact')
+    # HARDENED BY DEFAULT. The detections below used to be signals unless
+    # --strict-detections was passed, which meant a normal build had the weaker
+    # posture and the stronger one was opt-in. That is the wrong way round for a
+    # protection tool: the default should be the protected artefact.
+    #
+    # The cost of the old default was measured, not assumed: the hardened noise
+    # (64MB per iteration with no pause, eight threads) starved payloads on
+    # Windows and macOS. Its intensity is now bounded just below that point so a
+    # hardened build still runs, while `--fast` keeps the old reduced profile for
+    # anyone who needs the speed.
     build.add_argument('--strict-detections', dest='strict_detections',
-                       action='store_true', default=False,
+                       action='store_true', default=True,
                        help="Make the loader's environment detections (sandbox, "
                             "emulator, debugger frame, geo-fence, licence) "
                             "terminate the artifact instead of only perturbing "
-                            "it (off by default: a detection is a signal, not "
-                            "a gate)")
+                            "it (ON by default; use --fast to opt out)")
+    build.add_argument('--fast', dest='strict_detections', action='store_false',
+                       help="Build the reduced-protection profile: detections only "
+                            "warn, entropy noise and rdtsc pressure are lower. "
+                            "Faster builds and faster artefacts; weaker posture.")
     build.add_argument('--debug-dump-raw', dest='debug_dump_raw',
                        action='store_true', default=False,
                        help='Compile the plaintext-dump debug aid into the artifact '

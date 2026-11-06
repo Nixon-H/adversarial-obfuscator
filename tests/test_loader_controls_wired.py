@@ -144,8 +144,13 @@ def test_strict_detections_is_accepted_by_the_cli():
     parser, _subs = build_parser()
     args = parser.parse_args(["build", "p.py", "--strict-detections"])
     assert args.strict_detections is True
+    # HARDENED BY DEFAULT: a plain build is the protected artefact, and the
+    # weaker profile is the one that has to be asked for.
     args = parser.parse_args(["build", "p.py"])
-    assert args.strict_detections is False
+    assert args.strict_detections is True, (
+        "a build with no flags must be hardened; the reduced profile is opt-in")
+    args = parser.parse_args(["build", "p.py", "--fast"])
+    assert args.strict_detections is False, "--fast must select the reduced profile"
 
 
 def test_strict_detections_reaches_the_outer_loader():
