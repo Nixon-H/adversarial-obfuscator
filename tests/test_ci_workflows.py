@@ -134,3 +134,37 @@ def test_one_workflow_owns_the_push_trigger_and_calls_all_the_others():
             assert "push" not in on, (
                 "%s still triggers on push; the merged workflow owns that" % name)
             assert "workflow_call" in on, "%s is not callable from the entry point" % name
+
+
+def test_the_heaviest_tiers_are_not_on_every_push():
+    """536 jobs per push starved the pool; the 340 heaviest now run weekly.
+
+    Measured before the split: tier B advanced ~2 jobs per 20 minutes, so a single
+    push needed about 21 hours to finish. A per-push gate that never completes
+    proves less than a weekly one that does -- and the failures it was supposed to
+    catch never surfaced, because the run never got to them.
+
+    Everything is still reachable: the weekly schedule and workflow_dispatch (with
+    full: true) run the complete set.
+    """
+    import yaml
+
+    umbrella = yaml.safe_load(
+        open(os.path.join(WORKFLOWS, "all-checks.yml"), encoding="utf-8"))
+    on = umbrella.get(True) or umbrella.get("on") or {}
+
+    heavy = {"flag-all-platforms", "flag-all-pythons", "flag-exhaustive"}
+    for name in heavy:
+        job = umbrella["jobs"][name]
+        assert "if" in job, "%s must be conditional or it floods every push" % name
+        assert "github.event_name" in job["if"], (
+            "%s must key off the trigger, not a flag that is always true" % name)
+
+    # The light tiers still run on every push.
+    for name in ("ci", "build", "cross-platform", "portable-matrix", "flag-isolation"):
+        assert "if" not in umbrella["jobs"][name], (
+            "%s must keep running on every push" % name)
+
+    # And a dispatch can ask for everything.
+    inputs = (on.get("workflow_dispatch") or {}).get("inputs") or {}
+    assert "full" in inputs, "there must be a way to request the complete set"

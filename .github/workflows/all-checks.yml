@@ -24,6 +24,11 @@ on:
     # real-clock gating) are the ones a schedule actually adds signal to.
     - cron: "17 3 * * 1"
   workflow_dispatch:
+    inputs:
+      full:
+        description: "Also run the three heaviest flag tiers (they run weekly otherwise)"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -92,14 +97,35 @@ jobs:
 
   flag-all-platforms:
     name: Flag on all platforms (tier A1)
+    # ~340 of the 536 jobs live in the three tiers below. Running them on
+    # every push starved the pool: measured at ~2 jobs per 20 minutes, which
+    # is ~21 hours to finish one push. They keep full coverage weekly and
+    # on demand (and on a release), which is where a 274-flag cross product
+    # actually belongs -- a per-push gate that never finishes proves less
+    # than a weekly one that does.
+    if: github.event_name != 'push' || github.event.inputs.full == 'true'
     uses: ./.github/workflows/flag-all-platforms.yml
 
   flag-all-pythons:
     name: Flag on all Pythons (tier A2)
+    # ~340 of the 536 jobs live in the three tiers below. Running them on
+    # every push starved the pool: measured at ~2 jobs per 20 minutes, which
+    # is ~21 hours to finish one push. They keep full coverage weekly and
+    # on demand (and on a release), which is where a 274-flag cross product
+    # actually belongs -- a per-push gate that never finishes proves less
+    # than a weekly one that does.
+    if: github.event_name != 'push' || github.event.inputs.full == 'true'
     uses: ./.github/workflows/flag-all-pythons.yml
 
   flag-exhaustive:
     name: Flag exhaustive (tier B)
+    # ~340 of the 536 jobs live in the three tiers below. Running them on
+    # every push starved the pool: measured at ~2 jobs per 20 minutes, which
+    # is ~21 hours to finish one push. They keep full coverage weekly and
+    # on demand (and on a release), which is where a 274-flag cross product
+    # actually belongs -- a per-push gate that never finishes proves less
+    # than a weekly one that does.
+    if: github.event_name != 'push' || github.event.inputs.full == 'true'
     uses: ./.github/workflows/flag-exhaustive.yml
 
   # --- scheduled signal --------------------------------------------------
