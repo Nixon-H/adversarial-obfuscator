@@ -190,14 +190,11 @@ class BGVPolynomial:
 
     @staticmethod
     def ring_multiply(a: np.ndarray, b: np.ndarray, q: int) -> np.ndarray:
-        n = len(a)
-        conv = np.convolve(a, b, mode='full')
-        result = np.zeros(n, dtype=np.int64)
-        for i in range(len(conv)):
-            idx = i % n
-            sign = 1 if idx == i else -1
-            result[idx] = (result[idx] + sign * int(round(conv[i]))) % q
-        return BGVPolynomial.mod_coeffs(result, q)
+        # Same int64 overflow as ring_multiply_full: convolving in int64 wraps
+        # before the mod, so reducing afterwards cannot recover the value. One
+        # exact implementation, reduced mod q for this entry point.
+        return BGVPolynomial.mod_coeffs(
+            BGVPolynomial.ring_multiply_full(a, b), q)
 
     @staticmethod
     def ring_multiply_full(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -399,11 +396,18 @@ class BGVScheme:
         # a value that can exceed 2**53, which perturbs the rounded quotient -- and
         # the ring product is now exact, so there is nothing to gain by routing it
         # through a float.
+        # Round HALF TO EVEN, matching np.round. Rounding half away from zero
+        # differs from it at exact ties, and a tie is not impossible -- it made the
+        # plaintext come out one off roughly once in a few hundred multiplies,
+        # which is the flake that could not be reproduced.
         def _scale(x):
-            x = int(x)
-            if x >= 0:
-                return (x + delta // 2) // delta
-            return -(((-x) + delta // 2) // delta)
+            quo, rem = divmod(int(x), delta)      # floor division
+            twice = 2 * rem
+            if twice > delta:
+                return quo + 1
+            if twice < delta:
+                return quo
+            return quo + (quo & 1)               # exact tie -> nearest even
 
         c0 = BGVPolynomial.mod_coeffs(np.array([_scale(v) for v in c0_full], dtype=object), q)
         c1 = BGVPolynomial.mod_coeffs(np.array([_scale(v) for v in c1_full], dtype=object), q)

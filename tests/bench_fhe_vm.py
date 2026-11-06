@@ -10,6 +10,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import numpy as np
 from scripts.fhe_vm.scheme import BGVParameters, BGVScheme
 from scripts.fhe_vm.circuit import FHECircuit, CircuitEvaluator
 from scripts.fhe_vm.executor import FHEExecutor
@@ -130,3 +131,68 @@ class TestFHEBenchmarks:
             return executor.decrypt_result(ct_r)
         result = benchmark(do_fhe)
         assert result == (5 * 6 + 3) % BENCH_PARAMS.t
+
+
+class TestBGVArithmeticIsExact:
+    """The two defects that made this suite fail roughly once in a few hundred runs.
+
+    Neither could be reproduced from the failing run: the noise comes from
+    random.SystemRandom(), so the draw that broke it was gone. Pinning the
+    arithmetic directly is the only way to keep them fixed.
+    """
+
+    def test_ring_multiply_full_does_not_wrap_int64(self):
+        """Eight products of ~2**60 sum past 2**63. np.convolve wrapped silently."""
+        from scripts.fhe_vm.scheme import BGVPolynomial
+
+        n, q = 8, 1073741827
+        a = np.array([q - 1] * n, dtype=np.int64)
+        b = np.array([q - 1] * n, dtype=np.int64)
+
+        expected = [0] * n
+        for i in range(n):
+            for j in range(n):
+                idx = i + j
+                if idx < n:
+                    expected[idx] += (q - 1) * (q - 1)
+                else:
+                    expected[idx - n] -= (q - 1) * (q - 1)
+
+        assert sum(expected) > 2 ** 63 - 1, "this case no longer crosses the int64 edge"
+        got = [int(x) for x in BGVPolynomial.ring_multiply_full(a, b)]
+        assert got == expected, "ring product wrapped; it must be exact"
+
+    def test_delta_scaling_matches_exact_rational_rounding(self):
+        """The scaling must not route a >2**53 value through float64.
+
+        np.round(x / delta) converts to double first and loses the low bits, so it
+        disagrees with exact rounding exactly where the scheme needs it to be
+        right. Fraction is the oracle: round() on a Fraction rounds half to even
+        on the exact rational, with no float involved.
+
+        delta is odd here, so an exact .5 tie cannot occur -- the disagreement is
+        purely the float conversion, which is what the implementation removed.
+        """
+        from fractions import Fraction
+
+        delta = 1073741827 // 7
+        assert delta % 2 == 1, "an even delta would introduce real ties"
+
+        def scale(x):
+            quo, rem = divmod(int(x), delta)
+            twice = 2 * rem
+            if twice > delta:
+                return quo + 1
+            if twice < delta:
+                return quo
+            return quo + (quo & 1)
+
+        probes = [k for k in range(-400, 400)]
+        probes += [10 ** k for k in range(1, 19)]
+        probes += [-(10 ** k) for k in range(1, 19)]
+        probes += [2 ** 53, 2 ** 53 + 1, 2 ** 62, 2 ** 62 + 12345]
+
+        for k in probes:
+            for x in (k * delta + k, k * delta - k):
+                assert scale(x) == round(Fraction(x, delta)), (
+                    "scaling disagrees with exact rounding at x=%d" % x)
