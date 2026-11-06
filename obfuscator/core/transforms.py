@@ -2253,15 +2253,26 @@ class DynamicCodeGenerator(ast.NodeTransformer):
     def visit_FunctionDef(self, node):
         _depth = getattr(self, "_fn_depth", 0)
         self._fn_depth = _depth + 1
+        _scope_stack = getattr(self, "_scope_stack", None)
+        if _scope_stack is None:
+            _scope_stack = self._scope_stack = []
+        _scope_stack.append(_bound_names(node))
         try:
             self.generic_visit(node)
         finally:
             self._fn_depth = _depth
+            _scope_stack.pop()
         # A NESTED function may capture a free variable from its enclosing scope;
         # replaying its source in a fresh exec namespace leaves that name
         # undefined. Seen as "NameError: name 'fn' is not defined" for a decorator
-        # wrapper that closes over `fn`. Only top-level functions are safe.
-        if _depth > 0:
+        # wrapper that closes over `fn`.
+        #
+        # But that only applies to functions that ACTUALLY capture something. A
+        # nested function that references nothing from the enclosing scopes -- only
+        # its own locals and module globals, which the template's dict(globals())
+        # provides -- replays exactly like a top-level one. Excluding all of them
+        # threw away the whole of that population for a reason that did not apply.
+        if _depth > 0 and _captures_enclosing(node, _scope_stack):
             return node
         # A function that declares `nonlocal` (or `global`) cannot be round-tripped
         # through this transform: it unparses the function and exec()s the text in
@@ -2744,6 +2755,47 @@ class ExtendedArgBreaker(ast.NodeTransformer):
 # purity test comes first and the wrapper is emitted only for functions that pass
 # it.
 # ---------------------------------------------------------------------------
+
+def _bound_names(node):
+    """Names this function binds in its OWN scope (params, assignments, defs)."""
+    bound = set()
+    a = node.args
+    for arg in list(getattr(a, "posonlyargs", [])) + list(a.args) + list(a.kwonlyargs):
+        bound.add(arg.arg)
+    if a.vararg:
+        bound.add(a.vararg.arg)
+    if a.kwarg:
+        bound.add(a.kwarg.arg)
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and not isinstance(child.ctx, ast.Load):
+            bound.add(child.id)
+        elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if child is not node:
+                bound.add(child.name)
+        elif isinstance(child, ast.ExceptHandler) and child.name:
+            bound.add(child.name)
+    return bound
+
+
+def _captures_enclosing(node, enclosing):
+    """True when the body loads a name bound by an enclosing function scope.
+
+    That is the exact condition under which replaying the source in a fresh
+    namespace is unsound: the template runs with dict(globals()), which provides
+    module globals but not the enclosing function's locals or cells.
+    """
+    if not enclosing:
+        return False
+    frame = set()
+    for scope in enclosing:
+        frame |= scope
+    own = _bound_names(node)
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
+            if child.id in frame and child.id not in own:
+                return True
+    return False
+
 
 #: Builtins that are pure: same arguments, same result, no observable effect.
 _PURE_BUILTINS = frozenset({

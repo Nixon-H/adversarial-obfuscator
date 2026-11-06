@@ -98,3 +98,35 @@ def test_global_declaration_still_binds(level):
     out, _ = apply_ast_mutation(GLOBAL, {"opt_level": level})
     compile(out, "<gl>", "exec")
     assert _run(out, "<gl%d>" % level) == EXPECTED_GLOBAL
+
+
+def test_nested_function_coverage_follows_actual_capture():
+    """Nested functions are eligible unless they really do capture.
+
+    The JIT transform replays a function's source in a fresh namespace built from
+    dict(globals()), which provides module globals but not an enclosing function's
+    locals. Excluding every nested function for that reason discarded the whole
+    population, including the ones that capture nothing and replay perfectly well.
+
+    The gate is now the actual condition: does the body load a name bound by an
+    enclosing function scope?
+    """
+    import ast
+    from obfuscator.core.transforms import _bound_names, _captures_enclosing
+
+    src = (
+        "def outer():\n"
+        "    fn = 1\n"
+        "    def closes_over_fn():\n"
+        "        return fn\n"
+        "    def standalone():\n"
+        "        y = 2\n"
+        "        return y\n"
+    )
+    outer = ast.parse(src).body[0]
+    stack = [_bound_names(outer)]
+    by_name = {n.name: n for n in outer.body if isinstance(n, ast.FunctionDef)}
+
+    assert _captures_enclosing(by_name["closes_over_fn"], stack) is True
+    assert _captures_enclosing(by_name["standalone"], stack) is False, (
+        "a nested function that captures nothing must remain eligible")
