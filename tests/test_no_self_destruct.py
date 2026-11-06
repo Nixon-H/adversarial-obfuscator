@@ -13,6 +13,9 @@ destroyed -- leaving a 0-byte artefact that ran silently forever after
 The protection is real, so it was not deleted: --strict-detections restores the
 three-call comparison and the self-destruct. These tests pin both halves.
 """
+import os
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from obfuscator.core.sources import TRIPLE_REDUNDANCY_SOURCE as REDUNDANCY
 
 
@@ -89,3 +92,27 @@ def test_the_redundancy_wrapper_is_wired_only_for_pure_functions():
     # The purity test itself, directly.
     assert is_pure_function(ast.parse(pure).body[0]) is True
     assert is_pure_function(ast.parse(impure).body[0]) is False
+
+
+def test_the_wrapper_reaches_the_full_pipeline_output():
+    """End to end, not just the mutation step.
+
+    An earlier attempt to verify this grepped a BUILT ARTEFACT for the wrapper
+    and found none -- but the payload is packed inside the artefact, so its text
+    is not greppable at all. The wrapper was there the whole time. This test
+    looks at the assembler's output, which is where the payload still exists as
+    source.
+    """
+    import re
+    from obfuscator.core.pipeline import build_pipeline
+
+    src = open(os.path.join(ROOT, "tests", "fixtures", "portable",
+                            "secure_demo_source.py"), encoding="utf-8").read()
+    out = build_pipeline(src, extra_options={"opt_level": 0})
+
+    wrappers = re.findall(r"\*args, \*\*kwargs\):\s*\n\s*\S+ = ", out)
+    assert wrappers, (
+        "no purity-gated redundancy wrapper in the assembled payload; the "
+        "protection would be dead code again")
+    # And the destructive response is reachable from it.
+    assert "argv[0]" in out, "the wrapper has no fault response"
