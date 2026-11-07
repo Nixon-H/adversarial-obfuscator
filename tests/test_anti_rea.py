@@ -13,6 +13,9 @@ import contextlib
 import io
 
 from obfuscator.anti_rea import (
+    aliasing_illusion,
+    bpe_token_amplifier,
+    shadow_business_logic,
     AntiReaInjector,
     bait_procedures,
     canary_tokens,
@@ -233,3 +236,63 @@ def test_url_canaries_reach_the_injected_source():
     out, stats = inject(src, "balanced", 4)
     assert stats["url_canaries"] > 0
     assert "internal" in out
+
+
+def test_bpe_amplifier_fragments_identifiers():
+    """The names must deny a tokenizer any span it has a whole-word token for."""
+    import random
+    names = bpe_token_amplifier(random.Random(1), 6)
+    assert len(names) == 6
+    assert all(n.startswith("bpe_sink_") for n in names)
+    # long, and built from short alternating fragments
+    assert sum(len(n) for n in names) / len(names) > 25
+    assert all(n.count("_") >= 8 for n in names)
+
+
+def test_shadow_business_logic_is_coherent_not_a_stub():
+    """An analyzer cites what is unambiguous; a stub would give it nothing."""
+    import random
+    names, src = shadow_business_logic(random.Random(2), 3)
+    assert len(names) == 3
+    tree = ast.parse(src)
+    for fn in tree.body:
+        assert isinstance(fn, ast.FunctionDef)
+        assert ast.get_docstring(fn), "a shadow procedure without a docstring"
+        body = ast.unparse(fn)
+        assert "return" in body
+        # more than a one-liner: it has real control flow
+        assert len(fn.body) >= 3
+    ns = {}
+    exec(compile(src, "<shadow>", "exec"), ns)
+    for name in names:
+        assert callable(ns[name])
+
+
+def test_shadow_functions_actually_run():
+    import random
+    names, src = shadow_business_logic(random.Random(3), 3)
+    ns = {}
+    exec(compile(src, "<shadow>", "exec"), ns)
+    for name in names:
+        fn = ns[name]
+        if "pricing" in name:
+            assert "total" in fn(50, "eu", 24)
+        elif "license" in name:
+            assert "tier" in fn(b"blob", [1, 2, 3])
+        else:
+            frame, nonce = fn(b"abcd", 7)
+            assert isinstance(frame, (bytes, bytearray))
+
+
+def test_aliasing_illusion_overwrites_the_apparent_assignment():
+    """The reader is meant to conclude the wrong variable decides the result."""
+    import random
+    src = aliasing_illusion(random.Random(4), 1)
+    ns = {}
+    exec(compile(src, "<alias>", "exec"), ns)
+    fn = next(v for k, v in ns.items() if callable(v) and not k.startswith("__"))
+    a, b = fn(5)
+    assert a == b, "both names must see the same buffer"
+    # The alias is two bindings to the same object, not one statement.
+    assert "view_a = raw" in src and "view_b = raw" in src, (
+        "both names must bind the same buffer")

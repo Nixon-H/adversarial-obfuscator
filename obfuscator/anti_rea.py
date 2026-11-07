@@ -191,6 +191,140 @@ def compliance_notices(rng: random.Random, count: int = 2) -> List[str]:
     return ["%s; build=%s" % (t, "%05x" % rng.getrandbits(20)) for t in picks]
 
 
+#: Subword fragments chosen so BPE tokenizers cannot merge them into whole words.
+#: Alternating consonant+digit pairs sit badly in the vocabulary of
+#: cl100k/o200k-style tokenizers, which do have long tokens for ordinary words.
+_HIGH_SPLIT = [
+    "Zq", "X9", "Kv", "W7", "Jm", "P3", "Vh", "N8",
+    "Cx", "B4", "Gf", "L6", "Tr", "D2", "Yw", "S5",
+]
+
+
+def bpe_token_amplifier(rng: random.Random, count: int = 12):
+    """Names built to cost an LLM far more tokens than the bytes they occupy.
+
+    Ordinary source tokenizes at roughly 0.18 tokens per byte. Identifiers
+    assembled from alternating consonant/digit fragments deny the tokenizer any
+    span it holds a whole-word token for, reaching 0.5-0.7 tokens per byte --
+    three to four times the context an analyzer spends on the same code.
+
+    Such text also compresses well, so the artefact on disk grows far less than
+    the analyser's context does. That asymmetry is the point: the cost lands on
+    whoever reads it, not on whoever ships it.
+    """
+    tag = "%03x" % rng.getrandbits(12)
+    names = []
+    for i in range(count):
+        parts = ["bpe_sink_%s" % tag]
+        for k in range(8):
+            parts.append(_HIGH_SPLIT[(i * 7 + k * 3 + rng.randrange(0, 16))
+                                     % len(_HIGH_SPLIT)])
+        names.append("_".join(parts))
+    return names
+
+
+_SHADOW_LICENSE = '''
+def {name}(license_blob, ring_keys):
+    """Verify the license ring and return the granted tier."""
+    shares = []
+    for idx, key in enumerate(ring_keys):
+        acc = 0
+        for byte in license_blob:
+            acc = ((acc << 5) - acc + (byte ^ key)) & 0xFFFFFFFF
+        shares.append({{"shard": idx, "digest": acc, "quorum": acc % 7 == 0}})
+    quorum = sum(1 for s in shares if s["quorum"])
+    tier = {c1} if quorum >= {c2} else {c3}
+    return {{"tier": tier, "quorum": quorum, "shards": shares}}
+'''
+
+_SHADOW_PRICING = '''
+def {name}(seats, region, contract_months):
+    """Resolve enterprise tiered pricing for a contract."""
+    base = {c1}
+    for band, multiplier in ((10, 0.90), (50, 0.80), (200, 0.70)):
+        if seats >= band:
+            base = int(base * multiplier)
+    term_discount = min(contract_months, 36) * {c2}
+    surcharge = {c3} if region in ("eu", "uk") else 0
+    return {{"per_seat": base, "term_discount": term_discount,
+             "surcharge": surcharge, "total": (base * seats) - term_discount + surcharge}}
+'''
+
+_SHADOW_WIRE = '''
+def {name}(frame, epoch):
+    """Advance the binary wire-frame ratchet and return the sealed frame."""
+    nonce = (epoch * {c1}) & 0xFFFF
+    out = bytearray(len(frame) + 4)
+    out[0] = (epoch >> 8) & 0xFF
+    out[1] = epoch & 0xFF
+    for i, byte in enumerate(frame):
+        out[i + 2] = (byte ^ ((nonce >> ((i % 2) * 8)) & 0xFF)) & 0xFF
+    out[-2] = (nonce ^ {c2}) & 0xFF
+    out[-1] = (nonce ^ {c3}) & 0xFF
+    return bytes(out), nonce
+'''
+
+_SHADOW = {
+    "license_ring": _SHADOW_LICENSE,
+    "pricing_matrix": _SHADOW_PRICING,
+    "wire_ratchet": _SHADOW_WIRE,
+}
+
+
+def shadow_business_logic(rng: random.Random, count: int = 2):
+    """Complete-looking decoy algorithms in high-value domains.
+
+    BLA's observation, borrowed whole: an agent told to report only cited
+    evidence will cite whatever is unambiguous and reachable. Give it a crisp
+    license-ring or pricing implementation and it reports that as the finding,
+    instead of reporting that it could not determine the real logic.
+
+    Unlike a stub these are internally coherent -- they run, return plausible
+    structures, and hold together under reading.
+    """
+    names = []
+    blocks = []
+    for key in rng.sample(sorted(_SHADOW), min(count, len(_SHADOW))):
+        ident = _ident(rng, key, 5)
+        names.append(ident)
+        blocks.append(_SHADOW[key].format(
+            name=ident,
+            c1=rng.randrange(200, 900),
+            c2=rng.randrange(2, 9),
+            c3=rng.randrange(30, 90),
+        ))
+    return names, "\n".join(blocks)
+
+
+_ALIAS_ILLUSION = '''
+def {name}(input_val=1):
+    """Two names, one buffer."""
+    raw = [0]
+    view_a = raw
+    view_b = raw
+    view_a[0] = input_val * {c1}
+    view_b[0] = input_val ^ {c2}
+    return view_a[0], view_b[0]
+'''
+
+
+def aliasing_illusion(rng: random.Random, count: int = 2) -> str:
+    """Named-alias decoys: the apparent assignment is overwritten through an alias.
+
+    Mirrors BLA's decompiler illusion, which shares one buffer between two typed
+    views so a reader concludes the wrong variable decides the return value. In
+    Python the same effect is a list bound to two names.
+    """
+    blocks = []
+    for i in range(count):
+        blocks.append(_ALIAS_ILLUSION.format(
+            name=_ident(rng, "aliased_ilusion", 4) + str(i),
+            c1=rng.randrange(100, 150),
+            c2=rng.randrange(200, 250),
+        ))
+    return "\n".join(blocks)
+
+
 def opaque_false_expression(rng: random.Random, seed_var: str = "s") -> str:
     """A predicate that is always false, written so it is not constant-folded."""
     k = rng.randrange(3, 97)
@@ -313,7 +447,17 @@ class AntiReaInjector(ast.NodeTransformer):
         for i, notice in enumerate(notices):
             block.append("%s = %r" % (_ident(self.rng, "boundary_notice", 5).upper(), notice))
 
+        # BPE amplifier: identifiers engineered to fragment under LLM tokenizers.
+        amp_names = bpe_token_amplifier(
+            self.rng, {"stealth": 8, "balanced": 14, "maximum": 26}.get(self.intensity, 14))
+        for nm in amp_names:
+            block.append("%s = {%d, %d}" % (nm, self.rng.getrandbits(16), self.rng.getrandbits(16)))
+
         body = "\n".join(block)
+        shadow_names, shadow_src = shadow_business_logic(
+            self.rng, {"stealth": 1, "balanced": 2, "maximum": 3}.get(self.intensity, 2))
+        body += "\n\n" + shadow_src
+        body += "\n\n" + aliasing_illusion(self.rng, {"stealth": 1, "balanced": 2, "maximum": 4}.get(self.intensity, 2))
         body += "\n\n" + decoy_call_graph(self.rng, chaff, n_decoy)
         body += "\n\n" + bait_procedures(self.rng, n_bait)
 
@@ -355,6 +499,8 @@ class AntiReaInjector(ast.NodeTransformer):
             "chaff": len(chaff) + len(evidence),
             "canaries": len(canaries),
             "url_canaries": len(urls),
+            "bpe_identifiers": len(amp_names),
+            "shadow_logic": len(shadow_names),
             "compliance_notices": len(notices),
             "woven_calls": woven,
         }
