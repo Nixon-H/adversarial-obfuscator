@@ -2879,6 +2879,11 @@ def _VERIFY_INTEGRITY():
         # itself, which is why the old unconditional version had no call sites.
         # Hardened by default; --fast turns it off with the rest of the profile.
         'temporal_redundancy': bool(getattr(args, 'strict_detections', True)),
+        # Counter-REA shields (ported from BLA): poison, exhaust and muddle an
+        # automated analyzer. On with the hardened profile; intensity follows
+        # --anti-rea-level.
+        'anti_rea': bool(getattr(args, 'anti_rea', True)),
+        'anti_rea_level': str(getattr(args, 'anti_rea_level', 'balanced')),
         'func_transform': not getattr(args, 'native', False),
         'reflection': not getattr(args, 'native', False),
         'hwid': str(getattr(args, 'hwid', '') or ''),
@@ -3830,6 +3835,16 @@ def build_parser():
                             "emulator, debugger frame, geo-fence, licence) "
                             "terminate the artifact instead of only perturbing "
                             "it (ON by default; use --fast to opt out)")
+    build.add_argument('--anti-rea', dest='anti_rea', action='store_true',
+                       default=True,
+                       help="Counter-REA shields: architecture-mirage chaff, canary "
+                            "credentials, evidence-contract poison, a decoy call "
+                            "graph and high-salience bait procedures (ON by default)")
+    build.add_argument('--no-anti-rea', dest='anti_rea', action='store_false',
+                       help="Skip the counter-REA shields")
+    build.add_argument('--anti-rea-level', dest='anti_rea_level',
+                       choices=['stealth', 'balanced', 'maximum'], default='balanced',
+                       help="How much decoy material the counter-REA shields emit")
     build.add_argument('--fast', dest='strict_detections', action='store_false',
                        help="Build the reduced-protection profile: detections only "
                             "warn, entropy noise and rdtsc pressure are lower. "

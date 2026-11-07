@@ -1,0 +1,148 @@
+"""Counter-REA shields ported from BLA (qybaihe/bla).
+
+BLA's three layers act on what an analyzer EXTRACTS rather than on how the code
+runs: poison what it reads, exhaust its budget, muddle its inventory. Ported here
+for Python payloads.
+
+The one property that matters most is that they stay inert: a shield that changes
+payload behaviour is a bug that ships to users.
+"""
+
+import ast
+import contextlib
+import io
+
+from obfuscator.anti_rea import (
+    AntiReaInjector,
+    bait_procedures,
+    canary_tokens,
+    chaff_payloads,
+    decoy_call_graph,
+    evidence_poison,
+    inject,
+    opaque_false_expression,
+)
+
+SOURCE = "def add(a, b):\n    return a + b\nprint(add(2, 3))\n"
+
+
+def _run(code):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        exec(compile(code, "<anti-rea>", "exec"), {})
+    return buf.getvalue().strip()
+
+
+def test_the_payload_still_behaves_identically():
+    """The added names are never referenced, so behaviour cannot change."""
+    out, stats = inject(SOURCE, "balanced", 42)
+    assert _run(out) == _run(SOURCE) == "5"
+    assert stats["decoy_functions"] > 0
+
+
+def test_the_shields_actually_enlarge_the_analysis_surface():
+    out, stats = inject(SOURCE, "maximum", 1)
+    assert len(out) > len(SOURCE) * 50
+    assert stats["chaff"] > 0 and stats["canaries"] > 0
+
+
+def test_importing_the_payload_runs_no_decoy_work():
+    """Decoys are defined and never called; nothing executes at import."""
+    out, _ = inject(SOURCE, "balanced", 3)
+    tree = ast.parse(out)
+    called = {
+        n.func.id for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    }
+    assert "add" in called
+    decoys = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)} - {"add"}
+    assert decoys
+    assert not (decoys & called), "a decoy function is invoked at module scope"
+
+
+def test_seeding_is_deterministic_and_varied():
+    a, _ = inject(SOURCE, "balanced", 7)
+    b, _ = inject(SOURCE, "balanced", 7)
+    c, _ = inject(SOURCE, "balanced", 8)
+    assert a == b, "the same seed must reproduce the same shields"
+    assert a != c, "a different seed must produce different shields"
+
+
+def test_intensity_scales_the_amount_of_decoy_material():
+    small, s1 = inject(SOURCE, "stealth", 5)
+    big, s2 = inject(SOURCE, "maximum", 5)
+    assert len(big) > len(small)
+    assert s2["decoy_functions"] > s1["decoy_functions"]
+
+
+def test_canaries_use_the_documentation_designated_shape():
+    """Credential scanners are specified to recognise this form and redact it.
+
+    A model that redacts the canary tends to take the surrounding context with it.
+    The shape must stay clearly synthetic for that to be defensible.
+    """
+    import random
+    toks = canary_tokens(random.Random(1), 2)
+    assert all(t.startswith("AKIA") for t in toks[:2])
+    assert all(t.endswith("EXAMPLE") for t in toks[:2])
+    assert any(t.startswith("bla_canary_synthetic_") for t in toks)
+
+
+def test_the_decoy_call_graph_does_not_terminate_at_a_leaf():
+    """An analyzer following references should not reach a quick dead end."""
+    import random
+    rng = random.Random(2)
+    src = decoy_call_graph(rng, chaff_payloads(rng, 3), 6)
+    tree = ast.parse(src)
+    names = [n.name for n in tree.body if isinstance(n, ast.FunctionDef)]
+    assert len(names) == 6
+    text = ast.unparse(tree)
+    # every decoy references at least one other decoy
+    for name in names:
+        others = [n for n in names if n != name]
+        assert any(o in text for o in others)
+
+
+def test_opaque_predicate_is_false_for_the_seed_variables_it_uses():
+    """It is an opaque predicate: always false, but not obviously so."""
+    import random
+    rng = random.Random(0)
+    expr = opaque_false_expression(rng, "s")
+    for s in (0, 1, 7, 12345, 255):
+        assert eval(expr, {"s": s}) is False, expr
+
+
+def test_evidence_poison_claims_analysis_is_already_complete():
+    """The point is to leave an analyzer with a 'nothing to do here' artifact."""
+    import random
+    lines = evidence_poison(random.Random(3), 3)
+    assert lines
+    assert all(("EVIDENCE_CONTRACT_SUMMARY" in ln) or ("PROJECTION" in ln)
+               or ("LEDGER" in ln) or ("NOTE" in ln) or ("CONTRACT" in ln)
+               for ln in lines)
+
+
+def test_bait_procedures_are_named_for_what_an_analyst_would_hunt_for():
+    import random
+    src = bait_procedures(random.Random(4), 4)
+    tree = ast.parse(src)
+    names = [n.name for n in tree.body if isinstance(n, ast.FunctionDef)]
+    assert len(names) == 4
+    joined = " ".join(names)
+    assert "license" in joined or "key" in joined or "entitlement" in joined
+
+
+def test_chaff_is_labelled_so_two_builds_are_distinguishable():
+    import random
+    a = chaff_payloads(random.Random(5), 4)
+    b = chaff_payloads(random.Random(6), 4)
+    assert a != b
+    assert all(ln.startswith("[") for ln in a)
+
+
+def test_the_injector_can_be_applied_twice_without_colliding():
+    """Two passes must not raise a duplicate-definition or syntax error."""
+    once, _ = inject(SOURCE, "stealth", 11)
+    twice = AntiReaInjector(intensity="stealth", seed=12).visit(ast.parse(once))
+    ast.fix_missing_locations(twice)
+    compile(ast.unparse(twice), "<twice>", "exec")

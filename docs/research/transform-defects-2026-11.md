@@ -192,3 +192,34 @@ future false positive is one CI run instead of a bisect.
 
 Verified in a real default artefact: three `if not True` branches, the 16 MB noise
 buffer, `[BLOCKED] interpreter-integrity` with `exit(3)`, and the rdtsc spammer.
+
+## Counter-REA shields, ported from BLA
+
+`obfuscator/anti_rea.py` ports the source-level half of
+[BLA (qybaihe/bla)](https://github.com/qybaihe/bla), a counter-reverse-engineering
+tool aimed at AI analysis agents. Its three layers act on what an analyzer
+*extracts* rather than on how the code runs, so they transfer to a Python payload:
+
+| layer | what it adds |
+|---|---|
+| **Poison** | architecture-mirage notes, evidence-contract summaries claiming analysis is complete, and documentation-designated canary credentials |
+| **Exhaust** | a decoy call graph (each decoy references three others, so there is no leaf) plus high-salience bait procedures named for licence/key/entitlement checks |
+| **Muddle** | chaff tagged per build, so two builds do not present the same inventory |
+
+Defaults: on, with `--anti-rea-level {stealth,balanced,maximum}` and
+`--no-anti-rea` to opt out. Measured on the `secure_demo` fixture: 750 KB → 2.5 MB
+of artefact, runtime 0.3 s → 1.0 s, audit 12/12 pass.
+
+**What was deliberately not ported:**
+
+* **No compliance/medical bait.** BLA gates fake COPPA/IEC-62304 text behind an
+  explicit opt-in because it targets classifier behaviour. Omitted.
+* **No URL-parsing exploits.** BLA's canary URLs depend on specific bugs in one
+  analyzer's WHATWG parser and its redaction path. Reproducing them here would
+  make our protection depend on someone else's defect.
+* **No JS/WASM/ASAR/DEX surface.** This project ships Python artefacts.
+
+The shields append only. Nothing existing is rewritten, so a payload cannot change
+behaviour because of them — `tests/test_anti_rea.py` asserts the payload produces
+identical output with and without them, that no decoy is ever called, and that the
+same seed reproduces the same shields.

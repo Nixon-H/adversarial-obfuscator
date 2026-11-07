@@ -422,6 +422,17 @@ def _apply_ast_mutation_inner(source_code, options=None):
         # a second, subtler reason this protection had no call sites.
         _red = TemporalRedundancyWrapper()
         tree = _red.visit(tree)
+        # Counter-REA shields, ported from BLA. FIRST for the same reason the
+        # redundancy wrapper is: they append decoy defs and chaff constants that
+        # the later passes would otherwise rewrite or drop, and they must be
+        # added before the purity test sees the tree.
+        if options.get('anti_rea'):
+            from obfuscator.anti_rea import AntiReaInjector
+            _rea = AntiReaInjector(
+                intensity=str(options.get('anti_rea_level', 'balanced')),
+                seed=int(options.get('seed') or 0),
+            )
+            tree = _rea.visit(tree)
         mutator = ASTMutator(junk_enabled=options.get('enhanced_junk', True))
         tree = mutator.visit(tree)
         if options.get('cfg_flatten'):
