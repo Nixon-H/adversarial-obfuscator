@@ -15,6 +15,8 @@ import io
 from obfuscator.anti_rea import (
     aliasing_illusion,
     bpe_token_amplifier,
+    crash_trace_decoys,
+    diagnostic_rabbit_holes,
     shadow_business_logic,
     AntiReaInjector,
     bait_procedures,
@@ -296,3 +298,39 @@ def test_aliasing_illusion_overwrites_the_apparent_assignment():
     # The alias is two bindings to the same object, not one statement.
     assert "view_a = raw" in src and "view_b = raw" in src, (
         "both names must bind the same buffer")
+
+
+def test_crash_trace_decoys_look_like_native_faults():
+    """A crash-driven localisation loop should terminate on the decoy handler."""
+    import random
+    names, src = crash_trace_decoys(random.Random(1), 3)
+    assert len(names) == 3
+    ns = {}
+    exec(compile(src, "<crash>", "exec"), ns)
+    for name in names:
+        assert callable(ns[name])
+        assert isinstance(ns[name](0), str)
+    assert any(tag in src for tag in ("SIGSEGV", "EXC_BAD_ACCESS", "VSOCK", "0xC0000409"))
+
+
+def test_diagnostics_describe_a_broken_tool_not_a_broken_payload():
+    """The rabbit hole is that the ANALYZER's environment looks broken."""
+    import random
+    names, src = diagnostic_rabbit_holes(random.Random(2), 3)
+    assert len(names) == 3
+    ns = {}
+    exec(compile(src, "<diag>", "exec"), ns)
+    for name in names:
+        entry = ns[name]()
+        assert set(entry) == {"subsystem", "error_class", "system_code", "message"}
+        assert isinstance(entry["system_code"], int)
+    lowered = src.lower()
+    assert any(tool in lowered for tool in
+               ("pdb", "py-spy", "objdump", "gdb", "lldb", "decompiler"))
+
+
+def test_diagnostic_decoys_are_inert():
+    """They must not raise, print, or touch the filesystem."""
+    import random
+    _, src = diagnostic_rabbit_holes(random.Random(3), 6)
+    assert "open(" not in src and "print(" not in src

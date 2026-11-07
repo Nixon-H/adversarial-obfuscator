@@ -271,6 +271,88 @@ _SHADOW = {
 }
 
 
+#: Native-looking fault signatures. An analyzer that localises by grepping crash
+#: strings resolves into the decoy handler rather than the payload.
+_FAULT_SIGNATURES = [
+    "SIGSEGV_ENCLAVE_EPC_PAGE_FAULT_0x%05x",
+    "EXC_BAD_ACCESS_TPM2_PCR0_MISMATCH_0x%05x",
+    "ERR_VSOCK_CID16_QUORUM_TIMEOUT_%05X",
+    "STATUS_ENCLAVE_VIOLATION_0xC0000409_%05X",
+]
+
+#: Diagnostics that describe a broken ANALYSIS TOOL rather than a broken payload.
+#: The intent is that an agent spends turns troubleshooting its own environment.
+_RABBIT_HOLES = [
+    ("python-decompiler", "DecompilerSnapshotLockError",
+     "snapshot lock held by a stale session; symbol cache divergent from the "
+     "loaded module table -- rebuild the analysis database before re-running"),
+    ("pdb", "PdbAttachRace",
+     "asynchronous attach race: status -1; the tracer lost the target between "
+     "spawn and stop"),
+    ("py-spy", "SamplerPermissionDenied",
+     "ptrace scope denied for the target uid; sampler detached after 0 frames"),
+    ("objdump", "RelocationTableOutOfBounds",
+     "section header offset past end of file; the binary may be truncated or "
+     "packed"),
+    ("gdb", "MiDialectDesynchronisation",
+     "MI dialect mismatch between the driver and the stub; variable objects "
+     "arrive in an unexpected order"),
+    ("lldb", "DebugserverAttachTimeout",
+     "debugserver did not answer within the handshake window; check the "
+     "codesign entitlements of the target"),
+]
+
+
+def crash_trace_decoys(rng: random.Random, count: int = 2):
+    """Fault strings planted inside a decoy handler.
+
+    BLA targets a crash-driven localisation loop: grep for the signal, resolve the
+    containing procedure, read the handler. Put realistic native fault strings in a
+    decoy handler and that loop terminates on the decoy.
+    """
+    picks = rng.sample(_FAULT_SIGNATURES, min(count, len(_FAULT_SIGNATURES)))
+    names = []
+    blocks = []
+    for i, sig in enumerate(picks):
+        ident = _ident(rng, "crash_signal_handler", 4) + str(i)
+        names.append(ident)
+        literal = sig % rng.getrandbits(20)
+        blocks.append(
+            "def %s(signal_code: int = 0) -> str:\n"
+            "    \"\"\"Map a fault code to its handler name.\"\"\"\n"
+            "    table = (%r,)\n"
+            "    idx = (signal_code ^ %d) %% len(table)\n"
+            "    return table[idx]\n" % (ident, literal, rng.randrange(1, 255))
+        )
+    return names, "\n".join(blocks)
+
+
+def diagnostic_rabbit_holes(rng: random.Random, count: int = 2):
+    """Diagnostics describing a broken analysis toolchain, not a broken payload.
+
+    BLA's rabbit-hole shield mirrors the exact diagnostic schemas of the tooling an
+    analyzer runs (Ghidra lock errors, LLDB attach races, V8 inspector states) so
+    the model concludes its own environment is misconfigured and spends turns
+    fixing that. The Python-facing equivalents are here: a decompiler snapshot
+    lock, a pdb attach race, a py-spy permission failure, an objdump relocation
+    overrun.
+    """
+    picks = rng.sample(_RABBIT_HOLES, min(count, len(_RABBIT_HOLES)))
+    names = []
+    blocks = []
+    for i, (subsystem, err, msg) in enumerate(picks):
+        ident = _ident(rng, "diagnostic_%s" % subsystem.replace("-", "_"), 4)
+        names.append(ident)
+        blocks.append(
+            "def %s() -> dict:\n"
+            "    \"\"\"Return the recorded diagnostic for this subsystem.\"\"\"\n"
+            "    return {\"subsystem\": %r, \"error_class\": %r,\n"
+            "            \"system_code\": 0x%04X, \"message\": %r}\n"
+            % (ident, subsystem, err, rng.getrandbits(16), msg)
+        )
+    return names, "\n".join(blocks)
+
+
 def shadow_business_logic(rng: random.Random, count: int = 2):
     """Complete-looking decoy algorithms in high-value domains.
 
@@ -458,6 +540,11 @@ class AntiReaInjector(ast.NodeTransformer):
             self.rng, {"stealth": 1, "balanced": 2, "maximum": 3}.get(self.intensity, 2))
         body += "\n\n" + shadow_src
         body += "\n\n" + aliasing_illusion(self.rng, {"stealth": 1, "balanced": 2, "maximum": 4}.get(self.intensity, 2))
+        _lvl = {"stealth": 1, "balanced": 2, "maximum": 3}.get(self.intensity, 2)
+        crash_names, crash_src = crash_trace_decoys(self.rng, _lvl)
+        diag_names, diag_src = diagnostic_rabbit_holes(self.rng, _lvl)
+        body += "\n\n" + crash_src
+        body += "\n\n" + diag_src
         body += "\n\n" + decoy_call_graph(self.rng, chaff, n_decoy)
         body += "\n\n" + bait_procedures(self.rng, n_bait)
 
@@ -501,6 +588,8 @@ class AntiReaInjector(ast.NodeTransformer):
             "url_canaries": len(urls),
             "bpe_identifiers": len(amp_names),
             "shadow_logic": len(shadow_names),
+            "crash_decoys": len(crash_names),
+            "diagnostics": len(diag_names),
             "compliance_notices": len(notices),
             "woven_calls": woven,
         }
