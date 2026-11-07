@@ -175,7 +175,7 @@ def decoy_call_graph(rng: random.Random, chaff: List[str], count: int = 10) -> s
             state=state,
             slot=slot,
             mix=(rng.getrandbits(32) | 1),
-            opaque=opaque_false_expression(rng),
+            opaque=opaque_false_expression(rng, "seed"),
             n1=names[(i + 1) % len(names)],
             n2=names[(i + 3) % len(names)],
             n3=names[(i + 5) % len(names)],
@@ -236,13 +236,99 @@ class AntiReaInjector(ast.NodeTransformer):
         body += "\n\n" + bait_procedures(self.rng, n_bait)
 
         added = ast.parse(body).body
-        node.body.extend(added)
+        # BEFORE the payload body, not after it. A woven call runs at the top of a
+        # real function, and if that function is called by module-level code the
+        # decoy must already exist -- appending put the definitions after the
+        # call and raised NameError. (Found by the behaviour test, not by review.)
+        #
+        # A module docstring and any __future__ imports must stay first, so the
+        # block goes after those and before everything else.
+        insert_at = 0
+        if (node.body and isinstance(node.body[0], ast.Expr)
+                and isinstance(node.body[0].value, ast.Constant)
+                and isinstance(node.body[0].value.value, str)):
+            insert_at = 1
+        while (insert_at < len(node.body)
+               and isinstance(node.body[insert_at], ast.ImportFrom)
+               and node.body[insert_at].module == "__future__"):
+            insert_at += 1
+        node.body[insert_at:insert_at] = added
+
+        # ONLY the call-graph decoys are callable with (0, 0). The bait procedures
+        # take a string token, so weaving those raised
+        # "TypeError: 'int' object is not iterable" -- found by running the result.
+        decoy_names = [
+            n.name for n in added
+            if isinstance(n, ast.FunctionDef)
+            and [a.arg for a in n.args.args][:2] == ["seed", "depth"]
+        ]
+        # Everything we injected -- bait procedures included -- is off limits as a
+        # weave site. Otherwise the bait counted as a "customer function" and got
+        # a decoy call woven into a body that is itself a decoy.
+        injected = {n.name for n in added if isinstance(n, ast.FunctionDef)}
+        woven = weave_decoy_calls(node, decoy_names, self.rng, self.intensity,
+                                  exclude=injected)
         self.stats = {
             "decoy_functions": n_decoy + n_bait,
             "chaff": len(chaff) + len(evidence),
             "canaries": len(canaries),
+            "woven_calls": woven,
         }
         return node
+
+
+#: A decoy body is only ever reached through a woven call, never by name.
+_WOVEN_CALL = "_ = %s(0, 0)"
+
+
+def weave_decoy_calls(tree, decoy_names, rng, intensity="balanced", exclude=None):
+    """Insert calls to the decoy graph into the payload's own functions.
+
+    Appending decoys at module scope is not enough on its own: an analyzer that
+    starts from a real function never reaches them, so the labyrinth is invisible
+    and the decoys are dead weight. BLA weaves a decoy call into each real
+    function body for exactly this reason.
+
+    The call's result is discarded and the decoys are pure arithmetic, so this
+    costs a little runtime and changes no behaviour.
+    """
+    if not decoy_names:
+        return 0
+    # Insert at most one call per function, and only into functions with a body
+    # worth walking -- a one-line function gains nothing but cost.
+    eligible = [
+        n for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and len(n.body) >= 2
+        and not any(isinstance(x, (ast.Yield, ast.YieldFrom)) for x in ast.walk(n))
+    ]
+    # REAL FUNCTIONS FIRST. They are the ones an analyzer starts from; a woven
+    # call placed only among the decoys leaves the labyrinth unreachable from the
+    # payload, which is the same as not weaving at all. (A first attempt shuffled
+    # uniformly and hit only decoys, because the decoys outnumber the payload's
+    # own functions 20 to 2.)
+    # CUSTOMER FUNCTIONS ONLY -- never the decoys themselves. Weaving into a decoy
+    # puts a call with depth=0 at the top of its own body, which resets the
+    # recursion guard every time and recurses until RecursionError. The decoys
+    # already reference three others each; they do not need help reaching each
+    # other.
+    decoy_set = set(decoy_names) | set(exclude or ())
+    targets = [n for n in eligible if n.name not in decoy_set]
+    rng.shuffle(targets)
+
+    share = {"stealth": 0.25, "balanced": 0.5, "maximum": 0.85}.get(intensity, 0.5)
+    # Every customer function gets one in the hardened profile; a subset below it.
+    count = len(targets) if intensity == "maximum" else int(len(targets) * share + 0.5)
+    targets = targets[:count]
+
+    woven = 0
+    for fn in targets:
+        name = rng.choice(decoy_names)
+        stmt = ast.parse(_WOVEN_CALL % name).body[0]
+        ast.copy_location(stmt, fn.body[0])
+        fn.body.insert(0, stmt)
+        woven += 1
+    return woven
 
 
 def inject(source: str, intensity: str = "balanced", seed: int = 0):

@@ -146,3 +146,39 @@ def test_the_injector_can_be_applied_twice_without_colliding():
     twice = AntiReaInjector(intensity="stealth", seed=12).visit(ast.parse(once))
     ast.fix_missing_locations(twice)
     compile(ast.unparse(twice), "<twice>", "exec")
+
+
+def test_decoy_calls_are_woven_into_the_payloads_own_functions():
+    """Appending decoys is not enough: nothing in the real code would reach them.
+
+    An analyzer starts from a named function. If that function never references the
+    labyrinth, the decoys are dead weight. BLA solves this by weaving a decoy call
+    into each customer function, and this port does the same -- but ONLY into
+    customer functions. Weaving into a decoy puts a depth=0 call at the top of its
+    own body, resetting the recursion guard and recursing to RecursionError; and
+    weaving into a bait procedure called it with an int where it expects a string.
+    Both were found by executing the result, not by reading it.
+    """
+    src = ("def add(a, b):\n    total = a + b\n    return total\n"
+           "def mul(a, b):\n    prod = a * b\n    return prod\n"
+           "print(add(2, 3), mul(2, 3))\n")
+    out, stats = inject(src, "maximum", 5)
+    assert stats["woven_calls"] == 2, "both customer functions should be woven"
+
+    tree = ast.parse(out)
+    customer = {n.name: n for n in tree.body
+                if isinstance(n, ast.FunctionDef) and n.name in ("add", "mul")}
+    assert customer, "customer functions vanished"
+    for fn in customer.values():
+        assert ast.unparse(fn.body[0]).startswith("_ = "), (
+            "%s did not receive a decoy call" % fn.name)
+    assert _run(out) == "5 6"
+
+
+def test_weaving_never_changes_the_result():
+    src = ("def add(a, b):\n    total = a + b\n    return total\n"
+           "print(add(2, 3))\n")
+    for level in ("stealth", "balanced", "maximum"):
+        for seed in range(12):
+            out, _ = inject(src, level, seed)
+            assert _run(out) == "5", (level, seed)
