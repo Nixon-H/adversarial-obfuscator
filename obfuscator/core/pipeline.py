@@ -2887,6 +2887,7 @@ def _VERIFY_INTEGRITY():
         # Opt-in, like BLA's --llm-directives: it targets classifier behaviour
         # rather than a property of the artefact.
         'anti_rea_compliance_bait': bool(getattr(args, 'anti_rea_compliance_bait', False)),
+        'anti_rea_cognitive_armor': bool(getattr(args, 'anti_rea_cognitive_armor', False)),
         'func_transform': not getattr(args, 'native', False),
         'reflection': not getattr(args, 'native', False),
         'hwid': str(getattr(args, 'hwid', '') or ''),
@@ -3843,6 +3844,11 @@ def build_parser():
                        help="Counter-REA shields: architecture-mirage chaff, canary "
                             "credentials, evidence-contract poison, a decoy call "
                             "graph and high-salience bait procedures (ON by default)")
+    build.add_argument('--anti-rea-cognitive-armor', dest='anti_rea_cognitive_armor',
+                       action='store_true', default=False,
+                       help="Opt in to canary and in-band analysis-restriction markers "
+                            "that make a classifying model decline to continue. The "
+                            "most aggressive layer; off by default")
     build.add_argument('--anti-rea-compliance-bait', dest='anti_rea_compliance_bait',
                        action='store_true', default=False,
                        help="Opt in to regulatory-sensitivity markers, which steer "

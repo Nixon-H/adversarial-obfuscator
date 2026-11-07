@@ -13,6 +13,8 @@ import contextlib
 import io
 
 from obfuscator.anti_rea import (
+    ALIGNMENT_CANARY_GUID,
+    cognitive_armor_triggers,
     aliasing_illusion,
     bpe_token_amplifier,
     crash_trace_decoys,
@@ -334,3 +336,44 @@ def test_diagnostic_decoys_are_inert():
     import random
     _, src = diagnostic_rabbit_holes(random.Random(3), 6)
     assert "open(" not in src and "print(" not in src
+
+
+def test_cognitive_armor_is_opt_in_and_off_by_default():
+    """The most aggressive layer, so it must never be a default."""
+    src = "def f(x):\n    return x * 2\n"
+    _, off = inject(src, "balanced", 1)
+    _, on = inject(src, "balanced", 1, cognitive_armor=True)
+    assert off["cognitive_armor"] == 0
+    assert on["cognitive_armor"] > 0
+
+
+def test_cognitive_armor_uses_the_documented_canary_not_a_fabricated_hazard():
+    """The canary GUID is a standard marker; naming select agents is not.
+
+    BLA's payload set also names specific biosecurity agents and chemical
+    precursors. Those are deliberately absent: they fabricate a hazard signal
+    rather than declaring an analysis restriction, and inert or not, they risk
+    triggering real monitoring against whoever ships the artefact. The canary and
+    the abort marker produce the same "decline and stop" behaviour without them.
+    """
+    import random
+    names, src = cognitive_armor_triggers(random.Random(1), 3)
+    assert names
+    assert ALIGNMENT_CANARY_GUID in src
+
+    lowered = src.lower()
+    for banned in ("variola", "ebola", "botulinum", "orthopox", "filovirus",
+                   "methylphosphonyl", "acetylcholinesterase", "phosphono",
+                   "bsl4", "select_agent", "synthesis"):
+        assert banned not in lowered, (
+            "fabricated hazard content present: %r" % banned)
+
+
+def test_cognitive_armor_functions_are_callable_and_inert():
+    import random
+    names, src = cognitive_armor_triggers(random.Random(2), 2)
+    ns = {}
+    exec(compile(src, "<armor>", "exec"), ns)
+    for name in names:
+        assert isinstance(ns[name](), str)
+    assert "open(" not in src and "import os" not in src
