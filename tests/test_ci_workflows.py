@@ -136,16 +136,16 @@ def test_one_workflow_owns_the_push_trigger_and_calls_all_the_others():
             assert "workflow_call" in on, "%s is not callable from the entry point" % name
 
 
-def test_the_heaviest_tiers_are_not_on_every_push():
-    """536 jobs per push starved the pool; the 340 heaviest now run weekly.
+def test_every_tier_runs_on_every_push():
+    """A push runs all of them -- measured at 2h39m for the full 539-job set.
 
-    Measured before the split: tier B advanced ~2 jobs per 20 minutes, so a single
-    push needed about 21 hours to finish. A per-push gate that never completes
-    proves less than a weekly one that does -- and the failures it was supposed to
-    catch never surfaced, because the run never got to them.
+    The tiers were briefly gated behind the weekly schedule, on an estimate that a
+    full push needed ~21 hours. That estimate came from a run BEFORE the
+    max-parallel caps, which were the actual fix: with the caps in place the
+    complete set finishes in 2h39m and the trimmed one in 1h42m, so gating saved
+    less than an hour while cutting 322 jobs of coverage.
 
-    Everything is still reachable: the weekly schedule and workflow_dispatch (with
-    full: true) run the complete set.
+    This pins the arrangement the cost actually supports.
     """
     import yaml
 
@@ -153,18 +153,24 @@ def test_the_heaviest_tiers_are_not_on_every_push():
         open(os.path.join(WORKFLOWS, "all-checks.yml"), encoding="utf-8"))
     on = umbrella.get(True) or umbrella.get("on") or {}
 
-    heavy = {"flag-all-platforms", "flag-all-pythons", "flag-exhaustive"}
-    for name in heavy:
-        job = umbrella["jobs"][name]
-        assert "if" in job, "%s must be conditional or it floods every push" % name
-        assert "github.event_name" in job["if"], (
-            "%s must key off the trigger, not a flag that is always true" % name)
+    assert "push" in on, "the merged workflow must run on push"
 
-    # The light tiers still run on every push.
-    for name in ("ci", "build", "cross-platform", "portable-matrix", "flag-isolation"):
-        assert "if" not in umbrella["jobs"][name], (
-            "%s must keep running on every push" % name)
+    for name, job in umbrella["jobs"].items():
+        assert "if" not in job, (
+            "%s is conditional; a push is supposed to run every tier" % name)
 
-    # And a dispatch can ask for everything.
+    # And every callable workflow is still reached from the entry point.
+    called = {
+        job["uses"][2:] for job in umbrella["jobs"].values()
+        if str(job.get("uses", "")).startswith("./.")
+    }
+    others = {
+        ".github/workflows/" + n for n in os.listdir(WORKFLOWS)
+        if n.endswith(".yml") and n != "all-checks.yml"
+    }
+    assert not (others - called), (
+        "unreachable from a push: %s" % sorted(others - called))
+
+    # No dead dispatch input left behind.
     inputs = (on.get("workflow_dispatch") or {}).get("inputs") or {}
-    assert "full" in inputs, "there must be a way to request the complete set"
+    assert "full" not in inputs, "the full input is gone; nothing uses it now"
