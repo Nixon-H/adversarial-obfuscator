@@ -9,6 +9,27 @@ from typing import Dict, Tuple
 _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+def _normalised_ast_dump(tree):
+    """The tree with names, attributes and constant VALUES erased.
+
+    This is the definition of "shape" the diversity tests use: two variants that
+    differ only in identifier spelling or literal contents are the same shape.
+    Everything else -- nesting, statement order, expression structure -- survives.
+    """
+    import copy
+    t = copy.deepcopy(tree)
+    for node in ast.walk(t):
+        for attr in ("id", "name", "arg", "attr"):
+            if hasattr(node, attr):
+                try:
+                    setattr(node, attr, "_")
+                except (AttributeError, TypeError):
+                    pass
+        if isinstance(node, ast.Constant):
+            node.value = "_"
+    return ast.dump(t)
+
+
 def _parse(path_or_source):
     if os.path.exists(path_or_source):
         with open(path_or_source, encoding="utf-8") as f:
@@ -253,6 +274,17 @@ class DiversityMetrics:
         for ntype, count in sorted(types.most_common(15)):
             fingerprint_parts.append(f"node_{ntype}:{count}")
         fingerprint_parts.append(f"depth:{depth}")
+        # The counts above are a SUMMARY: two structurally different variants can
+        # share every one of them, and then they got the same fingerprint. That is
+        # what made this test fail once on CI with "2 distinct fingerprints, 3
+        # distinct shapes" while passing locally -- the variants differed in
+        # arrangement, not in any counted total.
+        #
+        # The normalised AST dump makes the fingerprint faithful: equal
+        # fingerprints now mean equal shapes, which is what the API is used for.
+        fingerprint_parts.append(
+            "ast:" + hashlib.sha256(
+                _normalised_ast_dump(tree).encode()).hexdigest())
 
         raw = "|".join(fingerprint_parts)
         h = hashlib.sha256(raw.encode()).hexdigest()
