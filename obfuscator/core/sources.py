@@ -431,6 +431,7 @@ def _apply_ast_mutation_inner(source_code, options=None):
             _rea = AntiReaInjector(
                 intensity=str(options.get('anti_rea_level', 'balanced')),
                 seed=int(options.get('seed') or 0),
+                compliance_bait=bool(options.get('anti_rea_compliance_bait', False)),
             )
             tree = _rea.visit(tree)
         mutator = ASTMutator(junk_enabled=options.get('enhanced_junk', True))

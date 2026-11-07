@@ -19,8 +19,10 @@ from obfuscator.anti_rea import (
     chaff_payloads,
     decoy_call_graph,
     evidence_poison,
+    compliance_notices,
     inject,
     opaque_false_expression,
+    url_differential_canaries,
 )
 
 SOURCE = "def add(a, b):\n    return a + b\nprint(add(2, 3))\n"
@@ -182,3 +184,52 @@ def test_weaving_never_changes_the_result():
         for seed in range(12):
             out, _ = inject(src, level, seed)
             assert _run(out) == "5", (level, seed)
+
+
+def test_url_canaries_exercise_parser_differentials():
+    """Parser disagreement is the property, not one parser's bug.
+
+    Four constructs that at least two mainstream parsers read differently: a
+    single-slash scheme with userinfo, duplicate query keys, a backslash after the
+    authority, and a userinfo section containing '@'.
+    """
+    import random
+    urls = url_differential_canaries(random.Random(9), 4)
+    assert len(urls) == 4
+    assert any("https:/" in u and "://" not in u for u in urls), "no single-slash form"
+    assert any(u.count("lease=") == 2 for u in urls), "no duplicate query key"
+    assert any("\\@" in u for u in urls), "no backslash-after-authority form"
+    assert any(u.count("@") >= 2 for u in urls), "no multi-@ userinfo form"
+
+
+def test_compliance_bait_is_off_unless_explicitly_requested():
+    """It targets classifier behaviour, so it is the user's decision, not a default."""
+    src = "def f(x):\n    return x * 2\n"
+    _, off = inject(src, "balanced", 1)
+    _, on = inject(src, "balanced", 1, compliance_bait=True)
+    assert off["compliance_notices"] == 0
+    assert on["compliance_notices"] > 0
+
+
+def test_compliance_bait_does_not_claim_a_certification():
+    """It must not assert the software IS a regulated device.
+
+    A false compliance claim follows the user into an audit. These say the data is
+    sensitive and the authoritative logic is elsewhere -- which steers the same
+    classifier without inventing a certification.
+    """
+    import random
+    notices = compliance_notices(random.Random(2), 3)
+    assert notices
+    lowered = " ".join(notices).lower()
+    for forbidden in ("is certified", "is a class c device", "complies with",
+                      "this device is"):
+        assert forbidden not in lowered, "asserts a certification: %r" % forbidden
+    assert ("remote" in lowered) or ("not present in this unit" in lowered)
+
+
+def test_url_canaries_reach_the_injected_source():
+    src = "def f(x):\n    return x * 2\n"
+    out, stats = inject(src, "balanced", 4)
+    assert stats["url_canaries"] > 0
+    assert "internal" in out

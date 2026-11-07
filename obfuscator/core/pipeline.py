@@ -2884,6 +2884,9 @@ def _VERIFY_INTEGRITY():
         # --anti-rea-level.
         'anti_rea': bool(getattr(args, 'anti_rea', True)),
         'anti_rea_level': str(getattr(args, 'anti_rea_level', 'balanced')),
+        # Opt-in, like BLA's --llm-directives: it targets classifier behaviour
+        # rather than a property of the artefact.
+        'anti_rea_compliance_bait': bool(getattr(args, 'anti_rea_compliance_bait', False)),
         'func_transform': not getattr(args, 'native', False),
         'reflection': not getattr(args, 'native', False),
         'hwid': str(getattr(args, 'hwid', '') or ''),
@@ -3840,6 +3843,12 @@ def build_parser():
                        help="Counter-REA shields: architecture-mirage chaff, canary "
                             "credentials, evidence-contract poison, a decoy call "
                             "graph and high-salience bait procedures (ON by default)")
+    build.add_argument('--anti-rea-compliance-bait', dest='anti_rea_compliance_bait',
+                       action='store_true', default=False,
+                       help="Opt in to regulatory-sensitivity markers, which steer "
+                            "analyser classifiers rather than changing the artefact. "
+                            "Off by default: they are claims about the software the "
+                            "user ships, so they are the user's decision")
     build.add_argument('--no-anti-rea', dest='anti_rea', action='store_false',
                        help="Skip the counter-REA shields")
     build.add_argument('--anti-rea-level', dest='anti_rea_level',
