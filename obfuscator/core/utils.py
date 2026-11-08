@@ -506,7 +506,20 @@ class ConfigManager:
             with open(self.CONFIG_FILE,"r", encoding='utf-8')as f:return json.load(f)
         except Exception:return {}
     def save(self):
-        with open(self.CONFIG_FILE,"w", encoding='utf-8')as f:json.dump(self.config,f,indent=4)
+        # Owner-only. This file holds GitHub and Cloudflare tokens, and the wizard
+        # tells the user they are "stored securely" -- 0644, the default, is not
+        # that. Written then chmod'd so the window where it is world-readable does
+        # not exist.
+        _fd = os.open(self.CONFIG_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(_fd, "w", encoding="utf-8") as f:
+                json.dump(self.config, f, indent=4)
+        except Exception:
+            raise
+        try:
+            os.chmod(self.CONFIG_FILE, 0o600)   # in case the file already existed
+        except OSError:
+            pass
         print(f" [+] Configuration saved to {self.CONFIG_FILE}")
     def get(self,key,default=None):return self.config.get(key,default)
     def set(self,key,value):self.config[key]=value

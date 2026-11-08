@@ -30,6 +30,16 @@ pub fn crc32(data: &[u8]) -> u32 {
 }
 
 pub fn find_text_bounds() -> Option<(usize, usize)> {
+    // The mapping must be OUR image, not the first executable one in the file.
+    // /proc/self/maps lists the dynamic loader first on most systems, so taking
+    // the first r-xp line hashed ld-linux's text and a "pass" proved nothing
+    // about the runtime.
+    let own = fs::read_link("/proc/self/exe").ok();
+    let own_name = own
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned());
+
     let maps = fs::read_to_string("/proc/self/maps").ok()?;
     for line in maps.lines() {
         if line.contains("[vdso]") || line.contains("[vvar]") || line.contains("[stack]") || line.contains("/dev/") {
@@ -41,6 +51,15 @@ pub fn find_text_bounds() -> Option<(usize, usize)> {
         }
         let path = cols[4].trim();
         if path.is_empty() || path.starts_with('[') {
+            continue;
+        }
+        // Skip anything that is not this process's own image.
+        let is_own = match (&own, &own_name) {
+            (Some(exe), _) => path == exe.to_string_lossy(),
+            (None, Some(name)) => path.ends_with(name.as_str()),
+            _ => true,
+        };
+        if !is_own {
             continue;
         }
         let addrs: Vec<&str> = cols[0].split('-').collect();

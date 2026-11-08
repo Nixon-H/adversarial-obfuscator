@@ -33,6 +33,10 @@ pub struct RuntimeConfig {
     pub enable_crypto_cfg: bool,
     pub enable_memguard: bool,
     pub enable_integrity: bool,
+    /// Fail closed when integrity is on but no CRC was supplied. Off by
+    /// default so existing deployments keep working, but a hardened build can
+    /// turn it on instead of silently enforcing nothing.
+    pub integrity_require_crc: bool,
     pub enable_decrypt: bool,
     pub enable_selfdestruct: bool,
     pub enable_antidbg: bool,
@@ -67,6 +71,7 @@ impl Default for RuntimeConfig {
             enable_crypto_cfg: false,
             enable_memguard: true,
             enable_integrity: true,
+            integrity_require_crc: false,
             enable_decrypt: true,
             enable_selfdestruct: true,
             enable_antidbg: true,
@@ -102,9 +107,23 @@ pub fn init_runtime(config: &RuntimeConfig) {
         selfdestruct::arm_self_destruct();
     }
     if config.enable_integrity {
-        if let Some(expected) = config.integrity_expected_crc {
-            if !integrity::verify_text_section(expected) {
-                selfdestruct::scrub_and_exit(1);
+        match config.integrity_expected_crc {
+            Some(expected) => {
+                if !integrity::verify_text_section(expected) {
+                    selfdestruct::scrub_and_exit(1);
+                }
+            }
+            None => {
+                // Integrity was REQUESTED but there is nothing to check against.
+                // This used to skip in complete silence, so a payload built
+                // without runtime_config.json got no enforcement and nothing said
+                // so. Say so; and fail closed when the build asked for that.
+                eprintln!(
+                    "[INTEGRITY] enabled but no expected CRC was supplied --                      integrity is NOT being enforced"
+                );
+                if config.integrity_require_crc {
+                    selfdestruct::scrub_and_exit(1);
+                }
             }
         }
     }

@@ -2440,6 +2440,13 @@ def {node.name}(*args, **kwargs):
                 [_jit_bin, "jit", "exec", _tmp],
                 capture_output=True, timeout=5
             )
+            # Delete the plaintext copy on EVERY path, not just success. The whole
+            # point of the XOR/base64 wrap above is that the source is not lying
+            # around; leaving a decrypted .jit in the temp directory defeated it.
+            try:
+                os.remove(_tmp)
+            except OSError:
+                pass
             if _result.returncode == 0:
                 return _result.stdout
         except Exception:

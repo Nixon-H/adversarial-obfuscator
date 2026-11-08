@@ -52,6 +52,7 @@ if _os_early.environ.get("NX_BUILD_SEED"):
         pass
 import json
 import os
+import hashlib
 import secrets
 import shutil
 import struct
@@ -337,6 +338,21 @@ def validate_dependencies(opts=None) -> bool:
 # ===========================================================================
 # Main Pipeline
 # ===========================================================================
+
+def _stage_seed(opts):
+    """The build seed for stages that can be reproducible.
+
+    These stages used `secrets.randbits(32)` unconditionally, so a `--seed` build was
+    NOT reproducible through them even though the surrounding stages honoured the
+    flag. Falls back to fresh entropy when no seed was given, which keeps per-build
+    variation for ordinary builds.
+    """
+    base = getattr(opts, 'seed', None)
+    if base is None:
+        return secrets.randbits(32)
+    # Derive a per-stage value so two stages do not share a stream.
+    return int(hashlib.sha256(("stage:%s" % base).encode()).hexdigest()[:8], 16)
+
 
 def main():
     """
@@ -1569,7 +1585,7 @@ in config/default.json.
                 with open(obfuscated_output, encoding='utf-8') as f:
                     _src_rt = f.read()
                 _tree_rt = _ast_rt.parse(_src_rt)
-                _ri = ReasoningLoopInjector(seed=secrets.randbits(32))
+                _ri = ReasoningLoopInjector(seed=_stage_seed(opts))
                 _tree_rt = _ri.inject_loop(_tree_rt, depth=opts.trap_depth)
                 with open(obfuscated_output, "w", encoding='utf-8') as f:
                     f.write(_ast_rt.unparse(_tree_rt))
@@ -1592,7 +1608,7 @@ in config/default.json.
                 with open(obfuscated_output, encoding='utf-8') as f:
                     _src_fi = f.read()
                 _tree_fi = _ast_fi.parse(_src_fi)
-                _fio = FunctionIntentObfuscator(seed=secrets.randbits(32))
+                _fio = FunctionIntentObfuscator(seed=_stage_seed(opts))
                 _tree_fi = _fio.obfuscate_intent(_tree_fi)
                 with open(obfuscated_output, "w", encoding='utf-8') as f:
                     f.write(_ast_fi.unparse(_tree_fi))
