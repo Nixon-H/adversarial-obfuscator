@@ -2395,8 +2395,28 @@ def {node.name}(*args, **kwargs):
     _{template_name}_b64 = "{b64_code}"
     _code = base64.b64decode(_{template_name}_b64).decode()
     _compiled = compile(_code, "<jit_{template_name}>", "exec")
+    # The .so and the .bin below are loaded from paths taken out of the
+    # environment. With only an os.path.exists() check, anything able to set those
+    # variables gets code execution inside the artefact -- a backdoor by
+    # construction, in the one place the loader is supposed to be the guard.
+    #
+    # They are now required to be PINNED: the caller must also supply the sha256 of
+    # the file, and a mismatch means we do not load it at all. nixon_core.so is
+    # already pinned this way; these two were the exception.
+    def _jit_pinned(path, pin_env):
+        want = os.environ.get(pin_env, "").strip().lower()
+        if not want:
+            return False
+        try:
+            import hashlib as _hl
+            with open(path, "rb") as _f:
+                got = _hl.sha256(_f.read()).hexdigest()
+            return got == want
+        except Exception:
+            return False
+
     _jit_so = os.environ.get("RUNTIME_JIT_SO", "")
-    if _jit_so and os.path.exists(_jit_so):
+    if _jit_so and os.path.exists(_jit_so) and _jit_pinned(_jit_so, "RUNTIME_JIT_SO_SHA256"):
         try:
             _lib = ctypes.CDLL(_jit_so)
             _lib.nixon_jit_exec.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
@@ -2408,7 +2428,7 @@ def {node.name}(*args, **kwargs):
         except Exception:
             pass
     _jit_bin = os.environ.get("RUNTIME_JIT_BIN", "")
-    if _jit_bin and os.path.exists(_jit_bin):
+    if _jit_bin and os.path.exists(_jit_bin) and _jit_pinned(_jit_bin, "RUNTIME_JIT_BIN_SHA256"):
         _tmp_fd = None
         try:
             _tmp_fd, _tmp = tempfile.mkstemp(suffix=".jit")

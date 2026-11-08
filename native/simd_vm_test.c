@@ -14,7 +14,56 @@ static int g_failed = 0;
     } \
 } while(0)
 
+/* Regression: the load/store window used to start 4096 bytes into memory and run
+ * 4096 bytes past it, so a store at a high address wrote through pc, halted and the
+ * handlers[] function-pointer table -- payload data reaching the opcode dispatch
+ * table. These two cases pin the correct window. */
+static void test_memory_window(void) {
+    SimdVmState vm;
+    simd_vm_init(&vm);
+
+    /* Round-trip at the very last byte of memory. */
+    vm.regs[0] = 65535;
+    vm.regs[1] = 0xAB;
+    uint8_t opcodes_store[] = { 8 /* store */, 1, 0, 0 };
+    simd_dispatch_scalar(&vm, opcodes_store, sizeof(opcodes_store));
+    TEST("store at 65535 lands in memory", vm.memory[65535] == 0xAB);
+    TEST("store at 65535 leaves pc intact", vm.pc <= sizeof(opcodes_store));
+
+    /* The dispatch table must be untouched by a store at the top of memory. */
+    SimdVmState before;
+    memcpy(&before.handlers, &vm.handlers, sizeof(vm.handlers));
+    vm.regs[0] = 65535;
+    vm.regs[1] = 0xFF;
+    simd_dispatch_scalar(&vm, opcodes_store, sizeof(opcodes_store));
+    TEST("store at 65535 does not corrupt handlers[]",
+         memcmp(&before.handlers, &vm.handlers, sizeof(vm.handlers)) == 0);
+
+    /* First byte maps to memory[0], not regs[0]. */
+    SimdVmState v2;
+    simd_vm_init(&v2);
+    v2.regs[15] = 0xCD;          /* a register value that must survive */
+    v2.regs[0] = 0;
+    v2.regs[1] = 0x11;
+    simd_dispatch_scalar(&v2, opcodes_store, sizeof(opcodes_store));
+    TEST("store at 0 lands in memory[0]", v2.memory[0] == 0x11);
+    TEST("store at 0 leaves regs[15] alone", v2.regs[15] == 0xCD);
+}
+
+/* Regression: handlers may read pc+1..pc+4 with nothing checking the buffer ends. */
+static void test_operand_bounds(void) {
+    SimdVmState vm;
+    simd_vm_init(&vm);
+    uint8_t truncated[] = { 9 /* jmp */, 0x01 };   /* needs 5 bytes, has 2 */
+    int rc = simd_dispatch_scalar(&vm, truncated, sizeof(truncated));
+    TEST("truncated operand run halts instead of reading past the buffer",
+         rc == 1 || vm.halted);
+}
+
 int main(void) {
+    test_memory_window();
+    test_operand_bounds();
+
     int avail = simd_available();
     printf("simd_available() = %d\n", avail);
 

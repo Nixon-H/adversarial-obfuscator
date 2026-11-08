@@ -140,6 +140,10 @@ native-test: core-cpp simd-vm-c
 simd-vm-c:
 	@echo "  CC      native/simd_vm.c"
 	gcc -c native/simd_vm.c -o native/simd_vm_test.o -Wall -Werror -msse4.1
+	@echo "  CC+RUN  native/simd_vm_test.c"
+	@mkdir -p $(BUILD_DIR)
+	gcc -I native native/simd_vm_test.c native/simd_vm.c -o $(BUILD_DIR)/simd_vm_test -msse4.1 -Wall -Werror
+	$(BUILD_DIR)/simd_vm_test
 
 clean:
 	rm -rf $(BUILD_DIR)

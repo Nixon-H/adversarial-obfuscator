@@ -28,6 +28,27 @@ int simd_available(void) {
     return g_simd_available;
 }
 
+/* Memory lives immediately after regs[] in SimdVmState, at offset 128, but the
+ * handlers receive only the regs pointer. They used to index `mem[addr + 4096]`
+ * from regs, which started 3968 bytes INTO memory and ended 3968 bytes past it --
+ * straight through pc, halted and the handlers[] function-pointer table. Writes
+ * there let payload data reach the opcode dispatch table.
+ *
+ * The offset is derived and asserted rather than hardcoded, so reordering the
+ * struct breaks the build instead of the VM.
+ */
+/* Longest operand run any handler reads: 4 (jmp) -- see handler_jmp. */
+#define SIMD_VM_MAX_OPERAND_BYTES 4
+
+#define SIMD_VM_MEM_OFFSET (sizeof(uint64_t) * SIMD_VM_NUM_REGS)
+#define SIMD_VM_MEM_BASE(regs_ptr) ((uint8_t *)(void *)(regs_ptr) + SIMD_VM_MEM_OFFSET)
+
+/* If this fails, SIMD_VM_MEM_BASE is wrong and the handlers would corrupt memory. */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(SimdVmState, memory) == SIMD_VM_MEM_OFFSET,
+               "SimdVmState.memory is not immediately after regs[]");
+#endif
+
 static int handler_nop(uint64_t *regs, const uint8_t *opcodes, size_t pc) {
     (void)regs; (void)opcodes; (void)pc;
     return 1;
@@ -80,8 +101,8 @@ static int handler_load(uint64_t *regs, const uint8_t *opcodes, size_t pc) {
     uint8_t addr_reg = opcodes[pc + 2] & 0x0F;
     uint64_t addr = regs[addr_reg];
     if (addr < 65536) {
-        uint8_t *mem = (uint8_t*)(void*)regs;
-        regs[dst] = (uint64_t)mem[addr + 4096];
+        uint8_t *mem = SIMD_VM_MEM_BASE(regs);
+        regs[dst] = (uint64_t)mem[addr];
     }
     return 3;
 }
@@ -91,8 +112,8 @@ static int handler_store(uint64_t *regs, const uint8_t *opcodes, size_t pc) {
     uint8_t addr_reg = opcodes[pc + 2] & 0x0F;
     uint64_t addr = regs[addr_reg];
     if (addr < 65536) {
-        uint8_t *mem = (uint8_t*)(void*)regs;
-        mem[addr + 4096] = (uint8_t)(regs[src] & 0xFF);
+        uint8_t *mem = SIMD_VM_MEM_BASE(regs);
+        mem[addr] = (uint8_t)(regs[src] & 0xFF);
     }
     return 3;
 }
@@ -111,6 +132,15 @@ static simd_handler_fn handlers[SIMD_VM_MAX_HANDLERS] = {
     handler_nop, handler_add, handler_sub, handler_mul,
     handler_xor, handler_and, handler_or, handler_load,
     handler_store, handler_jmp,
+};
+
+/* Bytes each handler needs: it is the instruction length, and therefore how far
+ * past pc it may read. The dispatch loops check it, so a truncated operand run
+ * halts instead of reading past the opcode buffer -- handler_jmp reads pc+4 and
+ * the arithmetic handlers read pc+2, and nothing used to verify those existed.
+ * Must stay in step with handlers[] above. */
+static const uint8_t handler_operand_bytes[SIMD_VM_MAX_HANDLERS] = {
+    1, 3, 3, 3, 3, 3, 3, 3, 3, 5,
 };
 
 void simd_vm_init(SimdVmState *vm) {
@@ -144,6 +174,10 @@ static int simd_dispatch_sse(SimdVmState *vm, const uint8_t *opcodes, size_t num
                 op = (op < SIMD_VM_MAX_HANDLERS) ? op : 0;
                 simd_handler_fn handler = vm->handlers[op];
                 if (handler) {
+                    if (pc + handler_operand_bytes[op] > num_opcodes) {
+                        vm->halted = 1;
+                        break;
+                    }
                     handler(vm->regs, opcodes, pc);
                 } else {
                     vm->halted = 1;
@@ -154,6 +188,10 @@ static int simd_dispatch_sse(SimdVmState *vm, const uint8_t *opcodes, size_t num
             op = (op < SIMD_VM_MAX_HANDLERS) ? op : 0;
             simd_handler_fn handler = vm->handlers[op];
             if (handler) {
+                if (pc + handler_operand_bytes[op] > num_opcodes) {
+                    vm->halted = 1;
+                    break;
+                }
                 handler(vm->regs, opcodes, pc);
             } else {
                 vm->halted = 1;
@@ -187,7 +225,12 @@ int simd_dispatch_scalar(SimdVmState *vm, const uint8_t *opcodes, size_t num_opc
         op = (op < SIMD_VM_MAX_HANDLERS) ? op : 0;
         simd_handler_fn handler = vm->handlers[op];
         if (handler) {
-            int advance = handler(vm->regs, opcodes, pc);
+            int advance;
+            if (pc + handler_operand_bytes[op] > num_opcodes) {
+                vm->halted = 1;
+                break;
+            }
+            advance = handler(vm->regs, opcodes, pc);
             pc += (size_t)advance;
         } else {
             vm->halted = 1;
