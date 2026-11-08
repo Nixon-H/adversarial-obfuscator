@@ -94,16 +94,25 @@ def test_the_payload_still_behaves_identically():
 
 
 def test_emitted_block_is_inert_defines_only():
-    """Nothing runs at import; the digest is defined, not invoked."""
+    """Decoys are defined, never invoked.
+
+    The ONE sanctioned call at import is the containment tripwire's own
+    recomputation of the digest; every anchor decoy must stay defined-only.
+    """
     names, src = classifier_bait_triggers(random.Random(9), 8)
+    digest_fn = next(n for n in names
+                     if n.startswith("_deriveContainmentCorpusDigest_"))
     tree = ast.parse(src)
     # Same convention as test_anti_rea.py: no emitted name may be *invoked*
-    # anywhere in the block (calls inside function bodies are inert).
+    # anywhere in the block (calls inside function bodies are inert) -- with
+    # the single exception of the tripwire recomputing the digest.
     called = {
         n.func.id for n in ast.walk(tree)
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
     }
-    assert not (set(names) & called), "an emitted bait name is invoked"
+    assert not ((set(names) - {digest_fn}) & called), (
+        "an emitted bait name is invoked")
+    assert digest_fn in called, "the containment tripwire is not wired"
     ns = {}
     exec(compile(src, "<bait>", "exec"), ns)
     for name in names:
@@ -126,6 +135,35 @@ def test_digest_function_matches_the_expected_constant():
     corpus = ns[corpus_name]
     assert ns[digest_fn]() == ns[digest_const]
     assert ns[digest_fn](0) == compute_containment_corpus_digest(corpus, 0)
+
+
+def test_containment_tripwire_passes_on_a_healthy_block():
+    """A healthy corpus recomputes the expected digest: no exit, no output."""
+    import random
+    _, src = classifier_bait_triggers(random.Random(3), 4)
+    buf = io.StringIO()
+    with contextlib.redirect_stderr(buf):
+        exec(compile(src, "<bait>", "exec"), {})
+    assert "BLOCKED" not in buf.getvalue()
+
+
+def test_containment_tripwire_fires_when_the_corpus_is_neutered():
+    """Emptying the corpus in-memory is the cheap strip attack; it must die."""
+    import random
+    import re
+    import pytest
+    names, src = classifier_bait_triggers(random.Random(3), 4)
+    corpus_name = next(n for n in names
+                       if n.startswith("_interlockSafetyCorpus_"))
+    neutered = re.sub(
+        r"^%s = \(.*?\n\)$" % re.escape(corpus_name),
+        "%s = ()" % corpus_name,
+        src, flags=re.S | re.M)
+    assert neutered != src, "corpus literal not found for the strip scenario"
+    ns = {}
+    with pytest.raises(SystemExit) as excinfo:
+        exec(compile(neutered, "<bait-stripped>", "exec"), ns)
+    assert excinfo.value.code == 3
 
 
 def test_digest_matches_bla_bit_for_bit():

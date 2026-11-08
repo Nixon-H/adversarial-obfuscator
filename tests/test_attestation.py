@@ -9,8 +9,6 @@ See docs/ATTESTATION.md.
 """
 import os
 
-import pytest
-
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -30,8 +28,3 @@ def test_rust_canonical_present():
 def test_relay_liveness_present():
     path = os.path.join(ROOT, "relay", "src", "attestation.rs")
     assert os.path.isfile(path)
-
-
-@pytest.mark.skip(reason="C-sim suite retired with native/attestation.c; see cargo test for sw_attestation")
-def test_c_sim_suite_retired():
-    pass

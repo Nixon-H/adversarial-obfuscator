@@ -238,3 +238,51 @@ def test_adaptive_rewriting_no_mock():
     rewritten = rewriter.rewrite(profile, source)
     assert rewritten is not None
     assert len(rewritten) > 0
+
+
+# ── JIT transform: decorated functions must stay untouched ───────────
+def test_jit_transform_skips_decorated_functions():
+    """Decorator side effects run at DEF time in the source.
+
+    The JIT wrapper replays a function's body at CALL time, so wrapping a
+    decorated function defers (or drops, if never called) its registration
+    side effects — a behaviour change, which no transform may make. The
+    nonlocal/global guard is the same family; this is the decorator half.
+    """
+    import random
+    from obfuscator.core.transforms import DynamicCodeGenerator
+
+    src = (
+        "registry = []\n"
+        "def register(fn):\n"
+        "    registry.append(fn)\n"
+        "    return fn\n"
+        "\n"
+        "@register\n"
+        "def handler(x):\n"
+        "    a = x + 1\n"
+        "    b = a * 2\n"
+        "    return b\n"
+        "\n"
+        "def plain(x):\n"
+        "    a = x + 1\n"
+        "    b = a * 2\n"
+        "    return b\n"
+    )
+    random.seed(1)          # first draw 0.134 < 0.2: the wrap branch triggers
+    assert random.random() < 0.2
+    random.seed(1)          # same stream for the visit below
+    gen = DynamicCodeGenerator()
+    out = gen.visit(ast.parse(src))
+    ast.fix_missing_locations(out)
+
+    defs = {n.name: n for n in out.body if isinstance(n, ast.FunctionDef)}
+    # The decorated function survives with its decorator intact and no JIT
+    # wrapper displaced the registration.
+    assert "handler" in defs and defs["handler"].decorator_list, (
+        "decorated function was JIT-wrapped: its registration would be "
+        "deferred to call time or lost")
+    # The undecorated neighbour of the same shape IS still wrapped (the guard
+    # is not a blanket shutdown of the transform).
+    plain_wrapped = "def plain(*args, **kwargs)" in ast.unparse(out)
+    assert plain_wrapped, "guard over-fired: the plain function lost JIT too"

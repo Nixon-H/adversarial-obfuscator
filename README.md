@@ -80,6 +80,7 @@ Notes:
 | BYOVD driver gate `--driver-check` (opt-in) | read-only blocklist check, fail-closed only when armed | `tests/test_driver_blocklist.py` |
 | Split bootstrap `--split-bootstrap` (opt-in) | Shamir (n=3,k=2) threshold key + fragmented decoder in loader | `tests/test_split_bootstrap.py` |
 | Diagnostic build `--diagnostic` | per-stage timings + transform counts + NOT-FOR-RELEASE marker | `tests/test_diagnostic.py` |
+| Counter-REA shields (BLA port) `--anti-rea` / `--anti-rea-level` (default ON), bait layers `--exclude-rea[-bio|-cognitive|-compliance]` | poison/exhaust/muddle layers + canary cognitive armor + classifier bait corpus, all inert by contract; containment tripwire guards the bait corpus | `tests/test_anti_rea.py`, `tests/test_classifier_bait.py` |
 | `--pytoc` native extension (best-effort) | Cython compile of output; never fails the build | `tests/test_pytoc.py` |
 | `--pyinstaller-spec` (best-effort) | writes `.spec` next to output; never fails the build | `tests/test_pyinstaller_spec.py` |
 | Artifact signing `--sign-key-env VAR` | signs packaged payload to `<file>.sig.json` (best-effort) | `tests/test_artifact_sign.py` |

@@ -170,3 +170,32 @@ class TestCli:
         result = self._run("pubkey", "--key-hex", seed)
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == lic.public_key_hex(private)
+
+
+class TestHwidFailClosed:
+    """A machine binding must not disappear when the verifier is lazy.
+
+    The old condition (`licence.hwid and hwid is not None and ...`) meant
+    verifying WITHOUT --hwid skipped the binding entirely: a machine-locked
+    licence validated on any host as long as the caller simply did not
+    supply one. A binding that disappears when the verifier is lazy is not
+    a binding; supplying no hwid to a bound licence is now an error.
+    """
+
+    def test_bound_licence_without_hwid_is_refused(self):
+        private, public = _keypair()
+        token = lic.issue(_licence(hwid="machine-a"), private)
+        with pytest.raises(lic.LicenceError, match="machine"):
+            lic.verify(token, public, hwid=None)
+
+    def test_refusal_names_the_binding(self):
+        private, public = _keypair()
+        token = lic.issue(_licence(hwid="machine-a"), private)
+        with pytest.raises(lic.LicenceError) as excinfo:
+            lic.verify(token, public, hwid=None)
+        assert "machine-a" in str(excinfo.value)
+
+    def test_unbound_licence_still_verifies_without_hwid(self):
+        private, public = _keypair()
+        token = lic.issue(_licence(), private)
+        assert lic.verify(token, public).customer == "acme"

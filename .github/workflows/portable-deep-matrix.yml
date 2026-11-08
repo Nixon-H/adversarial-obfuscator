@@ -144,6 +144,22 @@ jobs:
             args: "--pin-structure"
           - label: strict-detections
             args: "--strict-detections"
+          # Counter-REA exclusion matrix: each bait layer excluded on its own,
+          # every layer excluded at once, and the two profile flags. The unit
+          # tests pin the option mapping (test_loader_controls_wired.py); these
+          # jobs pin that each combination BUILDS and the artefact RUNS.
+          - label: exclude-rea-bio
+            args: "--exclude-rea-bio"
+          - label: exclude-rea-cognitive
+            args: "--exclude-rea-cognitive"
+          - label: exclude-rea-compliance
+            args: "--exclude-rea-compliance"
+          - label: exclude-rea-all
+            args: "--exclude-rea"
+          - label: anti-rea-level-maximum
+            args: "--anti-rea-level maximum"
+          - label: fast
+            args: "--fast"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

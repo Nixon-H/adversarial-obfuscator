@@ -2304,6 +2304,15 @@ class DynamicCodeGenerator(ast.NodeTransformer):
         # a mystery for several rounds while the real cause sat here.
         if any(isinstance(n, (ast.Nonlocal, ast.Global)) for n in ast.walk(node)):
             return node
+        # A decorated function must also stay untouched: decorator side effects
+        # (@app.route registration, class-table entries) run at DEF time in the
+        # original, but the wrapper only replays the body at CALL time -- so a
+        # never-called decorated function would never register at all, and a
+        # called one would register late. The mutable-defaults guard in
+        # FunctionTransformer is the same family of defect; this is its
+        # decorator half.
+        if node.decorator_list:
+            return node
         if len(node.body) >= 3 and random.random() < 0.2:
             try:
                 func_code = ast.unparse(node)

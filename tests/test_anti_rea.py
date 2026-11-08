@@ -61,7 +61,12 @@ def test_the_shields_actually_enlarge_the_analysis_surface():
 
 
 def test_importing_the_payload_runs_no_decoy_work():
-    """Decoys are defined and never called; nothing executes at import."""
+    """Decoys are defined and never called; nothing executes at import.
+
+    The single sanctioned import-time call is the classifier-bait containment
+    tripwire recomputing its digest (_deriveContainmentCorpusDigest_*) -- the
+    one guard the bait layer runs; every actual decoy stays define-only.
+    """
     out, _ = inject(SOURCE, "balanced", 3)
     tree = ast.parse(out)
     called = {
@@ -71,7 +76,9 @@ def test_importing_the_payload_runs_no_decoy_work():
     assert "add" in called
     decoys = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)} - {"add"}
     assert decoys
-    assert not (decoys & called), "a decoy function is invoked at module scope"
+    tripwire = {n for n in decoys if n.startswith("_deriveContainmentCorpusDigest_")}
+    assert not ((decoys - tripwire) & called), (
+        "a decoy function is invoked at module scope")
 
 
 def test_seeding_is_deterministic_and_varied():

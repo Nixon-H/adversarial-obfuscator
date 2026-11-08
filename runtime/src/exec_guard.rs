@@ -69,6 +69,11 @@ impl ExecGuard {
 
         let result1 = crate::platform::protect_pages(self.ptr, aligned_size, PagePerm::ReadWrite);
         if result1.is_err() {
+            // Without write access the buffer cannot be scrubbed, but it must
+            // not be left executable-and-dirty either: revoke exec so the
+            // failure path degrades to inaccessible, not to R-X residue.
+            let _ = crate::platform::protect_pages(self.ptr, aligned_size, PagePerm::None);
+            self.original_prot = PagePerm::None;
             return;
         }
         self.original_prot = PagePerm::ReadWrite;

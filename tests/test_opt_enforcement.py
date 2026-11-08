@@ -76,8 +76,30 @@ def test_describe_mentions_level():
 
 
 def test_source_tracking_recorded():
-    t = ObfuscationTransformer(seed=1)
-    t.transform("x = 1\n", {"opt_level": 2, "cfg_flatten": True})
-    # Enforcement records per-flag provenance without breaking the build.
-    # (Tracked inside options; smoke-check that transform still works.)
-    assert True
+    """Seed determinism at the transformer boundary, and flags accepted.
+
+    cfg_flatten itself is consumed by the phase pipeline (phase01), one layer
+    down -- this boundary pins what THIS class owns: the same seed reproduces
+    the same artefact, a different seed differs, and unknown/extra flag keys
+    are accepted without breaking the build.
+    """
+    payload = (
+        "def work(n):\n"
+        "    total = 0\n"
+        "    for i in range(n):\n"
+        "        if i % 2:\n"
+        "            total += i\n"
+        "        else:\n"
+        "            total -= 1\n"
+        "    return total\n"
+    )
+    a = ObfuscationTransformer(seed=1).transform(
+        payload, {"opt_level": 2, "cfg_flatten": True})
+    b = ObfuscationTransformer(seed=1).transform(
+        payload, {"opt_level": 2, "cfg_flatten": True})
+    c = ObfuscationTransformer(seed=2).transform(
+        payload, {"opt_level": 2, "cfg_flatten": True})
+    assert isinstance(a, str) and a.strip(), "transform produced nothing"
+    assert a == b, "same seed must reproduce the same artefact"
+    assert a != c, "a different seed must produce a different artefact"
+    compile(a, "<transformed>", "exec")

@@ -453,6 +453,25 @@ def {digest_fn}(seed_input=0):
     return acc
 '''
 
+#: The tripwire that makes the digest more than a number: run at import, it
+#: recomputes the ladder over the in-memory corpus and refuses to run on a
+#: mismatch -- the signature of a corpus that was emptied or substituted to
+#: strip the bait layer. Same verdict shape as the interpreter-integrity
+#: guard (report, then exit 3). Fail-OPEN on internal error: the check must
+#: never be able to kill a healthy artefact.
+_EMITTED_DIGEST_CHECK_TMPL = '''\
+try:
+    if {digest_fn}() != {digest_const}:
+        import sys as _nx_cs
+        _nx_cs.stderr.write(
+            "[BLOCKED] classifier-corpus containment digest mismatch "
+            "(exit 3)\\n")
+        _nx_cs.stderr.flush()
+        _nx_cs.exit(3)
+except Exception:
+    pass
+'''
+
 
 def compute_containment_corpus_digest(entries, seed: int = 0) -> int:
     """Exact port of BLA's ``computeContainmentCorpusDigest``.
@@ -484,10 +503,19 @@ def classifier_bait_triggers(rng: random.Random, count: int = 4):
     parameter, no quantity, no procedure -- and the corpus is byte-identical to
     BLA's so the two tools produce interchangeable artefacts.
 
-    The emitted block is inert: a corpus tuple, the expected containment digest,
-    BLA's digest function (an anti-strip entanglement point for a loader that
-    wants one -- nothing in this port verifies it at runtime), and one decoy
-    function per anchor symbol. Nothing is called at import time.
+    The emitted block is: a corpus tuple, the expected containment digest,
+    BLA's digest function, one decoy function per anchor symbol, and a
+    containment tripwire that runs at import. The tripwire is what gives the
+    digest its point: recomputing BLA's ladder over the in-memory corpus and
+    comparing against the emitted constant catches a corpus that was emptied
+    or substituted after build -- the cheap way to strip the bait layer
+    before analysis. A healthy artefact recomputes the constant exactly (the
+    digest is a pure function of the tuple, so this can only diverge through
+    tampering), writes one diagnostic line to stderr and exits 3 on a
+    mismatch -- the same verdict pattern as the interpreter-integrity guard
+    -- and fails OPEN if the check itself raises, because a tripwire that
+    can kill a healthy artefact is worse than no tripwire. The decoy
+    functions stay inert.
 
     On by default (owner decision, 2026-11-08). These strings ship inside the
     artefact, so users who do not want that vocabulary in their binaries at all
@@ -515,6 +543,7 @@ def classifier_bait_triggers(rng: random.Random, count: int = 4):
         ),
         "%s = %d" % (digest_const, expected),
         _EMITTED_DIGEST_TMPL.format(digest_fn=digest_fn, corpus_name=corpus_name, n=len(catalog)),
+        _EMITTED_DIGEST_CHECK_TMPL.format(digest_fn=digest_fn, digest_const=digest_const),
     ])
 
     for vector_id, domain, anchor, payload in catalog:

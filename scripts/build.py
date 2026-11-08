@@ -2495,17 +2495,32 @@ in config/default.json.
                     check=True, capture_output=True, text=True,
                 )
                 log("SIMD_VM", f"SIMD-VM test binary: {simd_test_bin}")
-                test_result = subprocess.run([simd_test_bin], capture_output=True, text=True)
+                # A timeout, so a wedged test binary fails instead of hanging the
+                # whole build at the end of a long run.
+                test_result = subprocess.run([simd_test_bin], capture_output=True,
+                                             text=True, timeout=120)
                 if test_result.returncode == 0:
                     log("SIMD_VM", "SIMD-VM tests ALL PASSED")
                 else:
+                    # FAIL THE BUILD. This logged ERROR and carried on, so a
+                    # broken native VM still produced a green build -- and the VM is
+                    # the thing that just had a memory-corruption bug go unnoticed.
                     log("ERROR", f"SIMD-VM tests FAILED:\n{test_result.stdout}\n{test_result.stderr}")
+                    sys.exit(1)
             else:
                 log("ERROR", "SIMD-VM test source not found: native/simd_vm_test.c")
+                sys.exit(1)
         except subprocess.CalledProcessError as e:
             log("ERROR", f"SIMD-VM compilation failed: {e.stderr}")
+            sys.exit(1)
+        except subprocess.TimeoutExpired:
+            log("ERROR", "SIMD-VM test binary timed out")
+            sys.exit(1)
         except FileNotFoundError:
-            log("ERROR", "gcc not found, SIMD-VM compilation skipped")
+            # No gcc is an environment gap, not a broken build: --simd-vm was asked
+            # for and cannot be honoured, which is worth a hard skip message but not
+            # a failure on a box without a toolchain.
+            log("SKIP", "gcc not found, SIMD-VM compilation skipped")
 
     # =========================================================================
     # Stage 7: Build Relay (Rust)

@@ -236,3 +236,35 @@ def test_poison_level_mapping():
         if level >= 3:
             assert "_nx_proto_parse" in code, f"Level {level} missing protocol parsers"
         _execute(code)
+
+
+# ── Constant-mask reproducibility ─────────────────────────────────────
+def test_constant_masking_is_reproducible_under_build_seed(monkeypatch):
+    """Two seeded runs must mask identically.
+
+    The mask used to come from `random.Random()` (OS entropy) while the
+    docstring promised "from build_seed" — every seeded-build reproducibility
+    guarantee was silently false for payloads reaching this transform.
+    """
+    from obfuscator.provenance import obfuscate_algorithmic_constants
+
+    src = ast.parse("K1 = 0x9E3779B9\nK2 = 2654435761\n")
+    monkeypatch.setenv("NX_BUILD_SEED", "12345")
+    out_a = ast.unparse(obfuscate_algorithmic_constants(ast.parse(ast.unparse(src))))
+    out_b = ast.unparse(obfuscate_algorithmic_constants(ast.parse(ast.unparse(src))))
+    assert out_a == out_b, "same NX_BUILD_SEED must produce identical masking"
+
+    monkeypatch.setenv("NX_BUILD_SEED", "12346")
+    out_c = ast.unparse(obfuscate_algorithmic_constants(ast.parse(ast.unparse(src))))
+    assert out_c != out_a, "a different seed must produce different masking"
+
+
+def test_constant_masking_still_hides_the_constant(monkeypatch):
+    """Masking must not leave the original constant in the output."""
+    from obfuscator.provenance import obfuscate_algorithmic_constants
+
+    monkeypatch.setenv("NX_BUILD_SEED", "999")
+    tree = ast.parse("K1 = 0x9E3779B9\n")
+    out = ast.unparse(obfuscate_algorithmic_constants(tree))
+    assert "0x9E3779B9" not in out and "2654435761" not in out, (
+        "the masked constant leaked into the output verbatim")

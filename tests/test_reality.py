@@ -373,8 +373,13 @@ class TestNegativeScores:
         pipeline_state = {"build_py_source": ""}
         feat = {"name": "NoEvidence", "module": None, "class": None, "cli_flag": "", "phase": ""}
         fr = compute_feature_reality(feat, pipeline_state)
-        if fr.evidence_count == 0:
-            assert True
+        # The premise itself is the assertion: with zero evidence the feature
+        # must score zero on every dimension, not merely "not crash".
+        assert fr.evidence_count == 0
+        assert fr.implemented_score == 0.0
+        assert fr.reachability_score == 0.0
+        assert fr.runtime_execution_score == 0.0
+        assert fr.attack_impact_score == 0.0
 
     def test_grade_improves_with_better_score(self):
         scores_and_grades = [(0, "F"), (25, "D"), (50, "C"), (75, "B"), (90, "A")]

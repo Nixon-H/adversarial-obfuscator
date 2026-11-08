@@ -1324,12 +1324,21 @@ def run():
             # this chmod and the exec below.
             os.chmod(path, 0o700)
             try:
-                subprocess.call([path] + sys.argv[1:])
+                # Propagate the payload's exit code and bound its runtime. This was
+                # subprocess.call() with no return handling, wrapped in a bare
+                # except: pass -- so the loader always exited 0 and the caller could
+                # never tell whether the payload succeeded, failed, or hung.
+                _rc = subprocess.call([path] + sys.argv[1:], timeout=3600)
             finally:
                 if os.path.exists(path):
                     try: os.remove(path)
                     except Exception: pass
-    except Exception: pass
+            sys.exit(_rc)
+    except SystemExit:
+        raise
+    except Exception as _e:
+        sys.stderr.write("[loader] failed: %s\n" % (_e,))
+        sys.exit(1)
 if __name__ == "__main__":
     run()
 """
@@ -1805,6 +1814,25 @@ def ensure_upx_installed():
         os.makedirs(local_tools_dir, exist_ok=True)
         archive_path = os.path.join(local_tools_dir, os.path.basename(url))
         urllib.request.urlretrieve(url, archive_path)
+        # The archive is about to become executable code on this machine (the
+        # binary is chmod'd and prepended to PATH below). Nothing verified it:
+        # a compromised release or CDN mirror meant code execution on the
+        # builder. When NIXON_UPX_SHA256 is set the hash is enforced; when it
+        # is not, the hash is printed so it can be pinned. The pin pattern is
+        # the same one the JIT loader hooks use (RUNTIME_JIT_SO_SHA256).
+        import hashlib as _hl
+        with open(archive_path, "rb") as _af:
+            _got = _hl.sha256(_af.read()).hexdigest()
+        _want = os.environ.get("NIXON_UPX_SHA256", "").strip().lower()
+        if _want and _got != _want:
+            print(f"    [!] UPX archive sha256 {_got} != pinned {_want}; refusing it")
+            try:
+                os.remove(archive_path)
+            except OSError:
+                pass
+            return False
+        if not _want:
+            print(f"    [i] UPX archive sha256 {_got} (set NIXON_UPX_SHA256 to enforce)")
         if archive_path.endswith(".zip"):
             _extract_zip_confined(archive_path, local_tools_dir)
         elif archive_path.endswith(".tar.xz"):
@@ -1988,8 +2016,21 @@ def run_payload():
                     st = os.stat(tmp_path)
                     os.chmod(tmp_path, st.st_mode | stat.S_IEXEC)
                 except Exception: pass
-            subprocess.call([tmp_path] + sys.argv[1:])
-    except Exception: pass
+            try:
+                # Same as the universal loader: propagate the payload's status and
+                # bound its runtime instead of swallowing both.
+                _rc = subprocess.call([tmp_path] + sys.argv[1:], timeout=3600)
+            finally:
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+            sys.exit(_rc)
+    except SystemExit:
+        raise
+    except Exception as _e:
+        sys.stderr.write("[loader] failed: %s\n" % (_e,))
+        sys.exit(1)
 if __name__=="__main__":
     run_payload()
 '''
