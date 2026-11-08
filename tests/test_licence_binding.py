@@ -147,6 +147,38 @@ def test_bound_build_marks_the_artefact_and_demands_the_token(tmp_path):
     assert "BOUND_OK" in with_token.stdout
 
 
+def test_verification_harness_presents_the_token(tmp_path):
+    """The variant table must run a bound artefact the way the operator does.
+
+    A bound loader refuses without NIXON_LICENCE, so a harness that omits the
+    token reads every correctly bound build as MISMATCH -- which, since the
+    verification gate now fails the build, meant bound artefacts could never
+    ship. test_protected_file must present the token when given one and still
+    fail the un-tokened run, exactly like the real loader.
+    """
+    from obfuscator.core.pipeline import test_protected_file
+
+    original = tmp_path / "orig.py"
+    original.write_text('print("OK")\n', encoding="utf-8")
+    bound = tmp_path / "bound.py"
+    bound.write_text(
+        "import os, sys\n"
+        "if not os.environ.get('NIXON_LICENCE'):\n"
+        "    sys.stderr.write('licence token required\\n'); sys.exit(1)\n"
+        "print('OK')\n",
+        encoding="utf-8")
+
+    harness_fail = test_protected_file(str(bound), str(original))
+    assert harness_fail['obfuscated']['status'] == 'FAIL', (
+        "the harness must not silently hand the token to an un-tokened run")
+
+    harness_pass = test_protected_file(
+        str(bound), str(original),
+        licence_path=str(tmp_path / "acme.licence"))
+    assert harness_pass['obfuscated']['status'] == 'PASS'
+    assert harness_pass['comparison']['outputs_match'] is True
+
+
 def _find_artefact(tmp_path):
     """Where `pipeline build` puts its output (dist/ beside the source)."""
     for root, _dirs, files in os.walk(tmp_path):

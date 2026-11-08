@@ -656,7 +656,7 @@ def get_native_blob_for_build(source_path, force_compile=False):
             else: os_name = 'darwin'
             return {os_name: blob, 'windows': '' if os_name != 'windows' else blob, 'linux': '' if os_name != 'linux' else blob, 'darwin': '' if os_name != 'darwin' else blob}
     return None
-def test_protected_file(filepath, original_source):
+def test_protected_file(filepath, original_source, licence_path=None):
     results = {}
     try:
         orig_result = subprocess.run([sys.executable, original_source], capture_output=True, timeout=120, text=True)
@@ -672,6 +672,12 @@ def test_protected_file(filepath, original_source):
         # verification harness must set both (harness-only, never prod).
         ver_env['NIXON_VERIFY_SKIP_VERSION_CHECK'] = '1'
         ver_env['NIXON_CI'] = ver_env.get('NIXON_CI', '1')
+        # A licence-bound artefact refuses to run without its token ("licence
+        # token required"): verification must present the same NIXON_LICENCE
+        # the operator would, or every bound build reads as MISMATCH -- and
+        # with the verification gate now failing the build, could never ship.
+        if licence_path:
+            ver_env['NIXON_LICENCE'] = licence_path
         # Popen + faulthandler rather than subprocess.run: a verification
         # run that hangs must name the frame it is stuck in.  On the
         # 3.13/3.14 runners this run blocks for the full 500 s timeout
@@ -742,7 +748,9 @@ def test_command(args, skip_header=False):
     if not os.path.exists(obfuscated_file) or not os.path.exists(original_file): print("[!] Files not found"); return
     if not skip_header and not getattr(args, 'silent', False):
         UI.section("PHASE 3: VERIFICATION SUITE")
-    results = test_protected_file(obfuscated_file, original_file)
+    results = test_protected_file(
+        obfuscated_file, original_file,
+        licence_path=str(getattr(args, 'licence_token', '') or '') or None)
     orig = results.get('original', {})
     obf = results.get('obfuscated', {})
     comp = results.get('comparison', {})
@@ -4153,16 +4161,56 @@ def main():
             _verification_failed = False
             if not args.one_shot:
                 UI.section("PHASE 3: VERIFICATION SUITE")
+                # A non-portable build's variants depend on nixon_core.so, but
+                # the core lives in dist/ while the variants live in the build
+                # root: phase 3 used to run them without the core, the loader
+                # fatalled on the missing native module, and every
+                # non-portable build read as FAIL/MISMATCH. Give each variant
+                # the core the build actually produced.
+                _core = str(getattr(args, '_core_so', '') or '')
+                if _core and os.path.exists(_core):
+                    import shutil as _sh
+                    for suff in ["Debug", "Silent"]:
+                        if generated_files_map and suff in generated_files_map:
+                            try:
+                                _sh.copy2(_core, os.path.join(
+                                    os.path.dirname(generated_files_map[suff]),
+                                    os.path.basename(_core)))
+                            except OSError:
+                                pass
                 ver_rows = []
                 engines = set()
                 all_ok = True
                 for suff in ["Debug", "Silent"]:
                     if generated_files_map and suff in generated_files_map:
-                        res = test_command(argparse.Namespace(obfuscated=generated_files_map[suff], original=args.source, silent=True, variant=f"{suff} Version"), skip_header=True)
+                        # The variants must see what the operator sees: a bound
+                        # build's loader refuses to run without its licence
+                        # token, so verification passes the same NIXON_LICENCE
+                        # or a correctly bound artefact can never verify.
+                        res = test_command(argparse.Namespace(
+                            obfuscated=generated_files_map[suff],
+                            original=args.source, silent=True,
+                            variant=f"{suff} Version",
+                            licence_token=getattr(args, 'licence_token', '')),
+                            skip_header=True)
                         if res:
                             ver_rows.append([f"[◯] {res['variant']}", res['status'], res['integrity'], res['match']])
                             engines.add(res['engine'])
-                            if res['status'] != 'PASS': all_ok = False
+                            if res['status'] != 'PASS':
+                                # Silent mode suppresses the failure detail in
+                                # test_command; a gate that fails without saying
+                                # why is the uninformative-red bug class this
+                                # project spent a whole round on. Print the
+                                # variant's own stderr tail here.
+                                _raw = (res.get('raw_results') or {}).get('obfuscated') or {}
+                                _err = (_raw.get('stderr') or '')[-1200:]
+                                _out = (_raw.get('stdout') or '')[-600:]
+                                UI._out(f"\n{UI.RED} [!] {res['variant']} failed verification:{UI.RESET}")
+                                if _err.strip():
+                                    UI._out(f"{UI.RED}{_err}{UI.RESET}")
+                                if _out.strip():
+                                    UI._out(f"    stdout tail: {_out.strip()[-400:]}")
+                                all_ok = False
                 
                 UI.print_table(["PROFILE VARIANT", "STATUS", "INTEGRITY", "MATCH"], ver_rows)
                 UI._out(" │")
