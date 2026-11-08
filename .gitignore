@@ -114,3 +114,4 @@ ci-artifacts/
 # from the payload path). They are not fixtures and must not be committed.
 tests/fixtures/portable/*.py.*.py
 tests/fixtures/portable/*_adaptive.py
+.mimosa/

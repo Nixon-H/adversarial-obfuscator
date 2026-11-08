@@ -4031,6 +4031,15 @@ def main():
             parser.print_help(file=_nixon_utils._console)
             sys.exit(1)
         if args.command == 'build':
+            # --fast ships the reduced posture. That is a legitimate choice, but it
+            # must never be a silent one: the flag is one word from the hardened
+            # default and the difference is every detection this project has.
+            if not getattr(args, 'strict_detections', True):
+                sys.stderr.write(
+                    "[WARN] --fast: building the REDUCED-protection profile. "
+                    "Environment detections only warn and the anti-analysis "
+                    "pressure is lower. Use the default for a protected build.\n")
+                sys.stderr.flush()
             auto_cf = False
             auto_nk = False
             if args.auto:
