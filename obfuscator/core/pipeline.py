@@ -4150,6 +4150,7 @@ def main():
             if not generated_files_map:
                 UI.fail("Build failed - no output generated")
                 sys.exit(1)
+            _verification_failed = False
             if not args.one_shot:
                 UI.section("PHASE 3: VERIFICATION SUITE")
                 ver_rows = []
@@ -4171,6 +4172,13 @@ def main():
                     UI.item("Validation Result", f"{UI.GREEN}[SUCCESS] All logic gates verified.{UI.RESET}", "")
                 else:
                     UI.item("Validation Result", f"{UI.RED}[FAILURE] Logic verification failed.{UI.RESET}", "")
+                    # FAIL THE BUILD.
+                    #
+                    # This printed [FAILURE] and then carried on to
+                    # 'ALL OPERATIONS COMPLETE' with rc=0, so a build whose own
+                    # verification said the variants did not match shipped green.
+                    # A gate that only prints is not a gate.
+                    _verification_failed = True
             else:
                 print("\n[*] ONE-SHOT MODE DETECTED: Skipping automated verification to prevent self-destruct.")
             if getattr(args, 'layers', None) is not None:
@@ -4413,6 +4421,13 @@ def main():
             UI._out(" └── Launchers         : Smart-Trust & Defender Whitelisting [READY]")
             UI._out("")
             UI._out(f" {UI.CYAN}ℹ Artifacts moved to: {dist_dir}{UI.RESET}")
+            if _verification_failed:
+                # The build's own gate said the profile variants do not match.
+                # Shipping that green would make the gate decorative: it printed
+                # FAILURE and then reported success one line later.
+                UI._out(f" {UI.RED}[✗] Build completed but its verification FAILED. "
+                        f"Not reporting success.{UI.RESET}")
+                sys.exit(1)
             UI._out(f" {UI.GREEN}[✓] ALL OPERATIONS COMPLETE.{UI.RESET}")
         elif args.command == 'auth':
             if not cm.get("cf_token"): print(" [!] Run setup first"); sys.exit(1)
