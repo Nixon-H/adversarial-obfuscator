@@ -21,6 +21,7 @@ concurrency:
 
 jobs:
   test:
+    timeout-minutes: 45
     # Runs on the weekly cron as well: previously every matrix job carried
     # `if: event != 'schedule'`, so Monday's "success" only meant lint-pin
     # had run and the suite could rot for weeks unnoticed.
@@ -111,6 +112,7 @@ jobs:
         run: python3 -m py_compile obfuscator/*.py irgen/*.py llvmgen/*.py scripts/*.py vm/*.py encrypt/*.py tests/*.py
 
   pip-audit:
+    timeout-minutes: 45
     if: github.event_name != 'schedule'
     # Supply chain HARD gate: pip-audit exits nonzero when any advisory
     # matches a pinned dependency, and continue-on-error stays false (the
@@ -139,6 +141,7 @@ jobs:
         run: pip-audit -r requirements.lock --desc
 
   gitleaks:
+    timeout-minutes: 45
     if: github.event_name != 'schedule'
     # Secret scanning on every push/PR: default rule set plus the
     # .gitleaks.toml allowlist (RFC 8439 test vector in
@@ -156,6 +159,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   dependency-diff:
+    timeout-minutes: 45
     if: github.event_name != 'schedule'
     # Informational only, never gates: surface requirements.txt history for
     # human review. Always exits 0 (|| true); reviewers check the log.
@@ -170,6 +174,7 @@ jobs:
           git diff HEAD~1 -- requirements.txt || true
 
   lint-pin:
+    timeout-minutes: 45
     # The ruff pin is deliberate -- an unpinned linter can turn a green
     # tree red with no change to the code -- but a pin that is never
     # reviewed goes stale.  This job reports (it never gates): it says

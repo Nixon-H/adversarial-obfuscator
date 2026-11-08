@@ -48,6 +48,10 @@ of the technique rather than a bug.
 ## Coverage
 
 `portable-build-matrix.yml`: 26 jobs on every push — 3 OSes × Python 3.10–3.14, two payload types,
+
+> **Superseded**: every push now fans out to all 14 workflows via
+> `all-checks.yml`. `portable-build-matrix.yml` is one of them; the per-workflow
+> job counts below describe composition, not what a push runs.
 audits, crash diagnostics. `portable-deep-matrix.yml`: 30 jobs on demand — 12 configurations, 8
 isolated packing flags, 12 isolated ladder transforms. Every job capped at 45 minutes.
 

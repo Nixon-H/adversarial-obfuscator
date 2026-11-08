@@ -9,7 +9,8 @@ name: Security artifact validation
 # in-process; this job covers them as deployed files.
 #
 # Design decisions (deliberate, documented):
-# - Triggers push + pull_request ONLY, no schedule: every gate asserted
+# - Triggered by all-checks.yml via workflow_call (a push fans out to every
+#   workflow), plus workflow_dispatch. No schedule: every gate asserted
 #   here is deterministic (forced verdicts, HMAC checks, real-clock
 #   expiry with wide margins). There is no time-drift signal a weekly
 #   run would add; supply-chain drift is already covered per-push by the

@@ -512,3 +512,19 @@ this file is a summary:
 - The emitted loader wrote the **decrypted payload** to a hardcoded
   absolute path at runtime.
 - The emitted key fetch used `ssl._create_unverified_context()`.
+
+## Hardened by default, and the counter-REA port
+
+**`--strict-detections` is no longer opt-in.** Since `1649dc0` it is the
+default and `--fast` selects the reduced posture; a plain build is the
+protected one. Any earlier note in this file describing it as an opt-in
+arming flag is stale.
+
+**Counter-REA shields** (`obfuscator/anti_rea.py`, ported from
+[BLA](https://github.com/qybaihe/bla)) are on by default: architecture-mirage
+chaff, canary credentials and URL parser differentials, evidence-contract
+poison, a decoy call graph woven into real functions, a BPE token amplifier,
+shadow business logic, an aliasing illusion, crash-trace decoys and diagnostic
+rabbit holes. Classifier-directed bait layers are on by default and disabled
+with `--exclude-rea`, `--exclude-rea-compliance`, `--exclude-rea-cognitive`
+or `--exclude-rea-bio`.
