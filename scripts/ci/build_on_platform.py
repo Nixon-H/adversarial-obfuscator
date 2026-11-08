@@ -100,6 +100,16 @@ def main():
     env = dict(os.environ, PYTHONIOENCODING="utf-8", NIXON_LOG_REDIRECT="0")
     proc = subprocess.run([sys.executable, "-c", launcher], cwd=ROOT,
                           capture_output=True, timeout=1800, env=env)
+    # The builder's output is captured, so a warning it prints -- the
+    # --fast reduced-profile notice is one -- would never reach the CI log.
+    _seen_warn = set()
+    for _line in (proc.stdout or b'').decode('utf-8', 'replace').splitlines() \
+            + (proc.stderr or b'').decode('utf-8', 'replace').splitlines():
+        if 'WARN' in _line and _line.strip() not in _seen_warn:
+            # The same notice reaches both streams (the builder writes it to stderr
+            # and to the saved console handle), so print it once.
+            _seen_warn.add(_line.strip())
+            print(_line.strip())
     if proc.returncode != 0:
         print("FAIL: builder exited %d" % proc.returncode)
         print(proc.stdout.decode("utf-8", "replace")[-3000:])
