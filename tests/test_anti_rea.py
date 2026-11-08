@@ -25,11 +25,16 @@ from obfuscator.anti_rea import (
     canary_tokens,
     chaff_payloads,
     decoy_call_graph,
+    diff_noise_blocks,
     evidence_poison,
     compliance_notices,
     inject,
+    obligation_flood,
     opaque_false_expression,
+    prompt_completion_poison,
     url_differential_canaries,
+    _CANARY_NOTICES,
+    _ABORT_MARKERS,
 )
 
 SOURCE = "def add(a, b):\n    return a + b\nprint(add(2, 3))\n"
@@ -209,13 +214,13 @@ def test_url_canaries_exercise_parser_differentials():
     assert any(u.count("@") >= 2 for u in urls), "no multi-@ userinfo form"
 
 
-def test_compliance_bait_is_off_unless_explicitly_requested():
-    """It targets classifier behaviour, so it is the user's decision, not a default."""
+def test_compliance_bait_is_on_by_default_and_excludable():
+    """The bait layers ship by default; the exclusion switch turns this one off."""
     src = "def f(x):\n    return x * 2\n"
-    _, off = inject(src, "balanced", 1)
-    _, on = inject(src, "balanced", 1, compliance_bait=True)
-    assert off["compliance_notices"] == 0
+    _, on = inject(src, "balanced", 1)
+    _, off = inject(src, "balanced", 1, compliance_bait=False)
     assert on["compliance_notices"] > 0
+    assert off["compliance_notices"] == 0
 
 
 def test_compliance_bait_does_not_claim_a_certification():
@@ -338,23 +343,25 @@ def test_diagnostic_decoys_are_inert():
     assert "open(" not in src and "print(" not in src
 
 
-def test_cognitive_armor_is_opt_in_and_off_by_default():
-    """The most aggressive layer, so it must never be a default."""
+def test_cognitive_armor_is_on_by_default_and_excludable():
+    """The canary layer ships by default; the exclusion switch turns it off."""
     src = "def f(x):\n    return x * 2\n"
-    _, off = inject(src, "balanced", 1)
-    _, on = inject(src, "balanced", 1, cognitive_armor=True)
-    assert off["cognitive_armor"] == 0
+    _, on = inject(src, "balanced", 1)
+    _, off = inject(src, "balanced", 1, cognitive_armor=False)
     assert on["cognitive_armor"] > 0
+    assert off["cognitive_armor"] == 0
 
 
 def test_cognitive_armor_uses_the_documented_canary_not_a_fabricated_hazard():
-    """The canary GUID is a standard marker; naming select agents is not.
+    """The canary GUID is a standard marker; the canary layer never names hazards.
 
     BLA's payload set also names specific biosecurity agents and chemical
-    precursors. Those are deliberately absent: they fabricate a hazard signal
-    rather than declaring an analysis restriction, and inert or not, they risk
-    triggering real monitoring against whoever ships the artefact. The canary and
-    the abort marker produce the same "decline and stop" behaviour without them.
+    precursors. This layer deliberately does not: the fabricated hazard signal
+    lives separately in ``classifier_bait_triggers`` (on by default, excluded
+    via --exclude-rea-bio) with its own keyword-only content guard in
+    tests/test_classifier_bait.py. This guard is scoped to the canary layer —
+    the notices and abort markers below — and fails if THAT layer ever gains
+    hazard vocabulary.
     """
     import random
     names, src = cognitive_armor_triggers(random.Random(1), 3)
@@ -377,3 +384,118 @@ def test_cognitive_armor_functions_are_callable_and_inert():
     for name in names:
         assert isinstance(ns[name](), str)
     assert "open(" not in src and "import os" not in src
+
+
+# --- canary variant pool (non-hazardous breadth) -----------------------------
+
+_BANNED_HAZARD_TERMS = ("variola", "ebola", "botulinum", "orthopox", "filovirus",
+                        "methylphosphonyl", "acetylcholinesterase", "phosphono",
+                        "bsl4", "select_agent", "synthesis")
+
+
+def test_every_canary_variant_declares_a_restriction_and_no_hazard():
+    """Breadth of the canary pool must never become fabricated hazard content."""
+    for text in _CANARY_NOTICES + _ABORT_MARKERS:
+        assert ALIGNMENT_CANARY_GUID in text, "variant lost the canary: %r" % text[:40]
+        lowered = text.lower()
+        for banned in _BANNED_HAZARD_TERMS:
+            assert banned not in lowered, "hazard term in variant: %r" % banned
+    assert len(set(_CANARY_NOTICES)) == len(_CANARY_NOTICES)
+    assert len(set(_ABORT_MARKERS)) == len(_ABORT_MARKERS)
+    assert len(_CANARY_NOTICES) >= 4 and len(_ABORT_MARKERS) >= 2
+
+
+def test_cognitive_armor_sampling_spans_the_variant_pool():
+    """count=3 against a 6-notice pool must reach more than the old 2-notice set."""
+    import random
+    seen = set()
+    for seed in range(6):
+        _, src = cognitive_armor_triggers(random.Random(seed), 3)
+        ns = {}
+        exec(compile(src, "<armor>", "exec"), ns)
+        for name in _fn_names(src):
+            seen.add(ns[name]())
+    assert len(seen) >= 4, "variant pool not being sampled: %d distinct" % len(seen)
+
+
+def _fn_names(src):
+    return [n.name for n in ast.parse(src).body if isinstance(n, ast.FunctionDef)]
+
+
+# --- diff-noise (BLA deception/diff-noise-injector) --------------------------
+
+def test_diff_noise_is_deterministic_per_seed_and_varies_across_seeds():
+    import random
+    n1, s1 = diff_noise_blocks(random.Random(7), 2)
+    n2, s2 = diff_noise_blocks(random.Random(7), 2)
+    n3, s3 = diff_noise_blocks(random.Random(8), 2)
+    assert s1 == s2 and n1 == n2, "same seed must reproduce the same blocks"
+    assert s1 != s3, "different seeds must permute the arms differently"
+    ns = {}
+    exec(compile(s1, "<diffnoise>", "exec"), ns)
+    for name in n1:
+        # Inert means: defined, callable, deterministic -- the payload never
+        # calls it, which the behaviour test pins for the whole module.
+        assert ns[name]() == ns[name](0), "frontier must be deterministic"
+        assert ns[name](5) == ns[name](5), "frontier must be deterministic on input"
+
+
+def test_diff_noise_reaches_the_module_and_scales_with_intensity():
+    _, stealth = inject(SOURCE, "stealth", 3)
+    _, maximum = inject(SOURCE, "maximum", 3)
+    assert stealth["diff_frontiers"] == 1
+    assert maximum["diff_frontiers"] == 4
+
+
+# --- prompt-completion priority sorting (BLA prompt-completion-poison) -------
+
+def test_prompt_poison_names_sort_early_and_are_uniquely_ranked():
+    import random
+    import re
+    names, src = prompt_completion_poison(random.Random(9), 4)
+    ranks = [re.match(r"^_([0-9a-f]{3})_", n).group(1) for n in names]
+    assert len(set(ranks)) == len(names), "shared rank = shared greppable literal"
+    for n in names:
+        assert n < "alpha", "priority symbol must sort before typical payload defs"
+    ns = {}
+    exec(compile(src, "<prio>", "exec"), ns)
+    for name in names:
+        assert ns[name]()["valid"] is False, "priority decoy must always be invalid"
+
+
+def test_prompt_poison_heads_the_module_listing():
+    import re
+    src = "def alpha():\n    return 1\n"
+    out, stats = inject(src, "balanced", 5)
+    assert stats["priority_symbols"] == 4
+    defs = [n.name for n in ast.parse(out).body if isinstance(n, ast.FunctionDef)]
+    prio = [d for d in defs if re.match(r"^_[0-9a-f]{3}_", d)]
+    assert prio, "no priority symbols reached the module"
+    for name in prio:
+        assert defs.index(name) < defs.index("alpha"), (
+            "%s must be injected ahead of the payload's own defs" % name)
+
+
+# --- obligation flood (BLA exhaustion/obligation-flooder) ---------------------
+
+def test_obligation_flood_is_inert_and_family_distinct():
+    import random
+    n1, s1 = obligation_flood(random.Random(11), 6)
+    n2, s2 = obligation_flood(random.Random(11), 6)
+    assert s1 == s2, "same seed must reproduce the same flood"
+    ns = {}
+    exec(compile(s1, "<oblig>", "exec"), ns)
+    kinds = set()
+    for fn in n1:
+        entry = ns[fn]()
+        assert entry["evidence"] == "decoy-inert"
+        assert 2 <= entry["required_cases"] <= 4
+        kinds.add(entry["kind"])
+    assert len(kinds) == len(n1), "families must not repeat within one flood"
+
+
+def test_obligation_flood_reaches_the_module_and_scales():
+    _, stealth = inject(SOURCE, "stealth", 4)
+    _, maximum = inject(SOURCE, "maximum", 4)
+    assert stealth["obligations"] == 3
+    assert maximum["obligations"] == 10

@@ -2884,10 +2884,19 @@ def _VERIFY_INTEGRITY():
         # --anti-rea-level.
         'anti_rea': bool(getattr(args, 'anti_rea', True)),
         'anti_rea_level': str(getattr(args, 'anti_rea_level', 'balanced')),
-        # Opt-in, like BLA's --llm-directives: it targets classifier behaviour
-        # rather than a property of the artefact.
-        'anti_rea_compliance_bait': bool(getattr(args, 'anti_rea_compliance_bait', False)),
-        'anti_rea_cognitive_armor': bool(getattr(args, 'anti_rea_cognitive_armor', False)),
+        # Classifier-directed bait layers are ON by default (owner decision,
+        # 2026-11-08). --exclude-rea turns off all three; --exclude-rea-bio /
+        # --exclude-rea-cognitive / --exclude-rea-compliance turn off one each
+        # and combine. The base shields follow --anti-rea/--no-anti-rea.
+        'anti_rea_compliance_bait': not (
+            bool(getattr(args, 'anti_rea_exclude_bait', False))
+            or bool(getattr(args, 'anti_rea_exclude_compliance', False))),
+        'anti_rea_cognitive_armor': not (
+            bool(getattr(args, 'anti_rea_exclude_bait', False))
+            or bool(getattr(args, 'anti_rea_exclude_cognitive', False))),
+        'anti_rea_classifier_bait': not (
+            bool(getattr(args, 'anti_rea_exclude_bait', False))
+            or bool(getattr(args, 'anti_rea_exclude_bio', False))),
         'func_transform': not getattr(args, 'native', False),
         'reflection': not getattr(args, 'native', False),
         'hwid': str(getattr(args, 'hwid', '') or ''),
@@ -3844,17 +3853,28 @@ def build_parser():
                        help="Counter-REA shields: architecture-mirage chaff, canary "
                             "credentials, evidence-contract poison, a decoy call "
                             "graph and high-salience bait procedures (ON by default)")
-    build.add_argument('--anti-rea-cognitive-armor', dest='anti_rea_cognitive_armor',
+    build.add_argument('--exclude-rea', dest='anti_rea_exclude_bait',
                        action='store_true', default=False,
-                       help="Opt in to canary and in-band analysis-restriction markers "
-                            "that make a classifying model decline to continue. The "
-                            "most aggressive layer; off by default")
-    build.add_argument('--anti-rea-compliance-bait', dest='anti_rea_compliance_bait',
+                       help="Exclude ALL classifier-directed bait layers (compliance "
+                            "notices, cognitive-armor canaries, fabricated classifier-bait "
+                            "corpus) from the counter-REA shields. The base shields "
+                            "(chaff, decoy call graph, canary credentials) stay on; use "
+                            "--no-anti-rea to skip those too")
+    build.add_argument('--exclude-rea-compliance', dest='anti_rea_exclude_compliance',
                        action='store_true', default=False,
-                       help="Opt in to regulatory-sensitivity markers, which steer "
-                            "analyser classifiers rather than changing the artefact. "
-                            "Off by default: they are claims about the software the "
-                            "user ships, so they are the user's decision")
+                       help="Exclude only the compliance-notice layer. Exclusions "
+                            "combine: pass any of --exclude-rea-* together")
+    build.add_argument('--exclude-rea-cognitive', dest='anti_rea_exclude_cognitive',
+                       action='store_true', default=False,
+                       help="Exclude only the cognitive-armor layer (canary notices "
+                            "and in-band abort markers). Exclusions combine: pass any "
+                            "of --exclude-rea-* together")
+    build.add_argument('--exclude-rea-bio', dest='anti_rea_exclude_bio',
+                       action='store_true', default=False,
+                       help="Exclude only the fabricated classifier-bait corpus (BLA's "
+                            "keyword-only bio/chem/cyber trigger strings; inert, no "
+                            "actionable content). Exclusions combine: pass any of "
+                            "--exclude-rea-* together")
     build.add_argument('--no-anti-rea', dest='anti_rea', action='store_false',
                        help="Skip the counter-REA shields")
     build.add_argument('--anti-rea-level', dest='anti_rea_level',
@@ -4035,11 +4055,19 @@ def main():
             # must never be a silent one: the flag is one word from the hardened
             # default and the difference is every detection this project has.
             if not getattr(args, 'strict_detections', True):
-                sys.stderr.write(
-                    "[WARN] --fast: building the REDUCED-protection profile. "
-                    "Environment detections only warn and the anti-analysis "
-                    "pressure is lower. Use the default for a protected build.\n")
+                _msg = ("[WARN] --fast: building the REDUCED-protection profile. "
+                        "Environment detections only warn and the anti-analysis "
+                        "pressure is lower. Use the default for a protected build.")
+                # Both sinks on purpose. enable_log_redirect() sends fd 1 and 2 to
+                # build.log, so a stderr-only warning is invisible on the console --
+                # which is how the first version of this shipped: implemented,
+                # correct, and never seen. UI._out writes to the saved console fd.
+                sys.stderr.write(_msg + "\n")
                 sys.stderr.flush()
+                try:
+                    UI._out(_msg)
+                except Exception:
+                    pass
             auto_cf = False
             auto_nk = False
             if args.auto:

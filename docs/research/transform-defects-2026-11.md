@@ -207,19 +207,81 @@ tool aimed at AI analysis agents. Its three layers act on what an analyzer
 | **Muddle** | chaff tagged per build, so two builds do not present the same inventory |
 
 Defaults: on, with `--anti-rea-level {stealth,balanced,maximum}` and
-`--no-anti-rea` to opt out. Measured on the `secure_demo` fixture: 750 KB → 2.5 MB
+`--no-anti-rea` to opt out. The classifier-directed bait layers (compliance
+notices, cognitive armor, the fabricated hazard corpus) are also on by default
+(2026-11-08): `--exclude-rea` skips all three, `--exclude-rea-{compliance,
+cognitive,bio}` skips one each, and those exclusions combine. Measured on the
+`secure_demo` fixture: 750 KB → 2.5 MB
 of artefact, runtime 0.3 s → 1.0 s, audit 12/12 pass.
+
+**The fabricated-hazard classifier bait — excluded at first, default-on since
+2026-11-08.**
+
+BLA's cognitive-armor payload set also names select agents, precursor chemicals
+and routes to trip biosecurity classifiers. That fabricates a hazard signal
+instead of declaring an analysis restriction; inert or not, those strings in
+shipped software risk triggering real monitoring against whoever ships the
+artefact. The original port excluded it and this row was marked "closed";
+the owner has since opted in and flipped the model: all three
+classifier-directed layers (compliance notices, cognitive armor, the hazard
+corpus) are **on by default**, and the corpus is ported **verbatim**
+(keyword-only fabrication: names of material classes, no route, parameter,
+quantity or procedure). Users who do not want it exclude it with
+`--exclude-rea-bio` (this layer only), `--exclude-rea` (all three bait
+layers at once), or the selective `--exclude-rea-compliance` /
+`--exclude-rea-cognitive` siblings — exclusions combine; `--no-anti-rea`
+still skips the base shields too. The canary-only
+`cognitive_armor_triggers()` layer remains hazard-free and still guarded by
+`tests/test_anti_rea.py::test_cognitive_armor_uses_the_documented_canary_not_a_fabricated_hazard`;
+the bait corpus carries its own guard
+(`tests/test_classifier_bait.py::test_corpus_carries_no_actionable_content`)
+that fails if procedural content is ever introduced.
 
 **What was deliberately not ported:**
 
-* **No compliance/medical bait.** BLA gates fake COPPA/IEC-62304 text behind an
-  explicit opt-in because it targets classifier behaviour. Omitted.
 * **No URL-parsing exploits.** BLA's canary URLs depend on specific bugs in one
   analyzer's WHATWG parser and its redaction path. Reproducing them here would
-  make our protection depend on someone else's defect.
+  make our protection depend on someone else's defect. (The URL *differential*
+  canaries, which exploit grammar diversity rather than a defect, are ported.)
 * **No JS/WASM/ASAR/DEX surface.** This project ships Python artefacts.
+* **No runtime/behavioural shields.** BLA's `runtime/` layer (memory-diff,
+  self-seal, sidecar-entangle) changes what a payload does. The invariant here is
+  that the shields are inert — the payload must behave identically with and
+  without them — so a behavioural layer is out of scope by construction.
+
+### Full BLA inventory — where every module landed
+
+| BLA module (`qybaihe/bla/src/shields/`) | status | here |
+|---|---|---|
+| `chaff/chaff-generator.ts` | ported | `anti_rea.py` `chaff_payloads()` |
+| `deception/architecture-mirage.ts` | ported | architecture-note strings, `visit_Module` |
+| `deception/canary-honeypot.ts` | ported | `canary_tokens()` |
+| `deception/evidence-contract-poison.ts` | ported | `evidence_poison()` |
+| `deception/semantic-honeypot.ts` | ported | `bait_procedures()` |
+| `deception/shadow-business-logic.ts` | ported | `shadow_business_logic()` |
+| `deception/crash-trace-decoy.ts` | ported | `crash_trace_decoys()` |
+| `deception/system-diagnostic-decoy.ts` | ported | `diagnostic_rabbit_holes()` |
+| `deception/decompiler-illusion.ts` | ported | `aliasing_illusion()` |
+| `deception/diff-noise-injector.ts` | ported | `diff_noise_blocks()` |
+| `deception/prompt-completion-poison.ts` | ported | `prompt_completion_poison()` (prefix adapted: `$` is not a Python identifier character) |
+| `deception/cognitive-armor-trigger.ts` (canary + abort vectors) | ported | `cognitive_armor_triggers()`, 6 notices + 3 markers |
+| `deception/cognitive-armor-trigger.ts` (hazard vectors + containment digest) | ported (default-on, 2026-11-08) | `classifier_bait_triggers()` + `compute_containment_corpus_digest()`, 8 entries verbatim; excluded via `--exclude-rea-bio` / `--exclude-rea` |
+| `deception/format-payloads.ts`, `formats/*` | N/A | binary/OS formats this product does not ship |
+| `exhaustion/bpe-token-amplifier.ts` | ported | `bpe_token_amplifier()` |
+| `exhaustion/callgraph-labyrinth.ts` | ported | `decoy_call_graph()` + `weave_decoy_calls()` |
+| `exhaustion/obligation-flooder.ts` | ported | `obligation_flood()` (generic families, not one product's schema) |
+| `exhaustion/rea-budget-matrix.ts` | covered in spirit | BLA's own comment: scale across orthogonal dimensions, never rely on one constant. Intensity tiers do that here; the matrix itself is one analyzer's drift-tracked constants and was not copied |
+| `exhaustion/regex-worker-tarpit.ts`, `frida-capture-saturation.ts`, `cdp-shape-budget-breaker.ts` | excluded | scale against one named analyzer's hard limits — same category as the URL-parser exploits |
+| `exhaustion/asar-header-amplifier.ts`, `wasm-interface-exhaustion.ts` | N/A | JS/ASAR/WASM surface |
+| `tarpit/*` | covered | `opaque_false_expression()` + the labyrinth are the source-level equivalent |
+| `weave/weave-decoy.ts` | ported | `weave_decoy_calls()` |
+| `runtime/*` | excluded | behavioural, breaks the inert-payload invariant |
 
 The shields append only. Nothing existing is rewritten, so a payload cannot change
 behaviour because of them — `tests/test_anti_rea.py` asserts the payload produces
 identical output with and without them, that no decoy is ever called, and that the
-same seed reproduces the same shields.
+same seed reproduces the same shields. 46 guards cover the module
+(`test_anti_rea.py` + `test_classifier_bait.py`), including the hazard-content
+guards (the canary-layer tripwire and the bait corpus's keyword-only content
+guard), the default-on / exclusion contract of the classifier-directed layers,
+and the determinism/inertness of every layer.
