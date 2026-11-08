@@ -20,6 +20,7 @@ removed:
   trial-expired artifact ran its payload and only then died.
 """
 import ast
+import inspect
 import os
 import subprocess
 import sys
@@ -214,3 +215,61 @@ def test_the_gates_precede_the_entry_point_in_the_emitted_source():
         pos = src.find(marker)
         assert 0 <= pos < entry_at, (
             "%r must be emitted before the payload entry point" % marker)
+
+
+def test_the_anti_rea_flags_reach_the_build_options():
+    """The anti_rea_* options must survive the CLI -> pipeline handoff.
+
+    Nothing tested this. test_anti_rea.py calls the module directly, so a flag that
+    parsed but never reached apply_ast_mutation would have looked fine while doing
+    nothing -- the same class of failure as the inert-placeholder bug.
+
+    The bait layers are ON by default and turned off with --exclude-rea*, so the
+    flags that matter are the exclusions.
+    """
+    from obfuscator.core.pipeline import build_parser
+
+    parser, _ = build_parser()
+    sub = parser._subparsers._group_actions[0].choices["build"]
+
+    default = sub.parse_args(["p.py"])
+    assert default.anti_rea is True, "the shields are on by default"
+    assert default.anti_rea_level == "balanced"
+    assert default.strict_detections is True
+    assert default.anti_rea_exclude_bait is False
+    assert default.anti_rea_exclude_cognitive is False
+
+    off = sub.parse_args(["p.py", "--no-anti-rea", "--anti-rea-level", "maximum"])
+    assert off.anti_rea is False
+    assert off.anti_rea_level == "maximum"
+
+    one = sub.parse_args(["p.py", "--exclude-rea-cognitive"])
+    assert one.anti_rea_exclude_cognitive is True
+    assert one.anti_rea_exclude_compliance is False, (
+        "excluding one layer must not disable the others")
+
+
+def test_fast_and_the_anti_rea_optins_are_independent():
+    """--fast lowers the detection profile; it must not switch the shields off.
+
+    They are separate concerns, and conflating them would silently remove a layer
+    from every build that asked only for speed.
+    """
+    from obfuscator.core.pipeline import build_parser
+
+    parser, _ = build_parser()
+    sub = parser._subparsers._group_actions[0].choices["build"]
+    fast = sub.parse_args(["p.py", "--fast"])
+    assert fast.strict_detections is False
+    assert fast.anti_rea is True, "--fast must not disable the counter-REA shields"
+
+
+def test_anti_rea_options_are_read_by_the_transform_chain():
+    """The option names the chain reads must be the ones the CLI sets."""
+    import obfuscator.core.sources as src
+
+    text = inspect.getsource(src)
+    for key in ("anti_rea", "anti_rea_level",
+                "anti_rea_compliance_bait", "anti_rea_cognitive_armor"):
+        assert "'%s'" % key in text, (
+            "apply_ast_mutation never reads %r, so the flag is inert" % key)

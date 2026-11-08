@@ -870,7 +870,23 @@ def %(VAR_BOOTSTRAP)s():
         if "NX_ORIGIN" not in os.environ: os.environ["NX_ORIGIN"] = os.path.abspath(__file__)
         %(VAR_DATA)s=%(DECODE_FUNC)s(%(VAR_PAYLOAD)s)
         %(VAR_TEMP)s=tempfile.mkdtemp(prefix="app_")
-        with zipfile.ZipFile(io.BytesIO(%(VAR_DATA)s)) as z: z.extractall(%(VAR_TEMP)s)
+        # CONFINED EXTRACTION. extractall() honours whatever paths the archive
+        # carries, so a tampered archive can write outside the temp directory --
+        # archive_safety says this project confines every archive it extracts, and
+        # this was the exception. Each member is resolved and rejected unless it
+        # stays under the target.
+        with zipfile.ZipFile(io.BytesIO(%(VAR_DATA)s)) as z:
+            _nx_root=os.path.realpath(%(VAR_TEMP)s)
+            for _nx_m in z.namelist():
+                _nx_dst=os.path.realpath(os.path.join(_nx_root,_nx_m))
+                if _nx_dst!=_nx_root and not _nx_dst.startswith(_nx_root+os.sep):
+                    raise RuntimeError("archive member escapes the extraction root: %%r" %% (_nx_m,))
+                if _nx_m.endswith("/"):
+                    os.makedirs(_nx_dst, exist_ok=True)
+                    continue
+                os.makedirs(os.path.dirname(_nx_dst), exist_ok=True)
+                with z.open(_nx_m) as _nx_src, open(_nx_dst,"wb") as _nx_out:
+                    shutil.copyfileobj(_nx_src,_nx_out)
         sys.path.insert(0,%(VAR_TEMP)s)
         _nx_owner_pid=os.getpid()
         def %(VAR_CLEAN)s():
