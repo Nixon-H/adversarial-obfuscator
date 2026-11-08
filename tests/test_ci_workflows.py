@@ -174,3 +174,37 @@ def test_every_tier_runs_on_every_push():
     # No dead dispatch input left behind.
     inputs = (on.get("workflow_dispatch") or {}).get("inputs") or {}
     assert "full" not in inputs, "the full input is gone; nothing uses it now"
+
+
+def test_the_placeholder_guard_matches_by_shape_not_by_file():
+    """It must catch the inert-strict-mode class from ANY module, not just two.
+
+    The guard used to read only sources.py and pipeline.py, so a placeholder that
+    originated in a third module would sail through. It was narrowed that way to
+    avoid a false positive on `{LKME}`, a legitimate set literal in generated code.
+
+    Matching on the `<PREFIX>_<NAME>` form fixes both: every real placeholder in
+    this project has that shape, and a bare word like LKME never does.
+    """
+    import re
+
+    pat = re.compile(r"\{([A-Z][A-Z0-9_]{2,})\}")
+    prefixes = set()
+    for src in ("obfuscator/core/sources.py", "obfuscator/core/pipeline.py"):
+        for n in pat.findall(open(os.path.join(ROOT, src), encoding="utf-8").read()):
+            if "_" in n:
+                prefixes.add(n.split("_")[0])
+
+    def flagged(text):
+        return {n for n in pat.findall(text)
+                if "_" in n and n.split("_")[0] in prefixes}
+
+    assert flagged("if not {VAR_STRICT_DETECTIONS}: pass")
+    assert flagged("def {FUNC_NAME}(): pass")
+    # from a module the old guard never read
+    assert flagged("_k = {NATIVE_BLOB_KEY_HEX}")
+
+    # the known false positive, and other bare words, must stay clean
+    assert not flagged("LKME = {LKME}")
+    assert not flagged("z = {OUTPUT}")
+    assert not flagged("d = {'a': 1}")

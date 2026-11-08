@@ -142,18 +142,27 @@ def main():
     # literally -- and `if not {VAR_STRICT_DETECTIONS}:` is then a SET LITERAL
     # naming an undefined variable, not a flag. That made restored protections
     # inert and killed the noise threads on NameError while every test passed.
-    # Only REAL template placeholders count. A bare {NAME} can be a legitimate
-    # set literal in generated code -- `{LKME}` is a set containing the name LKME,
-    # and flagging it was a false positive in this guard.
+    # Which names may be placeholders is decided by SHAPE, not by which file they
+    # came from. Every real placeholder in this project is <PREFIX>_<NAME> -- VAR_,
+    # FUNC_, METHOD_, NATIVE_, WHITEBOX_ and so on -- while the known false
+    # positive was a bare `{LKME}`, a legitimate set literal in generated code.
+    #
+    # Matching on the underscore form lets the guard cover every module instead of
+    # the two it used to read, without reviving that false positive: a bare word
+    # has no prefix and is never flagged.
     import re as _re
-    _known = set()
+    _prefixes = set()
     for _src in ("obfuscator/core/sources.py", "obfuscator/core/pipeline.py"):
         try:
-            _known.update(_re.findall(r"\{([A-Z][A-Z0-9_]{2,})\}",
-                                      open(_src, encoding="utf-8").read()))
+            for _n in _re.findall(r"\{([A-Z][A-Z0-9_]{2,})\}",
+                                  open(_src, encoding="utf-8").read()):
+                if "_" in _n:
+                    _prefixes.add(_n.split("_")[0])
         except OSError:
             pass
-    leftovers = sorted(set(_re.findall(r"\{([A-Z][A-Z0-9_]{2,})\}", text)) & _known)
+    leftovers = sorted(
+        n for n in set(_re.findall(r"\{([A-Z][A-Z0-9_]{2,})\}", text))
+        if "_" in n and n.split("_")[0] in _prefixes)
     if leftovers:
         print("FAIL: unsubstituted placeholders in the artefact:", leftovers[:6])
         return 1
