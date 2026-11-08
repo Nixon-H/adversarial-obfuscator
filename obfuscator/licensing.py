@@ -249,10 +249,21 @@ def verify(
         raise LicenceError(
             f"licence expired at {int(licence.expires_at)} (now {int(moment)})"
         )
-    if licence.hwid and hwid is not None and licence.hwid != hwid:
-        raise LicenceError(
-            f"licence is bound to a different machine (want {licence.hwid!r})"
-        )
+    if licence.hwid:
+        # FAIL CLOSED. The old condition also required `hwid is not None`, so
+        # verifying without --hwid skipped the machine binding entirely: a
+        # machine-locked licence validated on any host as long as the caller
+        # simply did not supply one. A binding that disappears when the verifier
+        # is lazy is not a binding.
+        if hwid is None:
+            raise LicenceError(
+                f"licence is bound to a machine (want {licence.hwid!r}) but no "
+                "hwid was supplied to the verifier"
+            )
+        if licence.hwid != hwid:
+            raise LicenceError(
+                f"licence is bound to a different machine (want {licence.hwid!r})"
+            )
     missing = sorted(set(required_features) - set(licence.features))
     if missing:
         raise LicenceError(f"licence does not grant: {', '.join(missing)}")

@@ -334,6 +334,17 @@ def encode_sensitive_strings(
     return result
 
 
+
+def _provenance_seed():
+    """The build's seed, or 0 when the build is deliberately unseeded."""
+    env = os.environ.get("NX_BUILD_SEED", "")
+    if env:
+        try:
+            return int(env)
+        except ValueError:
+            return env
+    return 0
+
 def scan_algorithmic_constants(
     ast_tree: ast.AST,
 ) -> list[dict[str, Any]]:
@@ -369,7 +380,11 @@ def obfuscate_algorithmic_constants(ast_tree: ast.Module) -> ast.Module:
     if not found:
         return ast_tree
 
-    rand = random.Random()
+    # Seeded from the build, not from the OS. An unseeded Random here made two
+    # supposedly identical seeded builds differ, silently, for any payload that
+    # reached this transform. Falls back to a fresh seed only when the build
+    # explicitly has none.
+    rand = random.Random(_provenance_seed())
     obfuscations: dict[int, tuple[int, int]] = {}
 
     unique_values = set(f["value"] for f in found)
@@ -444,7 +459,11 @@ def wrap_library_calls(
 
     library_patterns: {'chacha20': 'chacha20_poly1305_encrypt', ...}
     """
-    rand = random.Random()
+    # Seeded from the build, not from the OS. An unseeded Random here made two
+    # supposedly identical seeded builds differ, silently, for any payload that
+    # reached this transform. Falls back to a fresh seed only when the build
+    # explicitly has none.
+    rand = random.Random(_provenance_seed())
     func_names = set(
         name.lower() for name in library_patterns.values()
     )

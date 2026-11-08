@@ -121,7 +121,9 @@ def canary_tokens(rng: random.Random, count: int = 3) -> List[str]:
     for i in range(count):
         body = "".join(rng.choice(string.ascii_uppercase) for _ in range(4))
         out.append("AKIA%s%04dEXAMPLE" % (body, i))
-    out.append("bla_canary_synthetic_%08x" % rng.getrandbits(32))
+    if count > 0:
+        # Was unconditional, so canary_tokens(count=0) still returned one token.
+        out.append("bla_canary_synthetic_%08x" % rng.getrandbits(32))
     return out
 
 
@@ -682,7 +684,7 @@ def opaque_false_expression(rng: random.Random, seed_var: str = "s") -> str:
 
 DECOY_SOURCE = '''def {name}(seed: int = 0, depth: int = 0) -> int:
     """{doc}"""
-    tag = {table}[{idx} % len({table})]
+    tag = {table}[{idx} % len({table})] if {table} else "" 
     acc = (seed ^ {k1} ^ {state}) & 0xFFFFFFFF
     for r in range(5):
         acc = ((acc * {mix}) ^ (acc >> 11) ^ r ^ (ord(tag[r % len(tag)]) if tag else 0)) & 0xFFFFFFFF
@@ -1047,8 +1049,16 @@ def weave_decoy_calls(tree, decoy_names, rng, intensity="balanced", exclude=None
     for fn in targets:
         name = rng.choice(decoy_names)
         stmt = ast.parse(_WOVEN_CALL % name).body[0]
-        ast.copy_location(stmt, fn.body[0])
-        fn.body.insert(0, stmt)
+        # AFTER any docstring. Inserting at index 0 displaced it, so a payload
+        # function lost its __doc__ -- a behaviour change, which this transform
+        # promises never to make.
+        _at = 0
+        if (fn.body and isinstance(fn.body[0], ast.Expr)
+                and isinstance(fn.body[0].value, ast.Constant)
+                and isinstance(fn.body[0].value.value, str)):
+            _at = 1
+        ast.copy_location(stmt, fn.body[_at])
+        fn.body.insert(_at, stmt)
         woven += 1
     return woven
 

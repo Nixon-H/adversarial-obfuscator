@@ -499,3 +499,20 @@ def test_obligation_flood_reaches_the_module_and_scales():
     _, maximum = inject(SOURCE, "maximum", 4)
     assert stealth["obligations"] == 3
     assert maximum["obligations"] == 10
+
+
+def test_a_payload_docstring_survives_the_woven_call():
+    """Inserting at index 0 displaced __doc__ -- a behaviour change."""
+    src = ('def f(x):\n    """Keep me."""\n    return x + 1\nprint(f(2))\n')
+    out, _ = inject(src, "maximum", 3)
+    fn = next(n for n in ast.parse(out).body
+              if isinstance(n, ast.FunctionDef) and n.name == "f")
+    assert ast.get_docstring(fn) == "Keep me."
+    assert ast.unparse(fn.body[1]).startswith("_ = "), "the call must follow it"
+    assert _run(out) == "3"
+
+
+def test_canary_tokens_respects_count_zero():
+    import random
+    assert canary_tokens(random.Random(1), 0) == []
+    assert len(canary_tokens(random.Random(1), 2)) == 3   # 2 AWS + 1 synthetic

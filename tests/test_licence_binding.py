@@ -122,7 +122,10 @@ def test_bound_build_marks_the_artefact_and_demands_the_token(tmp_path):
     build = subprocess.run(
         [sys.executable, "-m", "obfuscator.core.pipeline", "build", str(src),
          "--licence-token", str(path)],
-        cwd=tmp_path, capture_output=True, text=True, timeout=300,
+        # 900s, not 300s. A licence-bound build measured 338.9s on an idle machine,
+        # so the old leash failed deterministically on slower hardware rather than
+        # catching a hang. The budget was the problem, not the product.
+        cwd=tmp_path, capture_output=True, text=True, timeout=900,
         env=dict(os.environ, PYTHONPATH=repo, NIXON_LOG_REDIRECT="0"))
     assert build.returncode == 0, build.stderr[-800:]
 

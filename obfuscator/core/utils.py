@@ -1306,7 +1306,10 @@ def run():
             os.close(fd)
             with open(path, "wb") as f:
                 f.write(z.read(target))
-            os.chmod(path, 0o777)
+            # 0o700, not 0o777. A world-writable executable in a temp directory is
+            # a window anyone on the host can use to swap the binary between
+            # this chmod and the exec below.
+            os.chmod(path, 0o700)
             try:
                 subprocess.call([path] + sys.argv[1:])
             finally:
