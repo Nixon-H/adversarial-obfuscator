@@ -22,7 +22,11 @@ import pytest
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-_BUILD_TIMEOUT = 300
+# 900s, matching the other build-fixture budgets: the e2e module fixture
+# builds the full pipeline artefact, which measures 340-550s idle and was
+# killed at 300s under a loaded suite (returncode -9, all three tests in
+# this file errored at setup). The budget was the problem, not the build.
+_BUILD_TIMEOUT = 900
 
 
 def _run_pipeline_build(source_path, cwd):

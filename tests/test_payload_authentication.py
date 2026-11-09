@@ -18,7 +18,10 @@ import sys
 import pytest
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-_BUILD_TIMEOUT = 600
+# 900s, matching the licence-binding budget: a build measures 340-550s on an
+# idle machine, and under the sustained CPU load of a full suite run it was
+# killed at 600s (returncode -9) -- the budget was the problem, not the build.
+_BUILD_TIMEOUT = 900
 _MARKER = "PAYLOAD-RAN"
 
 
