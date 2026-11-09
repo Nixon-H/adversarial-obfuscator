@@ -420,6 +420,34 @@ def _apply_ast_mutation_inner(source_code, options=None):
         # injection add calls to every function, so a purity test run afterwards
         # declares everything impure and the wrapper is never emitted -- which is
         # a second, subtler reason this protection had no call sites.
+        # Bounded recursion headroom, first in the chain so every artefact that
+        # embeds this payload carries it. A stochastic build (--mba-subs plus the
+        # random transforms) can produce an expression deep enough to trip the
+        # default 1000-frame limit mid-run; observed once as a RecursionError
+        # surfacing inside hmac, i.e. wherever the stack happened to run out.
+        #
+        # 3000, not 10000: on Windows a thread's native stack is 1 MB, so a limit
+        # the interpreter accepts on Linux overflows the real stack there and
+        # becomes an ACCESS_VIOLATION no except can catch -- the reason utils.py
+        # refuses to raise this at import time. 3000 frames stays well inside 1 MB.
+        _headroom = ast.parse(
+            "try:\n"
+            "    import sys as _nx_rl\n"
+            "    if _nx_rl.getrecursionlimit() < 3000:\n"
+            "        _nx_rl.setrecursionlimit(3000)\n"
+            "except Exception:\n"
+            "    pass\n"
+        ).body
+        _at = 0
+        if (tree.body and isinstance(tree.body[0], ast.Expr)
+                and isinstance(tree.body[0].value, ast.Constant)
+                and isinstance(tree.body[0].value.value, str)):
+            _at = 1
+        while (_at < len(tree.body) and isinstance(tree.body[_at], ast.ImportFrom)
+               and tree.body[_at].module == "__future__"):
+            _at += 1
+        tree.body[_at:_at] = _headroom
+
         _red = TemporalRedundancyWrapper()
         tree = _red.visit(tree)
         # Counter-REA shields, ported from BLA. FIRST for the same reason the
