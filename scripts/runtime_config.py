@@ -93,7 +93,20 @@ def executable_segment(path: str) -> bytes:
 
 
 def expected_crc(path: str) -> int:
-    return crc32(executable_segment(path))
+    """CRC of the whole binary file.
+
+    The runtime hashes /proc/self/exe, so this must hash the same file. It used to
+    hash only the executable PT_LOAD segment, which is not the same byte range as
+    any memory mapping -- the two agreed on one machine and disagreed on a
+    CI-built binary. Whole-file is unambiguous, and the file is a few MB at most.
+    """
+    with open(path, "rb") as f:
+        data = f.read()
+    if data[:4] != b"\x7fELF":
+        # Keep the guard: a baseline for something that is not a binary is a
+        # mistake the caller should hear about, not a CRC that never matches.
+        raise ValueError(f"{path} is not an ELF binary")
+    return crc32(data)
 
 
 def write_config(binary_path: str, out_dir: str | None = None) -> str:

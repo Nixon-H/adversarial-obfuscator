@@ -74,16 +74,26 @@ pub fn find_text_bounds() -> Option<(usize, usize)> {
 }
 
 pub fn verify_text_section(expected: u32) -> bool {
-    let bounds = find_text_bounds();
-    match bounds {
-        Some((start, end)) => {
-            let len = end - start;
-            let slice = unsafe {
-                std::slice::from_raw_parts(start as *const u8, len)
-            };
-            let actual = crc32(slice);
-            actual == expected
-        }
-        None => false,
-    }
+    // Hash the BINARY FILE, not a memory mapping.
+    //
+    // The baseline in runtime_config.json is produced by
+    // scripts/runtime_config.py, which reads the file's executable PT_LOAD
+    // segment. A maps-based region and a program-header region are not the same
+    // bytes -- page-aligning the first r-xp line happened to agree on the dev
+    // machine and disagreed on a CI-built binary, which is exactly the sort of
+    // "passes here, fails there" this check must not have.
+    //
+    // Reading /proc/self/exe hashes the same bytes the writer hashed, on every
+    // machine, and it is also what makes the check meaningful: it compares the
+    // running image against the recorded one rather than against a guess about
+    // which mapping is "ours".
+    let path = match fs::read_link("/proc/self/exe") {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    let bytes = match fs::read(&path) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    crc32(&bytes) == expected
 }
