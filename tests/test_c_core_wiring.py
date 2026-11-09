@@ -37,7 +37,11 @@ def _build(tmp_path):
     proc = subprocess.run(
         [sys.executable, "-m", "obfuscator.core.pipeline", "build", source,
          "--net-url", "https://127.0.0.1:9443/"],
-        cwd=str(tmp_path), env=env, capture_output=True, text=True, timeout=600)
+        # 900s, matching the other build-fixture budgets. The build measures
+        # ~700s on a loaded runner, so 600 killed it rather than catching a
+        # hang -- test (3.14) on CI hit TimeoutExpired with this suite green
+        # everywhere else.
+        cwd=str(tmp_path), env=env, capture_output=True, text=True, timeout=900)
     assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-1000:]
     artifact = os.path.join(str(tmp_path), "dist", "hello_protected.py")
     assert os.path.exists(artifact), proc.stdout[-2000:]
