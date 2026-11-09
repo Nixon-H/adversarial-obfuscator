@@ -56,6 +56,7 @@ import hashlib
 import secrets
 import shutil
 import struct
+import platform
 import subprocess
 import sys
 import tempfile
@@ -2480,9 +2481,20 @@ in config/default.json.
         native_dir = os.path.join(_ROOT, "native")
         simd_src = os.path.join(native_dir, "simd_vm.c")
         simd_obj = os.path.join(BUILD_DIR, "simd_vm.o")
+        # -msse4.1 is x86-only. On an arm64 host (the macOS runners) clang rejects
+        # it outright -- "unsupported option '-msse4.1' for target
+        # arm64-apple-darwin" -- and that is a platform gap, not a broken build.
+        # simd_vm.c guards its SSE path with __x86_64__ && __SSE4_1__, so on ARM it
+        # compiles cleanly AS the scalar implementation; building it that way gives
+        # real coverage there instead of a skip.
+        _simd_arch = platform.machine().lower()
+        _simd_x86 = _simd_arch in ("x86_64", "amd64", "i386", "i686")
+        _simd_cflags = ["-msse4.1"] if _simd_x86 else []
+        if not _simd_x86:
+            log("SIMD_VM", f"{_simd_arch}: SSE path unavailable, building the scalar fallback")
         try:
             subprocess.run(
-                ["gcc", "-c", "-O2", "-msse4.1", "-o", simd_obj, simd_src],
+                ["gcc", "-c", "-O2"] + _simd_cflags + ["-o", simd_obj, simd_src],
                 check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
             )
             log("SIMD_VM", f"Compiled SIMD-VM to {simd_obj}")
@@ -2491,7 +2503,8 @@ in config/default.json.
             if os.path.exists(simd_test_src):
                 simd_test_bin = os.path.join(BUILD_DIR, "simd_vm_test")
                 subprocess.run(
-                    ["gcc", "-O2", "-msse4.1", "-o", simd_test_bin, simd_test_src, simd_src, "-lm"],
+                    ["gcc", "-O2"] + _simd_cflags
+                    + ["-o", simd_test_bin, simd_test_src, simd_src, "-lm"],
                     check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
                 )
                 log("SIMD_VM", f"SIMD-VM test binary: {simd_test_bin}")
