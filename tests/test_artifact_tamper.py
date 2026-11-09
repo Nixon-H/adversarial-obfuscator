@@ -18,7 +18,10 @@ import sys
 import pytest
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-_BUILD_TIMEOUT = 600
+# 900s, matching the other build-fixture budgets: the pipeline build measures
+# 340-550s idle and was killed at 600s while a second suite ran (returncode
+# -9, both tests in this file errored at setup).
+_BUILD_TIMEOUT = 900
 
 
 def _build(tmp_path):
