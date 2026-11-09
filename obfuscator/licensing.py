@@ -193,9 +193,18 @@ def issue(licence: Licence, private_key) -> str:
     """
     payload = licence.to_payload()
     if not payload.get("key_material"):
-        # Derived, not random: issuing the same licence twice must produce
-        # the same token (the documented property), and the material has to
-        # stay secret -- both hold when it is a hash of the issuer's seed.
+        # Derived, not random: issuing the same licence twice must produce the
+        # same token (the documented property).
+        #
+        # Be precise about what is secret here, because an audit read the old
+        # wording -- "the material has to stay secret" -- as a defect. The
+        # ISSUER SEED stays secret: it is an input to sha256 and is not
+        # recoverable from the digest, so a token leaks nothing about it. The
+        # derived material itself ships in the signed payload, in the clear, by
+        # design: it is the credential the licensee must present to unlock the
+        # artefact (see pipeline.py, which masks the payload key with
+        # sha256("nx-customer:" + key_material)). An artefact without its token
+        # decrypts to garbage precisely because the mask is unavailable.
         # Licence is frozen, so the value lives in the payload we sign.
         try:
             seed = private_key.private_bytes_raw()
