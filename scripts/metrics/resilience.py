@@ -656,7 +656,7 @@ def compute_static_confusion(original_ast, protected_ast):
                 if tool == "pyflakes":
                     result = subprocess.run(
                         [sys.executable, "-m", "pyflakes", tmp_path],
-                        capture_output=True, text=True, timeout=30,
+                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
                     )
                     stderr_lines = result.stderr.strip().split("\n") if result.stderr.strip() else []
                     stdout_lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
@@ -665,7 +665,7 @@ def compute_static_confusion(original_ast, protected_ast):
                 elif tool == "pylint":
                     result = subprocess.run(
                         [sys.executable, "-m", "pylint", "--score=n", tmp_path],
-                        capture_output=True, text=True, timeout=30,
+                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
                     )
                     for line in result.stdout.split("\n"):
                         if "warning" in line.lower() or "error" in line.lower():
@@ -673,7 +673,7 @@ def compute_static_confusion(original_ast, protected_ast):
                 elif tool == "mypy":
                     result = subprocess.run(
                         [sys.executable, "-m", "mypy", tmp_path],
-                        capture_output=True, text=True, timeout=30,
+                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
                     )
                     for line in result.stdout.split("\n"):
                         if "error" in line.lower():

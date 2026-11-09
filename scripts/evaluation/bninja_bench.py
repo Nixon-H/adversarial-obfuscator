@@ -70,7 +70,7 @@ class BinaryNinjaBenchmark:
         try:
             result = subprocess.run(
                 [bn_bin, '-execute', '-script', 'analysis_report.py', path],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
             )
             output = result.stdout + result.stderr
             il_count = output.count('IL') + output.count('il')

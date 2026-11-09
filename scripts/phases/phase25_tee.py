@@ -42,7 +42,7 @@ def phase_tee(tee_type="software"):
     env["NIXON_TEE_TYPE"] = tee_type
     result = subprocess.run(
         ["cargo", "test", "--", "tee::tests", "--nocapture"],
-        cwd=RUNTIME_DIR, capture_output=True, text=True, timeout=60, env=env,
+        cwd=RUNTIME_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60, env=env,
     )
     out_path = os.path.join(BUILD_DIR, "tee_result.json")
     with open(out_path, "w", encoding='utf-8') as f:

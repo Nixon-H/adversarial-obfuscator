@@ -1920,7 +1920,7 @@ def compress_with_upx(path, level=9):
     try:
         orig_size = os.path.getsize(path)
         cmd = ["upx", f"-{level}", "--best", "--lzma", "-q", path]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode == 0:
             new_size = os.path.getsize(path)
             ratio = (1 - new_size / orig_size) * 100 if orig_size > 0 else 0

@@ -68,7 +68,7 @@ def collect_findings(paths):
     out = subprocess.run(
         ["ruff", "check", "--no-cache", "--select", "F401",
          "--output-format=concise"] + paths,
-        capture_output=True, text=True).stdout
+        capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
     findings = {}
     for line in out.splitlines():
         if " F401 " not in line:

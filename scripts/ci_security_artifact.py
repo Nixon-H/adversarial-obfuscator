@@ -103,7 +103,7 @@ def _run(target, workdir, state_dir, extra_env=None):
     return subprocess.run(
         [sys.executable, target],
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         timeout=_PROBE_TIMEOUT,
         cwd=workdir,
         env=_clean_env(state, extra_env),

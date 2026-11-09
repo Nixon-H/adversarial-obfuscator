@@ -19,7 +19,7 @@ def collect(paths):
     out = subprocess.run(
         ["ruff", "check", "--no-cache", "--select", "F841",
          "--output-format=concise"] + paths,
-        capture_output=True, text=True).stdout
+        capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
     found = {}
     for line in out.splitlines():
         if " F841 " not in line:

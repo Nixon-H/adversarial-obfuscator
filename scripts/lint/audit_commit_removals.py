@@ -78,7 +78,7 @@ def _normalise(text):
 
 def _git(*args):
     return subprocess.run(["git"] + list(args), capture_output=True,
-                          text=True).stdout
+                          text=True, encoding="utf-8", errors="replace").stdout
 
 
 def _changed_files(base, head):

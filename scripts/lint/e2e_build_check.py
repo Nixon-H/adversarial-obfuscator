@@ -46,7 +46,7 @@ def _build_and_run(index, extra=()):
         build = subprocess.run(
             [sys.executable, "-m", "obfuscator.core.pipeline", "build", source]
             + list(extra),
-            cwd=run_dir, env=env, capture_output=True, text=True, timeout=1800)
+            cwd=run_dir, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1800)
         if build.returncode != 0:
             return False, "build failed: %s" % (build.stderr[-500:])
 
@@ -61,7 +61,7 @@ def _build_and_run(index, extra=()):
         env["PYTHONFAULTHANDLER"] = "1"
         proc = subprocess.Popen([sys.executable, artifact],
                                 stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True, env=env)
+                                stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", env=env)
         try:
             out, err = proc.communicate(timeout=300)
         except subprocess.TimeoutExpired:

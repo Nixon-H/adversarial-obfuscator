@@ -186,14 +186,14 @@ def measure_static_analysis_resistance(protected_source: str) -> dict:
             if tool == "pyflakes":
                 result = subprocess.run(
                     [sys.executable, "-m", "pyflakes", tmp_path],
-                    capture_output=True, text=True, timeout=30,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
                 )
                 lines = [l for l in (result.stderr + result.stdout).split("\n") if l.strip()]
                 count = len(lines)
             elif tool == "pylint":
                 result = subprocess.run(
                     [sys.executable, "-m", "pylint", "--score=n", tmp_path],
-                    capture_output=True, text=True, timeout=30,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
                 )
                 for line in result.stdout.split("\n"):
                     if "warning" in line.lower() or "error" in line.lower():
@@ -201,7 +201,7 @@ def measure_static_analysis_resistance(protected_source: str) -> dict:
             elif tool == "mypy":
                 result = subprocess.run(
                     [sys.executable, "-m", "mypy", tmp_path],
-                    capture_output=True, text=True, timeout=30,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
                 )
                 for line in result.stdout.split("\n"):
                     if "error" in line.lower():
@@ -209,7 +209,7 @@ def measure_static_analysis_resistance(protected_source: str) -> dict:
             elif tool == "bandit":
                 result = subprocess.run(
                     [sys.executable, "-m", "bandit", "-q", "-f", "txt", tmp_path],
-                    capture_output=True, text=True, timeout=30,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
                 )
                 for line in result.stdout.split("\n"):
                     if ">> Issue" in line:
@@ -295,7 +295,7 @@ def measure_decompilation_resistance(protected_source: str) -> dict:
                 py_compile.compile(_src_path, cfile=pyc_path)
                 result = subprocess.run(
                     [decompiler, pyc_path],
-                    capture_output=True, text=True, timeout=30,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
                 )
                 decompiler_success = result.returncode == 0
                 os.unlink(pyc_path)

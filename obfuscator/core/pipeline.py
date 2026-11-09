@@ -488,7 +488,7 @@ setup(
         setup_path = os.path.join(cython_dir, 'setup.py')
         with open(setup_path, 'w', encoding='utf-8') as f: f.write(setup_content)
         cmd = [sys.executable, 'setup.py', 'build_ext', '--inplace']
-        result = subprocess.run(cmd, cwd=cython_dir, capture_output=True, text=True)
+        result = subprocess.run(cmd, cwd=cython_dir, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode != 0:
             print("[ERROR] Cython compilation failed:")
             print(result.stdout)
@@ -659,7 +659,7 @@ def get_native_blob_for_build(source_path, force_compile=False):
 def test_protected_file(filepath, original_source, licence_path=None):
     results = {}
     try:
-        orig_result = subprocess.run([sys.executable, original_source], capture_output=True, timeout=120, text=True)
+        orig_result = subprocess.run([sys.executable, original_source], capture_output=True, timeout=120, text=True, encoding="utf-8", errors="replace")
         stdout = orig_result.stdout[:1024*1024] if orig_result.stdout else ""
         results['original'] = {'status': 'PASS' if orig_result.returncode == 0 else 'FAIL', 'returncode': orig_result.returncode, 'stdout': stdout}
     except subprocess.TimeoutExpired:
@@ -687,7 +687,7 @@ def test_protected_file(filepath, original_source, licence_path=None):
         ver_env.setdefault('PYTHONFAULTHANDLER', '1')
         _proc = subprocess.Popen([sys.executable, filepath],
                                  stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE, text=True, env=ver_env)
+                                 stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", env=ver_env)
         try:
             _out, _err = _proc.communicate(timeout=120)
         except subprocess.TimeoutExpired:
@@ -1256,7 +1256,7 @@ setup(
             f.write(setup_content)            
         python_exec = target_python if target_python else sys.executable
         cmd = [python_exec, "setup.py", "build_ext", "--inplace"]
-        result = subprocess.run(cmd, cwd=build_dir, capture_output=True, text=True)
+        result = subprocess.run(cmd, cwd=build_dir, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode != 0:
             print(f" [!] Local Build Error Details:\n{result.stderr}")
             if result.stdout:

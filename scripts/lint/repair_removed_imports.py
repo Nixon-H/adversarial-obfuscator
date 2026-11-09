@@ -92,13 +92,13 @@ def main():
     args = ap.parse_args()
 
     changed = subprocess.run(["git", "diff", "--name-only"], capture_output=True,
-                             text=True).stdout.split()
+                             text=True, encoding="utf-8", errors="replace").stdout.split()
     repaired = []
     for path in changed:
         if not path.endswith(".py") or not os.path.exists(path):
             continue
         head = subprocess.run(["git", "show", "HEAD:%s" % path],
-                              capture_output=True, text=True).stdout
+                              capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
         if not head:
             continue
         try:

@@ -21,7 +21,10 @@ concurrency:
 
 jobs:
   test:
-    timeout-minutes: 45
+    # The unit suite is build-heavy: 45 minutes cancelled it mid-run
+    # (measured 45m15s before the kill). 180 leaves room for a loaded
+    # runner without going back to GitHub's 360-minute default.
+    timeout-minutes: 180
     # Runs on the weekly cron as well: previously every matrix job carried
     # `if: event != 'schedule'`, so Monday's "success" only meant lint-pin
     # had run and the suite could rot for weeks unnoticed.

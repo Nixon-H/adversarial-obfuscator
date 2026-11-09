@@ -118,7 +118,7 @@ class MultiToolEvaluator:
         try:
             result = subprocess.run(
                 ['python3', '-m', 'angr', path],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
             )
             return self._parse_angr_output(result.stdout)
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
@@ -129,7 +129,7 @@ class MultiToolEvaluator:
             rizin_bin = 'rizin' if _shutil_which('rizin') else 'radare2'
             result = subprocess.run(
                 [rizin_bin, '-q', '-c', 'aaa; afl', path],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
             )
             return self._parse_rizin_output(result.stdout)
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
@@ -139,7 +139,7 @@ class MultiToolEvaluator:
         try:
             result = subprocess.run(
                 ['readelf', '-a', path],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
             )
             return self._parse_readelf_output(result.stdout)
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
@@ -183,7 +183,7 @@ class MultiToolEvaluator:
             pass
         try:
             result = subprocess.run(
-                ['file', path], capture_output=True, text=True, timeout=10,
+                ['file', path], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
             )
             metrics['file_type'] = result.stdout.strip()
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
@@ -302,7 +302,7 @@ class MultiToolResistance:
             pass
         try:
             result = subprocess.run(
-                ['file', path], capture_output=True, text=True, timeout=10,
+                ['file', path], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
             )
             metrics['file_type'] = result.stdout.strip()
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):

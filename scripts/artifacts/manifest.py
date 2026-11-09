@@ -91,7 +91,7 @@ def c_symbols(so_path: str) -> list:
         return []
     try:
         out = subprocess.run(["nm", "-D", "--defined-only", so_path],
-                             capture_output=True, text=True, timeout=20).stdout
+                             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20).stdout
     except (OSError, subprocess.SubprocessError):
         return []
     present = [s for s in C_SYMBOL_MARKERS if s in out]

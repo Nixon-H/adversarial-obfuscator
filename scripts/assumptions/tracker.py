@@ -179,14 +179,14 @@ class AssumptionTracker:
                     elif key == "aes_ni" or key == "AES-NI":
                         import subprocess
                         try:
-                            out = subprocess.check_output(["grep", "-c", "aes", "/proc/cpuinfo"], text=True).strip()
+                            out = subprocess.check_output(["grep", "-c", "aes", "/proc/cpuinfo"], text=True, encoding="utf-8", errors="replace").strip()
                             a.satisfied = int(out) > 0
                         except Exception:
                             a.satisfied = None
                     elif key == "rdrand" or key == "RDRAND":
                         import subprocess
                         try:
-                            out = subprocess.check_output(["grep", "-c", "rdrand", "/proc/cpuinfo"], text=True).strip()
+                            out = subprocess.check_output(["grep", "-c", "rdrand", "/proc/cpuinfo"], text=True, encoding="utf-8", errors="replace").strip()
                             a.satisfied = int(out) > 0
                         except Exception:
                             a.satisfied = None

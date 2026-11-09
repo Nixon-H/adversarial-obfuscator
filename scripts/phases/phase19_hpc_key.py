@@ -50,7 +50,7 @@ def phase_hpc_key():
         try:
             r = subprocess.run(
                 ["cargo", "test", "--", test, "--nocapture"],
-                cwd=RUNTIME_DIR, capture_output=True, text=True, timeout=60,
+                cwd=RUNTIME_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
             )
             ok = r.returncode == 0
             results["tests"].append({"name": test, "ok": ok})

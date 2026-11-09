@@ -52,7 +52,7 @@ def phase_cpu_port(seed=None):
     try:
         result = subprocess.run(
             ["cargo", "test", "--", "port_entangle::tests", "--nocapture"],
-            cwd=RUNTIME_DIR, capture_output=True, text=True, timeout=900, env=env,
+            cwd=RUNTIME_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900, env=env,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
         log("SKIP", "CPU port entangle tests unavailable: %s" % type(exc).__name__)

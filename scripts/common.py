@@ -150,7 +150,7 @@ def run(cmd, cwd=None, check=True, timeout=900):
     arguments as this function does not perform input sanitisation.
     """
     log("CMD", " ".join(cmd) if isinstance(cmd, list) else cmd)
-    result = subprocess.run(cmd, cwd=cwd or ROOT, check=False, capture_output=True, text=True, timeout=timeout)
+    result = subprocess.run(cmd, cwd=cwd or ROOT, check=False, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     if check and result.returncode != 0:
         if result.stdout:
             log("CMD", f"stdout:\n{result.stdout[:2000]}")

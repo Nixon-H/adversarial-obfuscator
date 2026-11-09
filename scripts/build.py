@@ -2483,7 +2483,7 @@ in config/default.json.
         try:
             subprocess.run(
                 ["gcc", "-c", "-O2", "-msse4.1", "-o", simd_obj, simd_src],
-                check=True, capture_output=True, text=True,
+                check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
             )
             log("SIMD_VM", f"Compiled SIMD-VM to {simd_obj}")
             # Also compile and run a test binary to verify
@@ -2492,13 +2492,13 @@ in config/default.json.
                 simd_test_bin = os.path.join(BUILD_DIR, "simd_vm_test")
                 subprocess.run(
                     ["gcc", "-O2", "-msse4.1", "-o", simd_test_bin, simd_test_src, simd_src, "-lm"],
-                    check=True, capture_output=True, text=True,
+                    check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
                 )
                 log("SIMD_VM", f"SIMD-VM test binary: {simd_test_bin}")
                 # A timeout, so a wedged test binary fails instead of hanging the
                 # whole build at the end of a long run.
                 test_result = subprocess.run([simd_test_bin], capture_output=True,
-                                             text=True, timeout=120)
+                                             text=True, encoding="utf-8", errors="replace", timeout=120)
                 if test_result.returncode == 0:
                     log("SIMD_VM", "SIMD-VM tests ALL PASSED")
                 else:

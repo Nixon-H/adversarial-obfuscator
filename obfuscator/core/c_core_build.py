@@ -88,7 +88,7 @@ def build_c_core(output_dir: str, root: str | None = None) -> str | None:
             "-DCORE_HAVE_PYTHON_H", "-o", out_path] + sources +
            ["-I" + include, "-L" + libdir, "-l" + libname, "-ldl", "-lm"])
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     except Exception:
         return None
     if result.returncode != 0:

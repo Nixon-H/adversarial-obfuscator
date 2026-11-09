@@ -81,7 +81,7 @@ def cythonize_obfuscated(source_path: str, out_path: str) -> tuple[str | None, s
             )
         res = subprocess.run(
             [sys.executable, "setup.py", "build_ext", "--inplace"],
-            cwd=build_dir, capture_output=True, text=True, timeout=600,
+            cwd=build_dir, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
         )
         if res.returncode != 0:
             tail = (res.stderr or res.stdout or "")[-2000:]

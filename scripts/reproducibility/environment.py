@@ -32,7 +32,7 @@ def _get_git_info() -> Tuple[Optional[str], bool]:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
         )
         commit = result.stdout.strip() if result.returncode == 0 else None
         dirty = False

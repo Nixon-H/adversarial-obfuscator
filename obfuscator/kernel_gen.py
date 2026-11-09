@@ -278,7 +278,7 @@ def cythonize_kernel(pyx_path: str, out_dir: str) -> tuple[str | None, str]:
             )
         res = subprocess.run(
             [sys.executable, "setup.py", "build_ext", "--inplace"],
-            cwd=tmp, capture_output=True, text=True, timeout=600,
+            cwd=tmp, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
         )
         if res.returncode != 0:
             tail = (res.stderr or res.stdout or "")[-2000:]

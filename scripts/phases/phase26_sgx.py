@@ -37,7 +37,7 @@ def phase_sgx():
     try:
         result = subprocess.run(
             ["cargo", "test", "--features", "sgx", "--", "tee_sgx::tests", "--nocapture"],
-            cwd=RUNTIME_DIR, capture_output=True, text=True, timeout=60,
+            cwd=RUNTIME_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
         )
         out_path = os.path.join(BUILD_DIR, "sgx_result.json")
         with open(out_path, "w", encoding='utf-8') as f:
