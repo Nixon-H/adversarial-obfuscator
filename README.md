@@ -349,7 +349,9 @@ Enabling every flag is **not** maximum protection. Six flags write metadata
 that no runtime component reads, `--temporal-keys` is inert, `--crypto-binding`
 does not decrypt at run time, and the maximum-flags build with the default 100
 packaging layers **did not finish in 600 s**. Licensing and watermarking are
-access control and leak tracing, not reverse-engineering resistance.
+access control and leak tracing, not reverse-engineering resistance. One more
+measured gap: `--trial` and `--hwid-lock` did **not** reach the standard
+packed-loader artefact; the licence token is the binding that fires.
 
 The measured matrix (2,635-byte payload, Linux x86_64, CPython 3.13.5):
 
