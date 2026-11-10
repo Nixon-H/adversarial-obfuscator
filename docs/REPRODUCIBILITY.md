@@ -237,6 +237,11 @@ anti-REA-maximum configuration **did not finish in 600 s** — see
 **387 s** and 3.55 MB. Output includes `nixon_core.so` and a self-signed
 `Nixon_Security_Root.cer`; it is written to `<dirname(source)>/dist/`.
 
+**Known gap in this command:** `--trial` and `--hwid-lock` are accepted here
+but did **not** reach the standard packed-loader artefact in the measured
+builds (`MAXIMUM_SECURITY.md` §6.9). The licence token is the binding that is
+verified to fire.
+
 ### 5.4 Verifying a hardened build
 
 ```bash
