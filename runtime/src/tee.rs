@@ -183,8 +183,7 @@ impl TeePartition {
         iv_material.extend_from_slice(&self.measurement);
         iv_material.extend_from_slice(&now.to_le_bytes());
         let iv_hash = sha256_digest(&iv_material);
-        let mut iv = [0u8; 16];
-        iv.copy_from_slice(&iv_hash[..16]);
+        let iv: [u8; 16] = iv_hash[..16].try_into().expect("sha256 gives 16 bytes");
 
         let mut sealed = data.to_vec();
         crate::decrypt::aes_256_ctr_decrypt(&mut sealed, &key, &iv);
