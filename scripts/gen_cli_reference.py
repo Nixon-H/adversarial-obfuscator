@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""Generate the complete CLI reference for README.md from ``build.py --help``.
+"""Generate the complete CLI reference for docs/CLI.md from the live parsers.
 
-The README used to carry a hand-written block of 42 flags under the heading
-"(from ``scripts/build.py --help``)" while the parser had 271. Hand-maintained
-references drift the moment a flag is added, and a reference that is 15% right
-is worse than none: a reader assumes the rest of the surface does not exist.
+The reference used to live in the README, hand-written, listing 42 flags while
+the parser had 271. Hand-maintained references drift the moment a flag is
+added, and a reference that is 15% right is worse than none: a reader assumes
+the rest of the surface does not exist. The reference now lives in
+``docs/CLI.md``, next to the usage prose, and the README links to it.
 
 This emits every option, with the parser's own help text, grouped by area.
-``tests/test_readme_matches_cli.py`` re-runs it and fails if README.md is stale,
-so the block cannot drift silently again.
+``tests/test_readme_matches_cli.py`` re-runs it and fails if the document is
+stale, so the block cannot drift silently again.
 
 Usage::
 
-    python3 scripts/gen_cli_reference.py            # print the block
-    python3 scripts/gen_cli_reference.py --check    # exit 1 if README is stale
+    python3 scripts/gen_cli_reference.py            # print the blocks
+    python3 scripts/gen_cli_reference.py --check    # exit 1 if CLI.md is stale
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-README = os.path.join(ROOT, "README.md")
+CLI_DOC = os.path.join(ROOT, "docs", "CLI.md")
 START = "<!-- BEGIN GENERATED CLI REFERENCE -->"
 END = "<!-- END GENERATED CLI REFERENCE -->"
 LOADER_START = "<!-- BEGIN GENERATED LOADER REFERENCE -->"
@@ -177,7 +178,7 @@ def parse_options(help_text: str) -> list[tuple[str, str, str]]:
 
 
 def render(options: list[tuple[str, str, str]], start: str = START,
-           end: str = END) -> str:
+           end: str = END, producer: str = "scripts/build.py") -> str:
     seen: set[str] = set()
     buckets: dict[str, list[tuple[str, str, str]]] = {}
     for bare, invocation, desc in options:
@@ -193,7 +194,7 @@ def render(options: list[tuple[str, str, str]], start: str = START,
 
     lines = [start, ""]
     lines.append(
-        "Every option `scripts/build.py` accepts, generated from its own `--help` "
+        f"Every option `{producer}` accepts, generated from its own `--help` "
         "by\n`scripts/gen_cli_reference.py` and checked by "
         "`tests/test_readme_matches_cli.py`,\nso it cannot drift. "
         "Editorial notes are marked where a flag is inert or archived."
@@ -238,50 +239,108 @@ NOTES = {
         "the build to validate them; nothing decrypts at run time. The chain "
         "secret is deliberately not written into `payload.h`."
     ),
+    "randomization-seed": (
+        "**Partial seeding only.** Seeds structure randomisation, speculation and "
+        "the CPU-port phase; it does **not** make builds byte-reproducible, because "
+        "the emitters draw thousands of values directly from `secrets` and several "
+        "cross the pack/run boundary."
+    ),
+    "seed": (
+        "**Reproducibility seed.** Seeds the global `random` module, the AST "
+        "transformer's RNG and its `secrets` patch, and several injectors. With "
+        "the same payload, tool version and flags, the source emitter is "
+        "byte-identical. It does **not** make the packed loader reproducible, and "
+        "it is not key material. `--skip-obfuscate` is the copy path."
+    ),
+    "build-id": (
+        "**Lowering-kernel seed only.** Seeds the `--pytoc` semantic-lowering symbol "
+        "map and is recorded in the manifest. It does not make the whole build "
+        "reproducible, and a non-`--pytoc` build does not use it."
+    ),
+    "lock-hwid": (
+        "**Not a whole-build seed.** Registers a licence for the target HWID and "
+        "seeds the loader's polymorphic-map/VM RNG only; the blob and string keys "
+        "remain random. The help text's 'seeds the build deterministically' is "
+        "broader than the implementation."
+    ),
+    "pin-structure": (
+        "**Structure only.** Pins emitter draws and the build timestamp; key "
+        "material is not pinned, so artefacts are not byte-identical."
+    ),
+    "cfg-mutation": (
+        "**Metadata-only.** The phase writes `cfg_mutation_config`/variants; the "
+        "runtime module was archived and no component reads them. Not a runtime "
+        "protection."
+    ),
+    "class-dispatch": (
+        "**Metadata-only.** Writes `class_dispatch_config.json`; no runtime "
+        "consumer. Not a runtime protection."
+    ),
+    "ssa-mutation": (
+        "**Metadata-only.** Writes `ssa_mutation_variants.json`; no runtime "
+        "consumer. Not a runtime protection."
+    ),
+    "state-isa": (
+        "**Metadata-only.** Writes `state_isa_config.json`; no runtime consumer. "
+        "Not a runtime protection."
+    ),
+    "per-exec-recompile": (
+        "**Metadata-only.** Writes `per_exec_recompile_config.json`; no runtime "
+        "consumer. Not a runtime protection."
+    ),
+    "self-healing": (
+        "**Metadata-only.** Writes `self_healing_config.json`; the runtime module "
+        "was archived and no component reads it. Not a runtime protection."
+    ),
 }
 
 
-def splice(block: str, readme: str, start: str = START,
+def splice(block: str, document: str, start: str = START,
            end: str = END) -> str:
-    if start not in readme or end not in readme:
-        raise SystemExit(f"README is missing the {start} / {end} markers")
-    head, rest = readme.split(start, 1)
+    if start not in document or end not in document:
+        raise SystemExit(f"the CLI document is missing the {start} / {end} markers")
+    head, rest = document.split(start, 1)
     _, tail = rest.split(end, 1)
     return head + block + tail
 
 
-BLOCKS = (("build", START, END), ("loader", LOADER_START, LOADER_END))
+BLOCKS = (
+    ("build", START, END, "scripts/build.py"),
+    ("loader", LOADER_START, LOADER_END,
+     "python3 -m obfuscator.core.pipeline build"),
+)
 
 
 def main(argv: list[str]) -> int:
     built = []
-    for target, start, end in BLOCKS:
+    for target, start, end, producer in BLOCKS:
         options = parse_options(_help_text(target))
-        built.append((target, start, end, options, render(options, start, end)))
+        built.append((target, start, end, options,
+                      render(options, start, end, producer)))
 
     if "--check" in argv:
-        readme = open(README, encoding="utf-8").read()
+        document = open(CLI_DOC, encoding="utf-8").read()
         stale = []
         for target, start, end, options, block in built:
-            if start not in readme or end not in readme:
-                print(f"README has no {target} reference markers")
+            if start not in document or end not in document:
+                print(f"CLI.md has no {target} reference markers")
                 return 1
-            current = start + readme.split(start, 1)[1].split(end, 1)[0] + end
+            current = start + document.split(start, 1)[1].split(end, 1)[0] + end
             if current.strip() != block.strip():
                 stale.append(target)
         if stale:
             print("stale references: %s; run "
                   "python3 scripts/gen_cli_reference.py --write" % ", ".join(stale))
             return 1
-        print("README CLI references are current (%s)" %
+        print("CLI references are current (%s)" %
               ", ".join(f"{t}: {len(o)}" for t, _, _, o, _ in built))
         return 0
 
     if "--write" in argv:
-        readme = open(README, encoding="utf-8").read()
+        document = open(CLI_DOC, encoding="utf-8").read()
         for target, start, end, options, block in built:
-            readme = splice(block, readme, start, end)
-        open(README, "w", encoding="utf-8").write(readme)
+            document = splice(block, document, start, end)
+        open(CLI_DOC, "w", encoding="utf-8").write(document)
         print("wrote " + ", ".join(f"{t}: {len(o)}" for t, _, _, o, _ in built))
         return 0
 

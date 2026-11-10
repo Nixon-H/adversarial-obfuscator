@@ -1,5 +1,12 @@
 # Manuscript Skeleton: Attack-Transfer Cost Across Diversified Python Builds
 
+> **HISTORICAL — superseded by [`paper-draft.md`](paper-draft.md).** This
+> skeleton records an earlier framing built on the withdrawn "flat cost curve"
+> endpoint. It is kept because its retraction trail is part of the evidence and
+> because `tests/test_research_docs_consistency.py` requires the manuscript to
+> record the retraction. Do not cite its results as current; cite
+> `paper-draft.md` and [`../RESULTS.md`](../RESULTS.md).
+
 **Status:** structure and sourced numbers only. Sections marked **[GAP]** cannot
 be written from the current evidence and must not be filled by inference.
 

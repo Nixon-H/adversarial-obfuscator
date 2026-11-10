@@ -152,13 +152,26 @@ class TestArchivedPhases:
                    if (ROOT / "scripts" / "phases" / f"{n}.py").exists()]
         assert present == [], f"archived phases are back: {sorted(present)}"
 
-    def test_their_flags_say_archived(self):
-        """A flag that silently does nothing is the failure mode here."""
+    def test_their_flags_are_removed_not_silently_accepted(self):
+        """A flag that silently does nothing is the failure mode here.
+
+        The five flags were deleted from the parser (commit 5cc8469), so the
+        correct state is stronger than an "archived" log line: passing one is
+        an argparse error. This test was written before that deletion and
+        still demanded the old log strings; it now pins the removal instead.
+        """
+        import re
+
         build_py = (ROOT / "scripts" / "build.py").read_text()
+        declared = set(re.findall(
+            r'add_argument\(\s*"(--[a-z0-9][a-z0-9-]*)"', build_py))
         for flag in ("hpc_detect", "hw_entropy", "cache_bound",
                      "branch_entangle", "multicore_entangle"):
-            assert f'"{flag}: native backend archived' in build_py, \
-                f"--{flag.replace('_', '-')} does not report that its backend is archived"
+            opt = "--" + flag.replace("_", "-")
+            assert opt not in declared, (
+                f"{opt} is back in the parser; its native backend is archived")
+            assert f'"{flag}: native backend archived' not in build_py, (
+                f"{opt} still carries an archived-backend handler")
 
 
 class TestNoOpFallbacks:

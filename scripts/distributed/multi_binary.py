@@ -157,7 +157,6 @@ class MasterIndex:
     threshold: int
     fragment_map: List[Tuple[int, int]]
     cross_keys: List[bytes]
-    master_secret: bytes
 
     def serialize(self) -> bytes:
         buf = struct.pack(">III", self.binary_count, self.fragment_count, self.threshold)
@@ -167,7 +166,10 @@ class MasterIndex:
         buf += struct.pack(">I", len(self.cross_keys))
         for k in self.cross_keys:
             buf += struct.pack(">I", len(k)) + k
-        buf += struct.pack(">I", len(self.master_secret)) + self.master_secret
+        # The master secret is deliberately NOT serialized. `reconstruct()`
+        # derives cross keys from the holder's own secret; persisting the
+        # secret beside the shares would let any reader of the index decrypt
+        # every fragment.
         return buf
 
     @classmethod
@@ -190,10 +192,7 @@ class MasterIndex:
             offset += 4
             cross_keys.append(data[offset:offset+klen])
             offset += klen
-        slen = struct.unpack(">I", data[offset:offset+4])[0]
-        offset += 4
-        ms = data[offset:offset+slen]
-        return cls(bcount, fcount, thresh, frag_map, cross_keys, ms)
+        return cls(bcount, fcount, thresh, frag_map, cross_keys)
 
 
 class MultiBinaryDistributor:
@@ -258,7 +257,6 @@ class MultiBinaryDistributor:
             threshold=threshold,
             fragment_map=frag_map,
             cross_keys=cross_keys,
-            master_secret=self.master_secret,
         )
 
         binaries = []
@@ -339,7 +337,7 @@ class MultiBinaryDistributor:
             for j in range(i + 1, bcount):
                 data = self.master_secret + struct.pack(">II", i, j)
                 cross_keys.append(hashlib.sha256(data).digest())
-        return MasterIndex(bcount, total_frag_count, bthreshold, frag_map, cross_keys, self.master_secret)
+        return MasterIndex(bcount, total_frag_count, bthreshold, frag_map, cross_keys)
 
     def _unpack_binary(self, binary: bytes) -> List[EncryptedFragment]:
         if binary[:4] != b"NXMB":

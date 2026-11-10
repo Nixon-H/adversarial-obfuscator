@@ -203,15 +203,14 @@ impl AttestationEngine {
         }
     }
 
-    pub fn start(&self) {
+    pub fn start(self: &std::sync::Arc<Self>) {
         self.running.store(true, Ordering::SeqCst);
-        let engine_ref: &'static AttestationEngine = Box::leak(Box::new(AttestationEngine {
-            challenge_handler: ChallengeHandler::new(),
-            memory_watch: MemoryWatch::new(),
-            running: AtomicBool::new(true),
-        }));
+        // Start the loop on THIS engine. The former implementation leaked a
+        // freshly constructed engine into a thread, so the MemoryWatch the
+        // caller had registered was never the one being checked.
+        let engine = std::sync::Arc::clone(self);
         std::thread::spawn(move || {
-            engine_ref.attestation_loop();
+            engine.attestation_loop();
         });
     }
 

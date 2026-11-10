@@ -133,8 +133,28 @@ impl Config {
             fs::create_dir_all(parent)?;
         }
         let content = serde_json::to_string_pretty(self)?;
-        fs::write(&path, content)
-            .with_context(|| format!("Failed to write config to {}", path.display()))?;
+        #[cfg(unix)]
+        {
+            use std::io::Write;
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&path)
+                .with_context(|| format!("Failed to open config at {}", path.display()))?;
+            file.write_all(content.as_bytes())
+                .with_context(|| format!("Failed to write config to {}", path.display()))?;
+            // mode() only applies on creation; tighten an existing file too.
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+                .with_context(|| format!("Failed to restrict config at {}", path.display()))?;
+        }
+        #[cfg(not(unix))]
+        {
+            fs::write(&path, content)
+                .with_context(|| format!("Failed to write config to {}", path.display()))?;
+        }
         Ok(())
     }
 

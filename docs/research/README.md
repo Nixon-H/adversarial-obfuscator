@@ -1,10 +1,20 @@
 # Research Programme: Index and Current State
 
-**Last updated:** round 201 (2026-10-31)
+**Last updated:** round 201 (2026-10-31). **Editorial pass 2026-11-10:**
+links to the current synthesis added, the artefact count reconciled to the
+gate record (38), and the defect total reconciled to thirteen. No research
+claim or measurement was changed.
 
 This directory holds a research programme that produced **thirteen product defects
 and one negative result**. This file is the entry point: what exists, what it
 claims, and what it does not.
+
+> **Reading order.** The current synthesis is in
+> [`../RESEARCH.md`](../RESEARCH.md), [`../BENCHMARK.md`](../BENCHMARK.md),
+> [`../RESULTS.md`](../RESULTS.md), and [`../LIMITATIONS.md`](../LIMITATIONS.md).
+> This directory is the evidence record behind those documents: protocols,
+> per-round findings, defect reports, retractions, and the paper draft. Dated
+> documents are snapshots of their round, not descriptions of `master`.
 
 ---
 
@@ -13,7 +23,7 @@ claims, and what it does not.
 | If you want to | read |
 |---|---|
 | the paper | `paper-draft.md` — a controlled comparison; the family effect was a callable-count artefact (§5.1b), and §6 carries thirteen defects |
-| whether the artefact runs | `python3 scripts/transfer/artefact_gate.py` — 69 artefacts (measured at the time), 0 failures |
+| whether the artefact runs | `python3 scripts/transfer/artefact_gate.py` — **38 artefacts at one index**, 0 failures; `gate-count.json` is the authoritative record |
 | the defects | `paper-draft.md` §6, or the individual files below |
 | the benchmark | `task-validity.md`, `real-corpus-tasks.md`, `external-tasks-evaluated.md` |
 | what went wrong | `retraction-cost-curve.md`, `fourth-review-reframing.md`, and the eight retractions |
@@ -63,6 +73,12 @@ Thirteen, of which ten could not have been found by the project's own tests.
 Twelve of thirteen are fixed; the thirteenth is a design question, measured in the paper's section 6.4. The guards live in `tests/test_*` and are named
 in `artefact-gate.md`.
 
+A **separate later study** applied each build flag alone and executed the
+result; it found eight further defects (D1–D8), none reachable from the
+benchmark payloads. They are kept out of the thirteen above so the benchmark's
+own count is not inflated by them. See
+[`transform-defects-2026-11.md`](transform-defects-2026-11.md).
+
 ---
 
 ## The benchmark
@@ -87,7 +103,7 @@ singleton attacker set. `sibling-separation-audit.md` records the audit.
 
 | instrument | what it answers | how to run |
 |---|---|---|
-| artefact gate | does the output compile, import and run — **38 artefacts, 4 corpus families, seed sweep** | `python3 scripts/transfer/artefact_gate.py --variants 2 --seeds 4242,7` |
+| artefact gate | does the output compile, import and run — **38 artefacts, 4 corpus families, seed sweep** | `python3 scripts/transfer/artefact_gate.py --variants 1 --seeds 4242` |
 | reproduction | are the paper's numbers still true | `python3 scripts/transfer/reproduce.py` |
 | validity | is the task scoreable | `python3 scripts/transfer/evaluate_tasks.py` |
 | external validity | do third-party tasks pass | `python3 scripts/transfer/evaluate_external.py` |
@@ -124,16 +140,19 @@ corrected rather than deleted:
 Five of the eight were my own instrument failing, not the system under test.
 That is the ratio this programme should be judged on: **the checks caught the
 checker more often than they caught the product**, and the product still yielded
-nine defects.
+thirteen defects.
 
 ---
 
 ## Sealed reports
 
-`../research-reports/adversarial-obfuscator-research-readiness/` holds 40 sealed
-reports. Each claim is bound to a content-addressed evidence snapshot and
-re-hashed on read, so a claim that no longer matches its evidence is marked
-rather than trusted.
+The author's workspace holds sealed reports under
+`research-reports/adversarial-obfuscator-research-readiness/`. They are
+**outside this repository** and are not committed here. Each claim in them is
+bound to a content-addressed evidence snapshot and re-hashed on read, so a
+claim that no longer matches its evidence is marked rather than trusted. The
+in-repository documents are the durable record; the sealed reports are the
+author's local archive.
 
 ---
 

@@ -1,0 +1,19 @@
+name: "Nixon CodeQL configuration"
+
+# Research corpora and archived material are deliberately not production code.
+#
+# - docs/research/ contains the measurement programme's evidence: frozen
+#   snapshots of intentionally vulnerable programs (weak hashes, clear-text
+#   logging) used as benchmark inputs. They are data, not shipped code.
+# - scripts/transfer/corpus/ vendors third-party libraries (requests,
+#   more-itertools, boltons, cpython statistics) for the artefact gate. They
+#   are copied verbatim, licence included, and are not imported by the product.
+# - archive/ is superseded code kept for review, not built or shipped.
+#
+# Excluding them keeps CodeQL focused on code that can reach a shipped
+# artefact. It does not suppress a finding in the builder, the loader, the
+# runtime, the relay, or the tests that exercise them.
+paths-ignore:
+  - "docs/research/**"
+  - "scripts/transfer/corpus/**"
+  - "archive/**"

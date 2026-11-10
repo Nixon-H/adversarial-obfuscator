@@ -2192,12 +2192,13 @@ in config/default.json.
                 for bf in bound:
                     f.write(bf.serialize())
 
-            chain_secret_path = os.path.join(BUILD_DIR, "chain_secret.bin")
-            with open(chain_secret_path, "wb") as f:
-                f.write(chain_secret)
-
             log("CRYPTO_BINDING", f"Bound {len(bound)} fragments → {crypto_binding_output}")
-            log("CRYPTO_BINDING", f"Chain secret: {chain_secret_path}")
+            # The chain secret stays in memory. It used to be written to
+            # build/chain_secret.bin and then read back only to decide whether
+            # to log that it was withheld; the file was never embedded and no
+            # consumer needed it. Persisting a key beside its ciphertext is the
+            # exact failure mode this stage exists to avoid.
+            log("CRYPTO_BINDING", "Chain secret kept in memory (not written to disk)")
             # payload.h was generated ~430 lines earlier (Stage 2e), before
             # these binding files existed, so its embed step silently skipped.
             # Re-run it now (best-effort) so --crypto-binding actually lands.
@@ -2653,7 +2654,7 @@ in config/default.json.
                             _k_src = _kf.read()
                         _k_tokens = sorted({
                             _t.id for _t in _ka.walk(_ka.parse(_k_src))
-                            if isinstance(_t, ast.Name) and _t.id.startswith("_nxk_")
+                            if isinstance(_t, _ka.Name) and _t.id.startswith("_nxk_")
                         })
                         _k_new = _k_src.replace(
                             "from lowering_shim import",

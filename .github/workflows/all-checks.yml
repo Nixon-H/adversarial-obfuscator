@@ -110,6 +110,18 @@ jobs:
     name: Flag exhaustive (tier B)
     uses: ./.github/workflows/flag-exhaustive.yml
 
+  # --- security scanning --------------------------------------------------
+  # CodeQL owns no push trigger of its own any more; this umbrella calls it
+  # once per push, so a push cannot run it twice or not at all.
+  codeql:
+    name: CodeQL
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+    uses: ./.github/workflows/codeql.yml
+
   # --- scheduled signal --------------------------------------------------
   fuzz-weekly:
     name: Fuzz sweep

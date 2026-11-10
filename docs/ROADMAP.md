@@ -1,7 +1,22 @@
 # Shadow Compiler — Nixon Protection Pipeline
 
+> **HISTORICAL DESIGN RECORD.** This document records the original phase plan,
+> not the current control flow and not a security claim. The shipped pipeline
+> is driven by `obfuscator/core/transforms.py` + `obfuscator/core/pipeline.py`;
+> several phases named here exist as flags rather than separate stages. For the
+> current architecture read [`ARCHITECTURE.md`](ARCHITECTURE.md). Words such as
+> "unrecoverable" below describe the design intent of 2026-06, not a claim that
+> survives the threat model — the tool raises cost, it does not make an
+> artefact unbreakable.
+
 ## Overview
-The Shadow Compiler is a multi-stage pipeline that transforms Python source into an unrecoverable form delivered as a tiny native binary. Phases 1-6 form the baseline pipeline. Phases 7-15 (Phase 2) add advanced protections; **Phase 2 is enabled by default** via `config/default.json` (`shadow_compiler.phase2.enabled = true`), and `--phase2` is a hidden (undocumented) flag kept for compatibility. Phase 2 Extras (Section 19 techniques) are behind `--phase2-extras`.
+The Shadow Compiler is a multi-stage pipeline that transforms Python source into
+a protected artefact, originally designed as a native binary. Phases 1-6 form
+the baseline pipeline. Phases 7-15 (Phase 2) add advanced protections;
+**Phase 2 is enabled by default** via `config/default.json`
+(`shadow_compiler.phase2.enabled = true`), and `--phase2` is a hidden
+(undocumented) flag kept for compatibility. Phase 2 Extras (Section 19
+techniques) are behind `--phase2-extras`.
 
 > **Status note:** the phase list below records the original design. The
 > shipped pipeline is now driven by `obfuscator/core/transforms.py` +

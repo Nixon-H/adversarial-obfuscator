@@ -20,6 +20,9 @@ pub struct TeePartition {
     tee_type: TeeType,
     enclave_initialized: bool,
     measurement: [u8; 32],
+    /// Software-fallback sealing key. There is deliberately no default: a key
+    /// derived from the public measurement is recoverable from the blob.
+    software_seal_key: Option<[u8; 32]>,
     region_ptr: *mut u8,
     region_len: usize,
     #[cfg(feature = "sgx")]
@@ -54,11 +57,22 @@ impl TeePartition {
             tee_type,
             enclave_initialized: false,
             measurement,
+            software_seal_key: None,
             region_ptr: ptr::null_mut(),
             region_len: 0,
             #[cfg(feature = "sgx")]
             sgx_enclave: None,
         }
+    }
+
+    /// Supply the key used by the software fallback.
+    ///
+    /// Hardware SGX uses the enclave's sealing key and ignores this. The
+    /// software path requires it: deriving the key from `measurement` (which
+    /// is prepended to every blob) would let anyone holding the blob decrypt
+    /// it, which is not sealing.
+    pub fn set_software_seal_key(&mut self, key: [u8; 32]) {
+        self.software_seal_key = Some(key);
     }
 
     pub fn init_enclave(&mut self, payload: &[u8]) -> Result<(), String> {
@@ -156,13 +170,34 @@ impl TeePartition {
             }
         }
 
-        let key = derive_sealing_key(&self.measurement);
-        let iv = self.measurement[..16].try_into().unwrap_or(&[0u8; 16]);
+        let key = self.software_seal_key.ok_or_else(|| {
+            "software TEE sealing requires an external seal key; \
+             deriving it from the public measurement is not sealing".to_string()
+        })?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let mut iv_material = Vec::with_capacity(32 + 32 + 16);
+        iv_material.extend_from_slice(&key);
+        iv_material.extend_from_slice(&self.measurement);
+        iv_material.extend_from_slice(&now.to_le_bytes());
+        let iv_hash = sha256_digest(&iv_material);
+        let mut iv = [0u8; 16];
+        iv.copy_from_slice(&iv_hash[..16]);
+
         let mut sealed = data.to_vec();
-        crate::decrypt::aes_256_ctr_decrypt(&mut sealed, &key, iv);
-        let mut result = Vec::with_capacity(sealed.len() + 32);
+        crate::decrypt::aes_256_ctr_decrypt(&mut sealed, &key, &iv);
+        let mut tag_input = Vec::with_capacity(16 + sealed.len());
+        tag_input.extend_from_slice(&iv);
+        tag_input.extend_from_slice(&sealed);
+        let tag = hmac_sha256(&key, &tag_input);
+
+        let mut result = Vec::with_capacity(32 + 16 + sealed.len() + 32);
         result.extend_from_slice(&self.measurement);
+        result.extend_from_slice(&iv);
         result.extend_from_slice(&sealed);
+        result.extend_from_slice(&tag);
         scrub_memory(key.as_ptr() as *mut u8, key.len());
         Ok(result)
     }
@@ -179,15 +214,30 @@ impl TeePartition {
             }
         }
 
-        if sealed.len() < 32 {
+        // measurement (32) || iv (16) || ciphertext || tag (32)
+        if sealed.len() < 32 + 16 + 32 {
             return Err("Invalid sealed data — too short".to_string());
         }
-
-        let key = derive_sealing_key(&self.measurement);
-        let iv = self.measurement[..16].try_into().unwrap_or(&[0u8; 16]);
-        let encrypted = &sealed[32..];
+        if sealed[..32] != self.measurement {
+            return Err("Sealed data belongs to a different enclave".to_string());
+        }
+        let key = self.software_seal_key.ok_or_else(|| {
+            "software TEE unsealing requires the external seal key".to_string()
+        })?;
+        let iv = &sealed[32..48];
+        let tag_at = sealed.len() - 32;
+        let encrypted = &sealed[48..tag_at];
+        let tag = &sealed[tag_at..];
+        let mut tag_input = Vec::with_capacity(16 + encrypted.len());
+        tag_input.extend_from_slice(iv);
+        tag_input.extend_from_slice(encrypted);
+        let expected = hmac_sha256(&key, &tag_input);
+        if !ct_eq(tag, &expected) {
+            return Err("Sealed data authentication failed".to_string());
+        }
         let mut data = encrypted.to_vec();
-        crate::decrypt::aes_256_ctr_decrypt(&mut data, &key, iv);
+        let iv_arr: [u8; 16] = iv.try_into().map_err(|_| "bad IV".to_string())?;
+        crate::decrypt::aes_256_ctr_decrypt(&mut data, &key, &iv_arr);
         scrub_memory(key.as_ptr() as *mut u8, key.len());
         Ok(data)
     }
@@ -375,17 +425,43 @@ fn sha256_digest(data: &[u8]) -> [u8; 32] {
     hash
 }
 
-fn derive_sealing_key(measurement: &[u8; 32]) -> [u8; 32] {
-    let mut key = [0u8; 32];
-    for i in 0..32 {
-        key[i] = measurement[i] ^ 0x5c;
+/// HMAC-SHA256 (RFC 2104) over the local SHA-256.
+fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    const BLOCK: usize = 64;
+    let mut normalized = [0u8; BLOCK];
+    if key.len() > BLOCK {
+        normalized[..32].copy_from_slice(&sha256_digest(key));
+    } else {
+        normalized[..key.len()].copy_from_slice(key);
     }
-    key
+    let mut inner = Vec::with_capacity(BLOCK + data.len());
+    inner.extend(normalized.iter().map(|b| b ^ 0x36));
+    inner.extend_from_slice(data);
+    let inner_hash = sha256_digest(&inner);
+    let mut outer = Vec::with_capacity(BLOCK + 32);
+    outer.extend(normalized.iter().map(|b| b ^ 0x5c));
+    outer.extend_from_slice(&inner_hash);
+    sha256_digest(&outer)
+}
+
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_seal_key() -> [u8; 32] {
+        core::array::from_fn(|i| (i as u8).wrapping_mul(29).wrapping_add(7))
+    }
 
     #[test]
     fn test_new_tee_none() {
@@ -421,12 +497,31 @@ mod tests {
     #[test]
     fn test_seal_unseal_roundtrip() {
         let mut tee = TeePartition::new(TeeType::None);
+        tee.set_software_seal_key(test_seal_key());
         tee.init_enclave(b"payload").unwrap();
         let original = b"Hello TEE world!";
         let sealed = tee.seal_data(original).unwrap();
         assert!(sealed.len() > original.len());
         let unsealed = tee.unseal_data(&sealed).unwrap();
         assert_eq!(unsealed, original);
+    }
+
+    #[test]
+    fn test_seal_without_key_fails_closed() {
+        let mut tee = TeePartition::new(TeeType::None);
+        tee.init_enclave(b"payload").unwrap();
+        assert!(tee.seal_data(b"data").is_err());
+    }
+
+    #[test]
+    fn test_tampered_seal_fails_authentication() {
+        let mut tee = TeePartition::new(TeeType::None);
+        tee.set_software_seal_key(test_seal_key());
+        tee.init_enclave(b"payload").unwrap();
+        let mut sealed = tee.seal_data(b"Hello TEE world!").unwrap();
+        let last = sealed.len() - 1;
+        sealed[last] ^= 0x01;
+        assert!(tee.unseal_data(&sealed).is_err());
     }
 
     #[test]
