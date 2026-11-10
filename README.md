@@ -119,6 +119,74 @@ It writes `dist/hello_protected.py` (plus a `_dbg` variant), not `build/`: the t
 entry points have different output conventions. Its flags do not overlap with
 `build.py`'s — there is no `--skip-extras` here, the equivalent is `--skip-cloud`.
 
+## Maximum-security build (verified 2026-11-10)
+
+Everything that actually hardens the artefact, on the **loader CLI** — the packed
+build, which is the one that can apply licensing, section splitting and the
+counter-REA shields.
+
+```bash
+NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD \
+  python3 -m obfuscator.core.pipeline build payload.py \
+    --opt-level 5 \
+    --anti-rea-level maximum \
+    --section-split --section-count 6 \
+    --strict-detections \
+    --trial 7d \
+    --watermark NX-WM-001 \
+    --skip-cloud
+```
+
+Measured on a 3-line payload: **405 s** (6m 45s), output in `dist/` with
+`nixon_core.so` and a self-signed `Nixon_Security_Root.cer`. The artefact ran and
+printed the right answer. Expect longer for real payloads — this is not a
+seconds-long build.
+
+### What each flag adds
+
+| Flag | Effect | Default |
+|---|---|---|
+| `--opt-level 5` | full 17-transform ladder | 4 (14 of 17) |
+| `--anti-rea-level maximum` | counter-REA shields at full intensity: chaff, canary tokens, URL differentials, evidence poison, decoy call graph, BPE amplifier, shadow logic, aliasing illusion, crash decoys, diagnostic rabbit holes | on, level default |
+| `--section-split --section-count 6` | Shamir (n=3, k=2) threshold key with a fragmented decoder; the artefact is not a single readable blob | off |
+| `--strict-detections` | refuse to emit when a detection cannot be armed | **already default**; stated for clarity |
+| `--trial 7d` | expiry enforcement (`90s 1m 1h 1d 1w 1mo` combos) | off |
+| `--watermark NX-WM-001` | semantic watermark in the IR + refuse-to-run gate | off |
+
+Also on by default and **not** switched off here: the frozen-stdlib snapshot gate,
+the stdlib function-audit gate, the audit-hook plant detector, and loader traceback
+suppression. Their off-switches are `--no-snapshot`, `--no-stdlib-audit`,
+`--no-audit-hook-plant` — leaving them alone is the point.
+
+### Licensing flags, if you need them
+
+`--hwid` binds to the machine; `--hwid-lock` binds to a static `HWID:<64 hex>`;
+`--licence-token PATH` requires a signed token and makes the payload key
+unrecoverable without it (an artefact without its token decrypts to garbage). They
+are omitted above only because they need per-customer values.
+
+### What is deliberately **not** in this recipe
+
+| Not included | Why |
+|---|---|
+| `--code-genome` | defaults to 50 generations × 30 population = 1500 fitness evaluations; it did not finish in 300 s on a 3-line file. With `--genome-generations 2 --genome-population 4` it takes 2 s. Real but expensive — choose deliberately. |
+| `--temporal-keys` | **inert and slow** — ~19 s of hashing to produce metadata nothing reads; its verifier proves nothing. See the CLI reference note. |
+| `--crypto-binding` | build-time validation only; nothing decrypts at run time, and the chain secret is no longer written into `payload.h`. |
+| `--hpc-detect`, `--cache-bound`, `--hw-entropy`, `--branch-entangle`, `--multicore-entangle` | **archived** — the backend has no call path; they log and continue. |
+| `--driver-check` | read-only BYOVD enumeration; useful, but it enumerates the *host's* drivers and is a separate decision from hardening the artefact. |
+
+### Verifying a hardened build
+
+```bash
+python3 dist/payload_protected.py          # prints the payload's own output
+strings dist/payload_protected.py | grep -c NX-WM-001   # watermark present
+```
+
+A build whose phase-3 table reports a variant mismatch **fails** (exit 1). A variant
+that merely could not be run is reported as inconclusive and does not fail — that
+distinction is deliberate, because a gate that fires when it cannot check is a gate
+people learn to ignore.
+
 ## What it does
 
 The tool takes a Python payload and emits an artefact that is harder to read,
