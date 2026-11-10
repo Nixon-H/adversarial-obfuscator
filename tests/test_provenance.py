@@ -1,6 +1,7 @@
 """Tests for provenance poisoning techniques."""
 import ast
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -63,9 +64,9 @@ def test_fake_apis_generated():
     assert "_nx_fake_api_attest" in code
     assert "Authorization" in code
     # This asserts the generator emitted the decoy host into SOURCE TEXT; it is
-    # not URL sanitization. CodeQL's substring rule cannot distinguish the two.
-    # codeql[py/incomplete-url-substring-sanitization]
-    assert "api.verify.com" in code
+    # not URL sanitization. The anchored form also keeps CodeQL's URL-substring
+    # rule from reading a generation test as a security control.
+    assert re.search(r"https://api\.verify\.com(?:/|$)", code)
     _execute(code)
 
 
