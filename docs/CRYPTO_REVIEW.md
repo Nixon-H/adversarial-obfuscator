@@ -86,6 +86,11 @@ The field is removed; reconstruction uses the holder's own secret.
 - **The relay remote-unlock protocol remains plaintext TCP** with no server
   authentication; registration has no enrollment check. Research-only;
   documented, not fixed here.
+- **`encrypt/encrypt.py` is a self-decrypting packer by design.** It stores the
+  32-byte seed in `.shadorenc` metadata and embeds the bulk keystream in the
+  decryptor stub. That is what makes the artefact self-decrypting; it is also
+  why the scheme cannot be confidential against the artefact holder. Treat it
+  as obfuscation, not encryption, until a run-time key source exists.
 
 ---
 
