@@ -115,3 +115,7 @@ ci-artifacts/
 tests/fixtures/portable/*.py.*.py
 tests/fixtures/portable/*_adaptive.py
 .mimosa/
+
+# Generated per-arm artefacts from the AI layer benchmark. The harness writes
+# them beside the results; only results.json and RESULTS.md are tracked.
+docs/research/ai-layer-bench-*/[a-z]*.py
