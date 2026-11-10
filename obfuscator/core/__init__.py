@@ -26,7 +26,6 @@ Submodules remain importable as ``obfuscator.core.utils`` and so on.
 """
 
 from .utils import (
-    CloudBuilder,
     DEEP_RECURSION_LIMIT,
     DEFAULT_LOG_FILE,
     DEFAULT_TOR_PROXY,
@@ -364,7 +363,6 @@ __all__ = [
     'CUSTOM_VM_SOURCE',
     'CYTHON_VM_SOURCE',
     'CallGraphObfuscator',
-    'CloudBuilder',
     'CloudflareDeployer',
     'CodeChecksumInjector',
     'ConfigManager',
