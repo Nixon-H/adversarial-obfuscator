@@ -1,17 +1,67 @@
 # Nixon Adversarial Obfuscator (shadow-compiler)
 
-Python-source obfuscator + loader-hardening pipeline. `scripts/build.py`
-(version `shadow-compiler 2.0.0`, per `python3 scripts/build.py --version`)
-takes a Python payload and emits an obfuscated `.py` artifact into `build/`
-plus loader gates (anti-VM, trial/HWID, watermark, snapshot/stdlib-audit,
-audit-hook plant detection, optional kernel-driver gate).
+Takes a Python payload and emits an artefact that is harder to read, harder to
+re-run under instrumentation, and — where a stage supports it — capable of refusing
+to run when it detects it has been altered. `shadow-compiler 2.0.0`.
 
-> Scope note: this repo also contains research/experimental flags (FHE-VM,
-> iO, ZK, GPU/TEE/SGX, distributed execution, red-team). This README covers
-> only the paths verified by the test-suite and by the commands below.
-> Every flag is documented below. Where one is inert or superseded, the reference says so.
+The threat model is a motivated analyst with the artefact and a debugger, not a
+network attacker. Everything here raises the cost of reading and re-running code;
+nothing here claims to make a determined reverse engineer fail outright. Where a
+protection is weaker than its name suggests, this README says so next to the flag.
 
-## Requirements
+## What a build produces
+
+A `.py` artefact plus the loader furniture it needs. Two entry points, two
+conventions:
+
+| Entry point | Output | Applies |
+|---|---|---|
+| `scripts/build.py` | `build/<name>_obfuscated.py` | the AST ladder, lowering, packaging, native backends |
+| `python3 -m obfuscator.core.pipeline build` | `dist/<name>_protected.py` + `_dbg` variant, `nixon_core.so`, a self-signed root cert | the packed build: counter-REA shields, section splitting, licensing, attestation |
+
+The packed build is the one that can bind an artefact to a customer, a machine or a
+date, because those gates need a loader around the payload.
+
+## What it offers
+
+Nine independent layers — use one, or all of them:
+
+1. **Obfuscation ladder** — `--opt-level 0..5`, 17 base transforms behind one dial.
+   Level 0 is a byte-for-byte no-op, so a build can be diffed against its source.
+2. **Semantic lowering** — 20 families / 140 kernel ops rewritten to `_nxk_*` call sites.
+3. **Counter-REA shields** — decoy call graphs, canary credentials, evidence poison,
+   shadow business logic, crash-trace decoys and diagnostic rabbit holes, ported
+   from [BLA](https://github.com/qybaihe/bla). On by default.
+4. **Deception** — poisoned imports/APIs/paths/protocols, honey functions, traps
+   aimed at automated and LLM-assisted analysis.
+5. **Runtime integrity** — frozen-stdlib snapshot gate, stdlib function audit,
+   audit-hook plant detector, traceback suppression. All on by default.
+6. **Anti-tamper** — Shamir threshold section splitting, rolling keys, attestation,
+   challenge-response, build-time crypto binding.
+7. **Licensing and binding** — HWID, trial expiry, semantic watermarking, signed
+   licence tokens that make the payload key unrecoverable without the token.
+8. **Packaging** — Cython, PyInstaller spec, a C SIMD VM, FHE/ORAM backends,
+   cross-compilation, split bootstrap.
+9. **Verification** — preservation checks, SMT validation, proof coverage, evidence
+   ledger. A build whose own variant check disagrees with itself now fails.
+
+Details, with the flags that switch each on, are in [What it does](#what-it-does);
+the complete option list is in the [CLI reference](#cli-reference).
+
+## What it does not claim
+
+- **Not unbreakable.** Reduces analyst throughput; does not prevent a determined
+  analyst holding the artefact. Per-layer notes below say where a control is
+  narrower than its name.
+- **The research surface is separate.** FHE-VM, iO, ZK, GPU/TEE/SGX, distributed
+  execution and the red-team harness live in the repo and have flags, but they are
+  not exercised by the default paths. The `## What it does` section marks what is
+  wired; the CLI reference marks what is inert or archived.
+- **Performance numbers are measured, not inherited.** Vendor claims of 0.19x–1.56x
+  are not reproduced here; the in-repo measurement is 1.46x–3.84x for the lowering
+  shim, and the command to reproduce it is given.
+
+## Requirements## Requirements
 
 Python dependencies are installed from a **hash-pinned lock**
 (`requirements.lock`): every artefact, including the transitive
