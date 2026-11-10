@@ -26,6 +26,15 @@ Large / stale one-off artifacts:
 - `error_codes.json` — placeholder (`{"E0001": "Invalid input"}`)
 - `task_plan.md` — stale adversarial-loop task plan (status: Phase 1)
 
+## research_readiness_2026-10-29/
+Working notes for the research-readiness audit, moved out of the repository
+root on 2026-11-10. They are the evidence behind
+`docs/research/research-readiness-audit-2026-10-29.md`, not current
+documentation:
+- `notes.md` — repository snapshot, harness audit, literature screen, and the
+  findings that motivated the audit's verdict.
+- `task_plan.md` — the audit's task plan and decisions.
+
 ## originals_backup/
 Backups of obfuscator core modules predating the adversarial loop
 (`attention_poison.py`, `dataflow.py`, `decoy_apis.py`,
@@ -41,7 +50,9 @@ because `adversarial_loop.py` resolves sibling paths via
 
 ## Other moves in the same cleanup
 - `attack_report.md`, `claim_validation.md`, `runtime_verification.md`
-  → `docs/reports/` (related documentation, not archive)
+  → `docs/reports/` (related documentation, not archive). That directory is
+  **not present in the current checkout**; the entry records the intended
+  move, not a verified location.
 - `run_all_flags.sh` → `scripts/run_all_flags.sh` (pipeline runner; note it
   hardcodes `cd /home/nixon/Desktop/2` and `--payload Love.py`, so it needs
   path updates before reuse)

@@ -121,7 +121,12 @@ def phase_obfuscate(payload, output, opts):
             extra_opts['adaptive_rewrite'] = True
         if getattr(opts, 'rename_internal', False):
             extra_opts['rename_internal'] = True
-        result = build_pipeline(source, mba_validator=mba_opt, extra_options=extra_opts)
+        # Thread --seed into the transformer itself, not only into the option
+        # dict. The transformer only patches `secrets` and pins its own RNG
+        # when it owns a seed; without this argument string-encryption keys
+        # stayed random and two --seed builds still differed.
+        result = build_pipeline(source, seed=getattr(opts, "seed", None),
+                                mba_validator=mba_opt, extra_options=extra_opts)
 
         # LLM-Resilient passes
         if getattr(opts, "llm_resilient", False) or getattr(opts, "honey_functions", 0):

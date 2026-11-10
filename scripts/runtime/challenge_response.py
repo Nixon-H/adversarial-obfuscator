@@ -31,6 +31,7 @@ new instance or escalate to administrative intervention.
 """
 
 import hashlib
+import hmac
 import os
 import random
 import time
@@ -208,18 +209,28 @@ class ChallengeResponse:
         if self._self_destructed:
             return False
 
-        if time.time() > response.timestamp + self.timeout:
+        # The response must arrive before the CHALLENGE deadline, not a
+        # deadline the responder can restamp in its own response object.
+        if time.time() > challenge.deadline:
             return False
 
         if not response.success:
             return False
 
-        secret = self._get_secret(response.responder_id)
+        challenge_data = challenge.challenge_data[:-32]
         response_data = response.response_data[:-32]
         response_sig = response.response_data[-32:]
 
+        # Bind the response to THIS challenge. Without this prefix check a
+        # captured response with a valid MAC is replayable against any new
+        # challenge from the same responder until the timeout.
+        if not hmac.compare_digest(response_data[:len(challenge_data)],
+                                   challenge_data):
+            return False
+
+        secret = self._get_secret(response.responder_id)
         expected_sig = hashlib.sha256(secret + response_data + b"OK").digest()
-        return response_sig == expected_sig
+        return hmac.compare_digest(response_sig, expected_sig)
 
     def run_pairwise(self, peer_ids: list[str]) -> dict[tuple[str, str], bool]:
         """

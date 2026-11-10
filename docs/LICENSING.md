@@ -69,16 +69,21 @@ Every one of these is a test in `tests/test_licensing.py`:
 - a required feature is not granted
 - unknown schema, malformed JSON, truncated signature
 
-## Not done yet
+## What is done, and what is not
 
-- **Checking the token inside the artefact.** The emitted loader runs in
-  the customer's interpreter with no third-party packages, so it cannot
-  import `cryptography`. It needs a small pure-Python Ed25519 verify (or
-  the check stays build-side). Written down rather than pretended.
-- **Issuing from a service, accounts, and revocation.** Those need a
-  deployment, not a module. A short `expires_at` is the interim
-  revocation: a leaked token stops working, it just stops working late.
-- **Binding the token to the payload key.** The strongest form is that
-  the payload key is derived from the token, so a cracked binary without
-  a valid token decrypts nothing. That is the next step, and it changes
-  how the loader derives its key.
+- **Payload-key binding: implemented.** `--licence-token` derives the payload
+  key from the token's `key_material`; the emitted loader re-derives it from
+  the token at run time. An artefact without its token exits 1 with
+  "licence token required" (verified 2026-11-10).
+- **Ed25519 signature verification inside the artefact: not done.** The
+  emitted loader has no third-party packages and does not verify the signature;
+  it uses `key_material` as a capability. A forged token with different material
+  derives a key that does not match the ciphertext, so decryption fails. The
+  signature is what prevents re-issuing at the issuer/verifier level, not what
+  stops decryption inside the loader.
+- **Issuing from a service, accounts, and revocation: not done.** Those need a
+  deployment, not a module. A short `expires_at` is the interim revocation: a
+  leaked token stops working, it just stops working late.
+- **A server-side trust decision: not done.** The token is still a client-side
+  capability. A client that can decrypt can be made to skip the gate; the
+  token raises the cost of sharing a build, it does not create a trust boundary.

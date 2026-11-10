@@ -36,8 +36,58 @@ checks they agree).
   flag is gone. What blocks it is structural: the emitters draw thousands
   of values straight from `secrets` (measured with `NIXON_ENTROPY_TRACE`),
   so this needs a design pass rather than a seeding patch.
+  **Correction (2026-11-10):** the flag was later restored for *partial*
+  seeding (structure randomisation, speculation, CPU-port), and
+  `scripts/build.py` still accepts it. It does not make builds
+  byte-reproducible; the entry above describes the full-pinning attempt,
+  not the flag's current behaviour. See `docs/REPRODUCIBILITY.md` §6.1.
 
 ### Fixed
+
+- **`--seed` did not reach the AST transformer.** `phase01_obfuscate.py`
+  called `build_pipeline(..., extra_options={"seed": N})` but never passed
+  `seed=`, so `ObfuscationTransformer` skipped its own `random.seed` and its
+  `secrets` patch. String-encryption keys stayed random and two same-seed
+  builds differed. The call now passes `seed=getattr(opts, "seed", None)`;
+  three O4 builds are byte-identical (29,802 bytes each), two phase-2 builds
+  are byte-identical (33,170 bytes each), and a different seed differs. The
+  packed loader remains non-reproducible by design.
+
+- **`--pytoc` kernel swap never ran.** The swap step imported `ast as _ka`
+  but then used `ast.Name`, so every attempt raised
+  `cannot access local variable 'ast'` and was logged as non-fatal; the
+  artefact kept the pure-Python shim import. The reference is now `_ka.Name`;
+  the swap emits the native `_nxk_*` import and the artefact runs against the
+  compiled kernel (verified with `--lowering io --pytoc --build-id`).
+
+- **The crypto-binding chain secret was written to disk.** `--crypto-binding`
+  wrote `build/chain_secret.bin` so the payload-header step could log that it
+  was withholding it. Nothing embedded or needed the file. The secret now
+  stays in the builder's memory; the header step no longer reads or writes it.
+
+- **Attestation started a different engine.** `AttestationEngine::start`
+  leaked a new engine into the worker thread, so the caller's registered
+  `MemoryWatch` was never checked. It now takes `Arc<Self>` and starts the
+  loop on the same instance; both runtime call sites construct an `Arc`.
+
+- **Software TEE sealing used the public measurement as its key.** The
+  fallback derived the key from the measurement that is prepended to every
+  blob, and had no authentication. It now requires an external seal key, uses
+  a per-seal IV, appends an HMAC-SHA256 tag, and fails closed without a key.
+
+- **Relay attestation challenges embedded the responder secret.**
+  `create_challenge` put 24 secret bytes in the challenge and verified a bare
+  SHA-256 of public data. Challenges now contain only id+time; the expected
+  response is HMAC-SHA256 under the responder secret, compared in constant
+  time. Relay config files are written `0600` on Unix.
+
+- **Challenge-response replay windows.** Both `ChallengeResponse` and
+  `DistributedAttestation.verify_response` verified a MAC but not that the
+  response belonged to the current challenge. They now bind the response to
+  the issued challenge data (and remove it after use), and compare tags with
+  `hmac.compare_digest`.
+
+
 
 - **The sealed-section tag was not a MAC.** Sections were sealed with a
   SHA-256 keystream and a bare `sha256(part)` tag: the keystream is sound

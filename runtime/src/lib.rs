@@ -229,7 +229,7 @@ pub fn init_runtime(config: &RuntimeConfig) {
         let _ = hpc_key::derive_key_from_hpc(&base_key, config.hpc_seed);
     }
     if config.enable_sw_attestation {
-        let engine = sw_attestation::AttestationEngine::new();
+        let engine = std::sync::Arc::new(sw_attestation::AttestationEngine::new());
         engine.register_critical_region(
             &INTEGRITY_MAGIC as *const _ as *const u8,
             std::mem::size_of::<u64>(),
@@ -270,7 +270,7 @@ pub fn init_runtime(config: &RuntimeConfig) {
         }
         if config.enable_sw_attestation {
             let measurement = tee_system.get_measurement();
-            let engine = sw_attestation::AttestationEngine::new();
+            let engine = std::sync::Arc::new(sw_attestation::AttestationEngine::new());
             engine.register_critical_region(&measurement as *const _ as *const u8, 32);
             engine.start();
             eprintln!("sw_attestation: TEE-integrated attestation engine started");

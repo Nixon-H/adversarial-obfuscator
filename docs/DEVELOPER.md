@@ -128,16 +128,31 @@ See `config/default.json` for all build options.
 
 Builds are intentionally unique per run (random seeds, opcode swizzle,
 fragment keys), so identical payloads produce different artifacts.
-For auditors needing a deterministic replay:
 
-1. Set `SEED` (or `NIXON_SEED`) to an integer, e.g. `SEED=42`.
-2. Pass `--randomization-seed <int>` (see `scripts/build.py`) so the
-   structure-randomization, speculation, and CPU-port phases stop
-   drawing fresh entropy (`secrets.randbits` / `token_bytes`).
-3. Record the seed alongside the payload hash; re-running with the
-   same seed + same toolchain reproduces the same layout.
-4. Caveat: some phases still use fresh randomness when the flag is
-   absent (JIT seed, ephemeral opcode map, fingerprint seeds), and
-   timestamps/paths may differ — compare normalized artifacts.
-5. This changes nothing about default builds: without the env/flag,
-   every build stays unique by design.
+`--seed` seeds the global `random` module, the AST transformer's own RNG and
+its `secrets` patch, and several AST injectors. With a fixed seed the source
+emitter now produces **byte-identical** output for the same payload, tool
+version, and flag set. Verified: three O4 builds gave 29,802 bytes each; two
+builds with phase-2 defaults on gave 33,170 bytes each; a different seed gave
+32,911 bytes.
+
+`--randomization-seed` (or `SEED` / `NIXON_SEED`) is a separate structural
+seed: structure randomisation, speculation, and the CPU-port phase. It does not
+seed the AST path.
+
+What the flags do **not** buy:
+
+1. Level 0 is not a byte-identical copy through the CLI; always-on rename,
+   checksum and string passes still run. `--skip-obfuscate` is the copy path.
+2. The packed loader is not byte-reproducible: blob keys, string keys, section
+   keys, timestamps and packaging draws come from `secrets`/`os.urandom` and
+   several values cross the pack/run boundary.
+3. `--pin-structure` pins structure and the timestamp, not key material.
+4. Some phases still use fresh randomness when no seed is given (JIT seed,
+   ephemeral opcode map, fingerprint seeds), and timestamps/paths may differ —
+   compare normalised artifacts.
+
+`docs/EMITTER_PIPELINE.md` has the entropy inventory; the current limitations
+are in [`REPRODUCIBILITY.md`](REPRODUCIBILITY.md) §6.1. The historical entry in
+`CHANGELOG.md` saying `--randomization-seed` was gone is stale; the flag is
+still accepted by `scripts/build.py` and now carries a dated correction.

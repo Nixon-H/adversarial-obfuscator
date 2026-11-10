@@ -18,6 +18,9 @@ pub struct Challenge {
     pub data: Vec<u8>,
     pub created_at: u64,
     pub ttl_secs: u64,
+    /// HMAC-SHA256(responder_secret, data), computed at issuance. The secret
+    /// itself is never placed in `data` and never leaves this module.
+    expected: [u8; 32],
 }
 
 impl AttestationModule {
@@ -43,15 +46,16 @@ impl AttestationModule {
                 }
                 s
             });
-        let mut data = Vec::with_capacity(40);
+        let mut data = Vec::with_capacity(16);
         data.extend_from_slice(&cid.to_le_bytes());
         data.extend_from_slice(&now.to_le_bytes());
-        data.extend_from_slice(&secret[..24]);
+        let expected = hmac_sha256(secret, &data);
         let challenge = Challenge {
             challenge_id: cid,
             data,
             created_at: now,
             ttl_secs: 30,
+            expected,
         };
         self.challenges.insert(cid, challenge.clone());
         Some(challenge)
@@ -70,13 +74,38 @@ impl AttestationModule {
         if now > challenge.created_at + challenge.ttl_secs {
             return false;
         }
-        let expected = sha256_simple(&challenge.data);
-        &response[..32] == expected.as_slice()
+        // Constant-time compare: the tag is a keyed MAC, not a bare hash of
+        // public challenge bytes.
+        let mut diff = 0u8;
+        for (a, b) in response[..32].iter().zip(challenge.expected.iter()) {
+            diff |= a ^ b;
+        }
+        diff == 0
     }
 
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
+}
+
+/// HMAC-SHA256 (RFC 2104) over the local SHA-256. Keyed, so a peer that sees
+/// the public challenge cannot compute the expected response.
+fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    const BLOCK: usize = 64;
+    let mut normalized = [0u8; BLOCK];
+    if key.len() > BLOCK {
+        normalized[..32].copy_from_slice(&sha256_simple(key));
+    } else {
+        normalized[..key.len()].copy_from_slice(key);
+    }
+    let mut inner = Vec::with_capacity(BLOCK + data.len());
+    inner.extend(normalized.iter().map(|b| b ^ 0x36));
+    inner.extend_from_slice(data);
+    let inner_hash = sha256_simple(&inner);
+    let mut outer = Vec::with_capacity(BLOCK + 32);
+    outer.extend(normalized.iter().map(|b| b ^ 0x5c));
+    outer.extend_from_slice(&inner_hash);
+    sha256_simple(&outer)
 }
 
 /// Minimal correct SHA-256 (FIPS 180-4), pure Rust, stdlib only.

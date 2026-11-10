@@ -61,14 +61,14 @@ def phase_embed_crypto_binding(payload_h_path: str):
     """
     Embed crypto fragment binding data into payload.h.
 
-    Reads the bound fragments binary and chain secret from BUILD_DIR
-    and appends C constant arrays to the header.
+    Reads the bound fragments binary from BUILD_DIR and appends C constant
+    arrays to the header. The chain secret is not read from disk: it stays in
+    the builder's memory and is never written beside the ciphertext.
 
     Args:
         payload_h_path: path to payload.h to modify in-place
     """
     crypto_binding_path = os.path.join(BUILD_DIR, "crypto_bound_fragments.bin")
-    chain_secret_path = os.path.join(BUILD_DIR, "chain_secret.bin")
 
     if not os.path.exists(crypto_binding_path):
         log("CRYPTO_BINDING", f"Bound fragments not found: {crypto_binding_path}")
@@ -82,11 +82,6 @@ def phase_embed_crypto_binding(payload_h_path: str):
     if len(bound_data) < 4:
         log("ERROR", f"Bound fragments file too short ({len(bound_data)} bytes), skipping embed")
         return
-
-    chain_secret = b""
-    if os.path.exists(chain_secret_path):
-        with open(chain_secret_path, "rb") as f:
-            chain_secret = f.read()
 
     with open(payload_h_path, "a", encoding='utf-8') as f:
         f.write("\n// ============================================================\n")
@@ -117,10 +112,8 @@ def phase_embed_crypto_binding(payload_h_path: str):
         # never referenced. If a C-side consumer is ever written, it must get
         # the secret at run time from a source the attacker does not already
         # hold -- not from the payload it is protecting.
-        if chain_secret:
-            log("CRYPTO_BINDING",
-                "chain secret withheld from payload.h (writing it would ship "
-                "the key beside the ciphertext)")
+        log("CRYPTO_BINDING",
+            "chain secret is never written to disk or emitted in payload.h")
 
     log("CRYPTO_BINDING", f"Embedded {len(bound_data)} bytes of bound fragment data")
 

@@ -23,9 +23,9 @@ from obfuscator.core.pipeline import build_parser as pipeline_parser  # noqa: E4
 #: The documents that tell a USER what to type.  The audit reports are
 #: dated snapshots and legitimately mention flags that have since been
 #: removed, so they are checked separately (they carry RESOLVED notes).
-USER_DOCS = ("README.md", "docs/USER_GUIDE.md", "docs/DEVELOPER.md",
-             "docs/CHANGELOG.md", "SECURITY.md", "THREAT_MODEL.md",
-             "docs/PLATFORMS.md")
+USER_DOCS = ("README.md", "docs/CLI.md", "docs/USER_GUIDE.md",
+             "docs/DEVELOPER.md", "docs/CHANGELOG.md", "SECURITY.md",
+             "THREAT_MODEL.md", "docs/PLATFORMS.md")
 
 #: Flags that belong to OTHER tools and are quoted in the docs.  They
 #: are not project flags and must not be checked against ours.
@@ -42,8 +42,9 @@ FOREIGN_FLAGS = frozenset({
 })
 
 #: Prose fragments, not flags: the docs write "--no-" and "--skip-" when
-#: talking about a family of switches.
-FRAGMENTS = frozenset({"--no-", "--skip-"})
+#: talking about a family of switches. "--exclude-rea-*" appears verbatim in
+#: the parser's own help text for the three exclusion flags.
+FRAGMENTS = frozenset({"--no-", "--skip-", "--exclude-rea-"})
 
 
 def _pipeline_flags():

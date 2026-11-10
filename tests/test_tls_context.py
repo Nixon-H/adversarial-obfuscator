@@ -202,6 +202,9 @@ class _QuietServer(http.server.ThreadingHTTPServer):
 
 def _start_server(cert_path, key_path):
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    # The test server never needs TLS < 1.2; be explicit so a future default
+    # change cannot silently lower the negotiated floor.
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     ctx.load_cert_chain(cert_path, key_path)
     httpd = _QuietServer(("127.0.0.1", 0), _QuietHandler)
     httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)

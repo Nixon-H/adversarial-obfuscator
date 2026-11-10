@@ -2,8 +2,9 @@
 
 Practical walkthrough for `scripts/build.py` (`shadow-compiler 2.0.0`).
 Every command below was run on 2026-09-23 (CPython 3.13.5); outputs are
-pasted verbatim. For the flag table and test-evidence matrix see
-`README.md`.
+pasted verbatim. For the complete flag reference see
+[`CLI.md`](CLI.md); for the current quick start and research overview see
+[`../README.md`](../README.md).
 
 ## Two CLIs
 

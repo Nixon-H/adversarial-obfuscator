@@ -62,6 +62,9 @@ def test_fake_apis_generated():
     assert "_nx_fake_api_decrypt" in code
     assert "_nx_fake_api_attest" in code
     assert "Authorization" in code
+    # This asserts the generator emitted the decoy host into SOURCE TEXT; it is
+    # not URL sanitization. CodeQL's substring rule cannot distinguish the two.
+    # codeql[py/incomplete-url-substring-sanitization]
     assert "api.verify.com" in code
     _execute(code)
 

@@ -1,84 +1,289 @@
-# Nixon Adversarial Obfuscator (shadow-compiler)
+# Adversarial Obfuscator
 
-Takes a Python payload and emits an artefact that is harder to read, harder to
-re-run under instrumentation, and — where a stage supports it — capable of refusing
-to run when it detects it has been altered. `shadow-compiler 2.0.0`.
+### A measured investigation into Python software protection
 
-Threat model: an analyst with the artefact and a debugger. Every layer raises the
-cost of static reading, dynamic re-execution, or both. Per-layer scope is stated
-with each flag; system-level limits are in `THREAT_MODEL.md`.
+This repository is a research prototype and a measurement programme. It asks a
+question that the obfuscation literature largely assumes: **does shipping a
+differently obfuscated build to every customer actually make an attacker's work
+harder?**
 
-## What a build produces
+It contains a protection toolchain built to make that question testable, an
+attacker and benchmark built to measure it, and a record of what the
+measurements can and cannot support. The toolchain is real: it ships an AST
+obfuscation ladder, semantic lowering, a packed loader with integrity and
+licensing gates, and native backends. The research programme is deliberately
+narrow: it measures **function identification** in Python source, using a
+specification-derived attacker and a probe counter as its cost unit.
 
-A `.py` artefact plus the loader furniture it needs. Two entry points, two
-conventions:
+> **Status: research prototype.** `shadow-compiler 2.0.0`. The research
+> programme has produced one controlled negative result, one invalidated pilot,
+> one no-transfer-resistance experiment, and **thirteen correctness defects** in
+> the obfuscator (twelve fixed). It has **not** produced a claim that the
+> product resists reverse engineering. Read
+> [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) before relying on anything here.
 
-| Entry point | Output | Applies |
+---
+
+## The problem
+
+Python is normally distributed as source, or as bytecode that can be lifted
+back to something close to source. That removes the usual binary-protection
+story. A vendor's algorithm is readable; a licence check executes on a machine
+the attacker controls; and "closed source" is a distribution convention, not a
+control.
+
+Obfuscation is the practical response, and the literature has no shortage of
+transformations. What it has much less of is **measurement**: how much does a
+given transformation cost an attacker, and does that cost survive when the
+vendor ships a *different build* to the next customer?
+
+That second question is the deployment justification for per-build diversity —
+the claim that analysing one build does not transfer to another. It is widely
+assumed and rarely tested. This project tests one narrow version of it, and
+builds the tooling needed to test the rest.
+
+---
+
+## The research question and the result
+
+**Question.** Does per-build transform-family diversification raise the cost
+for an attacker to identify a function in Python source?
+
+**Result.** Once the number of module-level callables each family inserts is
+held constant, the answer on this instrument is **exactly 0.00 difference** —
+on all three family pairings, all 17 tasks, and all 51 task/seed cells.
+
+Uncontrolled, the same comparison shows +0.33 probes for A-vs-B and 0.00 for
+B-vs-C, which reads as a null. It is not. Family A inserts one fewer
+module-level callable than B and C, and the probe counter tracks callable
+count. **What looked like a diversity effect was the cost of the callables
+diversification happened to insert.**
+
+| Pairing | Uncontrolled | Callable counts matched |
 |---|---|---|
-| `scripts/build.py` | `build/<name>_obfuscated.py` | the AST ladder, lowering, packaging, native backends |
-| `python3 -m obfuscator.core.pipeline build` | `dist/<name>_protected.py` + `_dbg` variant, `nixon_core.so`, a self-signed root cert | the packed build: counter-REA shields, section splitting, licensing, attestation |
+| A vs B | +0.33 probes | **+0.00** |
+| A vs C | +0.33 | **+0.00** |
+| B vs C | 0.00 | **+0.00** |
 
-The packed build is the one that can bind an artefact to a customer, a machine or a
-date, because those gates need a loader around the payload.
+What *does* move cost is module size: from **2.0 probes at one candidate to 8.6
+at four**, monotone in nine of nine tasks and invariant to sibling order on the
+task whose permutations were run. A blind-property baseline costs 8.0 at one
+candidate and 20.0 at four, so the growth is not merely the size of the search
+space.
 
-## What it offers
+The honest statement is therefore about the instrument, not the defence: a
+specification-derived property set is blind to semantic transformation but
+sensitive to structure, and the benchmark conflated the two. We do **not**
+claim that diversification fails to raise attacker cost. We claim that this
+instrument cannot tell, and we explain why so the next attempt does not repeat
+it.
 
-Nine independent layers — use one, or all of them:
+The result is scoped to **11 load-bearing tasks** — seven hand-written, two
+independently specified, two prior external. Only the two blind tasks are
+independent of this paper's author. See
+[`docs/RESULTS.md`](docs/RESULTS.md) for the full result and
+[`docs/BENCHMARK.md`](docs/BENCHMARK.md) for the method.
 
-1. **Obfuscation ladder** — `--opt-level 0..5`, 17 base transforms behind one dial.
-   Level 0 is a byte-for-byte no-op, so a build can be diffed against its source.
-2. **Semantic lowering** — 20 families / 140 kernel ops rewritten to `_nxk_*` call sites.
-3. **Counter-REA shields** — decoy call graphs, canary credentials, evidence poison,
-   shadow business logic, crash-trace decoys and diagnostic rabbit holes, ported
-   from [BLA](https://github.com/qybaihe/bla). On by default.
-4. **Deception** — poisoned imports/APIs/paths/protocols, honey functions, traps
-   aimed at automated and LLM-assisted analysis.
-5. **Runtime integrity** — frozen-stdlib snapshot gate, stdlib function audit,
-   audit-hook plant detector, traceback suppression. All on by default.
-6. **Anti-tamper** — Shamir threshold section splitting, rolling keys, attestation,
-   challenge-response, build-time crypto binding.
-7. **Licensing and binding** — HWID, trial expiry, semantic watermarking, signed
-   licence tokens that make the payload key unrecoverable without the token.
-8. **Packaging** — Cython, PyInstaller spec, a C SIMD VM, FHE/ORAM backends,
-   cross-compilation, split bootstrap.
-9. **Verification** — preservation checks, SMT validation, proof coverage, evidence
-   ledger. A build whose own variant check disagrees with itself now fails.
+---
 
-Details, with the flags that switch each on, are in [What it does](#what-it-does);
-the complete option list is in the [CLI reference](#cli-reference).
+## What this repository contains
 
-## What it does not claim
+Two coupled efforts. Confusing them is the most common way to over-read the
+project.
 
-- **Not unbreakable.** Reduces analyst throughput; does not prevent a determined
-  analyst holding the artefact. Per-layer notes below say where a control is
-  narrower than its name.
-- **The research surface is separate.** FHE-VM, iO, ZK, GPU/TEE/SGX, distributed
-  execution and the red-team harness live in the repo and have flags, but they are
-  not exercised by the default paths. The `## What it does` section marks what is
-  wired; the CLI reference marks what is inert or archived.
-- **Performance numbers are measured, not inherited.** Vendor claims of 0.19x–1.56x
-  are not reproduced here; the in-repo measurement is 1.46x–3.84x for the lowering
-  shim, and the command to reproduce it is given.
+| Track | What it is | Evidence status |
+|---|---|---|
+| **Protection engineering** | `shadow-compiler`: 17-transform AST ladder, semantic lowering, IR/LLVM stages, packed loader, runtime gates, licensing, native backends | Implemented and tested; individual controls evaluated against named tests, **not** against a general attacker |
+| **Measurement programme** | `docs/research/` and `scripts/transfer/`: benchmark, attacker, protocols, defect discovery, paper draft | One controlled negative result; one invalidated pilot; one no-transfer-resistance experiment; thirteen defects; a retraction record |
 
-## Requirements## Requirements
+The measurement programme uses the obfuscator as its system under test. It does
+**not** evaluate the complete default production build: the experiments use the
+source-level research generator, not `scripts/build.py` or the packed loader.
+That scope is stated in the paper and is not a detail to gloss over.
 
-Python dependencies are installed from a **hash-pinned lock**
-(`requirements.lock`): every artefact, including the transitive
-closure, carries its SHA-256, and CI installs with `--require-hashes`,
-so a substituted artefact fails the install rather than landing.
-`requirements.txt` states the wanted versions; regenerate the lock with
-`make lock` after changing it.
+---
 
-- Python **3.10–3.14** for builder **and** payloads
-  (`obfuscator/nyser.py: SUPPORTED_MINORS`,
-  `obfuscator/py_matrix.py: SUPPORTED`, builder floor
-  `sys.version_info < (3, 10)` in `scripts/build.py`). Verified on 3.13.5.
-- No dependencies needed for the quick-start below (stdlib only).
-  Full pipeline stages need `cargo`, `g++`, `llc` (checked at startup).
+## What is implemented
 
-## Quick-start (verified 2026-11-10, Python 3.13.5, Linux x86_64)
+Nine layers, independently switchable. "Status" is deliberately conservative:
+*Verified* means measured in this repository; *Implemented* means code and
+tests exist but it has not been independently evaluated; *Experimental* means
+opt-in and partially validated.
 
-A minimal build with no external toolchain: AST obfuscation only.
+| Layer | What it does | Status |
+|---|---|---|
+| **AST ladder** (`--opt-level 0..5`) | 17 canonical transforms; level 0 disables the ladder, level 4 is the default (14/17) | Implemented; ladder disabled at O0. **Not** byte-identical through the CLI: always-on rename/checksum/string passes still run |
+| **Semantic lowering** (`--lowering`) | 20 families / 140 verified operations rewritten to per-build kernel calls | Implemented; Python shim overhead measured at **1.46×–3.84×** |
+| **Counter-REA shields** | Decoy call graphs, canary credentials, evidence poison, shadow logic, diagnostic rabbit holes | Implemented; effect on an analyst **not measured** |
+| **Deception** | Poisoned imports/APIs/paths, honey functions, traps aimed at automated analysis | Implemented; hypothesis, not a measured defence |
+| **Runtime integrity** | Frozen-stdlib snapshot, stdlib function audit, audit-hook plant detector, traceback suppression | Implemented; on by default |
+| **Anti-tamper** | Shamir section splitting, rolling keys, attestation, challenge-response, history-bound decryption | Implemented; several opt-in; six mutation flags are metadata-only, `--temporal-keys` is inert and `--crypto-binding` is build-time only |
+| **Licensing and binding** | HWID, trial expiry, semantic watermark, signed Ed25519 licence tokens | Implemented; the licence token is the strongest client-side binding |
+| **Packaging** | Cython, PyInstaller spec, C SIMD VM, FHE/ORAM backends, cross-compilation, split bootstrap | Implemented or research-only, marked per flag |
+| **Verification** | Preservation checks, SMT validation, proof coverage, evidence ledger, artefact gate | Implemented; a variant mismatch fails the build |
+
+The complete flag surface — 260+ options for the source emitter and 69 for the
+packed loader — is in [`docs/CLI.md`](docs/CLI.md), generated from the live
+parsers and checked in CI.
+
+**Seeds are not keys.** `--seed` and `--randomization-seed` exist to make a
+debug build reconstructible; `--build-id` seeds the `--pytoc` lowering kernel;
+`--lock-hwid` seeds only the loader's polymorphic map. Key material comes from
+`secrets`/`os.urandom`. `--seed` now makes the **source emitter** byte-identical
+for the same payload, tool version, and flags; the **packed loader** is still
+not reproducible because its keys and packaging draws are random.
+`--skip-obfuscate` is the true copy path. See
+[`docs/SEED_ARCHITECTURE.md`](docs/SEED_ARCHITECTURE.md).
+
+### What it does not claim
+
+- **Not unbreakable.** Every client-side control is editable by the client's
+  owner. The only architectural answer that holds is moving the secret and the
+  trust decision to a server.
+- **Not a measured defence against a frontier analyst.** No adversary-in-the-loop
+  measurement of the full stack exists in this repository.
+- **Not reproducible builds.** Two builds of the same payload differ by ~18%;
+  comparisons must mask the per-build key.
+- **Not a finished research result.** The paper's claim is narrow, and its
+  primary limitation — only two independently specified load-bearing tasks — is
+  not fixable by re-analysis.
+
+The full list is in [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md).
+
+---
+
+## How the research works
+
+1. **A corpus.** 17 internal tasks (9 hand-written, 8 from real modules), plus
+   five external sources gated for execution. Each task is a target function
+   among siblings.
+2. **An attacker.** A specification-derived property set: three to five
+   executable assertions per task, written from documentation rather than the
+   function body, applied **frozen** to every build. It never sees clean source,
+   evaluator vectors, labels, or another build.
+3. **A cost unit.** Specification-derived probe evaluations — one assertion
+   applied to one candidate. CPU seconds are recorded but not used for
+   inference; at this scale they are dominated by interpreter startup.
+4. **Gates.** Evaluator distinguishability, behavioural equivalence,
+   compile/import/run, and singleton identity. A cell where the evaluator
+   cannot name a unique target is invalid, not a zero.
+5. **A record.** Every claim gets a check that can fail; every check gets a
+   stated blind spot; every wrong turn stays next to the claim it corrected.
+
+The identity/conclusion separation matters: the evaluator alone holds the
+original function and decides identity; the attacker's property set decides only
+its own conclusion. Conflating them produced three rounds of unattributable
+numbers.
+
+---
+
+## Research contributions
+
+1. **A controlled negative result with the confound identified.** Transform-family
+   diversity added no measurable cost once callable counts were equalised; the
+   apparent effect was the callables the families inserted.
+2. **A reusable benchmark and gates.** Seventeen tasks, five external sources,
+   38 gated artefacts (20 external), and four instruments that run
+   deterministically from the repository.
+3. **A defect corpus from code the project did not write.** Thirteen defects in
+   the obfuscator, ten of which the project's own tests could not have found.
+   Ten produce artefacts that compile and then fail; three do not compile.
+4. **A methodology record.** Eight withdrawn claims, each kept beside what it
+   corrected. Five were the programme's own instrument failing, not the system
+   under test.
+5. **An engineering testbed.** A protection toolchain broad enough to make the
+   measurement question concrete, with its own threat model, evidence taxonomy,
+   and failure-mode audit.
+6. **A narrower next question.** The frozen-versus-adaptive transfer study is
+   specified, with a pre-registered equivalence bound and a project-held-out
+   corpus. It is **not yet run**.
+
+The paper draft is [`docs/research/paper-draft.md`](docs/research/paper-draft.md).
+The programme index is [`docs/research/README.md`](docs/research/README.md).
+
+---
+
+## Limitations and open questions
+
+The short list:
+
+- **Corpus.** Small, mostly one author, 37–51 lines per task. Not a Python
+  corpus in the sense a general claim needs.
+- **Independent specification.** Six blind tasks, two load-bearing. This is the
+  primary limitation.
+- **Probes are not analyst time.** No human has been timed; no
+  probe-to-minutes mapping is claimed.
+- **Identification is not comprehension.** Nothing here measures whether an
+  analyst could explain or repair a recovered function.
+- **The full product is not the research path.** The benchmark studies a
+  source-level generator, not the packed loader with counter-REA and native
+  backends.
+- **One open defect.** A module with public functions and no `__all__` can be
+  obfuscated into something its own package cannot import. A caller-side scan
+  fixes it for callers that supply it.
+- **No measurement against a frontier automated analyst.** The counter-REA and
+  deception layers are implemented hypotheses.
+
+The open questions, in priority order: Does an adaptive attacker recover what a
+frozen one misses? Do the results hold on a project-held-out corpus? Does the
+instrument track human effort? Can independent authors reproduce the
+specification? See
+[`docs/research/research-program-plan-2026-10-29.md`](docs/research/research-program-plan-2026-10-29.md).
+
+---
+
+## Documentation
+
+| Start here | Why |
+|---|---|
+| [`docs/RESEARCH.md`](docs/RESEARCH.md) | Problem, research questions, threat models, prior work, evidence standard |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Two artefact producers, pipeline stages, runtime, invariants |
+| [`docs/TRANSFORMS.md`](docs/TRANSFORMS.md) | What each protection layer actually changes, and what is inert |
+| [`docs/SECURITY_FEATURES.md`](docs/SECURITY_FEATURES.md) | Objective-level classification; IP protection vs licensing vs integrity |
+| [`docs/MAXIMUM_SECURITY.md`](docs/MAXIMUM_SECURITY.md) | Measured configuration matrix, bounded attack probe, interactions, negative results |
+| [`docs/CRYPTO_REVIEW.md`](docs/CRYPTO_REVIEW.md) | Internal crypto review; **not independent** |
+| [`docs/SEED_ARCHITECTURE.md`](docs/SEED_ARCHITECTURE.md) | Seeds vs randomisation vs key material; measured determinism |
+| [`docs/FLAG_AUDIT.md`](docs/FLAG_AUDIT.md) | Every flag with parser, default, and primary objective |
+| [`docs/BENCHMARK.md`](docs/BENCHMARK.md) | Corpus, attacker, cost unit, gates, protocols, validity threats |
+| [`docs/RESULTS.md`](docs/RESULTS.md) | Measured results, defect register, retractions, claim status |
+| [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) | Scope limits, open questions, what would falsify the claims |
+| [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) | Exact commands for every claimed number |
+| [`docs/CLI.md`](docs/CLI.md) | Complete generated flag reference for both entry points |
+| [`docs/DEVELOPER.md`](docs/DEVELOPER.md) | Prerequisites, layout, lint, tests, extension points |
+| [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) | Verified walkthroughs with pasted output |
+| [`THREAT_MODEL.md`](THREAT_MODEL.md) | Attacker-by-attacker coverage and evidence taxonomy |
+| [`docs/research/`](docs/research/) | The complete research record, round by round |
+
+A full map is in [`docs/README.md`](docs/README.md).
+
+---
+
+## Quick start
+
+### Prerequisites
+
+| Need | Version / note |
+|---|---|
+| Python | **3.10–3.14** for the builder and payloads; verified on 3.13.5 |
+| Quick start | **stdlib only** — no install required |
+| Full source pipeline | `cargo`, `g++`, `llc` (checked at startup) |
+| Tests / lint | `pip install -r requirements-dev.txt` |
+
+Recommended install for normal use:
+
+```bash
+python3 -m pip install -r requirements.txt
+```
+
+The dependency lock (`requirements.lock`) is hash-pinned; CI installs it with
+`--require-hashes`. If you only want to try the AST/phase-2 stage, skip the install and
+use the five `--skip-*` flags below.
+
+### Minimal build (verified)
+
+A minimal build with no external toolchain: AST-level obfuscation. Phase-2 AST
+features from `config/default.json` still run; add `--phase2-only none` if you
+want the ladder without them.
 
 ```bash
 echo 'print("hello-nixon")' > /tmp/hello.py
@@ -87,867 +292,162 @@ NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
   --payload /tmp/hello.py -o /tmp/qs_hello.py --force-output \
   --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras
 
-# [11:45:26] [   OBFUSCATE] /tmp/hello.py → /tmp/qs_hello.py
-# [11:45:26] [   OBFUSCATE] Done: 14.0KB (was 0.0KB)
-# [11:45:27] [     PACKAGE] Packaging build artifacts...
-#  Build artifacts: build/
-
 NIXON_LOG_REDIRECT=0 timeout 60 python3 build/hello_obfuscated.py
 # hello-nixon
 ```
 
-About a second, and the artefact is ~15 KB from a 21-byte source. Measured on the
-default `--opt-level 4`; level 0 produces a byte-identical copy of the source.
+About a second, and the artefact is ~15 KB from a 21-byte source at the default
+`--opt-level 4`. Level 0 disables the 17 ladder transforms but still runs the
+pipeline's always-on passes (symbol rename, integrity checksums, string
+sealing), so it is **not** a byte-identical copy through the CLI;
+`--skip-obfuscate` is the true copy path. The five skips remove IR generation,
+LLVM codegen, post-link encryption, the Rust relay, and optional native extras;
+they do **not** disable the phase-2 AST features from the default config. Add
+`--phase2-only none` for the ladder alone.
 
-### What each `--skip-*` buys you
+### Practical build (packed loader)
 
-The five skips keep the build to the AST stage. Without them the pipeline also runs
-IR generation, LLVM codegen, post-link encryption and the Rust relay, which is where
-`cargo`, `g++` and `llc` become mandatory (checked at startup).
-
-| Skip | Stage removed | Needs |
-|---|---|---|
-| `--skip-irgen` | IR construction | — |
-| `--skip-llvmgen` | LLVM codegen | `llc` |
-| `--skip-encrypt` | post-link encryption | — |
-| `--skip-relay` | Rust relay build | `cargo` |
-| `--skip-extras` | optional native extras | — |
-
-Drop them only when the toolchain is present; a full build is minutes, not seconds.
-
-### Output and logging semantics
-
-**`-o` is a staging path, not the output.** The final artefact is always packaged as
-`build/<payload>_obfuscated.py`. Writing outside the build directory is refused:
-
-```text
-$ python3 scripts/build.py --payload /tmp/hello.py -o /tmp/nope.py --skip-extras
-[ERROR] Refusing -o outside build dir: /tmp/nope.py (use --force-output to override)
-```
-
-`--force-output` exists because silently overwriting an arbitrary path is a bad
-default for a local tool, not because the guard is optional.
-
-**Logging differs between the two entry points.** `scripts/build.py` sets
-`NIXON_LOG_REDIRECT=0` itself, so it prints to the console. The loader CLI
-(`python3 -m obfuscator.core.pipeline build`) *does* write `build.log` in the current
-directory unless you set `NIXON_LOG_REDIRECT=0`. There is no import-time redirect:
-`enable_log_redirect()` is called explicitly by the loader entry point, so merely
-importing `obfuscator.core` writes nothing.
-
-### If you use `--lowering`
-
-`--lowering io,scalar` rewrites covered call sites to `from lowering_shim import ...`.
-That artefact only runs when `obfuscator/` is importable:
-
-```text
-$ python3 build/hello_obfuscated.py
-ModuleNotFoundError: No module named 'lowering_shim'
-
-$ PYTHONPATH=$PWD/obfuscator python3 build/hello_obfuscated.py
-hello-nixon
-```
-
-The default build (no `--lowering`) runs anywhere. This is the one flag that changes
-the deployment requirement of the artefact.
-
-### The loader CLI
-
-`python3 -m obfuscator.core.pipeline build` is the second entry point and has its own
-options (counter-REA, section splitting, loader switches — 69 of them, listed in the
-[loader reference](#the-loader-cli) below).
+The packed loader is the second entry point and the one that can apply
+licensing, trial, HWID, watermark and section splitting. This command keeps the
+default protections but bounds packaging to 25 layers so it finishes in about a
+minute on the representative payload:
 
 ```bash
 NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD \
-  python3 -m obfuscator.core.pipeline build /tmp/hello.py --skip-cloud
+  python3 -m obfuscator.core.pipeline build /tmp/hello.py \
+    --skip-cloud --layers 25
 
-python3 dist/hello_protected.py     # hello-nixon
+python3 /tmp/dist/hello_protected.py
+# hello-nixon
 ```
 
-It writes `dist/hello_protected.py` (plus a `_dbg` variant), not `build/`: the two
-entry points have different output conventions. Its flags do not overlap with
-`build.py`'s — there is no `--skip-extras` here, the equivalent is `--skip-cloud`.
+The packed loader writes **next to the payload**, not to the current directory:
+`<dirname(payload)>/dist/<name>_protected.py`. A build of `/tmp/hello.py`
+therefore writes `/tmp/dist/hello_protected.py` (verified 2026-11-10).
 
-## Maximum-security build (verified 2026-11-10)
+### Verify the output
 
-Everything that actually hardens the artefact, on the **loader CLI** — the packed
-build, which is the one that can apply licensing, section splitting and the
-counter-REA shields.
+1. The file exists: `ls -lh /tmp/dist/hello_protected.py`.
+2. It runs: `python3 /tmp/dist/hello_protected.py` prints the payload's output.
+3. The loader furniture is present: `nixon_core.so` and
+   `Nixon_Security_Root.cer` are in the same `dist/` directory.
+4. A licence-bound build refuses without its token (exit 1); a trial-bound
+   build reports expiry after the window.
+
+`--opt-level 0` is **not** the copy path; `--skip-obfuscate` is. A build is not
+evidence that the artefact works — run it.
+
+Detailed walkthroughs: [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md). Complete
+flags: [`docs/CLI.md`](docs/CLI.md). Deployment requirements:
+[`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md).
+
+---
+
+## Maximum security: what is actually verified
+
+Enabling every flag is **not** maximum protection. Six flags write metadata
+that no runtime component reads, `--temporal-keys` is inert, `--crypto-binding`
+does not decrypt at run time, and the maximum-flags build with the default 100
+packaging layers **did not finish in 600 s**. Licensing and watermarking are
+access control and leak tracing, not reverse-engineering resistance.
+
+The measured matrix (2,635-byte payload, Linux x86_64, CPython 3.13.5):
+
+| Configuration | Enabled protections | Compatibility | Build time / size | Security assessment |
+|---|---|---|---|---|
+| **Default (source)** | O4 ladder (14/17) + phase-2 defaults | Runs standalone | ~2 s / ~34 KB | Basic static obfuscation; no loader gates |
+| **Balanced (source + lowering)** | O5 (17/17) + 20-family lowering | Runs only with `obfuscator/` on `PYTHONPATH` | ~2 s / ~37 KB; shim 1.46×–3.84× | Stronger static surface; deployment cost |
+| **High (loader defaults)** | Full ladder, sections (4), anti-REA balanced, strict detections, integrity gates, 100 layers | Runs; 3.55 MB artefact | 387 s / 3.55 MB | Strongest default posture; all client-side |
+| **Maximum practical (verified)** | High + anti-REA **maximum**, 6 sections, watermark, trial 7 d, licence token, **25 layers** | Runs **with token**; exit 1 without | **69–99 s** / **1.46–8.25 MB** | Strongest verified under a ~2-min budget; anti-REA effect unmeasured |
+
+The verified maximum command (token generation included) is in
+[`docs/MAXIMUM_SECURITY.md`](docs/MAXIMUM_SECURITY.md). A **bounded attack
+probe** exists there too: deterministic probes plus one LLM pass found no
+payload identifier or plaintext in the maximum-loader surface, while the O4
+source artefact exposed its string-cipher key. That is a floor, not a claim of
+resistance. Read [`docs/SECURITY_FEATURES.md`](docs/SECURITY_FEATURES.md) for
+the objective-level classification and [`docs/FLAG_AUDIT.md`](docs/FLAG_AUDIT.md)
+for every flag.
+
+---
+
+## Reproducing the research
 
 ```bash
-NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD \
-  python3 -m obfuscator.core.pipeline build payload.py \
-    --opt-level 5 \
-    --anti-rea-level maximum \
-    --section-split --section-count 6 \
-    --strict-detections \
-    --trial 7d \
-    --watermark NX-WM-001 \
-    --skip-cloud
+# The paper's ten tables, printed beside the documents' claims
+python3 scripts/transfer/reproduce.py
+
+# 38 artefacts at one index, compile + import + run, 0 failures
+python3 scripts/transfer/artefact_gate.py --variants 1 --seeds 4242
+
+# Task validity and external validity
+python3 scripts/transfer/evaluate_tasks.py
+python3 scripts/transfer/evaluate_external.py
+
+# The product suite (large; read the live count, not a doc)
+NIXON_LOG_REDIRECT=0 python3 -m pytest tests/ -q
 ```
 
-Measured on a 3-line payload: **405 s** (6m 45s), output in `dist/` with
-`nixon_core.so` and a self-signed `Nixon_Security_Root.cer`. The artefact ran and
-printed the right answer. Expect longer for real payloads — this is not a
-seconds-long build.
+Expected today: **10 of 10 tables match**, **38 artefacts and 0 failures**,
+**4,500+ tests**, and **12 of 12 external cells valid**. All four research
+commands are deterministic: explicit seeds, no network, repository inputs. The
+reproduction script prints values beside claims and leaves comparison to a
+human.
 
-### What each flag adds
+---
 
-| Flag | Effect | Default |
-|---|---|---|
-| `--opt-level 5` | full 17-transform ladder | 4 (14 of 17) |
-| `--anti-rea-level maximum` | counter-REA shields at full intensity: chaff, canary tokens, URL differentials, evidence poison, decoy call graph, BPE amplifier, shadow logic, aliasing illusion, crash decoys, diagnostic rabbit holes | on, level default |
-| `--section-split --section-count 6` | Shamir (n=3, k=2) threshold key with a fragmented decoder; the artefact is not a single readable blob | off |
-| `--strict-detections` | refuse to emit when a detection cannot be armed | **already default**; stated for clarity |
-| `--trial 7d` | expiry enforcement (`90s 1m 1h 1d 1w 1mo` combos) | off |
-| `--watermark NX-WM-001` | semantic watermark in the IR + refuse-to-run gate | off |
+## Project status and version numbering
 
-Also on by default and **not** switched off here: the frozen-stdlib snapshot gate,
-the stdlib function-audit gate, the audit-hook plant detector, and loader traceback
-suppression. Their off-switches are `--no-snapshot`, `--no-stdlib-audit`,
-`--no-audit-hook-plant` — leaving them alone is the point.
-
-### Licensing flags, if you need them
-
-`--hwid` binds to the machine; `--hwid-lock` binds to a static `HWID:<64 hex>`;
-`--licence-token PATH` requires a signed token and makes the payload key
-unrecoverable without it (an artefact without its token decrypts to garbage). They
-are omitted above only because they need per-customer values.
-
-### Excluded from this recipe
-
-| Not included | Why |
+| Item | State |
 |---|---|
-| `--code-genome` | defaults to 50 generations × 30 population = 1500 fitness evaluations; did not complete in 300 s on a 3-line file. With `--genome-generations 2 --genome-population 4` it takes 2 s. Real but expensive. |
-| `--temporal-keys` | **inert and slow** — ~19 s of hashing to produce metadata nothing reads; its verifier proves nothing. See the CLI reference note. |
-| `--crypto-binding` | build-time validation only; nothing decrypts at run time, and the chain secret is no longer written into `payload.h`. |
-| `--driver-check` | read-only BYOVD enumeration; useful, but it enumerates the *host's* drivers and is a separate decision from hardening the artefact. |
-
-### Verifying a hardened build
-
-```bash
-python3 dist/payload_protected.py          # prints the payload's own output
-strings dist/payload_protected.py | grep -c NX-WM-001   # watermark present
-```
-
-A build whose phase-3 table reports a variant mismatch **fails** (exit 1). A variant
-that merely could not be run is reported as inconclusive and does not fail — that
-A gate that fires on its own inability to check is not a gate.
-
-## What it does
-
-The tool takes a Python payload and emits an artefact that is harder to read,
-harder to re-run under instrumentation, and — where a stage supports it — able to
-refuse to run when it detects it has been altered. Layers are independent: you can
-use any one of them alone.
-
-Each area below names the flags that switch it on. The **complete** flag list, with
-the parser's own description for every option, is in the [CLI reference](#cli-reference)
-further down.
-
-### 1. Obfuscation ladder — `--opt-level 0..5`
-
-One dial, default **4**, which turns on 14 of the 17 base transforms: cfg-flatten,
-opaque predicates, bogus exceptions, MBA substitution, string fragmentation,
-unicode identifiers, variable splitting, constant unfolding, metadata stripping,
-code checksums, dynamic code, enhanced junk, symbol renaming and decompiler breaks.
-
-The ladder is the only way to switch a transform **on**. Individual transforms are
-switched **off** with the `--no-` form — `--no-cfg-flatten`, `--no-opaque-predicates`,
-`--no-bogus-exceptions`, `--no-mba-subs`, `--no-fragment-strings`,
-`--no-unicode-ids` — so you can drop one rung without leaving the ladder. There is
-no `--mba-subs`; it is on at level ≥ 1 and disabled by its inverse.
-
-Level 0 is a **byte-for-byte no-op** (asserted by `tests/test_pipeline_wiring.py` and
-`tests/test_opt_enforcement.py`), so you can diff a build against its source.
-
-Beyond the ladder: `--ssa-mutation`, `--cfg-mutation`, `--class-dispatch`,
-`--struct-randomization`,
-`--speculation-obfuscation`, `--data-obfuscation`, `--micro-fragment`,
-`--fragment`, `--per-exec-recompile`, `--self-healing`.
-
-### 2. Semantic lowering — `--lowering`
-
-Rewrites covered call sites to `_nxk_*` kernel calls across **20 families / 140
-kernel ops**. The generated artefacts need `obfuscator/lowering_shim.py` importable;
-the default build (no `--lowering`) runs anywhere. Measured shim overhead is
-1.46x–3.84x per family — see the numbers below, which are the in-repo ones.
-
-### 3. Counter-REA shields — on by default (`--anti-rea`)
-
-Ported from [BLA](https://github.com/qybaihe/bla), in `obfuscator/anti_rea.py`:
-architecture-mirage chaff, canary credentials and URL parser differentials,
-evidence-contract poison, a decoy call graph woven into real functions, a BPE token
-amplifier, shadow business logic, an aliasing illusion, crash-trace decoys and
-diagnostic rabbit holes.
-
-Classifier-directed bait layers are also on by default. Each is individually
-removable via the **loader** CLI (`python3 -m obfuscator.core.pipeline build`):
-`--exclude-rea` (all of them), `--exclude-rea-compliance`,
-`--exclude-rea-cognitive`, `--exclude-rea-bio`; `--anti-rea-level` sets intensity
-and `--no-anti-rea` turns the whole subsystem off. Every combination is built **and
-run** in CI (`portable-deep-matrix.yml`, the `flags` job).
-
-### 4. Deception against automated and human analysts
-
-`--poison-apis` · `--poison-imports` · `--poison-call-graph` · `--poison-paths` ·
-`--poison-protocols` · `--poison-all` · `--decoy-apis` · `--honey-functions` ·
-`--reasoning-traps` · `--trap-depth` · `--prompt-resistance` · `--attention-poison` ·
-`--llm-resilient` · `--multi-agent-deception` · `--storyline-count` ·
-`--provenance-poison` · `--manipulation-detector` · `--false-confidence-audit` ·
-`--self-critique` · `--red-team`
-
-### 5. Runtime integrity and anti-tamper
-
-| Gate | Default | Off switch |
-|---|---|---|
-| Frozen-stdlib snapshot | **on** | `NIXON_SNAPSHOT_OFF` at run time, `--no-snapshot` at build |
-| Stdlib function audit | **on** | `NIXON_STDLIB_AUDIT_OFF`, `--no-stdlib-audit` |
-| Audit-hook plant detector | **on** | `--no-audit-hook-plant` |
-| Loader traceback suppression | **on** | — |
-| BYOVD driver check | off (`--driver-check`) | read-only; never loads a driver |
-
-Modules: `obfuscator/frozen_snapshot.py`, `stdlib_audit.py`, `audit_hook.py`,
-`driver_blocklist.py`, `kill_ladder.py`, `hostguard.py`. Kill primitives exit the
-process and are silent unless `NIXON_LADDER_DEBUG=1`.
-
-Structural anti-tamper: `--section-split` on the **loader** CLI (Shamir n=3,k=2
-threshold with a fragmented decoder), and on `build.py`: `--rolling-keys`,
-`--temporal-keys`
-(**inert — see the note in the CLI reference**), `--history-bound-decryption`,
-`--state-isa`, `--attestation`, `--challenge-response`, `--crypto-binding`
-(build-time validation only; the chain secret is not written to the artefact).
-
-### 6. Licensing, binding and provenance
-
-`--hwid` + `--hwid-lock` · `--trial` (formats `90s 1m 1h 1d 1w 1mo`) ·
-`--watermark` + `--verify-watermark` · `--verify-watermark-survivability` ·
-`--name-gate` · `--rename-internal` · `--licence-token` · `--customer-salt` ·
-`--sign-key-env` · `--embed-proof` · `--zk-state` · `--remote-unlock` ·
-`--dist-watermark` · `--provenance-replace`
-
-A licence token carries a SHA-256 of the issuer seed, not the seed; the payload key
-is masked with it, so **an artefact without its token decrypts to garbage**
-(`tests/test_licence_binding.py`, and the derivation is documented in
-`obfuscator/licensing.py`).
-
-### 7. Packaging and loaders
-
-`--pytoc` (Cython) · `--pyinstaller-spec` · `--simd-vm` (C VM; the SSE path only on
-x86, the scalar fallback elsewhere) · `--fhe-vm` · `--oram` · `--rop` · `--sgx` ·
-`--tee` · `--cross win,linux,macos,linux-arm` · `--payload-dispersal` ·
-`--split-bootstrap` · `--generate-payload-h` · `--rust-exe` · `--python-dll`
-
-`--pytoc` and `--pyinstaller-spec` are best-effort and never fail the build.
-
-### 8. Verification you can run
-
-`--validate` · `--validate-fail` · `--verify-preservation` ·
-`--verify-preservation-formal` · `--verify-mutations` · `--verify-jit` ·
-`--verify-mba` · `--prove-vm` · `--prove-fragments` · `--proof-coverage` ·
-`--proof-soundness` · `--verification-bundle` · `--evidence-ledger` ·
-`--confidence-interval`
-
-A build now **fails** if its own phase-3 table reports a variant mismatch
-(`match == MISMATCH`); a variant that merely could not be run is reported as
-inconclusive and does not fail the build.
-
-### 9. Research and evaluation
-
-`scripts/` carries the measurement programme behind the claims: `benchmark/`,
-`evaluation/` (analyst time, cost model, survivability probes), `attack_replay/`,
-`adversarial_bench/`, `proofs/`, `zk_state/`, `distributed/`, `gpu/`, `fhe_vm/`.
-Their flags are in the CLI reference under *Research, evaluation and reporting*.
-
-
-Measured numbers (host-specific, reproducible in-repo):
-
-- Phase-1 lowering-shim overhead: per-family geomeans **1.46x–3.84x** vs
-  plain CPython — `obfuscator/lowering_DESIGN.md` table
-  (`NIXON_LOG_REDIRECT=0 python3 scripts/benchmark/lowering_perf.py`;
-  finite-ratio/parity assertions in `tests/test_lowering_perf.py`).
-- Vendor-native claims (**0.19x–1.56x**) describe a native kernel and are
-  **NOT reproduced in-repo** (stated in `scripts/benchmark/lowering_perf.py`
-  header and `obfuscator/lowering_DESIGN.md`).
-
-## CLI reference
-
-Complete: every option `scripts/build.py` accepts, generated from the parser's own
-`--help`. The block below is machine-generated and checked in CI
-(`tests/test_readme_matches_cli.py`), so it cannot drift from the code again —
-it previously listed 42 of 271 options under a heading claiming to be from `--help`.
-
-<!-- BEGIN GENERATED CLI REFERENCE -->
-
-Every option `scripts/build.py` accepts, generated from its own `--help` by
-`scripts/gen_cli_reference.py` and checked by `tests/test_readme_matches_cli.py`,
-so it cannot drift. Editorial notes are marked where a flag is inert or archived.
-
-**263 options.**
-
-### Input, output and build control
-
-| Option | What it does |
-|---|---|
-| `--cross CROSS` | Cross-compile targets: win,linux,macos,linux-arm |
-| `--force-output` | Allow -o/--output outside the repo build dir (default: refuse absolute/escaping paths) |
-| `--generate-payload-h` | Auto-generate payload.h from obfuscated payload (default: on) |
-| `--include-original` | Include original payload in build/ |
-| `--no-generate-payload-h` | Skip payload.h generation |
-| `-o, --output OUTPUT` | Staging path for the obfuscated script (the final artifact is written to build/) |
-| `--payload PAYLOAD` | Python script to obfuscate |
-| `--python-dll PYTHON_DLL` | Python DLL to embed in payload.h |
-| `--rust-exe RUST_EXE` | Rust Windows EXE to embed in payload.h |
-| `--skip-conflict-check` | Skip protection conflict detection |
-| `--skip-encrypt` | Skip post-link encryption |
-| `--skip-extras` | Skip optional extras (antidbg, packing, timing checks) |
-| `--skip-irgen` | Skip IR compilation |
-| `--skip-llvmgen` | Skip LLVM codegen |
-| `--skip-obfuscate` | Skip AST obfuscation |
-| `--skip-relay` | Skip Rust relay build |
-| `--version` | show program's version number and exit |
-
-### Obfuscation ladder and AST transforms
-
-| Option | What it does |
-|---|---|
-| `--adaptive` | Enable function-level adaptive protection (auto- classify + strategy selection) |
-| `--adaptive-adversarial` | Enable adaptive adversarial rewriting based on benchmark feedback |
-| `--adaptive-classifier-loop` | Run classify → protect → benchmark → re-classify → re- protect loop |
-| `--advanced-protection` | Enable all Advanced Protection features |
-| `--advanced-protection-only ADVANCED_PROTECTION_ONLY` | Comma-separated list of Advanced Protection features to enable |
-| `--adversarial-bench` | Run adversarial benchmark generator against all target systems |
-| `--adversarial-bench-count ADVERSARIAL_BENCH_COUNT` | Number of adversarial tests to generate (default: 20) |
-| `--adversarial-injection` | Enable adversarial dead code + prompt injection |
-| `--adversarial-level {1,2,3,4,5}` | Adversarial injection aggressiveness (1-5, default: 3) |
-| `--adversarial-loop` | Enable self-improving obfuscation via deobfuscation agent |
-| `--cfg-mutation` | Enable live CFG mutation (variant basic-block ordering) |
-| `--cfg-mutation-variants CFG_MUTATION_VARIANTS` | Number of CFG orderings per function (default: 4) |
-| `--class-dispatch` | Enable execution-path-specific JIT codegen |
-| `--class-dispatch-count CLASS_DISPATCH_COUNT` | Number of dispatch classes (default: 4) |
-| `--classify` | Run classification pass and report |
-| `--data-obf-level {1,2,3}` | Data obfuscation intensity (1-3, default: 3) |
-| `--data-obfuscation` | Enable data-oriented obfuscation (protect data layout) |
-| `--fragment` | Enable micro-JIT fragment reassembly (decrypt->execute->wipe) |
-| `--fragment-functions FRAGMENT_FUNCTIONS` | Comma-separated functions to fragment, or 'auto' |
-| `--fragment-migration` | Enable cross-platform fragment migration (Item 115) |
-| `--fragment-size FRAGMENT_SIZE` | Instructions per fragment (default: 5) |
-| `--lowering LOWERING` | Semantic-lowering families CSV (io,scalar,string,conta iner,service,protocol,function,import,fusion + opt-in: arithmetic,truth,slice,format,augassign); default '' = disabled |
-| `--micro-fragment` | Enable micro-fragment execution (decrypt->execute->wipe each fragment) |
-| `--micro-fragment-size MICRO_FRAGMENT_SIZE` | Bytes per micro-fragment (default: 64) |
-| `--no-audit-hook-plant` | [LOADER ONLY -- ignored by this pipeline] Omit the site-packages audit-hook plant detector from the loader (default: detector ON) |
-| `--no-bogus-exceptions` | Disable fake exception handlers (default: on) |
-| `--no-cfg-flatten` | Disable control-flow flattening (default: on) |
-| `--no-fragment-strings` | Disable string fragmentation (default: on) |
-| `--no-mba-subs` | Disable MBA expression substitution (default: on) |
-| `--no-opaque-predicates` | Disable opaque-predicate insertion (default: on) |
-| `--no-snapshot` | [LOADER ONLY -- ignored by this pipeline] Omit the frozen-stdlib snapshot gate from the loader (default: gate ON; also disarmable at runtime via NIXON_SNAPSHOT_OFF=1) |
-| `--no-stdlib-audit` | [LOADER ONLY -- ignored by this pipeline] Omit the stdlib function-audit gate from the loader (default: gate ON; also disarmable at runtime via NIXON_STDLIB_AUDIT_OFF=1) |
-| `--no-unicode-ids` | Disable Unicode symbol renaming (default: on) |
-| `--opt-level {0,1,2,3,4,5}` | Optimization/protection ladder O0-O5 (default: 4, recommended) |
-| `--per-exec-recompile` | Enable per-execution recompilation |
-| `--phase2-extras` | Enable optional extras (antidbg APIs, packing, timing checks, etc.) |
-| `--randomization-level {1,2,3}` | Randomization level 1-3 (default: 3) |
-| `--randomization-seed RANDOMIZATION_SEED` | Deterministic seed for structure randomization (also read from SEED/NIXON_SEED env when flag is absent) |
-| `--self-healing` | Enable self-healing runtime (redundant code copies) |
-| `--speculation-obfuscation` | Enable AST-level speculation obfuscation (Item 123) |
-| `--ssa-mutation` | Enable SSA mutation (variant instruction ordering) |
-| `--ssa-variants SSA_VARIANTS` | Number of SSA variants per function (default: 4) |
-| `--struct-randomization` | Enable structure randomization (stack/heap/reg) |
-| `--validate` | Run SMT-backed semantic validation after each obfuscation phase |
-| `--validate-fail` | Abort build if SMT validation fails |
-
-### Anti-analysis, counter-REA and deception
-
-| Option | What it does |
-|---|---|
-| `--attack-corpus` | Build permanent corpus of bypasses, deobfuscations, proof failures, replay attacks (Feature 196) |
-| `--attack-store ATTACK_STORE` | Store directory for attack captures (default: build/attacks/) |
-| `--attention-poison ATTENTION_POISON` | Enable attention poisoning with fan-out N (default: 0 = disabled) |
-| `--capture-attacks` | Capture attack results from red team pipeline for replay |
-| `--decoy-api-count DECOY_API_COUNT` | Number of decoy APIs to inject (default: 5) |
-| `--decoy-apis` | Enable semantic decoy API injection |
-| `--false-confidence-audit` | Scan for false confidence patterns in codebase (Feature 173) |
-| `--honey-functions HONEY_FUNCTIONS` | Number of honey functions to inject (default: 0) |
-| `--independent-audit` | Run independent audit using separate code paths (Feature 181) |
-| `--llm-fingerprint` | Enable LLM fingerprint embedding |
-| `--llm-resilient` | Enable LLM-resilient AST obfuscation (context collapse + guard vars + string encoding) |
-| `--llm-resilient-depth LLM_RESILIENT_DEPTH` | Nesting depth for context collapse (default: 15) |
-| `--llm-resilient-vars LLM_RESILIENT_VARS` | Number of dead variables per function (default: 50) |
-| `--manipulation-detector` | Detect metric manipulation, hardcoded scores, inflated coverage (Feature 182) |
-| `--multi-agent-deception` | Enable multi-agent deception storyline injection |
-| `--multi-tool` | Run multi-tool resistance evaluation |
-| `--poison-all` | Enable all poisoning techniques |
-| `--poison-apis` | Enable fake APIs |
-| `--poison-call-graph` | Enable fake call graphs |
-| `--poison-imports` | Enable misleading imports |
-| `--poison-level {0,1,2,3,4,5}` | Provenance poisoning level (0-5, default: 0 = disabled) |
-| `--poison-paths` | Enable believable dead paths |
-| `--poison-protocols` | Enable fake protocol parsers |
-| `--prompt-resistance` | Compute prompt reconstruction resistance metrics |
-| `--provenance-poison` | Enable all provenance poisoning techniques |
-| `--provenance-replace` | Enable automated provenance replacement (error codes + string encoding + constant obfuscation) |
-| `--reasoning-traps` | Enable reasoning-loop trap injection |
-| `--red-team` | Enable autonomous red team pipeline — every build attacks itself |
-| `--red-team-output RED_TEAM_OUTPUT` | Output directory for red team attack results (default: build/redteam/) |
-| `--replay-attacks` | Replay captured attacks and compare results |
-| `--self-critique` | Before release, critically analyze assumptions, evidence, metrics, proofs (Feature 200) |
-| `--storyline-count STORYLINE_COUNT` | Number of storylines to inject (default: 3) |
-| `--trap-depth TRAP_DEPTH` | Circular chain depth for reasoning traps (default: 5) |
-| `--uarch-diversity` | Enable microarchitectural-aware diversity generation (Item 129) |
-| `--uarch-watermark` | Embed microarchitectural timing watermark (Item 122) |
-
-### Runtime integrity, anti-tamper and attestation
-
-| Option | What it does |
-|---|---|
-| `--attestation` | Enable hardware-agnostic attestation engine (whitebox entanglement + dynamic attestation) |
-| `--audit-drift` | Detect code changes without corresponding verification updates (Feature 185) |
-| `--challenge-response` | Enable standalone challenge-response protocol (extracted from distributed attestation) |
-| `--crypto-binding` | Enable cryptographic fragment binding chain **Build-time only.** `verify_chain` decrypts the bound fragments during the build to validate them; nothing decrypts at run time. The chain secret is deliberately not written into `payload.h`. |
-| `--dist-attestation` | Enable distributed attestation (Item 116) |
-| `--dist-attestation-nodes DIST_ATTESTATION_NODES` | Number of attestation nodes (default: 5) |
-| `--driver-check` | [LOADER ONLY -- ignored by this pipeline] Bake the V10 kernel-driver gate into the loader (fail-closed on known-vulnerable BYOVD drivers only when armed; default: off, also armable at runtime via NIXON_DRIVER_CHECK=1) |
-| `--ephemeral-isa` | Enable ephemeral per-build VM opcode mapping |
-| `--history-bound-decryption` | Enable execution-history-bound decryption key derivation |
-| `--hostguard` | [LOADER ONLY -- ignored by this pipeline] Prepend hostguard snippet (bind_host/check_host/isolated_exec) to loader (default: off) |
-| `--invariant-engine` | Verify security invariants across codebase (Feature 190) |
-| `--recovery-prevention` | Enable distributed execution recovery prevention (Item 119) |
-| `--recovery-prevention-nodes RECOVERY_PREVENTION_NODES` | Number of recovery prevention nodes (default: 5) |
-| `--rolling-keys` | Enable rolling key evolution for fragment chains |
-| `--self-audit` | Run self-audit agent — final pipeline integrity check (Feature 180) |
-| `--state-isa` | Enable state-dependent opcode mapping |
-| `--state-isa-history-len STATE_ISA_HISTORY_LEN` | Execution history length for state ISA (default: 8) |
-| `--temporal-keys` | Enable temporal micro-key evolution (time-window-based key chain) **Inert and slow.** Derives a window key by ratcheting from epoch 0 to the current 60 s window (~19 s per build, growing every minute), then writes scheduling metadata that nothing reads. Its verifier (`verify_key_in_window`) only compares a timestamp against the key's own fields, so it proves nothing. No key material is written to disk. |
-| `--temporal-window TEMPORAL_WINDOW` | Key time window in seconds (default: 60) |
-| `--trust-boundary` | Map trust boundaries across all domains (Feature 186) |
-
-### Licensing, binding, watermarking and provenance
-
-| Option | What it does |
-|---|---|
-| `--customer-salt CUSTOMER_SALT` | Bind the payload key to one customer (hybrid-loader build only: `python3 -m obfuscator.core.pipeline build`). Refused here rather than silently ignored — this pipeline emits no hybrid loader to carry the mask |
-| `--dist-watermark` | Enable distributed watermarking (Item 117) |
-| `--dist-watermark-shares DIST_WATERMARK_SHARES` | Number of watermark shares (default: 5) |
-| `--embed-proof` | Embed proof section into packaged binary |
-| `--emit-certificates` | Emit transformation equivalence certificates |
-| `--hwid HWID` | [LOADER ONLY -- ignored by this pipeline] HWID string for GET_HWID() macro expansion and HWID-locked fallback. Dynamic (default): any opaque string; the loader collects format(uuid.getnode(), 'x') at runtime. Static (GAP #33): canonical 'HWID:<64 hex chars>' fingerprint (case-insensitive, lowercased) binding the artifact to a known value instead of dynamic collection (documented in obfuscator/hwid_lock.py; default: '') |
-| `--hwid-lock` | [LOADER ONLY -- ignored by this pipeline] HWID-lock the bytecode fallback blob (requires --hwid; static 'HWID:<64 hex>' fingerprints unlock via the embedded value, dynamic HWIDs via uuid.getnode(); default: off) |
-| `--name-gate` | Rewrite privileged call sites through per-build token map (default: off) |
-| `--remote-unlock` | Enable remote fragment unlocking (Item 112) |
-| `--remote-unlock-ttl REMOTE_UNLOCK_TTL` | Token TTL for remote unlock in seconds (default: 30) |
-| `--rename-internal` | Rename proven-internal public methods/attributes (used only inside their own class; opt-in, default: off) |
-| `--sign-key-env SIGN_KEY_ENV` | Env var name holding hex key for artifact signing sidecars (.sig.json; default: '' = disabled) |
-| `--trial TRIAL` | [LOADER ONLY -- ignored by this pipeline] Trial period spec, e.g. '7d', '1w2d' (parsed via obfuscator.macros.parse_trial; default: '') |
-| `--verify-preservation` | Run machine-checked semantic preservation across pipeline stages |
-| `--verify-preservation-formal` | Run formal Z3-based semantic preservation proofs (Item 61) |
-| `--verify-watermark` | Verify watermark after embedding |
-| `--verify-watermark-survivability` | Verify watermark survivability (Item 95) |
-| `--watermark WATERMARK` | Embed semantic watermark string into IR |
-| `--zk-state` | Enable ZK state-bound execution (sigma-protocol-based state proofs) |
-| `--zk-state-config ZK_STATE_CONFIG` | Path to ZK state config file (optional) |
-
-### Packaging, loaders, native backends and build farm
-
-| Option | What it does |
-|---|---|
-| `--cpu-gpu-hybrid` | Enable distinct CPU/GPU hybrid protection paths (Item 126) |
-| `--cpu-port` | Enable CPU execution port entanglement (Item 129) |
-| `--dist-diversity` | Enable distributed diversity pools (Item 118) |
-| `--dist-diversity-nodes DIST_DIVERSITY_NODES` | Number of deployment nodes (default: 4) |
-| `--dist-diversity-rotation DIST_DIVERSITY_ROTATION` | Variant rotation interval in seconds (default: 3600) |
-| `--dist-diversity-variants DIST_DIVERSITY_VARIANTS` | Number of diversity variants (default: 8) |
-| `--distributed-mode {simulation,multiprocess}` | Mode for distributed protection features: simulation or multiprocess (default: simulation) |
-| `--distributed-vm` | Enable distributed VM execution (Item 113) |
-| `--diversity DIVERSITY` | Generate N diversity variants |
-| `--diversity-dir DIVERSITY_DIR` | Output directory for diversity variants |
-| `--diversity-report` | Generate diversity comparison report |
-| `--diversity-threshold DIVERSITY_THRESHOLD` | Minimum diversity score between variants (0.0-1.0) |
-| `--fhe-vm` | Enable FHE-VM compilation for crown-jewel functions |
-| `--fhe-vm-functions FHE_VM_FUNCTIONS` | Comma-separated function names for FHE-VM compilation |
-| `--gpu` | Short flag for --gpu-execution (Item 125) |
-| `--gpu-execution` | Enable GPU fragment execution with hardware detection (Item 125) |
-| `--gpu-hybrid` | Enable CPU/GPU hybrid protection (Item 126) |
-| `--hpc` | Enable hardware performance counter integration (Item 120) |
-| `--hpc-key` | Enable HPC-based key derivation (Item 121) |
-| `--kernel-assist` | Enable kernel-assisted execution research (Linux) |
-| `--kernel-assist-features KERNEL_ASSIST_FEATURES` | Comma-separated kernel features to enable (default: all detected) |
-| `--microjit` | Enable polymorphic micro-JIT reassembly |
-| `--multi-binary` | Enable multi-binary fragment distribution (Item 110) |
-| `--multi-binary-num MULTI_BINARY_NUM` | Number of binaries for fragment distribution (default: 4) |
-| `--multi-host` | Enable multi-host execution graphs (Item 114) |
-| `--multi-host-count MULTI_HOST_COUNT` | Number of hosts for multi-host execution (default: 3) |
-| `--oram` | Enable Oblivious RAM (ORAM) controller |
-| `--pyinstaller-spec` | Write a best-effort PyInstaller .spec alongside the output (never fails the build) |
-| `--pytoc` | Compile the obfuscated output to a native extension via Cython (best-effort, never fails the build) |
-| `--pytoc-out PYTOC_OUT` | Output path for the --pytoc native extension (default: alongside -o as <out>_pytoc.<so/pyd>) |
-| `--rop` | Enable ROP chain compilation for crown jewel functions |
-| `--sgx` | Enable Intel SGX hardware enclave support (Item 128) |
-| `--simd-vm` | Enable SIMD-accelerated VM dispatch (Item 124) |
-| `--split-bootstrap` | [LOADER ONLY -- ignored by this pipeline] V10 kernel split-bootstrap: Shamir (n=3,k=2) threshold key + fragmented decoder in the loader instead of the single embedded key path (opt-in until battle-tested; default: off) |
-| `--tee` | Enable trusted execution environment partition (Item 127) |
-| `--tee-type {software,sgx,sev,apple}` | TEE type (default: software) |
-| `--vm-threshold VM_THRESHOLD` | [LOADER ONLY -- ignored by this pipeline] VM-score verdict threshold embedded in loader snippet (default: 50.0) |
-
-### Verification, proofs and formal checking
-
-| Option | What it does |
-|---|---|
-| `--claim-audit` | Scan for unsupported security claims like 'secure', 'unbreakable', 'tamper-proof' (Feature 172) |
-| `--confidence-interval` | Compute security confidence intervals from metric samples (Feature 179) |
-| `--confidence-level CONFIDENCE_LEVEL` | Confidence level for intervals (default: 0.95) |
-| `--evidence-completeness` | Compute evidence completeness score for all claims (Feature 187) |
-| `--evidence-ledger` | Generate evidence ledger mapping claims to source files, tests, benchmarks, and runtime traces |
-| `--gate-threshold GATE_THRESHOLD` | Global gate threshold override, as a ratio of the baseline metric (0.0-1.0; e.g. 0.9 = at least 90 percent of baseline) |
-| `--min-resilience MIN_RESILIENCE` | Minimum resilience score (0.0-1.0); auto-tune up to 3 iterations |
-| `--min-security MIN_SECURITY` | Minimum security score (default: 0.5) |
-| `--proof-aware-optimizer` | Use proof-aware optimizer (Item 99) |
-| `--proof-carrying` | Enable proof-carrying obfuscation (Z3 equivalence certificates) |
-| `--proof-coverage` | Generate proof coverage report (Feature 153) |
-| `--proof-soundness` | Run proof soundness harness (Feature 174) |
-| `--prove-fragments` | Run fragment safety proofs (Item 93) |
-| `--prove-vm` | Run VM correctness proofs (Item 92) |
-| `--reality-score` | Compute 0-100 Reality Score for every protection feature |
-| `--release-confidence` | Combine all verification metrics into single release confidence score (Feature 197) |
-| `--reproducibility-score` | Compute reproducibility score for build artifacts (Feature 178) |
-| `--verification-bundle` | Generate independent verification bundle (tar.gz + SHA256 manifest) of all build artifacts |
-| `--verification-bundle-output VERIFICATION_BUNDLE_OUTPUT` | Output directory for verification bundle (default: build/verification_bundle/) (set to empty string to use default) |
-| `--verification-diversity` | Run multiple verification strategies and detect disagreements (Feature 184) |
-| `--verify-jit` | Verify JIT reassembly correctness (Item 97) |
-| `--verify-mba` | Verify MBA substitutions with SMT before applying |
-| `--verify-mutations` | Verify mutation safety (Item 96) |
-
-### Research, evaluation and reporting
-
-| Option | What it does |
-|---|---|
-| `--analyst-time` | Estimate analyst reverse-engineering time from complexity metrics |
-| `--artifacts-output ARTIFACTS_OUTPUT` | Output directory for research artifacts (default: build/artifacts/) |
-| `--assumptions-report` | Generate assumption report for all protection features |
-| `--attack-surface` | Enumerate attack surfaces across all categories (Feature 189) |
-| `--benchmark` | Run AI obfuscation benchmark on protected output |
-| `--benchmark-integrity` | Verify benchmark integrity with SHA256 hashing and tamper detection (Feature 183) |
-| `--benchmark-model BENCHMARK_MODEL` | Specify LLM model to test against (gpt4, claude3, gemini, deepseek, or 'all') |
-| `--benchmark-report` | Generate HTML benchmark report |
-| `--classify-features` | Classify all 129 protection/research features and generate report |
-| `--code-genome` | Enable code genome evolution |
-| `--cost-model` | Run reverse engineering cost model estimation |
-| `--coverage-map` | Generate protection coverage map after all stages |
-| `--coverage-output COVERAGE_OUTPUT` | Output directory for coverage map (default: build/coverage/) |
-| `--dependency-graph` | Validate dependency graph and detect cycles (Feature 188) |
-| `--eval-summary` | Run full evaluation summary report |
-| `--evaluate` | Generate unified evaluation report (all 9 metrics) |
-| `--evolution-generations EVOLUTION_GENERATIONS` | Number of evolution generations (default: 3) |
-| `--evolution-iterations EVOLUTION_ITERATIONS` | Number of evolution steps per build (default: 1) |
-| `--feature-effectiveness` | Score features by demonstrated security improvement, not existence (Feature 193) |
-| `--fingerprint-model {gpt,claude,gemini,deepseek,copilot}` | AI model to fingerprint as (default: gpt) |
-| `--generate-artifacts` | Generate paper-ready research artifacts from build outputs |
-| `--genome-generations GENOME_GENERATIONS` | Evolution generations (default: 50) |
-| `--genome-population GENOME_POPULATION` | Population size (default: 30) |
-| `--io-research` | Enable approximate indistinguishability obfuscation research |
-| `--io-research-functions IO_RESEARCH_FUNCTIONS` | Comma-separated function names for iO research |
-| `--knowledge-base` | Build persistent historical record of assumptions, failures, fixes, discoveries (Feature 199) |
-| `--knowledge-graph` | Generate security knowledge graph of protection relationships |
-| `--knowledge-graph-output KNOWLEDGE_GRAPH_OUTPUT` | Output directory for knowledge graph (default: build/knowledge_graph/) |
-| `--longitudinal-tracking` | Track security metrics over time and detect drift (Feature 195) |
-| `--metrics` | Collect quantitative resilience metrics after build |
-| `--plaintext-exposure` | Measure actual plaintext lifetime during execution (Feature 151) |
-| `--protection-roi` | Compute security gain vs runtime/complexity/maintenance cost for each feature (Feature 194) |
-| `--reachability-report` | Generate reachability coverage report classifying every feature as REACHABLE/PARTIALLY_REACHABLE/UNREACHABLE (Feature 169) |
-| `--retirement-report` | Generate feature retirement report analyzing features for low effectiveness, high overhead, poor survivability |
-| `--runtime-truth` | Record what actually executes vs what was intended (Feature 192) |
-| `--security-debt` | Compute security debt index measuring unprotected functions, weak protections, and coverage gaps |
-| `--security-gates` | Enable security regression gates (Feature 146) |
-| `--semantic-leakage` | Measure semantic leakage between original and obfuscated IR (Feature 152) |
-| `--survivability` | Run protection survivability index measurement |
-| `--synthesis` | Enable protection synthesis engine (auto-select protections) |
-| `--synthesis-max-overhead SYNTHESIS_MAX_OVERHEAD` | Max allowed overhead percent (default: 50) |
-| `--synthesis-max-size SYNTHESIS_MAX_SIZE` | Max allowed size multiplier (default: 3.0) |
-| `--synthesis-output SYNTHESIS_OUTPUT` | Output path for synthesis report (default: build/synthesis_report.json) |
-| `--synthesis-target-security SYNTHESIS_TARGET_SECURITY` | Target security score 0-100 (default: 70) |
-| `--threat-coverage` | Map threats to features, metrics, and verifications; identify gaps (Feature 198) |
-| `--update-baseline` | Save current metrics as new baseline for security gates |
-
-### Other
-
-| Option | What it does |
-|---|---|
-| `--ai-guided-diversity` | Enable AI-guided evolutionary diversity generation |
-| `--apply-synthesis` | Apply synthesis plan flags to pipeline configuration |
-| `--build-id BUILD_ID` | Stable build id: seeds the semantic-lowering kernel and is recorded in the signature sidecar, so two builds with the same --build-id lower identically. It does not by itself make the whole build reproducible (default: empty = random per build) |
-| `--context-saturation` | Compute context window saturation metrics |
-| `--cross-process` | Enable cross-process fragment binding (Item 111) |
-| `--deobfuscation-threshold DEOBFUSCATION_THRESHOLD` | Minimum deobfuscation score (default: 0.7) |
-| `--diagnostic` | Diagnostic build: per-stage timings + transform counts + NOT-FOR-RELEASE marker |
-| `--dispersal-slices DISPERSAL_SLICES` | Number of payload slices (default: 3) |
-| `--flow-entangle` | Enable whitebox-flow entanglement (crypto-state- dependent control flow) |
-| `--function-intent` | Enable function intent obfuscation |
-| `-h, --help` | show this help message and exit |
-| `--kod` | [LOADER ONLY -- ignored by this pipeline] Arm loader kill-on-detect: the VM snippet reads NIXON_KOD env at runtime (default: report-only) |
-| `--max-cpu-overhead MAX_CPU_OVERHEAD` | Max CPU overhead percentage (default: 20) |
-| `--max-size-mult MAX_SIZE_MULT` | Max binary size multiplier (default: 3.0) |
-| `--optimize` | Enable cost-aware protection optimizer |
-| `--payload-dispersal` | Enable payload dispersal execution model (disjoint slice execution) |
-| `--poly-engine` | Enable environmental poly-engine (environment-adapted code variants) |
-| `--require-live-features N` | Fail the build unless at least N features are LIVE in the artefact |
-| `--seed SEED` | seed the randomised transform order (reproducible builds) |
-| `--silent-fallback` | Detect silent fallbacks (try/except without logging) in codebase (Feature 191) |
-
-<!-- END GENERATED CLI REFERENCE -->
-
-### The loader CLI
-
-`python3 -m obfuscator.core.pipeline build` is a second entry point with its own
-option set — the counter-REA flags, section splitting and the loader-side switches
-live here, not in `build.py`. Generated from that parser's `--help`, and checked by
-the same test.
-
-<!-- BEGIN GENERATED LOADER REFERENCE -->
-
-Every option `scripts/build.py` accepts, generated from its own `--help` by
-`scripts/gen_cli_reference.py` and checked by `tests/test_readme_matches_cli.py`,
-so it cannot drift. Editorial notes are marked where a flag is inert or archived.
-
-**69 options.**
-
-### Input, output and build control
-
-| Option | What it does |
-|---|---|
-| `--skip-cloud` | Skip the cloud build farm: build the artifact locally even if --compile/--auto would send it to the farm |
-
-### Obfuscation ladder and AST transforms
-
-| Option | What it does |
-|---|---|
-| `--lowering LOWERING` | Semantic-lowering families CSV (default: disabled) |
-| `--no-anti-rea` | Skip the counter-REA shields |
-| `--no-audit-hook-plant` | Omit the audit-hook plant detector |
-| `--no-section-split` | Ship the payload as a single blob instead of N sealed sections (default: sections are on) |
-| `--no-snapshot` | Omit the frozen-stdlib snapshot gate |
-| `--no-stdlib-audit` | Omit the stdlib function-audit gate |
-| `--opt-level OPT_LEVEL` | Protection ladder 0-5: resolve the 17 canonical transform flags from the level. Without it the loader build applies the full set |
-
-### Anti-analysis, counter-REA and deception
-
-| Option | What it does |
-|---|---|
-| `--anti-rea` | Counter-REA shields: architecture-mirage chaff, canary credentials, evidence-contract poison, a decoy call graph and high-salience bait procedures (ON by default) |
-| `--anti-rea-level {stealth,balanced,maximum}` | How much decoy material the counter-REA shields emit |
-| `--exclude-rea` | Exclude ALL classifier-directed bait layers (compliance notices, cognitive-armor canaries, fabricated classifier-bait corpus) from the counter-REA shields. The base shields (chaff, decoy call graph, canary credentials) stay on; use --no-anti-rea to skip those too |
-| `--exclude-rea-bio` | Exclude only the fabricated classifier-bait corpus (BLA's keyword-only bio/chem/cyber trigger strings; inert, no actionable content). Exclusions combine: pass any of --exclude-rea-* together |
-| `--exclude-rea-cognitive` | Exclude only the cognitive-armor layer (canary notices and in-band abort markers). Exclusions combine: pass any of --exclude-rea-* together |
-| `--exclude-rea-compliance` | Exclude only the compliance-notice layer. Exclusions combine: pass any of --exclude-rea-* together |
-
-### Runtime integrity, anti-tamper and attestation
-
-| Option | What it does |
-|---|---|
-| `--driver-check` | Bake the kernel-driver gate into the loader |
-| `--hostguard` | Prepend hostguard snippet to loader |
-
-### Licensing, binding, watermarking and provenance
-
-| Option | What it does |
-|---|---|
-| `--customer-salt CUSTOMER_SALT` | Bind the payload key to one customer (mixed as a domain-separated second mask; empty = no binding) |
-| `--hwid HWID` | HWID string for macro expansion / HWID-locked fallback |
-| `--hwid-lock` | HWID-lock the bytecode fallback blob (requires --hwid) |
-| `--licence-token LICENCE_TOKEN` | Bind the payload key to a licence token (its key_material becomes the customer mask; the artefact then needs that token at run time) |
-| `--name-gate` | Rewrite privileged call sites through per-build token map |
-| `--rename-internal` | Rename proven-internal public methods/attributes |
-| `--trial TRIAL` | Trial period spec, e.g. '7d' (parsed via obfuscator.macros.parse_trial) |
-| `--watermark WATERMARK` | Embed an owner-supplied watermark message in the loader, HMAC-tagged and checked at load time: a stripped or edited watermark kills the artifact |
-
-### Packaging, loaders, native backends and build farm
-
-| Option | What it does |
-|---|---|
-| `--exclude-android` | Skip Android build in Nuitka cloud compilation |
-| `--native` | Native Mode: Cloud Farm Cython Compilation (Hybrid - With Fallback) |
-| `--native-only` | Strict Native Mode: Cloud Farm Cython Compilation (No Fallback) |
-| `--platform {auto,github}` | Build farm platform. "auto" selects the only implemented farm, GitHub |
-| `--public` | Public Repo Mode (Flash Mode) - Nukes repo after build |
-| `--python PYTHON` | Python version for GitHub Actions (Defaults to local) |
-| `--resume RESUME` | Resume waiting for a specific GitHub Run ID (skip upload) |
-| `--section-count SECTION_COUNT` | Number of sealed sections when --section-split is used (default 4) |
-| `--section-split` | Ship the payload as N independently sealed sections instead of one blob, so the whole encrypted payload is never resident in a single buffer. Needs a fallback payload to split, so it is not available with --native-only (default: on) |
-| `--split-bootstrap` | Shamir (n=3,k=2) threshold key + fragmented decoder |
-| `--tor` | Route build traffic through Tor (default 127.0.0.1:9050; override via --tor-proxy or NIXON_TOR_PROXY) |
-| `--tor-proxy TOR_PROXY` | Tor SOCKS endpoint host:port (default 127.0.0.1:9050; env NIXON_TOR_PROXY) |
-| `--vm-threshold VM_THRESHOLD` | VM-score verdict threshold (default: 50.0) |
-
-### Other
-
-| Option | What it does |
-|---|---|
-| `--allow-countries ALLOW_COUNTRIES` | Allowed country codes |
-| `--allow-regions ALLOW_REGIONS` | Allowed regions |
-| `--auto [AUTO]` | Automation: cf=Cloudflare, nk=Nuitka (Defaults to cf,nk if no value) |
-| `--auto-deploy` | Auto deploy contract |
-| `--bind BIND` | Bind files inside payload |
-| `--bind-mac BIND_MAC` | Bind to MAC address |
-| `--block-countries BLOCK_COUNTRIES` | Blocked country codes |
-| `--block-regions BLOCK_REGIONS` | Blocked regions |
-| `--cf-account CF_ACCOUNT` | Cloudflare Account ID (overrides the stored config) |
-| `--cf-token CF_TOKEN` | Cloudflare API Token (overrides the stored config) |
-| `--compile` | Compile FINAL loader with Nuitka (Creates EXE/ELF) |
-| `--contract CONTRACT` | Contract address |
-| `--debug-dump-raw` | Compile the plaintext-dump debug aid into the artifact (it writes the decrypted payload to a 0600 temp file when NIXON_DUMP_RAW=1). Off by default: a normal artifact has no such capability |
-| `--deploy-rpc DEPLOY_RPC` | RPC URL for deployment |
-| `--expire EXPIRE` | Expiration Date (YYYY-MM-DD) |
-| `--explorer EXPLORER` | Blockscout URL |
-| `--fast` | Build the reduced-protection profile: detections only warn, entropy noise and rdtsc pressure are lower. Faster builds and faster artefacts; weaker posture. |
-| `--kod` | Arm the loader kill-on-detect response: the artifact terminates when a detection fires |
-| `--layers LAYERS` | Recursive packaging layers (default 100) |
-| `--lock-hwid LOCK_HWID` | Lock the build to a target HWID: registers a license for it and seeds the build deterministically |
-| `--net-url NET_URL` | Auth URL (if not using auto=cf) |
-| `--one-shot` | Self-destruct |
-| `--pin-structure` | Pin the EMITTER-ONLY draws (encoding order, slot picks, names, VM op-map) so two builds share a structure. Debugging aid; key material is not pinned, so artefacts are not byte-identical. |
-| `--portable` | Skip the native core so one file runs on every OS. The FHE/ORAM layer falls back to pure Python with a small batch; every other protection is unchanged. |
-| `--private-key PRIVATE_KEY` | Deployment key |
-| `--rpc RPC` | RPC URL |
-| `--shards SHARDS` | Key shard URLs |
-| `--stego` | Steganography wrapping |
-| `--strict-detections` | Make the loader's environment detections (sandbox, emulator, debugger frame, geo-fence, licence) terminate the artifact instead of only perturbing it (ON by default; use --fast to opt out) |
-| `--tls-ca-bundle TLS_CA_BUNDLE` | PEM CA bundle for the emitted key fetch. The artifact verifies the certificate chain AND the hostname against the system trust store plus this CA (it never disables verification) |
-| `--webhook WEBHOOK` | Alert Webhook URL |
-| `--zips ZIPS` | Number of ZIP layers |
-
-<!-- END GENERATED LOADER REFERENCE -->
-
-## Audit
-
-The most recent full repository audit is [`docs/AUDIT-2026-10-19.md`](docs/AUDIT-2026-10-19.md) — 20 sections, the
-vendor v1.1→V10 version matrix, and a completeness verdict. It also records
-the two highest-severity findings of the year: the adversarial injection
-corrupting the emitted ChaCha20 seal (~80% of default builds produced a dead
-artifact) and a process-wide `mlockall(MCL_FUTURE)` leak. Both are fixed.
-
-The follow-up rounds are in
-[`docs/AUDIT-2026-10-19-followup.md`](docs/AUDIT-2026-10-19-followup.md)
-(verified TLS, no import-time log file, `section_split` wired, an
-enforceable lint gate) and
-[`docs/AUDIT-2026-10-20.md`](docs/AUDIT-2026-10-20.md) (the CLI audit:
-dropped flags, an unpinned lint gate, an untracked build config, a hard
-`z3` dependency, and the documentation refresh). The current suite is
-**4314 passed, 23 skipped, 0 failed** (plus 289 Rust runtime tests and
-4 Rust relay tests).
+| Product | `shadow-compiler 2.0.0` |
+| Research programme | Paper draft complete; core result reproducible; final review verdict **submit with named caveats** |
+| Benchmark | 17 internal tasks, 11 load-bearing; 5 external sources; 38 gated artefacts |
+| Defects | 13 found, 12 fixed, 1 design-level open |
+| Retractions | 8 claims withdrawn, plus the cost-curve endpoint; all retained in the record |
+| Adaptive study | Designed, **not run** |
+| Independent specification | 2 of 11 load-bearing tasks |
+| Seed determinism | **Source emitter: yes** with `--seed` (byte-identical for same flags); **packed loader: no** (random keys/packaging) |
+| Strongest verified build | Loader + anti-REA max + 6 sections + licence/trial/watermark + 25 layers; 69–99 s, runs only with its token |
+| Analyst-time study | **Not done** |
+| Systematic review | **Not done** |
 
 ### Which version numbers are which
 
 | Numbering | Meaning |
 |---|---|
 | **2.0.0** | **this product's** version. One constant, in `obfuscator/version.py`; the CLI reports it and `config/default.json` carries the same value (a test checks they agree). See [`docs/CHANGELOG.md`](docs/CHANGELOG.md). |
-| **v1.1 … V10** | the **vendor's** obfuscation-technique generations, tracked in the audit report's version matrix. They are NOT releases of this tool and must not be compared with 2.0.0. |
+| **v1.1 … V10** | the **vendor's** obfuscation-technique generations, tracked in the audit report's version matrix. They are **not releases** of this tool and must not be compared with 2.0.0. |
 
-## Changelog
+Research documents are dated records, not releases. `docs/research/README.md`
+is the current index; the per-round documents are the evidence trail.
 
-[`docs/CHANGELOG.md`](docs/CHANGELOG.md).
+---
 
-The suite is green. The live count is a moving number -- read it from
-`python3 -m pytest tests/ -q` rather than from a doc; the dated
-snapshots live in the audit reports.
-
-## Security model + honest limitations
-
-- Kernel-driver stance: **read-only BYOVD gate, no ring-0 loading.**
-  `obfuscator/driver_blocklist.py` enumerates loaded-driver names only
-  (Linux `/proc/modules`, Windows `EnumDeviceDrivers`) and compares stems
-  against a ~20-entry public BYOVD blocklist (LOLDrivers-derived). No driver
-  loading, no IOCTLs, no service installation, no writes. Disarmed (default)
-  it enumerates and returns hits but never exits; armed it fails closed via
-  `os._exit(1)` plus a best-effort 60 s daemon re-check thread.
-- Kill primitives (`_nx_kill`) exit the process (exit 137 for audit-plant)
-  and are silent unless `NIXON_LADDER_DEBUG=1` (`obfuscator/kill_ladder.py`).
-- Limitations verified during doc writing:
-  - Lowered artifacts (`--lowering`) need `lowering_shim` importable
-    (run with `PYTHONPATH=.../obfuscator`); otherwise `ModuleNotFoundError`.
-  - `--watermark` without IR stages logs a conflict hint
-    (`skip_irgen <-> watermark (requires)`); the AST path still builds.
-  - `--pytoc` / `--pyinstaller-spec` are best-effort and never fail the build.
-  - Vendor-native perf claims (0.19x–1.56x) are not reproduced in-repo;
-    measured Phase-1 shim overhead is 1.46x–3.84x per family.
-- Full attacker-by-attacker breakdown: `THREAT_MODEL.md`.
-- Policy, supported versions (3.10–3.14), and enforceable invariants: `SECURITY.md`.
-
-## Repo layout
-
-```text
-scripts/build.py          Build pipeline entry point (+ scripts/phases/, scripts/benchmark/)
-obfuscator/               AST obfuscation, lowering, loader-gate emitters (vm_score, trial_bind,
-                          hwid_lock, watermark_gate, frozen_snapshot, stdlib_audit, audit_hook,
-                          driver_blocklist, split_bootstrap, name_gate, internal_rename, nyser, py_matrix)
-irgen/ llvmgen/ encrypt/  IR / LLVM / post-link encryption stages
-vm/ runtime/ relay/       VM ISA + interpreters, Rust runtime, Rust relay binary
-native/                   C/C++ extensions and stubs
-tests/test_*.py           Per-feature test files (see table above)
-docs/research/            Research programme: paper, benchmark, nine defect reports,
-                          retraction record -- start at docs/research/README.md
-docs/                     DEVELOPER.md, USER_GUIDE.md, PLATFORMS.md, ATTESTATION.md, ROADMAP.md, ...
-examples/hello.py         Sample payload (print-based)
-```
-
-## Research programme
-
-`docs/research/` holds a research programme that ran alongside this codebase and
-produced **nine correctness defects** in it, all fixed and guarded, plus one
-negative result written up as an instrument-validity note. Start at
-[`docs/research/README.md`](docs/research/README.md).
-
-Four independent checks back it:
-
-| check | command | what it catches |
-|---|---|---|
-| test suite | `python3 -m pytest tests/ -q` | code drifting from its specification |
-| artefact gate | `python3 scripts/transfer/artefact_gate.py --variants 2 --seeds 4242,7` | output that does not compile, import or run |
-| reproduction | `python3 scripts/transfer/reproduce.py` | prose drifting from measurement |
-| paper guards | `python3 -m pytest tests/test_research_docs_consistency.py -q` | prose drifting from its own tables |
-
-The defects matter more than the paper. Six of the nine could not have been found
-by this project's own tests: they needed code the project did not write (three
-external libraries and a vendored package, 104 gated artefacts) or a check that
-imports the artefact rather than compiling it. Two of the nine produced code that
-**looked fine and was not obfuscated at all**.
-
-## Testing
-
-```bash
-NIXON_LOG_REDIRECT=0 python3 -m pytest tests/ -q
-```
-
-That is the whole suite. It is large (a few hundred test files), so the
-targeted subsets below are what to reach for while working:
-
-```bash
-NIXON_LOG_REDIRECT=0 python3 -m pytest tests/test_lowering.py \
-  tests/test_opcount_truth.py tests/test_vm_subset.py tests/test_clock_bias.py -q
-```
-
-A broader verified subset (lowering parity, diagnostic, trial, hwid,
-pytoc, spec, snapshot, stdlib, watermark, gates, split-bootstrap, driver):
-
-```bash
-NIXON_LOG_REDIRECT=0 python3 -m pytest tests/test_lowering_parity_141.py \
-  tests/test_diagnostic.py tests/test_trial_bind.py tests/test_hwid_static.py \
-  tests/test_hwid_lock.py tests/test_pytoc.py tests/test_pyinstaller_spec.py \
-  tests/test_stdlib_audit.py tests/test_frozen_snapshot.py tests/test_watermark_gate.py \
-  tests/test_name_gate.py tests/test_internal_rename.py tests/test_split_bootstrap.py \
-  tests/test_driver_blocklist.py -q
-```
-
-Other gates:
+## Testing and contributing
 
 ```bash
 make lint        # ruff + the runtime undefined-global check
-make e2e         # every build must produce an artifact that RUNS
-make audit-commit  # what the last commit removed, and which removals dropped a call
+make e2e         # every build must produce an artefact that RUNS
+make test        # pytest + runtime/relay cargo tests
 ```
 
-`NIXON_LOG_REDIRECT=0` keeps pytest output on the console instead of
-`build.log`.
+The standing rules are simple and enforced: do not add test skips to make the
+suite green; do not claim an option works because it is accepted; do not trust
+a check that cannot fail. [`docs/DEVELOPER.md`](docs/DEVELOPER.md) has the
+prerequisites, layout, and extension points.
 
-## Contributing
+## Security
 
-See `docs/DEVELOPER.md` (prereqs, `make` targets, project structure).
-Do not commit docs or code without running the relevant tests above.
+Report suspected vulnerabilities privately rather than in a public issue.
+[`SECURITY.md`](SECURITY.md) states the supported versions, the reporting
+process, and the enforceable security invariants. [`THREAT_MODEL.md`](THREAT_MODEL.md)
+states what each control is claimed to do and the evidence behind it.
+
+## License
+
+Copyright © 2026 Nixon H. **All rights reserved.** This repository is published
+for transparency and review; no licence to use, copy, modify, or redistribute
+is granted by its publication. The obfuscation technology exists to protect
+software against unauthorised analysis — not to defeat security products, hide
+malware, or evade detection. See [`LICENSE`](LICENSE).

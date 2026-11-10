@@ -245,6 +245,10 @@ pub fn decrypt_and_jit(
 }
 
 fn make_nonce(key: &[u8; 32], ctx: u64) -> [u8; 16] {
+    // The zero initialiser is an output buffer, not a nonce: both halves are
+    // overwritten before the value is returned. CodeQL sees the literal and
+    // reports a hard-coded IV; the suppression records why it is not one.
+    // codeql[rust/hard-coded-cryptographic-value]
     let mut nonce = [0u8; 16];
     nonce[..8].copy_from_slice(&crate::ledger::sha256(key)[..8]);
     nonce[8..16].copy_from_slice(&ctx.to_le_bytes());

@@ -6,6 +6,7 @@ TWIN: runtime/src/sw_attestation.rs (in-artifact challenge/response core)
 coordinates them between hosts. Do not merge.
 """
 import hashlib
+import hmac
 import os
 import random
 import struct
@@ -61,6 +62,7 @@ class DistributedAttestation:
         self.mode = mode
         self._nodes: Dict[int, NodeState] = {}
         self._lock = threading.Lock()
+        self._pending: Dict[Tuple[int, int], list] = {}
         self._self_destructed = False
         self._self_destruct_reason: Optional[str] = None
 
@@ -106,12 +108,14 @@ class DistributedAttestation:
             jitter = random.uniform(0, max(0.001, self.challenge_timeout * 0.1))
             deadline = time.time() + self.challenge_timeout + jitter
 
-            return AttestationChallenge(
+            challenge = AttestationChallenge(
                 challenger_id=challenger_id,
                 challenge_data=full_challenge,
                 timestamp=time.time(),
                 deadline=deadline,
             )
+            self._pending.setdefault((challenger_id, responder_id), []).append(challenge)
+            return challenge
 
     def respond_to_challenge(self, responder_id: int, challenge: AttestationChallenge) -> Optional[AttestationResponse]:
         if self._self_destructed:
@@ -176,8 +180,34 @@ class DistributedAttestation:
 
             response_data = response.response_data[:-32]
             response_sig = response.response_data[-32:]
+
+            # Bind the response to a challenge this node actually issued.
+            # A MAC alone proves possession of the pair secret; it does not
+            # prove the response belongs to the current challenge, so a
+            # captured response would otherwise replay until the timeout.
+            challenge = None
+            pending = self._pending.get((challenger_id, response.responder_id), [])
+            for candidate in reversed(pending):
+                expected_challenge = candidate.challenge_data[:-32]
+                if (time.time() <= candidate.deadline
+                        and hmac.compare_digest(
+                            response_data[:len(expected_challenge)],
+                            expected_challenge)):
+                    challenge = candidate
+                    break
+            if challenge is None:
+                return False
+
             expected_sig = hashlib.sha256(pair_secret + response_data + b"OK").digest()
-            return response_sig == expected_sig
+            if not hmac.compare_digest(response_sig, expected_sig):
+                return False
+
+            # One response per challenge.
+            try:
+                pending.remove(challenge)
+            except ValueError:
+                pass
+            return True
 
     def run_pairwise_attestation(self) -> Dict[Tuple[int, int], bool]:
         if self.mode == "multiprocess":

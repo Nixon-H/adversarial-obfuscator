@@ -12,12 +12,11 @@
 name: "CodeQL Advanced"
 
 on:
-  push:
-    branches: [ "master" ]
   pull_request:
     branches: [ "master" ]
   schedule:
     - cron: '39 7 * * 2'
+  workflow_call:
 
 jobs:
   analyze:
@@ -75,6 +74,9 @@ jobs:
       with:
         languages: ${{ matrix.language }}
         build-mode: ${{ matrix.build-mode }}
+        # Research corpora, vendored corpus code and archived material are
+        # excluded there; see .github/codeql/codeql-config.yml.
+        config-file: ./.github/codeql/codeql-config.yml
         # If you wish to specify custom queries, you can do so here or in a config file.
         # By default, queries listed here will override any specified in a config file.
         # Prefix the list here with "+" to use these queries and those in the config file.
