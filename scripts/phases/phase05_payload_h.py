@@ -104,10 +104,23 @@ def phase_embed_crypto_binding(payload_h_path: str):
             f.write(indent + ", ".join(f"0x{b:02X}" for b in chunk) + ",\n")
         f.write("};\n\n")
 
+        # NIXON_CHAIN_SECRET is deliberately NOT emitted.
+        #
+        # It used to be written here: the 32-byte secret the fragment keys are
+        # derived from, as plaintext C constants, immediately after the
+        # ciphertext it decrypts. That is the key taped to the lock, and it
+        # bought nothing -- grep for NIXON_CHAIN_SECRET across native/*.c,
+        # *.h and *.cpp finds no consumer, so the value only ever sat in a
+        # shipped header waiting to be read out of the binary.
+        #
+        # Nothing is removed from the artefact by dropping it: the symbol was
+        # never referenced. If a C-side consumer is ever written, it must get
+        # the secret at run time from a source the attacker does not already
+        # hold -- not from the payload it is protecting.
         if chain_secret:
-            f.write("const uint8_t NIXON_CHAIN_SECRET[32] = {\n")
-            f.write(indent + ", ".join(f"0x{b:02X}" for b in chain_secret) + ",\n")
-            f.write("};\n")
+            log("CRYPTO_BINDING",
+                "chain secret withheld from payload.h (writing it would ship "
+                "the key beside the ciphertext)")
 
     log("CRYPTO_BINDING", f"Embedded {len(bound_data)} bytes of bound fragment data")
 

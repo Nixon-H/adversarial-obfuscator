@@ -34,7 +34,8 @@ def phase_temporal_keys(opts) -> dict:
         opts: argparse.Namespace with temporal_window
 
     Returns:
-        dict with master_key, bucket_seconds, current_bucket, key_hex
+        dict with bucket_seconds, current_bucket, enabled -- scheduling
+        metadata only; no key material is returned or written to disk
     """
     log("TEMPORAL_KEYS", "Running temporal key evolution phase (Item 59)...")
     try:
@@ -46,11 +47,21 @@ def phase_temporal_keys(opts) -> dict:
             window_seconds=window_seconds,
         )
         current_key = chain.derive_key_for_window()
+        # No key material on disk.
+        #
+        # This file used to carry "master_key" (the genesis secret, hex) and
+        # "key_hex" (the derived window key). Both are the thing the temporal
+        # chain exists to protect, and neither had a reader: grepping for
+        # temporal_key_config.json finds only this write. So the build printed
+        # the secrets to a file in build/ that nothing consumed -- a leak with
+        # no benefit at all.
+        #
+        # What remains is scheduling metadata: which bucket, how long a bucket
+        # is, whether the feature was on. That is safe to write and it is what
+        # any future consumer would actually need to locate the window.
         tk_config = {
-            "master_key": master_key.hex(),
             "bucket_seconds": window_seconds,
             "current_bucket": current_key.index,
-            "key_hex": current_key.key.hex(),
             "enabled": True,
         }
         tk_config_path = os.path.join(BUILD_DIR, "temporal_key_config.json")
