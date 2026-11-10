@@ -27,40 +27,97 @@ so a substituted artefact fails the install rather than landing.
 - No dependencies needed for the quick-start below (stdlib only).
   Full pipeline stages need `cargo`, `g++`, `llc` (checked at startup).
 
-## Quick-start (verified 2026-09-23)
+## Quick-start (verified 2026-11-10, Python 3.13.5, Linux x86_64)
 
-The `-o/--output` path is a staging path: the final artifact is always
-packaged as `build/<payload>_obfuscated.py` (`scripts/phases/phase06_package.py`).
-`-o` outside the build dir is refused unless `--force-output` is passed
-(path-traversal guard: silent overwrites of arbitrary files are a
-footgun for a local build tool).
-Without `NIXON_LOG_REDIRECT=0`, stdout/stderr go to `build.log`
-(`obfuscator/core/utils.py`; the default is `1`, and `scripts/build.py`
-itself calls `setdefault("0")`, so plain `python3 scripts/build.py ...`
-prints to the console — but any library import path without that
-`setdefault` still redirects).
+A minimal build with no external toolchain: AST obfuscation only.
 
 ```bash
 echo 'print("hello-nixon")' > /tmp/hello.py
+
 NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
   --payload /tmp/hello.py -o /tmp/qs_hello.py --force-output \
   --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras
-# [   OBFUSCATE] Done: 1.1KB (was 0.0KB)
-# [     PACKAGE]   Payload: /home/nixon/Projects/adversarial-obfuscator/build/hello_obfuscated.py
-#   Build artifacts: /home/nixon/Projects/adversarial-obfuscator/build/
+
+# [11:45:26] [   OBFUSCATE] /tmp/hello.py → /tmp/qs_hello.py
+# [11:45:26] [   OBFUSCATE] Done: 14.0KB (was 0.0KB)
+# [11:45:27] [     PACKAGE] Packaging build artifacts...
+#  Build artifacts: build/
 
 NIXON_LOG_REDIRECT=0 timeout 60 python3 build/hello_obfuscated.py
 # hello-nixon
 ```
 
-Notes:
+About a second, and the artefact is ~15 KB from a 21-byte source. Measured on the
+default `--opt-level 4`; level 0 produces a byte-identical copy of the source.
 
-- `--skip-*` keeps this to the AST-obfuscation stage. Without them the
-  pipeline runs IR/LLVM/encrypt/relay stages (needs the toolchain above).
-- `--lowering io,scalar` (no skips removed) rewrites call sites to
-  `from lowering_shim import ...`; that artifact only runs with
-  `obfuscator/` on `PYTHONPATH`, otherwise `ModuleNotFoundError:
-  No module named 'lowering_shim'`. Default (no `--lowering`) runs anywhere.
+### What each `--skip-*` buys you
+
+The five skips keep the build to the AST stage. Without them the pipeline also runs
+IR generation, LLVM codegen, post-link encryption and the Rust relay, which is where
+`cargo`, `g++` and `llc` become mandatory (checked at startup).
+
+| Skip | Stage removed | Needs |
+|---|---|---|
+| `--skip-irgen` | IR construction | — |
+| `--skip-llvmgen` | LLVM codegen | `llc` |
+| `--skip-encrypt` | post-link encryption | — |
+| `--skip-relay` | Rust relay build | `cargo` |
+| `--skip-extras` | optional native extras | — |
+
+Drop them only when the toolchain is present; a full build is minutes, not seconds.
+
+### Two behaviours that surprise people
+
+**`-o` is a staging path, not the output.** The final artefact is always packaged as
+`build/<payload>_obfuscated.py`. Writing outside the build directory is refused:
+
+```text
+$ python3 scripts/build.py --payload /tmp/hello.py -o /tmp/nope.py --skip-extras
+[ERROR] Refusing -o outside build dir: /tmp/nope.py (use --force-output to override)
+```
+
+`--force-output` exists because silently overwriting an arbitrary path is a bad
+default for a local tool, not because the guard is optional.
+
+**Logging differs between the two entry points.** `scripts/build.py` sets
+`NIXON_LOG_REDIRECT=0` itself, so it prints to the console. The loader CLI
+(`python3 -m obfuscator.core.pipeline build`) *does* write `build.log` in the current
+directory unless you set `NIXON_LOG_REDIRECT=0`. There is no import-time redirect:
+`enable_log_redirect()` is called explicitly by the loader entry point, so merely
+importing `obfuscator.core` writes nothing.
+
+### If you use `--lowering`
+
+`--lowering io,scalar` rewrites covered call sites to `from lowering_shim import ...`.
+That artefact only runs when `obfuscator/` is importable:
+
+```text
+$ python3 build/hello_obfuscated.py
+ModuleNotFoundError: No module named 'lowering_shim'
+
+$ PYTHONPATH=$PWD/obfuscator python3 build/hello_obfuscated.py
+hello-nixon
+```
+
+The default build (no `--lowering`) runs anywhere. This is the one flag that changes
+the deployment requirement of the artefact, so decide it deliberately.
+
+### The loader CLI
+
+`python3 -m obfuscator.core.pipeline build` is the second entry point and has its own
+options (counter-REA, section splitting, loader switches — 69 of them, listed in the
+[loader reference](#the-loader-cli) below).
+
+```bash
+NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD \
+  python3 -m obfuscator.core.pipeline build /tmp/hello.py --skip-cloud
+
+python3 dist/hello_protected.py     # hello-nixon
+```
+
+It writes `dist/hello_protected.py` (plus a `_dbg` variant), not `build/`: the two
+entry points have different output conventions. Its flags do not overlap with
+`build.py`'s — there is no `--skip-extras` here, the equivalent is `--skip-cloud`.
 
 ## What it does
 
