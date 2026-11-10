@@ -4,10 +4,9 @@ Takes a Python payload and emits an artefact that is harder to read, harder to
 re-run under instrumentation, and — where a stage supports it — capable of refusing
 to run when it detects it has been altered. `shadow-compiler 2.0.0`.
 
-The threat model is a motivated analyst with the artefact and a debugger, not a
-network attacker. Everything here raises the cost of reading and re-running code;
-nothing here claims to make a determined reverse engineer fail outright. Where a
-protection is weaker than its name suggests, this README says so next to the flag.
+Threat model: an analyst with the artefact and a debugger. Every layer raises the
+cost of static reading, dynamic re-execution, or both. Per-layer scope is stated
+with each flag; system-level limits are in `THREAT_MODEL.md`.
 
 ## What a build produces
 
@@ -116,7 +115,7 @@ IR generation, LLVM codegen, post-link encryption and the Rust relay, which is w
 
 Drop them only when the toolchain is present; a full build is minutes, not seconds.
 
-### Two behaviours that surprise people
+### Output and logging semantics
 
 **`-o` is a staging path, not the output.** The final artefact is always packaged as
 `build/<payload>_obfuscated.py`. Writing outside the build directory is refused:
@@ -150,7 +149,7 @@ hello-nixon
 ```
 
 The default build (no `--lowering`) runs anywhere. This is the one flag that changes
-the deployment requirement of the artefact, so decide it deliberately.
+the deployment requirement of the artefact.
 
 ### The loader CLI
 
@@ -215,11 +214,11 @@ suppression. Their off-switches are `--no-snapshot`, `--no-stdlib-audit`,
 unrecoverable without it (an artefact without its token decrypts to garbage). They
 are omitted above only because they need per-customer values.
 
-### What is deliberately **not** in this recipe
+### Excluded from this recipe
 
 | Not included | Why |
 |---|---|
-| `--code-genome` | defaults to 50 generations × 30 population = 1500 fitness evaluations; it did not finish in 300 s on a 3-line file. With `--genome-generations 2 --genome-population 4` it takes 2 s. Real but expensive — choose deliberately. |
+| `--code-genome` | defaults to 50 generations × 30 population = 1500 fitness evaluations; did not complete in 300 s on a 3-line file. With `--genome-generations 2 --genome-population 4` it takes 2 s. Real but expensive. |
 | `--temporal-keys` | **inert and slow** — ~19 s of hashing to produce metadata nothing reads; its verifier proves nothing. See the CLI reference note. |
 | `--crypto-binding` | build-time validation only; nothing decrypts at run time, and the chain secret is no longer written into `payload.h`. |
 | `--driver-check` | read-only BYOVD enumeration; useful, but it enumerates the *host's* drivers and is a separate decision from hardening the artefact. |
@@ -233,8 +232,7 @@ strings dist/payload_protected.py | grep -c NX-WM-001   # watermark present
 
 A build whose phase-3 table reports a variant mismatch **fails** (exit 1). A variant
 that merely could not be run is reported as inconclusive and does not fail — that
-distinction is deliberate, because a gate that fires when it cannot check is a gate
-people learn to ignore.
+A gate that fires on its own inability to check is not a gate.
 
 ## What it does
 
@@ -352,8 +350,7 @@ x86, the scalar fallback elsewhere) · `--fhe-vm` · `--oram` · `--rop` · `--s
 
 A build now **fails** if its own phase-3 table reports a variant mismatch
 (`match == MISMATCH`); a variant that merely could not be run is reported as
-inconclusive and does not fail the build. That distinction is deliberate: a gate
-that fires when it cannot check is a gate people learn to ignore.
+inconclusive and does not fail the build.
 
 ### 9. Research and evaluation
 
