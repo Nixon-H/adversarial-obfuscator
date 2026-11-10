@@ -170,6 +170,14 @@ def parse_options(help_text: str) -> list[tuple[str, str, str]]:
         # text on the same line, with any wrapping on continuation lines.
         inv, _, same_line = head.partition("  ")
         invocation = " ".join(inv.split())
+        # Python 3.13 renders "-o, --output OUTPUT"; 3.10/3.11 render
+        # "-o OUTPUT, --output OUTPUT". Normalise the multi-flag form so the
+        # generated block does not depend on the interpreter that ran it.
+        invocation = re.sub(
+            r'^(-[A-Za-z]) ([A-Z][A-Z0-9_]*), (--[a-z0-9][a-z0-9-]*)',
+            r'\1, \3',
+            invocation,
+        )
         desc_parts = [same_line.strip()] if same_line.strip() else []
         desc_parts.extend(e[1:])
         desc = " ".join(p for p in desc_parts if p)
