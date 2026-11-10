@@ -241,6 +241,7 @@ specification? See
 | [`docs/TRANSFORMS.md`](docs/TRANSFORMS.md) | What each protection layer actually changes, and what is inert |
 | [`docs/SECURITY_FEATURES.md`](docs/SECURITY_FEATURES.md) | Objective-level classification; IP protection vs licensing vs integrity |
 | [`docs/MAXIMUM_SECURITY.md`](docs/MAXIMUM_SECURITY.md) | Measured configuration matrix, bounded attack probe, interactions, negative results |
+| [`docs/research/ai-layer-bench-2026-11-11/RESULTS.md`](docs/research/ai-layer-bench-2026-11-11/RESULTS.md) | Fresh per-layer AI benchmark: crack/recall and refusal rates by layer |
 | [`docs/CRYPTO_REVIEW.md`](docs/CRYPTO_REVIEW.md) | Internal crypto review; **not independent** |
 | [`docs/SEED_ARCHITECTURE.md`](docs/SEED_ARCHITECTURE.md) | Seeds vs randomisation vs key material; measured determinism |
 | [`docs/FLAG_AUDIT.md`](docs/FLAG_AUDIT.md) | Every flag with parser, default, and primary objective |
