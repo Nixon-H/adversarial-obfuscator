@@ -689,7 +689,12 @@ def test_protected_file(filepath, original_source, licence_path=None):
                                  stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", env=ver_env)
         try:
-            _out, _err = _proc.communicate(timeout=120)
+            # 300s, not 120. A --section-split artefact reaches ~7.6 MB across
+            # 70 layers; on a loaded runner (and py3.14 specifically) starting
+            # one can exceed two minutes, which read as a failed variant and,
+            # since the gate now fails on real divergence, failed the build.
+            # This bounds a hang, it is not a performance budget.
+            _out, _err = _proc.communicate(timeout=300)
         except subprocess.TimeoutExpired:
             try:
                 import signal as _signal
