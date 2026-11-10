@@ -1397,7 +1397,15 @@ in config/default.json.
                 obf_src = f.read()
             try:
                 import ast
-                from scripts.validation.smt_validator import SMTValidator
+                # Do NOT re-import SMTValidator here. A function-local import
+                # binds the name as a local of main() for the whole function, so
+                # the `--validate` block below (line ~1426), which runs when
+                # certificate_collector is None and this branch did not execute,
+                # raised UnboundLocalError -- caught by the surrounding
+                # `except Exception` and logged as "Validation error". The net
+                # effect was that --validate never validated anything and the
+                # build reported success anyway. The module-level import at the
+                # top of this file is the binding to use.
                 from irgen.compile import compile_py_to_ir
                 tree = ast.parse(orig_src)
                 ir_module = compile_py_to_ir(obf_src)
