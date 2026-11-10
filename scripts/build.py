@@ -670,13 +670,8 @@ in config/default.json.
     # Hardware Research Integration flags (Items 120-124)
     parser.add_argument("--hpc", action="store_true", help="Enable hardware performance counter integration (Item 120)")
     parser.add_argument("--hpc-key", action="store_true", help="Enable HPC-based key derivation (Item 121)")
-    parser.add_argument("--hpc-detect", action="store_true", help="Enable emulator detection via HPC (Item 122)")
-    parser.add_argument("--hw-entropy", action="store_true", help="Enable hardware entropy loop (Item 123)")
-    parser.add_argument("--cache-bound", action="store_true", help="Enable cache-bound execution (Item 124)")
 
     # Hardware Research Integration flags (Items 125-129)
-    parser.add_argument("--branch-entangle", action="store_true", help="Enable branch predictor entanglement (Item 125)")
-    parser.add_argument("--multicore-entangle", action="store_true", help="Enable multi-core timing entanglement (Item 126)")
     parser.add_argument("--tee", action="store_true", help="Enable trusted execution environment partition (Item 127)")
     parser.add_argument("--tee-type", default="software", choices=["software", "sgx", "sev", "apple"], help="TEE type (default: software)")
     parser.add_argument("--sgx", action="store_true", help="Enable Intel SGX hardware enclave support (Item 128)")
@@ -2471,14 +2466,8 @@ in config/default.json.
         from scripts.phases.phase19_hpc_key import phase_hpc_key
         phase_hpc_key()
 
-    if opts.hpc_detect:
-        log("ARCHIVED", "hpc_detect: native backend archived (runtime/src/hpc_detect.rs has no call path; see archive/rust-runtime/README.md)")
-
-    if opts.hw_entropy:
-        log("ARCHIVED", "hw_entropy: native backend archived (runtime/src/hw_entropy.rs has no call path; see archive/rust-runtime/README.md)")
-
-    if opts.cache_bound:
-        log("ARCHIVED", "cache_bound: native backend archived (runtime/src/cache_bound.rs has no call path; see archive/rust-runtime/README.md)")
+    # --hpc-detect, --hw-entropy and --cache-bound are gone: their backends have
+    # no call path, so the flags could only log "archived" and continue.
 
     # =========================================================================
     # Item 124: SIMD-VM Pipeline Integration
@@ -3879,16 +3868,10 @@ in config/default.json.
     # =========================================================================
     # Hardware Research Integration (Items 125-129)
     # =========================================================================
-
-    if opts.branch_entangle:
-        log("ARCHIVED", "branch_entangle: native backend archived (runtime/src/branch_entangle.rs has no call path; see archive/rust-runtime/README.md)")
-    else:
-        log("SKIP", "Branch entangle not enabled (use --branch-entangle)")
-
-    if opts.multicore_entangle:
-        log("ARCHIVED", "multicore_entangle: native backend archived (runtime/src/multicore_entangle.rs has no call path; see archive/rust-runtime/README.md)")
-    else:
-        log("SKIP", "Multicore entangle not enabled (use --multicore-entangle)")
+    # --branch-entangle and --multicore-entangle are gone: their backends
+    # (runtime/src/branch_entangle.rs, multicore_entangle.rs) have no call path,
+    # so the flags could only ever log "archived" and continue. A flag that can
+    # never do anything is worse than no flag -- it reads as a protection.
 
     if opts.tee:
         phase_tee(tee_type=opts.tee_type)

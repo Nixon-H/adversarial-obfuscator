@@ -73,7 +73,7 @@ def test_every_parser_option_appears_in_the_readme():
 
 @pytest.mark.parametrize("name", [
     # flags whose real behaviour contradicts their name; each must carry a note
-    "temporal-keys", "crypto-binding", "hpc-detect",
+    "temporal-keys", "crypto-binding",
 ])
 def test_inert_flags_carry_a_warning(name):
     """A reader must not discover an inert flag by reading its implementation."""

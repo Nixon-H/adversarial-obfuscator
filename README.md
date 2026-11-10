@@ -172,7 +172,6 @@ are omitted above only because they need per-customer values.
 | `--code-genome` | defaults to 50 generations × 30 population = 1500 fitness evaluations; it did not finish in 300 s on a 3-line file. With `--genome-generations 2 --genome-population 4` it takes 2 s. Real but expensive — choose deliberately. |
 | `--temporal-keys` | **inert and slow** — ~19 s of hashing to produce metadata nothing reads; its verifier proves nothing. See the CLI reference note. |
 | `--crypto-binding` | build-time validation only; nothing decrypts at run time, and the chain secret is no longer written into `payload.h`. |
-| `--hpc-detect`, `--cache-bound`, `--hw-entropy`, `--branch-entangle`, `--multicore-entangle` | **archived** — the backend has no call path; they log and continue. |
 | `--driver-check` | read-only BYOVD enumeration; useful, but it enumerates the *host's* drivers and is a separate decision from hardening the artefact. |
 
 ### Verifying a hardened build
@@ -215,7 +214,7 @@ Level 0 is a **byte-for-byte no-op** (asserted by `tests/test_pipeline_wiring.py
 `tests/test_opt_enforcement.py`), so you can diff a build against its source.
 
 Beyond the ladder: `--ssa-mutation`, `--cfg-mutation`, `--class-dispatch`,
-`--struct-randomization`, `--branch-entangle`, `--multicore-entangle`,
+`--struct-randomization`,
 `--speculation-obfuscation`, `--data-obfuscation`, `--micro-fragment`,
 `--fragment`, `--per-exec-recompile`, `--self-healing`.
 
@@ -337,7 +336,7 @@ Every option `scripts/build.py` accepts, generated from its own `--help` by
 `scripts/gen_cli_reference.py` and checked by `tests/test_readme_matches_cli.py`,
 so it cannot drift. Editorial notes are marked where a flag is inert or archived.
 
-**268 options.**
+**263 options.**
 
 ### Input, output and build control
 
@@ -375,7 +374,6 @@ so it cannot drift. Editorial notes are marked where a flag is inert or archived
 | `--adversarial-injection` | Enable adversarial dead code + prompt injection |
 | `--adversarial-level {1,2,3,4,5}` | Adversarial injection aggressiveness (1-5, default: 3) |
 | `--adversarial-loop` | Enable self-improving obfuscation via deobfuscation agent |
-| `--branch-entangle` | Enable branch predictor entanglement (Item 125) **Archived** — logs and continues; no entanglement is emitted. |
 | `--cfg-mutation` | Enable live CFG mutation (variant basic-block ordering) |
 | `--cfg-mutation-variants CFG_MUTATION_VARIANTS` | Number of CFG orderings per function (default: 4) |
 | `--class-dispatch` | Enable execution-path-specific JIT codegen |
@@ -390,7 +388,6 @@ so it cannot drift. Editorial notes are marked where a flag is inert or archived
 | `--lowering LOWERING` | Semantic-lowering families CSV (io,scalar,string,conta iner,service,protocol,function,import,fusion + opt-in: arithmetic,truth,slice,format,augassign); default '' = disabled |
 | `--micro-fragment` | Enable micro-fragment execution (decrypt->execute->wipe each fragment) |
 | `--micro-fragment-size MICRO_FRAGMENT_SIZE` | Bytes per micro-fragment (default: 64) |
-| `--multicore-entangle` | Enable multi-core timing entanglement (Item 126) **Archived** — logs and continues; no entanglement is emitted. |
 | `--no-audit-hook-plant` | [LOADER ONLY -- ignored by this pipeline] Omit the site-packages audit-hook plant detector from the loader (default: detector ON) |
 | `--no-bogus-exceptions` | Disable fake exception handlers (default: on) |
 | `--no-cfg-flatten` | Disable control-flow flattening (default: on) |
@@ -525,7 +522,6 @@ so it cannot drift. Editorial notes are marked where a flag is inert or archived
 | `--gpu-execution` | Enable GPU fragment execution with hardware detection (Item 125) |
 | `--gpu-hybrid` | Enable CPU/GPU hybrid protection (Item 126) |
 | `--hpc` | Enable hardware performance counter integration (Item 120) |
-| `--hpc-detect` | Enable emulator detection via HPC (Item 122) **Archived** — the native backend has no call path; logs and continues. |
 | `--hpc-key` | Enable HPC-based key derivation (Item 121) |
 | `--kernel-assist` | Enable kernel-assisted execution research (Linux) |
 | `--kernel-assist-features KERNEL_ASSIST_FEATURES` | Comma-separated kernel features to enable (default: all detected) |
@@ -632,7 +628,6 @@ so it cannot drift. Editorial notes are marked where a flag is inert or archived
 | `--ai-guided-diversity` | Enable AI-guided evolutionary diversity generation |
 | `--apply-synthesis` | Apply synthesis plan flags to pipeline configuration |
 | `--build-id BUILD_ID` | Stable build id: seeds the semantic-lowering kernel and is recorded in the signature sidecar, so two builds with the same --build-id lower identically. It does not by itself make the whole build reproducible (default: empty = random per build) |
-| `--cache-bound` | Enable cache-bound execution (Item 124) **Archived** — the native backend has no call path; logs and continues. |
 | `--context-saturation` | Compute context window saturation metrics |
 | `--cross-process` | Enable cross-process fragment binding (Item 111) |
 | `--deobfuscation-threshold DEOBFUSCATION_THRESHOLD` | Minimum deobfuscation score (default: 0.7) |
@@ -641,7 +636,6 @@ so it cannot drift. Editorial notes are marked where a flag is inert or archived
 | `--flow-entangle` | Enable whitebox-flow entanglement (crypto-state- dependent control flow) |
 | `--function-intent` | Enable function intent obfuscation |
 | `-h, --help` | show this help message and exit |
-| `--hw-entropy` | Enable hardware entropy loop (Item 123) **Archived** — the native backend has no call path; logs and continues. |
 | `--kod` | [LOADER ONLY -- ignored by this pipeline] Arm loader kill-on-detect: the VM snippet reads NIXON_KOD env at runtime (default: report-only) |
 | `--max-cpu-overhead MAX_CPU_OVERHEAD` | Max CPU overhead percentage (default: 20) |
 | `--max-size-mult MAX_SIZE_MULT` | Max binary size multiplier (default: 3.0) |

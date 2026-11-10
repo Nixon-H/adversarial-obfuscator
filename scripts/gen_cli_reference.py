@@ -238,11 +238,6 @@ NOTES = {
         "the build to validate them; nothing decrypts at run time. The chain "
         "secret is deliberately not written into `payload.h`."
     ),
-    "hpc-detect": "**Archived** — the native backend has no call path; logs and continues.",
-    "cache-bound": "**Archived** — the native backend has no call path; logs and continues.",
-    "hw-entropy": "**Archived** — the native backend has no call path; logs and continues.",
-    "branch-entangle": "**Archived** — logs and continues; no entanglement is emitted.",
-    "multicore-entangle": "**Archived** — logs and continues; no entanglement is emitted.",
 }
 
 
