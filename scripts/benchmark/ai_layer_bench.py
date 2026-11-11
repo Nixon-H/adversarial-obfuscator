@@ -315,10 +315,62 @@ def _score(answer_text: str, parsed: dict | None) -> dict:
 def _call_model(model: str, provider: str, prompt: str,
                 artefact_text: str, timeout: int) -> dict:
     if provider == "auto":
-        provider = "zen" if model.startswith("deepseek-v4") else "openrouter"
+        if model.startswith("deepseek-v4"):
+            provider = "zen"
+        elif model.startswith("Qwen/"):
+            provider = "kern"
+        else:
+            provider = "openrouter"
     if provider == "zen":
         return _zen(model, prompt, artefact_text, timeout)
+    if provider == "kern":
+        return _kern(model, prompt, artefact_text, timeout)
     return _openrouter(model, prompt, artefact_text, timeout)
+
+
+def _kern(model: str, prompt: str, artefact_text: str, timeout: int) -> dict:
+    key = os.environ.get("KERN_API_KEY")
+    if not key:
+        raise RuntimeError("KERN_API_KEY is not set")
+    user = PROMPTS[prompt] + "\n\n" + ANSWER_SCHEMA + "\n\n" + artefact_text
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": user}],
+        "temperature": 0,
+        # Qwen's reasoning trace consumes the completion budget before it
+        # emits content; 4k was exhausted without a final answer.
+        "max_tokens": 16384,
+    })
+    cmd = [
+        "curl", "-sS", "-w", "\n__HTTP_STATUS__%{http_code}",
+        "-H", f"Authorization: Bearer {key}",
+        "-H", "Content-Type: application/json",
+        "--data-binary", "@-", "--max-time", str(timeout),
+        "https://api.kern-llm.org/v1/chat/completions",
+    ]
+    last_error = None
+    for attempt in range(4):
+        proc = subprocess.run(cmd, input=body, capture_output=True, text=True,
+                              timeout=timeout + 10)
+        out = proc.stdout
+        marker = "__HTTP_STATUS__"
+        if marker not in out:
+            last_error = f"curl failed rc={proc.returncode}: {proc.stderr[:400]}"
+            time.sleep(min(30, 5 * (attempt + 1)))
+            continue
+        payload, _, status = out.rpartition(marker)
+        status = status.strip()
+        if status.startswith("2"):
+            try:
+                return json.loads(payload)
+            except json.JSONDecodeError as exc:
+                last_error = f"bad JSON from Kern: {exc}: {payload[:300]}"
+        else:
+            last_error = f"HTTP {status}: {payload[:500]}"
+            if status in ("401", "403"):
+                break
+        time.sleep(min(30, 5 * (attempt + 1)))
+    raise RuntimeError(last_error or "Kern request failed")
 
 
 def _zen(model: str, prompt: str, artefact_text: str, timeout: int) -> dict:
@@ -330,7 +382,7 @@ def _zen(model: str, prompt: str, artefact_text: str, timeout: int) -> dict:
         "model": model,
         "messages": [{"role": "user", "content": user}],
         "temperature": 0,
-        "max_tokens": 1200,
+        "max_tokens": 4096,
     })
     session = "ses_bench_" + uuid.uuid4().hex[:16]
     request = "msg_bench_" + uuid.uuid4().hex[:16]
@@ -380,7 +432,7 @@ def _openrouter(model: str, prompt: str, artefact_text: str, timeout: int) -> di
         "model": model,
         "messages": [{"role": "user", "content": user}],
         "temperature": 0,
-        "max_tokens": 1200,
+        "max_tokens": 4096,
     })
     # curl, not urllib: the free-tier endpoints can stall one resolver path;
     # curl follows the working path and returns the HTTP status cleanly.
@@ -483,8 +535,8 @@ def main() -> int:
     parser.add_argument("--arms", default=",".join(ARMS))
     parser.add_argument("--models", default="nvidia/nemotron-3-ultra-550b-a55b:free")
     parser.add_argument("--provider", default="auto",
-                        choices=["auto", "openrouter", "zen"],
-                        help="auto uses zen for deepseek-v4* and openrouter otherwise")
+                        choices=["auto", "openrouter", "zen", "kern"],
+                        help="auto uses zen for deepseek-v4*, kern for Qwen/*, openrouter otherwise")
     parser.add_argument("--trials", type=int, default=1)
     parser.add_argument("--surface-limit", type=int, default=42000,
                         help="max artefact chars sent whole; larger artefacts are head/tail+strings")
@@ -535,12 +587,18 @@ def main() -> int:
 
     cells: list[dict] = []
     has_key = bool(os.environ.get("OPENROUTER_API_KEY")
-                   or os.environ.get("OPENCODE_API_KEY"))
+                   or os.environ.get("OPENCODE_API_KEY")
+                   or os.environ.get("KERN_API_KEY"))
     if has_key:
         for model in models:
             provider = args.provider
             if provider == "auto":
-                provider = "zen" if model.startswith("deepseek-v4") else "openrouter"
+                if model.startswith("deepseek-v4"):
+                    provider = "zen"
+                elif model.startswith("Qwen/"):
+                    provider = "kern"
+                else:
+                    provider = "openrouter"
             for arm in arms:
                 artefact = (out_dir / f"{arm}.py").read_text(encoding="utf-8")
                 for prompt in PROMPTS:
