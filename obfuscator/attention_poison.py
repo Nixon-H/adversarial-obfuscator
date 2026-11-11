@@ -6,6 +6,7 @@ attention windows.
 """
 
 import ast
+import copy
 import random
 
 
@@ -32,13 +33,13 @@ class AttentionPoisonInjector(ast.NodeTransformer):
         )
 
     def _clone_stmt(self, stmt: ast.stmt) -> ast.stmt:
-        try:
-            return ast.parse(ast.unparse(stmt)).body[0]
-        except (AttributeError, ValueError) as _e:
-            import logging as _lg
-            _lg.warning(f"Attention poison failed on statement: {_e}")
-            ast.fix_missing_locations(stmt)
-            return ast.parse(ast.unparse(stmt)).body[0]
+        # Deep-copy the subtree instead of unparse->parse. The unparse route
+        # used to emit noisy warnings when upstream passes had injected nodes
+        # without locations, and the fallback was the same work done again.
+        # Locations are repaired after cloning; the pipeline already calls
+        # fix_missing_locations on the whole tree.
+        cloned = copy.deepcopy(stmt)
+        return ast.fix_missing_locations(cloned)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
         self.input_ast_nodes += self._count_nodes(node)
