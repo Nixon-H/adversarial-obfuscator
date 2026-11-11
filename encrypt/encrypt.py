@@ -107,7 +107,7 @@ def encrypt_binary(input_path: str, output_path: str,
         else:
             degradation_config = {'microjit_seed': microjit_seed}
 
-    metadata = _build_shadorenc_metadata(seed, block_size, num_blocks,
+    metadata = _build_shadorenc_metadata(block_size, num_blocks,
                                          text_size, entry_offset_in_text,
                                          len(stub), degradation_config,
                                          enable_exec_guard)
@@ -137,21 +137,24 @@ def _split_blocks(data: bytes, block_size: int) -> list[bytes]:
     return blocks
 
 
-def _build_shadorenc_metadata(seed: bytes, block_size: int,
+def _build_shadorenc_metadata(block_size: int,
                                num_blocks: int, text_size: int,
                                original_entry: int,
                                stub_size: int,
                                degradation_config: dict | None = None,
                                enable_exec_guard: bool = False) -> bytes:
+    # The seed is deliberately NOT written here. The decryptor stub carries the
+    # keystream it needs; storing the seed beside the ciphertext would hand a
+    # reader the ability to derive every block key. The detector's finding is
+    # correct for the old layout; this is the layout fix.
     data = b''
     data += struct.pack('<I', 0x4E4958)
-    data += struct.pack('<I', 1)
+    data += struct.pack('<I', 2)
     data += struct.pack('<I', block_size)
     data += struct.pack('<I', num_blocks)
     data += struct.pack('<I', text_size)
     data += struct.pack('<I', original_entry)
     data += struct.pack('<I', stub_size)
-    data += seed
     if degradation_config:
         deg_flags = degradation_config.get('degradation_flags', 0)
         data += struct.pack('<I', deg_flags)
@@ -215,7 +218,7 @@ def encrypt_binary_per_block(input_path: str, output_path: str,
     elf.replace_text(new_text, add_stub_size=len(new_text) - len(text_data))
     elf.set_entry_point(new_entry)
 
-    metadata = _build_shadorenc_metadata(seed, block_size, num_blocks,
+    metadata = _build_shadorenc_metadata(block_size, num_blocks,
                                          len(text_data), entry_offset_in_text,
                                          len(new_text) - len(text_data),
                                          degradation_config,

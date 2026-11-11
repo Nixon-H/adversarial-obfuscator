@@ -9,6 +9,43 @@ import time
 from dataclasses import dataclass
 from typing import Dict, Optional
 
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.exceptions import InvalidTag
+except ImportError:  # pragma: no cover - environment without cryptography
+    AESGCM = None
+    InvalidTag = ValueError
+
+_AAD = b"nixon-remote-unlock/1"
+
+
+def _as_bytes(value) -> Optional[bytes]:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value
+    return str(value).encode("utf-8")
+
+
+def _seal_message(obj: dict, key: bytes) -> bytes:
+    if AESGCM is None:
+        raise RuntimeError(
+            "remote unlock network transport requires cryptography (AES-GCM); "
+            "refusing to send a plaintext secret")
+    nonce = os.urandom(12)
+    body = json.dumps(obj, separators=(",", ":")).encode("utf-8")
+    return nonce + AESGCM(key).encrypt(nonce, body, _AAD)
+
+
+def _open_message(blob: bytes, key: bytes) -> dict:
+    if AESGCM is None:
+        raise RuntimeError("remote unlock network transport requires cryptography")
+    if len(blob) < 13:
+        raise ValueError("short sealed message")
+    nonce, ciphertext = blob[:12], blob[12:]
+    body = AESGCM(key).decrypt(nonce, ciphertext, _AAD)
+    return json.loads(body.decode("utf-8"))
+
 
 @dataclass
 class UnlockToken:
@@ -36,9 +73,25 @@ class UnlockToken:
 
 
 class RemoteUnlockServer:
-    def __init__(self, server_secret: Optional[bytes] = None, token_ttl: float = 30.0):
+    def __init__(self, server_secret: Optional[bytes] = None, token_ttl: float = 30.0,
+                 enrollment_token: Optional[bytes] = None,
+                 transport_key: Optional[bytes] = None):
         self.server_secret = server_secret or os.urandom(32)
         self.token_ttl = token_ttl
+        # The enrollment token authenticates a registration. The transport key
+        # encrypts every network message. Both are configuration inputs; the
+        # defaults are ephemeral so a local server/client pair still works, and
+        # a real deployment must supply them through the environment.
+        self.enrollment_token = (
+            _as_bytes(enrollment_token)
+            or _as_bytes(os.environ.get("NIXON_REMOTE_UNLOCK_ENROLL"))
+            or os.urandom(32)
+        )
+        self.transport_key = (
+            _as_bytes(transport_key)
+            or _as_bytes(os.environ.get("NIXON_REMOTE_UNLOCK_TRANSPORT"))
+            or os.urandom(32)
+        )
         self._issued_tokens: Dict[int, UnlockToken] = {}
         self._client_secrets: Dict[bytes, bytes] = {}
         self._lock = threading.Lock()
@@ -97,13 +150,18 @@ class RemoteUnlockServer:
                     break
             if not data:
                 return
-            msg = json.loads(data.decode("utf-8"))
+            msg = _open_message(data, self.transport_key)
             action = msg.get("action")
             if action == "register":
                 client_id = bytes.fromhex(msg["client_id"])
-                client_secret = bytes.fromhex(msg["client_secret"])
-                self.register_client(client_id, client_secret)
-                response = {"status": "ok"}
+                expected_auth = hmac.new(
+                    self.enrollment_token, client_id, hashlib.sha256).hexdigest()
+                if not hmac.compare_digest(str(msg.get("auth", "")), expected_auth):
+                    response = {"status": "error", "reason": "enrollment_auth_failed"}
+                else:
+                    client_secret = bytes.fromhex(msg["client_secret"])
+                    self.register_client(client_id, client_secret)
+                    response = {"status": "ok"}
             elif action == "request_token":
                 fragment_id = msg["fragment_id"]
                 client_id = bytes.fromhex(msg["client_id"])
@@ -118,7 +176,7 @@ class RemoteUnlockServer:
                         response = {"status": "ok", "token": token.to_dict()}
             else:
                 response = {"status": "error", "reason": "unknown_action"}
-            conn.sendall(json.dumps(response).encode("utf-8"))
+            conn.sendall(_seal_message(response, self.transport_key))
         except Exception:
             pass
         finally:
@@ -176,15 +234,17 @@ class RemoteUnlockClient:
         self._host = host
         self._port = port
         self._server = server
-        server.register_client(self._client_id, self.local_secret)
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(5.0)
         sock.connect((host, port))
-        reg_msg = json.dumps({
+        auth = hmac.new(
+            server.enrollment_token, self._client_id, hashlib.sha256).hexdigest()
+        reg_msg = _seal_message({
             "action": "register",
             "client_id": self._client_id.hex(),
             "client_secret": self.local_secret.hex(),
-        }).encode("utf-8")
+            "auth": auth,
+        }, server.transport_key)
         sock.sendall(reg_msg)
         sock.close()
 
@@ -202,12 +262,12 @@ class RemoteUnlockClient:
                 sock.settimeout(5.0)
                 sock.connect((self._host, self._port))
                 sig = self._make_request_sig(fragment_id)
-                req_msg = json.dumps({
+                req_msg = _seal_message({
                     "action": "request_token",
                     "fragment_id": fragment_id,
                     "client_id": self._client_id.hex(),
                     "signature": sig.hex(),
-                }).encode("utf-8")
+                }, self._server.transport_key)
                 sock.sendall(req_msg)
                 sock.shutdown(socket.SHUT_WR)
                 response_data = b""
@@ -219,13 +279,13 @@ class RemoteUnlockClient:
                 sock.close()
                 if not response_data:
                     return self._fallback(fragment_id)
-                response = json.loads(response_data.decode("utf-8"))
+                response = _open_message(response_data, self._server.transport_key)
                 if response.get("status") == "ok" and "token" in response:
                     token = UnlockToken.from_dict(response["token"])
                     self._cached_tokens[fragment_id] = token
                     return token
                 return self._fallback(fragment_id)
-            except (socket.error, OSError, json.JSONDecodeError):
+            except (socket.error, OSError, json.JSONDecodeError, ValueError, InvalidTag):
                 return self._fallback(fragment_id)
 
         if self._server is not None:

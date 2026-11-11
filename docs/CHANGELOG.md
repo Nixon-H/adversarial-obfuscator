@@ -44,6 +44,20 @@ checks they agree).
 
 ### Fixed
 
+- **Remote unlock sent credentials in cleartext and accepted anonymous
+  registration.** Network messages now use AES-256-GCM with a configured
+  transport key, and registration requires an HMAC proof over the enrollment
+  token. Both values are read from `NIXON_REMOTE_UNLOCK_TRANSPORT` /
+  `NIXON_REMOTE_UNLOCK_ENROLL` or supplied explicitly; the module fails closed
+  without `cryptography` instead of falling back to plaintext.
+
+- **The binary-encryption metadata stored the key beside the ciphertext.**
+  `_build_shadorenc_metadata` appended the 32-byte AES seed to the
+  `.shadorenc` section. The decryptor stub already carries the keystream it
+  needs, so the seed was redundant. It is no longer emitted; the metadata
+  format version is bumped to 2. This is a layout fix, not a claim that a
+  self-decrypting stub hides plaintext from its holder.
+
 - **`--seed` did not reach the AST transformer.** `phase01_obfuscate.py`
   called `build_pipeline(..., extra_options={"seed": N})` but never passed
   `seed=`, so `ObfuscationTransformer` skipped its own `random.seed` and its
