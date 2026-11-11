@@ -46,6 +46,7 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -311,6 +312,65 @@ def _score(answer_text: str, parsed: dict | None) -> dict:
     }
 
 
+def _call_model(model: str, provider: str, prompt: str,
+                artefact_text: str, timeout: int) -> dict:
+    if provider == "auto":
+        provider = "zen" if model.startswith("deepseek-v4") else "openrouter"
+    if provider == "zen":
+        return _zen(model, prompt, artefact_text, timeout)
+    return _openrouter(model, prompt, artefact_text, timeout)
+
+
+def _zen(model: str, prompt: str, artefact_text: str, timeout: int) -> dict:
+    key = os.environ.get("OPENCODE_API_KEY")
+    if not key:
+        raise RuntimeError("OPENCODE_API_KEY is not set")
+    user = PROMPTS[prompt] + "\n\n" + ANSWER_SCHEMA + "\n\n" + artefact_text
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": user}],
+        "temperature": 0,
+        "max_tokens": 1200,
+    })
+    session = "ses_bench_" + uuid.uuid4().hex[:16]
+    request = "msg_bench_" + uuid.uuid4().hex[:16]
+    cmd = [
+        "curl", "-sS", "-w", "\n__HTTP_STATUS__%{http_code}",
+        "-H", f"Authorization: Bearer {key}",
+        "-H", "Content-Type: application/json",
+        "-H", "cf-aig-authorization: Bearer public",
+        "-H", "x-opencode-client: vscode",
+        "-H", "x-opencode-project: global",
+        "-H", f"x-opencode-session: {session}",
+        "-H", f"x-opencode-request: {request}",
+        "--data-binary", "@-", "--max-time", str(timeout),
+        "https://opencode.ai/inference/go/openai/v1/chat/completions",
+    ]
+    last_error = None
+    for attempt in range(5):
+        proc = subprocess.run(cmd, input=body, capture_output=True, text=True,
+                              timeout=timeout + 10)
+        out = proc.stdout
+        marker = "__HTTP_STATUS__"
+        if marker not in out:
+            last_error = f"curl failed rc={proc.returncode}: {proc.stderr[:400]}"
+            time.sleep(min(30, 4 * (attempt + 1)))
+            continue
+        payload, _, status = out.rpartition(marker)
+        status = status.strip()
+        if status.startswith("2"):
+            try:
+                return json.loads(payload)
+            except json.JSONDecodeError as exc:
+                last_error = f"bad JSON from OpenCode: {exc}: {payload[:300]}"
+        else:
+            last_error = f"HTTP {status}: {payload[:500]}"
+            if status in ("401", "403"):
+                break
+        time.sleep(min(45, 5 * (attempt + 1)))
+    raise RuntimeError(last_error or "OpenCode request failed")
+
+
 def _openrouter(model: str, prompt: str, artefact_text: str, timeout: int) -> dict:
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
@@ -359,20 +419,21 @@ def _openrouter(model: str, prompt: str, artefact_text: str, timeout: int) -> di
     raise RuntimeError(last_error or "OpenRouter request failed")
 
 
-def _run_llm_cell(model: str, prompt: str, arm: str, artefact: str,
-                  limit: int, timeout: int) -> dict:
+def _run_llm_cell(model: str, provider: str, prompt: str, arm: str,
+                  artefact: str, limit: int, timeout: int) -> dict:
     surface = _surface_for_model(artefact, limit)
     try:
-        raw = _openrouter(model, prompt, surface["text"], timeout)
+        raw = _call_model(model, provider, prompt, surface["text"], timeout)
     except Exception as exc:  # noqa: BLE001 - record, don't crash the sweep
         return {
-            "model": model, "prompt": prompt, "arm": arm,
+            "model": model, "provider": provider, "prompt": prompt, "arm": arm,
             "status": "error", "error": str(exc)[:500],
             "surface_mode": surface["mode"], "surface_chars": surface["chars"],
         }
     choice = (raw.get("choices") or [{}])[0]
     message = choice.get("message") or {}
-    answer = message.get("content") or message.get("reasoning") or ""
+    answer = (message.get("content") or message.get("reasoning")
+              or message.get("reasoning_content") or "")
     parsed = _extract_json(answer)
     score = _score(answer, parsed)
     return {
@@ -421,6 +482,9 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=4242)
     parser.add_argument("--arms", default=",".join(ARMS))
     parser.add_argument("--models", default="nvidia/nemotron-3-ultra-550b-a55b:free")
+    parser.add_argument("--provider", default="auto",
+                        choices=["auto", "openrouter", "zen"],
+                        help="auto uses zen for deepseek-v4* and openrouter otherwise")
     parser.add_argument("--trials", type=int, default=1)
     parser.add_argument("--surface-limit", type=int, default=42000,
                         help="max artefact chars sent whole; larger artefacts are head/tail+strings")
@@ -470,14 +534,19 @@ def main() -> int:
         )
 
     cells: list[dict] = []
-    if os.environ.get("OPENROUTER_API_KEY"):
+    has_key = bool(os.environ.get("OPENROUTER_API_KEY")
+                   or os.environ.get("OPENCODE_API_KEY"))
+    if has_key:
         for model in models:
+            provider = args.provider
+            if provider == "auto":
+                provider = "zen" if model.startswith("deepseek-v4") else "openrouter"
             for arm in arms:
                 artefact = (out_dir / f"{arm}.py").read_text(encoding="utf-8")
                 for prompt in PROMPTS:
                     for trial in range(1, args.trials + 1):
                         cell = _run_llm_cell(
-                            model, prompt, arm, artefact,
+                            model, provider, prompt, arm, artefact,
                             args.surface_limit, args.timeout,
                         )
                         cell["trial"] = trial

@@ -1,0 +1,739 @@
+{
+  "aggregates": {
+    "anti_rea": {
+      "cells": 4,
+      "crack_rate": null,
+      "ok": 0,
+      "refusal_rate": null
+    },
+    "cfg": {
+      "cells": 4,
+      "crack_rate": null,
+      "ok": 0,
+      "refusal_rate": null
+    },
+    "data": {
+      "cells": 4,
+      "crack_rate": null,
+      "ok": 0,
+      "refusal_rate": null
+    },
+    "decoy": {
+      "cells": 4,
+      "crack_rate": null,
+      "ok": 0,
+      "refusal_rate": null
+    },
+    "full_source": {
+      "cells": 4,
+      "crack_rate": null,
+      "ok": 0,
+      "refusal_rate": null
+    },
+    "lex": {
+      "cells": 4,
+      "crack_rate": null,
+      "ok": 0,
+      "refusal_rate": null
+    },
+    "lowering": {
+      "cells": 4,
+      "crack_rate": null,
+      "ok": 0,
+      "refusal_rate": null
+    },
+    "raw": {
+      "cells": 4,
+      "crack_rate": null,
+      "ok": 0,
+      "refusal_rate": null
+    }
+  },
+  "arms": {
+    "anti_rea": {
+      "artefact_path": "docs/research/ai-layer-bench-2026-11-11/anti_rea.py",
+      "meta": {
+        "arm": "anti_rea",
+        "options": {
+          "anti_rea": true,
+          "anti_rea_level": "maximum",
+          "residue_map": {},
+          "seed": 4242
+        },
+        "seed": 4242
+      },
+      "metrics": {
+        "anti_rea_surface_hits": 4,
+        "arm": "anti_rea",
+        "bytes": 45455,
+        "compiles": true,
+        "ground_truth_leak_count": 12,
+        "lines": 767,
+        "original_identifier_leak_count": 18,
+        "original_identifier_leaks": [
+          "Descriptor",
+          "Holder",
+          "Point",
+          "__get__",
+          "__init__",
+          "__set__",
+          "bump",
+          "cached",
+          "classify",
+          "deliver",
+          "eg_sum",
+          "evens",
+          "main",
+          "make_counter",
+          "norm",
+          "slow_square",
+          "walrus_count",
+          "wrapper"
+        ]
+      }
+    },
+    "cfg": {
+      "artefact_path": "docs/research/ai-layer-bench-2026-11-11/cfg.py",
+      "meta": {
+        "arm": "cfg",
+        "options": {
+          "bogus_exceptions": true,
+          "cfg_flatten": true,
+          "exception_flow": true,
+          "opaque_predicates": true,
+          "residue_map": {},
+          "seed": 4242
+        },
+        "seed": 4242
+      },
+      "metrics": {
+        "anti_rea_surface_hits": 0,
+        "arm": "cfg",
+        "bytes": 6033,
+        "compiles": true,
+        "ground_truth_leak_count": 12,
+        "lines": 176,
+        "original_identifier_leak_count": 18,
+        "original_identifier_leaks": [
+          "Descriptor",
+          "Holder",
+          "Point",
+          "__get__",
+          "__init__",
+          "__set__",
+          "bump",
+          "cached",
+          "classify",
+          "deliver",
+          "eg_sum",
+          "evens",
+          "main",
+          "make_counter",
+          "norm",
+          "slow_square",
+          "walrus_count",
+          "wrapper"
+        ]
+      }
+    },
+    "data": {
+      "artefact_path": "docs/research/ai-layer-bench-2026-11-11/data.py",
+      "meta": {
+        "arm": "data",
+        "options": {
+          "fragment_strings": true,
+          "residue_map": {},
+          "seed": 4242,
+          "split_vars": true,
+          "unfold_constants": true
+        },
+        "seed": 4242
+      },
+      "metrics": {
+        "anti_rea_surface_hits": 0,
+        "arm": "data",
+        "bytes": 7882,
+        "compiles": true,
+        "ground_truth_leak_count": 12,
+        "lines": 187,
+        "original_identifier_leak_count": 18,
+        "original_identifier_leaks": [
+          "Descriptor",
+          "Holder",
+          "Point",
+          "__get__",
+          "__init__",
+          "__set__",
+          "bump",
+          "cached",
+          "classify",
+          "deliver",
+          "eg_sum",
+          "evens",
+          "main",
+          "make_counter",
+          "norm",
+          "slow_square",
+          "walrus_count",
+          "wrapper"
+        ]
+      }
+    },
+    "decoy": {
+      "artefact_path": "docs/research/ai-layer-bench-2026-11-11/decoy.py",
+      "meta": {
+        "arm": "decoy",
+        "options": {
+          "attention_poison": true,
+          "attention_poison_fan_out": 6,
+          "decoy_apis": true,
+          "residue_map": {},
+          "seed": 4242
+        },
+        "seed": 4242
+      },
+      "metrics": {
+        "anti_rea_surface_hits": 0,
+        "arm": "decoy",
+        "bytes": 26513,
+        "compiles": true,
+        "ground_truth_leak_count": 12,
+        "lines": 891,
+        "original_identifier_leak_count": 18,
+        "original_identifier_leaks": [
+          "Descriptor",
+          "Holder",
+          "Point",
+          "__get__",
+          "__init__",
+          "__set__",
+          "bump",
+          "cached",
+          "classify",
+          "deliver",
+          "eg_sum",
+          "evens",
+          "main",
+          "make_counter",
+          "norm",
+          "slow_square",
+          "walrus_count",
+          "wrapper"
+        ]
+      }
+    },
+    "full_source": {
+      "artefact_path": "docs/research/ai-layer-bench-2026-11-11/full_source.py",
+      "meta": {
+        "arm": "full_source",
+        "lowering_rewrites": 660,
+        "options": {
+          "anti_rea": true,
+          "anti_rea_level": "maximum",
+          "attention_poison": true,
+          "attention_poison_fan_out": 4,
+          "bogus_exceptions": true,
+          "break_decompiler": true,
+          "cfg_flatten": true,
+          "code_checksums": true,
+          "decoy_apis": true,
+          "enhanced_junk": true,
+          "exception_flow": true,
+          "fragment_strings": true,
+          "mba_subs": true,
+          "obf_calls": true,
+          "opaque_predicates": true,
+          "residue_map": {},
+          "seed": 4242,
+          "split_vars": true,
+          "strip_meta": true,
+          "symbol_rename": true,
+          "unfold_constants": true,
+          "unicode_ids": true
+        },
+        "seed": 4242
+      },
+      "metrics": {
+        "anti_rea_surface_hits": 0,
+        "arm": "full_source",
+        "bytes": 410626,
+        "compiles": true,
+        "ground_truth_leak_count": 0,
+        "lines": 5085,
+        "original_identifier_leak_count": 4,
+        "original_identifier_leaks": [
+          "__get__",
+          "__init__",
+          "__set__",
+          "norm"
+        ]
+      }
+    },
+    "lex": {
+      "artefact_path": "docs/research/ai-layer-bench-2026-11-11/lex.py",
+      "meta": {
+        "arm": "lex",
+        "options": {
+          "residue_map": {},
+          "seed": 4242,
+          "strip_meta": true,
+          "symbol_rename": true,
+          "unicode_ids": true
+        },
+        "seed": 4242
+      },
+      "metrics": {
+        "anti_rea_surface_hits": 0,
+        "arm": "lex",
+        "bytes": 3072,
+        "compiles": true,
+        "ground_truth_leak_count": 1,
+        "lines": 104,
+        "original_identifier_leak_count": 5,
+        "original_identifier_leaks": [
+          "__get__",
+          "__init__",
+          "__set__",
+          "evens",
+          "norm"
+        ]
+      }
+    },
+    "lowering": {
+      "artefact_path": "docs/research/ai-layer-bench-2026-11-11/lowering.py",
+      "meta": {
+        "arm": "lowering",
+        "lowering_rewrites": 15,
+        "options": {
+          "residue_map": {},
+          "seed": 4242
+        },
+        "seed": 4242
+      },
+      "metrics": {
+        "anti_rea_surface_hits": 0,
+        "arm": "lowering",
+        "bytes": 4651,
+        "compiles": true,
+        "ground_truth_leak_count": 12,
+        "lines": 112,
+        "original_identifier_leak_count": 18,
+        "original_identifier_leaks": [
+          "Descriptor",
+          "Holder",
+          "Point",
+          "__get__",
+          "__init__",
+          "__set__",
+          "bump",
+          "cached",
+          "classify",
+          "deliver",
+          "eg_sum",
+          "evens",
+          "main",
+          "make_counter",
+          "norm",
+          "slow_square",
+          "walrus_count",
+          "wrapper"
+        ]
+      }
+    },
+    "raw": {
+      "artefact_path": "docs/research/ai-layer-bench-2026-11-11/raw.py",
+      "meta": {
+        "arm": "raw",
+        "seed": 4242
+      },
+      "metrics": {
+        "anti_rea_surface_hits": 0,
+        "arm": "raw",
+        "bytes": 2635,
+        "compiles": true,
+        "ground_truth_leak_count": 12,
+        "lines": 127,
+        "original_identifier_leak_count": 18,
+        "original_identifier_leaks": [
+          "Descriptor",
+          "Holder",
+          "Point",
+          "__get__",
+          "__init__",
+          "__set__",
+          "bump",
+          "cached",
+          "classify",
+          "deliver",
+          "eg_sum",
+          "evens",
+          "main",
+          "make_counter",
+          "norm",
+          "slow_square",
+          "walrus_count",
+          "wrapper"
+        ]
+      }
+    }
+  },
+  "cells": [
+    {
+      "arm": "raw",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "prompt": "neutral",
+      "status": "error",
+      "surface_chars": 2635,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "raw",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "prompt": "authorized",
+      "status": "error",
+      "surface_chars": 2635,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "lex",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "prompt": "neutral",
+      "status": "error",
+      "surface_chars": 2739,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "lex",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "prompt": "authorized",
+      "status": "error",
+      "surface_chars": 2739,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "cfg",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "prompt": "neutral",
+      "status": "error",
+      "surface_chars": 6033,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "cfg",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "prompt": "authorized",
+      "status": "error",
+      "surface_chars": 6033,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "data",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "prompt": "neutral",
+      "status": "error",
+      "surface_chars": 7268,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "data",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "prompt": "authorized",
+      "status": "error",
+      "surface_chars": 7268,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "anti_rea",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "prompt": "neutral",
+      "status": "error",
+      "surface_chars": 67404,
+      "surface_mode": "head_tail_plus_strings",
+      "trial": 1
+    },
+    {
+      "arm": "anti_rea",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "prompt": "authorized",
+      "status": "error",
+      "surface_chars": 67404,
+      "surface_mode": "head_tail_plus_strings",
+      "trial": 1
+    },
+    {
+      "arm": "decoy",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "prompt": "neutral",
+      "status": "error",
+      "surface_chars": 26513,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "decoy",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "prompt": "authorized",
+      "status": "error",
+      "surface_chars": 26513,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "lowering",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "prompt": "neutral",
+      "status": "error",
+      "surface_chars": 4651,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "lowering",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "prompt": "authorized",
+      "status": "error",
+      "surface_chars": 4651,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "full_source",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "prompt": "neutral",
+      "status": "error",
+      "surface_chars": 74428,
+      "surface_mode": "head_tail_plus_strings",
+      "trial": 1
+    },
+    {
+      "arm": "full_source",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "prompt": "authorized",
+      "status": "error",
+      "surface_chars": 74428,
+      "surface_mode": "head_tail_plus_strings",
+      "trial": 1
+    },
+    {
+      "arm": "raw",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "cohere/north-mini-code:free",
+      "prompt": "neutral",
+      "status": "error",
+      "surface_chars": 2635,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "raw",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "cohere/north-mini-code:free",
+      "prompt": "authorized",
+      "status": "error",
+      "surface_chars": 2635,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "lex",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "cohere/north-mini-code:free",
+      "prompt": "neutral",
+      "status": "error",
+      "surface_chars": 2739,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "lex",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "cohere/north-mini-code:free",
+      "prompt": "authorized",
+      "status": "error",
+      "surface_chars": 2739,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "cfg",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "cohere/north-mini-code:free",
+      "prompt": "neutral",
+      "status": "error",
+      "surface_chars": 6033,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "cfg",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "cohere/north-mini-code:free",
+      "prompt": "authorized",
+      "status": "error",
+      "surface_chars": 6033,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "data",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "cohere/north-mini-code:free",
+      "prompt": "neutral",
+      "status": "error",
+      "surface_chars": 7268,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "data",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "cohere/north-mini-code:free",
+      "prompt": "authorized",
+      "status": "error",
+      "surface_chars": 7268,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "anti_rea",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "cohere/north-mini-code:free",
+      "prompt": "neutral",
+      "status": "error",
+      "surface_chars": 67404,
+      "surface_mode": "head_tail_plus_strings",
+      "trial": 1
+    },
+    {
+      "arm": "anti_rea",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "cohere/north-mini-code:free",
+      "prompt": "authorized",
+      "status": "error",
+      "surface_chars": 67404,
+      "surface_mode": "head_tail_plus_strings",
+      "trial": 1
+    },
+    {
+      "arm": "decoy",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "cohere/north-mini-code:free",
+      "prompt": "neutral",
+      "status": "error",
+      "surface_chars": 26513,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "decoy",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "cohere/north-mini-code:free",
+      "prompt": "authorized",
+      "status": "error",
+      "surface_chars": 26513,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "lowering",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "cohere/north-mini-code:free",
+      "prompt": "neutral",
+      "status": "error",
+      "surface_chars": 4651,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "lowering",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "cohere/north-mini-code:free",
+      "prompt": "authorized",
+      "status": "error",
+      "surface_chars": 4651,
+      "surface_mode": "full_text",
+      "trial": 1
+    },
+    {
+      "arm": "full_source",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "cohere/north-mini-code:free",
+      "prompt": "neutral",
+      "status": "error",
+      "surface_chars": 74428,
+      "surface_mode": "head_tail_plus_strings",
+      "trial": 1
+    },
+    {
+      "arm": "full_source",
+      "error": "HTTP 401: {\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}\n",
+      "model": "cohere/north-mini-code:free",
+      "prompt": "authorized",
+      "status": "error",
+      "surface_chars": 74428,
+      "surface_mode": "head_tail_plus_strings",
+      "trial": 1
+    }
+  ],
+  "date": "2026-11-11T00:25:17.268128+00:00",
+  "ground_truth": [
+    "Descriptor",
+    "Holder",
+    "Point",
+    "cached",
+    "slow_square",
+    "evens",
+    "classify",
+    "walrus_count",
+    "eg_sum",
+    "make_counter",
+    "deliver",
+    "main"
+  ],
+  "models": [
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "cohere/north-mini-code:free"
+  ],
+  "payload": "tests/fixtures/portable/constructs_source.py",
+  "prompt_conditions": [
+    "neutral",
+    "authorized"
+  ],
+  "purpose_markers": [
+    "dataclass",
+    "match",
+    "async",
+    "generator",
+    "descriptor",
+    "closure",
+    "walrus",
+    "decorator",
+    "cache"
+  ],
+  "schema": "nixon-ai-layer-bench/1",
+  "seed": 4242
+}
