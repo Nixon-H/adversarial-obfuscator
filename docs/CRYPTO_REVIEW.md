@@ -83,14 +83,16 @@ The field is removed; reconstruction uses the holder's own secret.
   paths; per-build keys reduce reuse risk but a proof is not recorded here.
 - **No side-channel review** of the pure-Python ciphers (timing, memory
   retention beyond `scrub_memory`).
-- **The relay remote-unlock protocol remains plaintext TCP** with no server
-  authentication; registration has no enrollment check. Research-only;
-  documented, not fixed here.
-- **`encrypt/encrypt.py` is a self-decrypting packer by design.** It stores the
-  32-byte seed in `.shadorenc` metadata and embeds the bulk keystream in the
-  decryptor stub. That is what makes the artefact self-decrypting; it is also
-  why the scheme cannot be confidential against the artefact holder. Treat it
-  as obfuscation, not encryption, until a run-time key source exists.
+- **Remote unlock now encrypts and authenticates (fixed).** Network messages
+  use AES-256-GCM under a configured transport key, and registration requires
+  an HMAC proof over the enrollment token. It still lacks forward secrecy and
+  a public-key enrollment story; the shared keys must come from configuration.
+- **`encrypt/encrypt.py` is a self-decrypting packer by design.** It no longer
+  stores the 32-byte seed in `.shadorenc` metadata, but the decryptor stub
+  still embeds the bulk keystream. That is what makes the artefact
+  self-decrypting; it is also why the scheme cannot be confidential against
+  the artefact holder. Treat it as obfuscation, not encryption, until a
+  run-time key source exists.
 
 ---
 
