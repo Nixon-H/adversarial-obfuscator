@@ -1,0 +1,226 @@
+{
+  "answer": "The file is fully readable plain Python source \u2014 no obfuscation, no loader, no embedded encrypted payload. I read all 126 lines and confirmed the structure with an AST summary.\n\n**Findings:**\n- **Top-level classes:** `Descriptor` (a simple data descriptor with `__get__`/`__set__`), `Holder` (uses `Descriptor` as a class attribute), `Point` (a `@dataclasses.dataclass` with `x`, `y` and a `norm()` method).\n- **Top-level functions:** `cached` (memoizing decorator using `functools.wraps`), `slow_square` (decorated with `@cached`), `evens` (generator), `classify` (uses `match`/`case` on `Point`), `walrus_count` (uses the walrus operator), `eg_sum` (try/except; comment notes `except*` is only exercised in a 3.11+ payload), `make_counter` (closure factory), `deliver` (async function using `await asyncio.sleep(0)`), and `main` (drives everything, prints deterministic results, ends with `\"OK\"`).\n- **Purpose:** A self-contained demo/test payload exercising Python constructs (async, generators, dataclasses, match, decorators, walrus, descriptors, closures, comprehensions) that a build pipeline can compare against its source by printing deterministic output. It is not a loader and contains no encrypted payload.\n- **Secrets:** None. I searched for credential-like terms (password, key, token, secret, api) \u2014 no matches. The only string constants are print labels and the exception message `\"empty\"`.\n\n{\"names\": [\"Descriptor\", \"Holder\", \"Point\", \"cached\", \"slow_square\", \"evens\", \"classify\", \"walrus_count\", \"eg_sum\", \"make_counter\", \"deliver\", \"main\"], \"purpose\": \"Plain, unobfuscated Python demo payload that exercises assorted language constructs (descriptors, dataclasses, a memoizing decorator, generators, match statements, the walrus operator, closures, async/await, and a plain except standing in for except* on 3.10). main() runs each construct and prints deterministic results ending with 'OK' so a build can be compared against its source. It is not a loader and contains no encrypted payload.\", \"secrets\": [], \"confidence\": 0.97, \"refused\": false, \"evidence\": [\"Module docstring: 'Payload covering the constructs the demo does not: async, generators, dataclasses, match, decorators with arguments, walrus, descriptors, closures, comprehensions. Prints a deterministic result so a build can be compared against its source.'\", \"AST summary top_level_symbols: ClassDef:Descriptor, ClassDef:Holder, ClassDef:Point, FunctionDef:cached, FunctionDef:slow_square, FunctionDef:evens, FunctionDef:classify, FunctionDef:walrus_count, FunctionDef:eg_sum, FunctionDef:make_counter, AsyncFunctionDef:deliver, FunctionDef:main\", \"main() (lines 109-123) prints labeled results for each construct and ends with print('OK'); file ends with a top-level main() call\", \"Grep for 'password', 'key', 'token', 'secret', 'api' returned no matches; only string constants are print labels and the ValueError message 'empty'\", \"Comment in eg_sum (lines 86-88) explains except* is exercised only in the 3.11+ payload, confirming this is a version-matrix test payload, not a loader\"]}",
+  "answer_chars": 3072,
+  "answer_complete": true,
+  "answer_excerpt": "The file is fully readable plain Python source \u2014 no obfuscation, no loader, no embedded encrypted payload. I read all 126 lines and confirmed the structure with an AST summary.\n\n**Findings:**\n- **Top-level classes:** `Descriptor` (a simple data descriptor with `__get__`/`__set__`), `Holder` (uses `Descriptor` as a class attribute), `Point` (a `@dataclasses.dataclass` with `x`, `y` and a `norm()` method).\n- **Top-level functions:** `cached` (memoizing decorator using `functools.wraps`), `slow_square` (decorated with `@cached`), `evens` (generator), `classify` (uses `match`/`case` on `Point`), `walrus_count` (uses the walrus operator), `eg_sum` (try/except; comment notes `except*` is only exercised in a 3.11+ payload), `make_counter` (closure factory), `deliver` (async function using `await asyncio.sleep(0)`), and `main` (drives everything, prints deterministic results, ends with `\"OK\"`).\n- **Purpose:** A self-contained demo/test payload exercising Python constructs (async, generators, dataclasses, match, decorators, walrus, descriptors, closures, comprehensions) that a build pipeline can compare against its source by printing deterministic output. It is not a loader and contains no encrypted payload.\n- **Secrets:** None. I searched for credential-like terms (password, key, token, secret, api) \u2014 no matches. The only string constants are print labels and the exception message `\"empty\"`.\n\n{\"names\": [\"Descriptor\", \"Holder\", \"Point\", \"cached\", \"slow_square\", \"evens\", \"classify\", \"walrus_count\", \"eg_sum\", \"make_counter\", \"deliver\", \"main\"], \"purpose\": \"Plain, unobfuscated Python demo payload that exercises assorted language constructs (descriptors, dataclasses, a memoizing decorator, generators, match statements, the walrus operator, closures, async/await, and a plain except standing in for except* on 3.10). main() runs each construct and prints deterministic results ending with 'OK' so a build can be compared against its source. It is not a loader and contains no encrypted payload.\", \"secrets\": [], \"confidence\": 0.97, \"refused\": false, \"evidence\": [\"Module docstring: 'Payload covering the constructs the demo does not: async, generators, dataclasses, match, decorators with arguments, walrus, descriptors, closures, comprehensions. Prints a deterministic result so a build can be compared against its source.'\", \"AST summary top_level_symbols: ClassDef:Descriptor, ClassDef:Holder, ClassDef:Point, FunctionDef:cached, FunctionDef:slow_square, FunctionDef:evens, FunctionDef:classify, FunctionDef:walrus_count, FunctionDef:eg_sum, FunctionDef:make_counter, AsyncFunctionDef:deliver, FunctionDef:main\", \"main() (lines 109-123) prints labeled results for each construct and ends with print('OK'); file ends with a top-level main() call\", \"Grep for 'password', 'key', 'token', 'secret', 'api' returned no matches; only string constants are print labels and the ValueError message 'empty'\", \"Comment in eg_sum (lines 86-88) explains except* is exercised only in the 3.11+ pa",
+  "artifact": "tests/fixtures/portable/constructs_source.py",
+  "artifact_bytes": 2635,
+  "artifact_sha256": "3e91993a41ca05bd3aa3ccdee4ae3a5a94e37dec6eff0a2b1ccb98f347f19f2d",
+  "condition": "neutral",
+  "confidence": 0.97,
+  "context_compactions": 0,
+  "cracked": true,
+  "date": "2026-11-11T10:27:14.947085+00:00",
+  "elapsed_s": 19.38,
+  "endpoint": "https://api.kern-llm.org/v1/chat/completions",
+  "errors": [],
+  "final_finish_reason": "stop",
+  "finish_reasons": [
+    {
+      "finish_reason": "tool_calls",
+      "round": 1
+    },
+    {
+      "finish_reason": "tool_calls",
+      "round": 2
+    },
+    {
+      "finish_reason": "tool_calls",
+      "round": 3
+    },
+    {
+      "finish_reason": "tool_calls",
+      "round": 4
+    },
+    {
+      "finish_reason": "tool_calls",
+      "round": 5
+    },
+    {
+      "finish_reason": "stop",
+      "round": 6
+    }
+  ],
+  "ground_truth": [
+    "Descriptor",
+    "Holder",
+    "Point",
+    "cached",
+    "slow_square",
+    "evens",
+    "classify",
+    "walrus_count",
+    "eg_sum",
+    "make_counter",
+    "deliver",
+    "main"
+  ],
+  "max_tool_output_chars": 6000,
+  "model": "Qwen/Qwen3.8-27B-FP8",
+  "name_count": 12,
+  "names_recovered": [
+    "Descriptor",
+    "Holder",
+    "Point",
+    "cached",
+    "classify",
+    "deliver",
+    "eg_sum",
+    "evens",
+    "main",
+    "make_counter",
+    "slow_square",
+    "walrus_count"
+  ],
+  "packed_purpose_identified": false,
+  "packed_purpose_markers": [],
+  "parsed_json": true,
+  "provider": "kern",
+  "purpose_markers": [
+    "dataclass",
+    "match",
+    "async",
+    "generator",
+    "descriptor",
+    "closure",
+    "walrus",
+    "decorator",
+    "cache"
+  ],
+  "purpose_recovered": true,
+  "recall": 1.0,
+  "refused": false,
+  "rounds": 6,
+  "sandbox": "temporary read-only copy; no shell, write, or network tool",
+  "schema": "nixon-kern-agent-bench/1",
+  "secrets_reported": 0,
+  "status": "ok",
+  "stop_reason": "answer",
+  "tool_call_count": 10,
+  "tool_calls": [
+    {
+      "arguments": {
+        "path": "/work"
+      },
+      "id": "call_b2c31994d64f4ef28061a985",
+      "result_chars": 42,
+      "result_excerpt": "1 file(s):\nconstructs_source.py\t2635 bytes",
+      "round": 1,
+      "status": "ok",
+      "tool": "list_files"
+    },
+    {
+      "arguments": {
+        "path": "/work/constructs_source.py"
+      },
+      "id": "call_f5ecabb5f595449e84ab0cbf",
+      "result_chars": 123,
+      "result_excerpt": "path: constructs_source.py\nbytes: 2635\nlines: 126\nsha256: 3e91993a41ca05bd3aa3ccdee4ae3a5a94e37dec6eff0a2b1ccb98f347f19f2d\n",
+      "round": 1,
+      "status": "ok",
+      "tool": "file_info"
+    },
+    {
+      "arguments": {
+        "limit": 60,
+        "offset": 1,
+        "path": "/work/constructs_source.py"
+      },
+      "id": "call_d53edadc920447e5938e3f78",
+      "result_chars": 1542,
+      "result_excerpt": "constructs_source.py lines 1-60 of 126\n     1\t\"\"\"Payload covering the constructs the demo does not: async, generators, dataclasses,\n     2\tmatch, decorators with arguments, walrus, descriptors, closures, comprehensions.\n     3\t\n     4\tPrints a deterministic result so a build can be compared against its source.\n     5\t\"\"\"\n     6\timport asyncio\n     7\timport dataclasses\n     8\timport functools\n     9\t\n    10\t\n    11\tclass Descriptor:\n    12\t    def __init__(self):\n    13\t        self._value = 0\n    14\t\n    15\t    def __get__(self, obj, objtype=None):\n    16\t        return self._value\n    17\t\n    18\t    def __set__(self, obj, value):\n    19\t        self._value = value\n    20\t\n    21\t\n    22\tclass Holder:\n    23\t    slot = Descriptor()\n    24\t\n    25\t\n    26\t@dataclasses.dataclass\n    27\tclass Point:\n    28\t    x: int\n    29\t    y: int\n    30\t\n    31\t    def norm(self):\n    32\t        return (self.x * self.x + self.y * self.y) ** 0.5\n    33\t\n    34\t\n    35\tdef cached(fn):\n    36\t    store = {}\n    37\t\n    38\t    @functools.wraps(fn)\n    39\t    def wrapper(*args):\n    40\t        if args not in store:\n    41\t            store[args] = fn(*args)\n    42\t        return store[args]\n    43\t\n  ",
+      "round": 2,
+      "status": "ok",
+      "tool": "read_file"
+    },
+    {
+      "arguments": {
+        "limit": 66,
+        "offset": 61,
+        "path": "/work/constructs_source.py"
+      },
+      "id": "call_30c4f8eadcd64618bbda44f8",
+      "result_chars": 2053,
+      "result_excerpt": "constructs_source.py lines 61-126 of 126\n    61\t            return \"origin\"\n    62\t        case Point(x=0):\n    63\t            return \"on-y\"\n    64\t        case Point(y=0):\n    65\t            return \"on-x\"\n    66\t        case Point():\n    67\t            return \"somewhere\"\n    68\t        case _:\n    69\t            return \"other\"\n    70\t\n    71\t\n    72\tdef walrus_count(values):\n    73\t    n = 0\n    74\t    while (chunk := values[n:n + 2]) != []:\n    75\t        n += 2\n    76\t    return n\n    77\t\n    78\t\n    79\tdef eg_sum(values):\n    80\t    result = 0\n    81\t    try:\n    82\t        if not values:\n    83\t            raise ValueError(\"empty\")\n    84\t        result = sum(values)\n    85\t    except ValueError:\n    86\t        # `except*` (exception groups) needs 3.11; this payload must parse on the\n    87\t        # oldest Python the matrix covers (3.10), so the star form is exercised\n    88\t        # only in the 3.11+ payload.\n    89\t        result = 0\n    90\t    return result\n    91\t\n    92\t\n    93\tdef make_counter():\n    94\t    count = 0\n    95\t\n    96\t    def bump():\n    97\t        nonlocal count\n    98\t        count += 1\n    99\t        return count\n   100\t\n   101\t    return bump\n   102\t\n",
+      "round": 3,
+      "status": "ok",
+      "tool": "read_file"
+    },
+    {
+      "arguments": {
+        "path": "/work/constructs_source.py"
+      },
+      "id": "call_6c3a8a36147c482ebfde07df",
+      "result_chars": 600,
+      "result_excerpt": "parsed: yes\nlines: 127\ntop_level_nodes: 17\ncounts: {\"AsyncFunctionDef\": 1, \"Await\": 1, \"BinOp\": 7, \"Call\": 40, \"ClassDef\": 3, \"Constant\": 59, \"For\": 1, \"FunctionDef\": 14, \"If\": 3, \"Lambda\": 0, \"NamedExpr\": 1, \"Try\": 1, \"While\": 1, \"With\": 0, \"Yield\": 1, \"YieldFrom\": 0}\ntop_level_symbols: [\"Import\", \"Import\", \"Import\", \"ClassDef:Descriptor\", \"ClassDef:Holder\", \"ClassDef:Point\", \"FunctionDef:cached\", \"FunctionDef:slow_square\", \"FunctionDef:evens\", \"FunctionDef:classify\", \"FunctionDef:walrus_count\", \"FunctionDef:eg_sum\", \"FunctionDef:make_counter\", \"AsyncFunctionDef:deliver\", \"FunctionDef:main\"]\n",
+      "round": 4,
+      "status": "ok",
+      "tool": "ast_summary"
+    },
+    {
+      "arguments": {
+        "path": "/work/constructs_source.py",
+        "query": "password"
+      },
+      "id": "call_f95a0417aced4275989957c5",
+      "result_chars": 57,
+      "result_excerpt": "no literal matches for 'password' in constructs_source.py",
+      "round": 4,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "path": "/work/constructs_source.py",
+        "query": "key"
+      },
+      "id": "call_7e86f904ddee42b78c5a6119",
+      "result_chars": 52,
+      "result_excerpt": "no literal matches for 'key' in constructs_source.py",
+      "round": 4,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "path": "/work/constructs_source.py",
+        "query": "token"
+      },
+      "id": "call_12498e84f6004133985222a1",
+      "result_chars": 54,
+      "result_excerpt": "no literal matches for 'token' in constructs_source.py",
+      "round": 5,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "path": "/work/constructs_source.py",
+        "query": "secret"
+      },
+      "id": "call_18afb83279c74089b5b2bee7",
+      "result_chars": 55,
+      "result_excerpt": "no literal matches for 'secret' in constructs_source.py",
+      "round": 5,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "path": "/work/constructs_source.py",
+        "query": "api"
+      },
+      "id": "call_c47c0d03f2c94462b8f43510",
+      "result_chars": 52,
+      "result_excerpt": "no literal matches for 'api' in constructs_source.py",
+      "round": 5,
+      "status": "ok",
+      "tool": "grep"
+    }
+  ],
+  "usage": {
+    "completion_tokens": 1599,
+    "prompt_tokens": 13688,
+    "total_tokens": 15287
+  }
+}

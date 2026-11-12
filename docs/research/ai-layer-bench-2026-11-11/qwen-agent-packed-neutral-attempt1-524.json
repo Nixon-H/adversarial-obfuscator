@@ -1,0 +1,369 @@
+{
+  "answer": "",
+  "answer_chars": 0,
+  "answer_excerpt": "",
+  "artifact": "tests/fixtures/portable/dist/constructs_source_protected.py",
+  "artifact_bytes": 2748710,
+  "artifact_sha256": "d6ecce56c6795d5bd320427ee697dfc778edf09d3f855a259614c8b65e72f5ee",
+  "condition": "neutral",
+  "confidence": null,
+  "cracked": false,
+  "date": "2026-11-11T09:51:28.124072+00:00",
+  "elapsed_s": 697.94,
+  "endpoint": "https://api.kern-llm.org/v1/chat/completions",
+  "errors": [
+    "chat round 12: HTTP 524: error code: 524\n\n"
+  ],
+  "ground_truth": [
+    "Descriptor",
+    "Holder",
+    "Point",
+    "cached",
+    "slow_square",
+    "evens",
+    "classify",
+    "walrus_count",
+    "eg_sum",
+    "make_counter",
+    "deliver",
+    "main"
+  ],
+  "model": "Qwen/Qwen3.8-27B-FP8",
+  "name_count": 0,
+  "names_recovered": [],
+  "parsed_json": false,
+  "provider": "kern",
+  "purpose_markers": [
+    "dataclass",
+    "match",
+    "async",
+    "generator",
+    "descriptor",
+    "closure",
+    "walrus",
+    "decorator",
+    "cache"
+  ],
+  "purpose_recovered": false,
+  "recall": 0.0,
+  "refused": false,
+  "rounds": 12,
+  "sandbox": "temporary read-only copy; no shell, write, or network tool",
+  "schema": "nixon-kern-agent-bench/1",
+  "secrets_reported": 0,
+  "status": "error",
+  "tool_call_count": 24,
+  "tool_calls": [
+    {
+      "arguments": {
+        "path": "/work"
+      },
+      "id": "call_02ed1cd89795430f9d0b3e3e",
+      "result_chars": 55,
+      "result_excerpt": "1 file(s):\nconstructs_source_protected.py\t2748710 bytes",
+      "round": 1,
+      "status": "ok",
+      "tool": "list_files"
+    },
+    {
+      "arguments": {
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_f669f779e5e54bfba7276dc9",
+      "result_chars": 137,
+      "result_excerpt": "path: constructs_source_protected.py\nbytes: 2748710\nlines: 6729\nsha256: d6ecce56c6795d5bd320427ee697dfc778edf09d3f855a259614c8b65e72f5ee\n",
+      "round": 1,
+      "status": "ok",
+      "tool": "file_info"
+    },
+    {
+      "arguments": {
+        "limit": 80,
+        "offset": 1,
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_305a7f2a1cd34f508568900b",
+      "result_chars": 6896,
+      "result_excerpt": "constructs_source_protected.py lines 1-80 of 6729\n     1\t# -*- coding: utf-8 -*-\n     2\t# Silence deprecation warnings the loader would otherwise emit on Python <=3.11:\n     3\t# its MetaPathFinder has no find_spec, so the import machinery falls back to the\n     4\t# removed find_module() and warns. Those warning lines land in the artefact's\n     5\t# output stream, which makes a correct run look different from its source --\n     6\t# and on 3.12 the fallback is gone entirely, so the hook has to be silent here\n     7\t# rather than rely on machinery that no longer exists.\n     8\timport warnings as _nx_warn\n     9\t_nx_warn.filterwarnings(\"ignore\", category=DeprecationWarning)\n    10\t_nx_warn.filterwarnings(\"ignore\", category=ImportWarning)\n    11\t_nixon_\u4e00=1;_nixon_\u5b57=chr;_nixon_\u5e8f=ord;_nixon_\u4e32=str;_nixon_\u4f8b=isinstance\n    12\tdef _nixon_\u9006(s):return s[::-_nixon_\u4e00]\n    13\tdef _nx_mac():\n    14\t    # uuid.getnode() is not used anywhere in the loader: CPython falls\n    15\t    # back to running ip/ifconfig/arp when sysfs is unreadable, and that\n    16\t    # subprocess blocked for ~500s from this heavily threaded artifact on\n    17\t    # the 3.13/3.14 CI runners.  When it fails it also returns a r",
+      "round": 2,
+      "status": "ok",
+      "tool": "read_file"
+    },
+    {
+      "arguments": {
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_6a26eb0d684447f18c21a223",
+      "result_chars": 7536,
+      "result_excerpt": "parsed: yes\nlines: 6729\ntop_level_nodes: 2804\ncounts: {\"AsyncFunctionDef\": 0, \"Await\": 0, \"BinOp\": 970, \"Call\": 2900, \"ClassDef\": 49, \"Constant\": 7919, \"For\": 133, \"FunctionDef\": 273, \"If\": 491, \"Lambda\": 1, \"NamedExpr\": 0, \"Try\": 227, \"While\": 20, \"With\": 32, \"Yield\": 0, \"YieldFrom\": 0}\ntop_level_symbols: [\"Import\", \"FunctionDef:_nixon_\\u9006\", \"FunctionDef:_nx_mac\", \"FunctionDef:_nixon_getattr_hook\", \"FunctionDef:_nixon_\\u027a\\u0668\\u05dd\\u0627\\u069e\", \"FunctionDef:_nixon_\\u0441\\u16a3\\u03b9\\u0210\\u16d2\\u04bc\\u10ea\\u16e3\", \"FunctionDef:_nixon_\\u091d\\u0944\\u0e2d\\u0e29\\u0192\", \"Import\", \"Import\", \"FunctionDef:_28629dc089_k\", \"FunctionDef:_nixon_\\u094d\\u099c\\u0e35\\u0941\\u16c6\", \"FunctionDef:_nixon_\\u026c\\u04a9\\u02b9\\u16d8\\u0229\", \"ClassDef:_nixon_\\u0916\\u16a4\\u013e\\u0288\\u66d6\", \"FunctionDef:_nixon_\\u13a5\\u01fc\\u13d3\\u0903\\u0e44\", \"FunctionDef:_nixon_\\u0999\\u09a6\\u05e4\\u0e34\\u10a5\\u10b2\\u03e3\\u0907\\u13d8\\u305b\", \"FunctionDef:_nixon_\\u16ab\\u03eb\\u0e1c\\u0386\\u0919\\u304a\\u0131\\u0544\\u3053\", \"FunctionDef:_nixon_\\u065c\\u010b\\u05da\\u0290\\u03b2\\u0e51\\u027a\\u0220\\u05d3\", \"FunctionDef:_nixon_\\u05ea\\u13ae\\u01ab\\u16b3\\u0238\\u047c\\u0273\\u05ea\\u06c7\", \"ClassDef:_nixon_\\u0e41\\u0581\\u0264\\u0e14\\u01",
+      "round": 2,
+      "status": "ok",
+      "tool": "ast_summary"
+    },
+    {
+      "arguments": {
+        "limit": 120,
+        "offset": 80,
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_0733615fdabb4cc58d2acbe5",
+      "result_chars": 16000,
+      "result_excerpt": "constructs_source_protected.py lines 80-199 of 6729\n    80\t        try:\n    81\t            return _nixon_orig_getattr(obj, name)\n    82\t        except AttributeError:\n    83\t            pass\n    84\t        try:\n    85\t            h = _nixon_\u30cf\u30c3\u30b7\u30e5\ud574\uc2dc.sha256((name + \"_SALT\").encode()).hexdigest()[:16]\n    86\t            if h in _28629dc089_XM:\n    87\t                real_name = _28629dc089_XM[h]\n    88\t                return object.__getattribute__(obj, real_name)\n    89\t        except: pass\n    90\t        if default is not _28629dc089_SN: return default\n    91\t        raise AttributeError\n    92\t    finally:\n    93\t        if is_cv: _nx_rec_guard.reset(t)\n    94\t        else: _nx_rec_guard.a = False\n    95\t_nixon_\u30d3\u30eb\u30c8\u30a4\u30f3\ube4c\ud2b8\uc778.getattr = _nixon_getattr_hook\n    96\t__import__(_nixon_\u9006(_nixon_\u5b57(99)+_nixon_\u5b57(98)+_nixon_\u5b57(97)+_nixon_\u5b57(46)+_nixon_\u5b57(98)+_nixon_\u5b57(105)+_nixon_\u5b57(108)+_nixon_\u5b57(116)+_nixon_\u5b57(114)+_nixon_\u5b57(111)+_nixon_\u5b57(112)+_nixon_\u5b57(109)+_nixon_\u5b57(105)))\n    97\t__import__(_nixon_\u9006(_nixon_\u5b57(108)+_nixon_\u5b57(105)+_nixon_\u5b57(116)+_nixon_\u5b57(117)+_nixon_\u5b57(46)+_nixon_\u5b57(98)+_nixon_\u5b57(105)+_nixon_\u5b57(108)+_nixon_\u5b57(116)+_nixon_\u5b57(114)+_nixon_\u5b57(111)+_nixon_\u5b57(112)+_nixon_\u5b57(109)+_nixon_\u5b57(105)))\n    98\t__imp",
+      "round": 3,
+      "status": "ok",
+      "tool": "read_file"
+    },
+    {
+      "arguments": {
+        "max_results": 200,
+        "min_length": 12,
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_b749e37d4f3a4903939274ec",
+      "result_chars": 5225,
+      "result_excerpt": "printable runs 1-200 of 7734:\n0: # -*- coding: utf-8 -*-\n24: # Silence deprecation warnings the loader would otherwise emit on Python <=3.11:\n105: # its MetaPathFinder has no find_spec, so the import machinery falls back to the\n186: # removed find_module() and warns. Those warning lines land in the artefact's\n264: # output stream, which makes a correct run look different from its source --\n341: # and on 3.12 the fallback is gone entirely, so the hook has to be silent here\n420: # rather than rely on machinery that no longer exists.\n475: import warnings as _nx_warn\n503: _nx_warn.filterwarnings(\"ignore\", category=DeprecationWarning)\n566: _nx_warn.filterwarnings(\"ignore\", category=ImportWarning)\n643: =chr;_nixon_\n656: =ord;_nixon_\n669: =str;_nixon_\n706: (s):return s[::-_nixon_\n732: def _nx_mac():\n747:     # uuid.getnode() is not used anywhere in the loader: CPython falls\n818:     # back to running ip/ifconfig/arp when sysfs is unreadable, and that\n891:     # subprocess blocked for ~500s from this heavily threaded artifact on\n965:     # the 3.13/3.14 CI runners.  When it fails it also returns a random\n1037:     # per-process value, which no build-time fingerprint can match.\n1114:       ",
+      "round": 3,
+      "status": "ok",
+      "tool": "extract_strings"
+    },
+    {
+      "arguments": {
+        "max_results": 100,
+        "path": "/work/constructs_source_protected.py",
+        "query": "def _nx_"
+      },
+      "id": "call_26c293aa8d904205bf26248d",
+      "result_chars": 741,
+      "result_excerpt": "17 match(es) for 'def _nx_':\n13: def _nx_mac():\n107: def _nx_scan():\n3612: def _nx_hard_die(code, what):\n4341: def _nx_validate_license(serial_key=None):\n4350: def _nx_check_serial_number(code=None):\n4355: def _nx_verify_activation(token=None):\n4362: def _nx_decrypt_premium_data(data=None, key=None):\n4367: def _nx_unlock_features(level=0):\n4482: def _nx_authenticate_premium_user(credentials=None):\n4493: def _nx_decrypt_master_vault(vault_data=None, master_key=None):\n4502: def _nx_phone_home_telemetry(endpoint=None):\n4509: def _nx_emergency_key_recovery(recovery_code=None):\n5870: def _nx_bind_blob_key(_raw):\n5906: def _nx_core_verified():\n5919: def _nx_core_mix(_k):\n5962: def _nx_strict_fail(reason):\n5977: def _nx_self_fail(reason):",
+      "round": 4,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "max_results": 100,
+        "path": "/work/constructs_source_protected.py",
+        "query": "class _nixon"
+      },
+      "id": "call_0e6505b810dd4ee2baf61227",
+      "result_chars": 1495,
+      "result_excerpt": "48 match(es) for 'class _nixon':\n2998: class _nixon_\u0916\u16a4\u013e\u0288\u66d6:\n3015: class _nixon_\u0e41\u0581\u0264\u0e14\u0138\u7226\u045d\u0147\u0111:\n3029: class _nixon_\u05dd\u025e\u0948\u6a1f\u16d4:\n3151: class _nixon_\u0e36\u7694\u06e1\u0961\u0250\u028c\u0546\u0e30\u0905\u09df:\n3171: class _nixon_\u041a\u0615\u0928\u0376\u0e26\u3093\u018f\u16ac\u03f0\u04f0(_nixon_\u30a4\u30f3\u30dd\u30fc\u30c8\uc784\ud3ec\ud2b8.abc.MetaPathFinder, _nixon_\u30a4\u30f3\u30dd\u30fc\u30c8\uc784\ud3ec\ud2b8.abc.Loader):\n3304: class _nixon_\u0116\u05e8\u026b\u576d\u0287\u13b9:\n3325: class _nixon_\u16a4\u040d\u0118\u099a\u03a7\u04ec:\n3352: class _nixon_\u30de\u30fc\u30af\u30eb\uba38\ud074:\n3397: class _nixon_\u30ea\u30d5\u30ec\u30af\u30c6\u30a3\u30d6\ub9ac\ud50c\ub809:\n3476: class _nixon_\u0683\u5374\u0464\u06c8\u0273\u16c3\u309d\u04d7\u0e31:\n3685: class _nixon_\u04d5\u10c3\u16ce\u10bb\u0545\u0125\u0158_Loader:\n3785: class _nixon_\u16ad\u16d2\u0e34\u0120\u015e\u16a1\u0981\u16dd\u0142:\n3831: class _nixon_\u16a4\u040d\u0118\u099a\u03a7\u04ec_Injector:\n4095: class _nixon_\u16c8\u8ef4\u0433\u307e\u01e0\u3082\u093f\u16dd\u01de:\n4130: class _nixon_\u0160\u0299\u0139\u023c\u3067\u06a9:\n4185: class _nixon_\u05d9\u0926\u037f\u0130\u06c9\u027c\u13af\u16c7\u13e8\u043a:\n4270: class _nixon_\u13e0\u5861\u09cc\u85be\u0981:\n4313: class _nixon_\u5677\u04c2\u0136\u06d0\u019a:\n4374: class _nixon_\u019d\u13e7\u10aa\u305d\u13c8\u0956\u044d\u3052\u13bf\u10f4:\n4400: class _nixon_\u05df\u09e3\u13f4\u3090\u97b5\u0577\u05e9\u040b:\n4431: class _nixon_\u0e54\u0913\u13f4\u05dd\u056a\u13bb:\n4458: class _nixon_\u06ec\u16be\u09b8\u06df\u0455:\n4520: class _nixon_\u09dc\u024f\u05d1\u16a4\u093f\u0926\u0372\u014a\u0e2a\u04b6:\n4549: class _nixon_\u16d3\u13d9\u0295\u308b\u3089:\n4576: class _nixon_\u13e0\u046a\u0287\u16a0\u16da\u6875\u0951\u01ae\u13b8:\n4610: class _nixon_\u13b1\u10b9\u13a4\u0586\u13b0\u9e92\u9fe1\u0997\u068f\u0145:\n4635: class _nixon_\u010c\u05d5\u06fc\u0956\u0465\u3053\u05e3\u0e18\u023b:\n4675: class _nixon_\u10e6\u16c4\u10a7\u3082\u0906\u09b9\u8cdc\u5b36:\n4708: class _nixon_\u06d7\u10a4\u01c0\u3047\u13c0\u0914\u10a4\u03c5\u04df\u057f:\n4743: class _nixon_\u0205\u308b\u03be\u13a3\u04b0\u044c\u09ef:\n4777: class _nixon_\u0433\u01a2\u10c3\u05d4\u0490\u0e15:\n4807: class _nixon_\u10da\u09dd\u091b\u10c7\u13dc\u0104\u05db\u09e7\u16db:\n4837: class _nixon_\u0e27\u0137\u0143\u3046\u06ce\u10c7\u16ca\u056d\u024f\u10f1:\n4883: class _nixon_\u0165\u16b1\u04fd\u029b\u13ea\u13c9\u03ba:\n5009: class _nixon_\u0297\u3070\u04fd\u9071\u0294\u0959\u05d7\u16a4\u028b\u593d:\n5061: class _nixon_\u0277\u03e2\u0997\u0193\u8b58\u0661\u0152:\n5113: class _nixon_\u0618\u090a\u16a0\u0e06\u027c\u0907\u13b8\u03b6\u0258:\n5163: class _nixon_\u0407\u16df\u03f2",
+      "round": 4,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "limit": 120,
+        "offset": 4341,
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_b6d0cf4c77bc478fad030e67",
+      "result_chars": 4805,
+      "result_excerpt": "constructs_source_protected.py lines 4341-4460 of 6729\n  4341\tdef _nx_validate_license(serial_key=None):\n  4342\t    try:\n  4343\t        if serial_key:\n  4344\t            h = _nixon_\u30cf\u30c3\u30b7\u30e5\ud574\uc2dc.sha256(str(serial_key).encode()).hexdigest()\n  4345\t            if h[:4] == _nixon_\u091d\u0944\u0e2d\u0e29\u0192(150):\n  4346\t                return True\n  4347\t        _nixon_\u05d2\u0284\u04b7\u03d3\u0546(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(151))\n  4348\t    except: pass\n  4349\t    return False\n  4350\tdef _nx_check_serial_number(code=None):\n  4351\t    try:\n  4352\t        _nixon_\u05d2\u0284\u04b7\u03d3\u0546(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(152))\n  4353\t    except: pass\n  4354\t    return True\n  4355\tdef _nx_verify_activation(token=None):\n  4356\t    try:\n  4357\t        if token:\n  4358\t            _nixon_\u30cf\u30c3\u30b7\u30e5\ud574\uc2dc.sha256(str(token).encode())\n  4359\t        _nixon_\u05d2\u0284\u04b7\u03d3\u0546(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(153))\n  4360\t    except: pass\n  4361\t    return True\n  4362\tdef _nx_decrypt_premium_data(data=None, key=None):\n  4363\t    try:\n  4364\t        _nixon_\u05d2\u0284\u04b7\u03d3\u0546(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(154))\n  4365\t    except: pass\n  4366\t    return data\n  4367\tdef _nx_unlock_features(level=0):\n  4368\t    try:\n  4369\t        _nixon_\u05d2\u0284\u04b7\u03d3\u0546(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(155))\n  4370\t    except: pass\n  4371\t    return False\n  4372\t\n  4373\t\n  4374\tclass _nixon_\u019d\u13e7\u10aa\u305d\u13c8\u0956\u044d\u3052\u13bf\u10f4:\n  4375\t    @staticme",
+      "round": 5,
+      "status": "ok",
+      "tool": "read_file"
+    },
+    {
+      "arguments": {
+        "limit": 120,
+        "offset": 4482,
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_008c0564eb02428ebe749850",
+      "result_chars": 5561,
+      "result_excerpt": "constructs_source_protected.py lines 4482-4601 of 6729\n  4482\tdef _nx_authenticate_premium_user(credentials=None):\n  4483\t    try:\n  4484\t        if credentials:\n  4485\t            h = _nixon_\u30cf\u30c3\u30b7\u30e5\ud574\uc2dc.sha256(str(credentials).encode()).hexdigest()\n  4486\t            if h == \"0\" * 64:\n  4487\t                return _nixon_\u30cf\u30c3\u30b7\u30e5\ud574\uc2dc.sha256(b\"master_key\").digest()\n  4488\t            if h[:8] == _nixon_\u091d\u0944\u0e2d\u0e29\u0192(156):\n  4489\t                return True\n  4490\t        _nixon_\u05d2\u0284\u04b7\u03d3\u0546(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(157))\n  4491\t    except: pass\n  4492\t    return None\n  4493\tdef _nx_decrypt_master_vault(vault_data=None, master_key=None):\n  4494\t    try:\n  4495\t        if vault_data and master_key:\n  4496\t            test = _nixon_\u30cf\u30c3\u30b7\u30e5\ud574\uc2dc.sha256(master_key).hexdigest()\n  4497\t            if len(test) == 65:\n  4498\t                return vault_data\n  4499\t        _nixon_\u05d2\u0284\u04b7\u03d3\u0546(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(158))\n  4500\t    except: pass\n  4501\t    return b\"\"\n  4502\tdef _nx_phone_home_telemetry(endpoint=None):\n  4503\t    try:\n  4504\t        if endpoint and len(endpoint) > 512:\n  4505\t            return True\n  4506\t        _nixon_\u05d2\u0284\u04b7\u03d3\u0546(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(159))\n  4507\t    except: pass\n  4508\t    return False\n  4509\tdef _nx_emergency_key_recovery(reco",
+      "round": 5,
+      "status": "ok",
+      "tool": "read_file"
+    },
+    {
+      "arguments": {
+        "limit": 60,
+        "offset": 152,
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_a8d277cae0044f06a37e207c",
+      "result_chars": 4548,
+      "result_excerpt": "constructs_source_protected.py lines 152-211 of 6729\n   152\t_nx_salt_m = (1980705534 >> 3) & 0xFF\n   153\tdef _nixon_\u091d\u0944\u0e2d\u0e29\u0192(idx):\n   154\t    try:\n   155\t        _t = _nixon_\u0441\u16a3\u03b9\u0210\u16d2\u04bc\u10ea\u16e3()\n   156\t        _r = bytes([114^_nx_salt_m,111^_nx_salt_m,117^_nx_salt_m,116^_nx_salt_m,101^_nx_salt_m,114^_nx_salt_m])\n   157\t        _r = bytes([_b ^ _nx_salt_m for _b in _r]).decode()\n   158\t        _tb = bytes([116^_nx_salt_m,97^_nx_salt_m,98^_nx_salt_m,108^_nx_salt_m,101^_nx_salt_m,115^_nx_salt_m])\n   159\t        _tb = bytes([_b ^ _nx_salt_m for _b in _tb]).decode()\n   160\t        _kk = bytes([107^_nx_salt_m,101^_nx_salt_m,121^_nx_salt_m,115^_nx_salt_m])\n   161\t        _kk = bytes([_b ^ _nx_salt_m for _b in _kk]).decode()\n   162\t        _ff = bytes([70^_nx_salt_m,82^_nx_salt_m,65^_nx_salt_m,71^_nx_salt_m])\n   163\t        _ff = bytes([_b ^ _nx_salt_m for _b in _ff]).decode()\n   164\t        route = _t[_r].get(idx)\n   165\t        if not route: return \"\"\n   166\t        rtype, tbl, tbl_idx = route[0], route[1], route[2]\n   167\t        if rtype == _ff:\n   168\t            s1 = _t[_tb][tbl][tbl_idx]\n   169\t            tbl2, idx2 = route[3], route[4]\n   170\t            s2 = _t[_tb][tbl2][idx2]\n   171\t       ",
+      "round": 6,
+      "status": "ok",
+      "tool": "read_file"
+    },
+    {
+      "arguments": {
+        "limit": 120,
+        "offset": 6610,
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_fa965bf868b74c948a5de153",
+      "result_chars": 7296,
+      "result_excerpt": "constructs_source_protected.py lines 6610-6729 of 6729\n  6610\t                    # __file__ is NOT a target: in a packed artifact it is the\n  6611\t                    # temp file the outer loader extracted, and that loader deletes\n  6612\t                    # it at exit anyway.  Wiping it made the loader's own re-entry\n  6613\t                    # fail its self-check (ENOENT) and kill a clean run.  The\n  6614\t                    # artifact itself (argv[0] / NX_ORIGIN) is still wiped.\n  6615\t                    if _nixon_\u30b7\u30b9\u30c6\u30e0\uc2dc\uc2a4\ud15c.argv and _nixon_\u30b7\u30b9\u30c6\u30e0\uc2dc\uc2a4\ud15c.argv[0]: targets.add(_nixon_\u30aa\u30da\u30ec\u30fc\u30b7\u30e7\u30f3\uc6b4\uc601.path.abspath(_nixon_\u30b7\u30b9\u30c6\u30e0\uc2dc\uc2a4\ud15c.argv[0]))\n  6616\t                    origin = _nixon_\u30aa\u30da\u30ec\u30fc\u30b7\u30e7\u30f3\uc6b4\uc601.environ.get(\"NX_ORIGIN\")\n  6617\t                    if origin: targets.add(origin)\n  6618\t                    for t in targets:\n  6619\t                        if _nixon_\u30aa\u30da\u30ec\u30fc\u30b7\u30e7\u30f3\uc6b4\uc601.path.exists(t) and _nixon_\u30aa\u30da\u30ec\u30fc\u30b7\u30e7\u30f3\uc6b4\uc601.path.isfile(t):\n  6620\t                            sz = _nixon_\u30aa\u30da\u30ec\u30fc\u30b7\u30e7\u30f3\uc6b4\uc601.path.getsize(t)\n  6621\t                            with open(t, \"rb+\") as f: f.write(_nixon_\u30aa\u30da\u30ec\u30fc\u30b7\u30e7\u30f3\uc6b4\uc601.urandom(sz))\n  6622\t                            try: _nixon_\u30aa\u30da\u30ec\u30fc\u30b7\u30e7\u30f3\uc6b4\uc601.rename(t, t + _nixon_\u091d\u0944\u0e2d\u0e29\u0192(267))\n  6623\t            ",
+      "round": 6,
+      "status": "ok",
+      "tool": "read_file"
+    },
+    {
+      "arguments": {
+        "limit": 130,
+        "offset": 5870,
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_1de43467939949c8b0102458",
+      "result_chars": 6201,
+      "result_excerpt": "constructs_source_protected.py lines 5870-5999 of 6729\n  5870\tdef _nx_bind_blob_key(_raw):\n  5871\t    try:\n  5872\t        import hashlib as _h, json as _j, os as _o, sys as _s\n  5873\t        if _nixon_\u091d\u0944\u0e2d\u0e29\u0192(185) == _nixon_\u091d\u0944\u0e2d\u0e29\u0192(185):\n  5874\t            _mat = None\n  5875\t            _cands = []\n  5876\t            _named = _o.environ.get(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(186))\n  5877\t            if _named:\n  5878\t                _cands.append(_named)\n  5879\t            _base = _o.path.dirname(_o.path.abspath((_s.argv[0] if _s.argv else \"\") or \"\"))\n  5880\t            for _d in (_base, _o.getcwd()):\n  5881\t                for _n in (_nixon_\u091d\u0944\u0e2d\u0e29\u0192(187), _nixon_\u091d\u0944\u0e2d\u0e29\u0192(188), _nixon_\u091d\u0944\u0e2d\u0e29\u0192(189)):\n  5882\t                    _cands.append(_o.path.join(_d, _n))\n  5883\t            for _c in _cands:\n  5884\t                try:\n  5885\t                    with open(_c, \"r\", encoding=\"utf-8\") as _f:\n  5886\t                        _mat = ((_j.load(_f) or {}).get(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(85)) or {}).get(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(190))\n  5887\t                    if _mat:\n  5888\t                        break\n  5889\t                except Exception:\n  5890\t                    continue\n  5891\t            if not _mat:\n  5892\t                _s.stderr.",
+      "round": 7,
+      "status": "ok",
+      "tool": "read_file"
+    },
+    {
+      "arguments": {
+        "max_results": 60,
+        "path": "/work/constructs_source_protected.py",
+        "query": "S_INIT"
+      },
+      "id": "call_24c816b4e74e491191135e1b",
+      "result_chars": 232,
+      "result_excerpt": "3 match(es) for 'S_INIT':\n6431: S_INIT = 0; S_STG0 = 1; S_REC = (22027 ^ 22025); S_ON1 = (22698 ^ 22697); S_ZIP1 = (8000 ^ 8004)\n6681: S_INIT: _nixon_\u05db\u10b4\u0396\u05e3\u094c\u16de\u742d\u10f9, S_STG0: _nixon_\u0431\u05d6\u0696\u0573\u095a\u06d8\u0273\u0e31\u3043\u056a, S_REC: _nixon_\u13f2\u16c9\u04d6\u10bb\u0569\u02ae\u0919\u3091\u307c\u04e5,\n6686: curr = S_INIT",
+      "round": 7,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "limit": 130,
+        "offset": 6431,
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_60155ea6bcd946bc9fc5f20e",
+      "result_chars": 7162,
+      "result_excerpt": "constructs_source_protected.py lines 6431-6560 of 6729\n  6431\t    S_INIT = 0; S_STG0 = 1; S_REC = (22027 ^ 22025); S_ON1 = (22698 ^ 22697); S_ZIP1 = (8000 ^ 8004)\n  6432\t    S_ON2 = (37902 ^ 37899); S_DEC1 = (40700 ^ 40698); S_VM = (60764 ^ 60763); S_PAD = (19797 ^ 19805); S_LOAD = (61746 ^ 61755); S_EXEC = (45696 ^ 45706); S_EXIT = (49036 ^ 49031)\n  6433\t    def _nixon_\u05db\u10b4\u0396\u05e3\u094c\u16de\u742d\u10f9():\n  6434\t        try:\n  6435\t            try:\n  6436\t                if _nixon_\u093a\u13a9\u0277\u09b7\u0949\u3067\u16bd\u7fa9\u0e21._nixon_\u5bd0\u065c\u0123\u5e4c\u0181\u092e\u3055():\n  6437\t                    _nixon_\u094d\u099c\u0e35\u0941\u16c6(\"[WARN] Universal Debugger Detected\")\n  6438\t                    _nixon_\u01a4\u16c7\u0386\u305b\u062a._nixon_\u307e\u0e40\u3095\u16e5\u0959\u0e29\u9bee\u06bf\u9ad3(5)\n  6439\t            except: pass\n  6440\t            _sbx = _nixon_\u05e2\u05d4\u305f\u307c\u04ad\n  6441\t            if _sbx._nixon_\u0453\u068d\u16a6\u03cc\u0272\u01f9\u06d7\u13df\u091e\u03be():\n  6442\t                _nixon_\u094d\u099c\u0e35\u0941\u16c6(\"[WARN] Automated Sandbox detected (Time Acceleration/Low Res)\")\n  6443\t                if not _nixon_\u0272\u10f6\u0271\u05da\u06db\u4f16\u02ad:\n  6444\t                    pass\n  6445\t        except: pass\n  6446\t        deg = _nixon_\u04b9\u0193\u10aa\u016f\u0910\u0942\u090c\u016f\u16be()\n  6447\t        if deg & 1: ctx['h'] = _nixon_\u05e0\u012a\u0e25\u0101\u09a7\u13ec(ctx['h'], _nixon_\u091d\u0944\u0e2d\u0e29\u0192(239)) \n  6448\t        try: _nixon_\u307c\u0e45\u13bb\u03ec\u03d9\u0e49\u3088()\n  6449\t        except: pass\n  6450\t        _nixon_\u05d3\u0256\u13e8\u0397\u04dd\u3056\u0573\u0142\u13ac\u05dd()\n  6451\t        try:\n  64",
+      "round": 8,
+      "status": "ok",
+      "tool": "read_file"
+    },
+    {
+      "arguments": {
+        "max_results": 40,
+        "path": "/work/constructs_source_protected.py",
+        "query": "BLOB_KEY"
+      },
+      "id": "call_7dec6c61cccc4181b985e517",
+      "result_chars": 580,
+      "result_excerpt": "9 match(es) for 'BLOB_KEY':\n3692: data = bytes([b ^ BLOB_KEY[i % len(BLOB_KEY)] for i, b in enumerate(data)])\n3696: data = bytes([b ^ BLOB_KEY[i % len(BLOB_KEY)] for i, b in enumerate(data)])\n3700: data = bytes([b ^ BLOB_KEY[i % len(BLOB_KEY)] for i, b in enumerate(data)])\n3704: data = bytes([b ^ BLOB_KEY[i % len(BLOB_KEY)] for i, b in enumerate(data)])\n5858: BLOB_KEY = bytes.fromhex(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(273))\n5866: BLOB_KEY = bytes([_b ^ 0x5A for _b in BLOB_KEY])\n5870: def _nx_bind_blob_key(_raw):\n5904: BLOB_KEY = _nx_bind_blob_key(BLOB_KEY)\n5928: BLOB_KEY = _nx_core_mix(BLOB_KEY)",
+      "round": 8,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "limit": 130,
+        "offset": 6560,
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_cc4161cb343d4d4ba37d1239",
+      "result_chars": 7966,
+      "result_excerpt": "constructs_source_protected.py lines 6560-6689 of 6729\n  6560\t        prov_salt = _nixon_\u30cf\u30c3\u30b7\u30e5\ud574\uc2dc.sha256(str(sim_h).encode()).digest()\n  6561\t        k_dec = bytes([a ^ b ^ c for a, b, c in zip(k_final, time_salt, prov_salt)])\n  6562\t        ctx[_nixon_\u091d\u0944\u0e2d\u0e29\u0192(194)], _fake_flag = _nixon_\u03f8\u05db\u039f\u048d\u0110\u0377\u3077(ctx[_nixon_\u091d\u0944\u0e2d\u0e29\u0192(194)])\n  6563\t        cip = _nixon_\u0e41\u0581\u0264\u0e14\u0138\u7226\u045d\u0147\u0111(k_dec)\n  6564\t        ctx[_nixon_\u091d\u0944\u0e2d\u0e29\u0192(196)] = cip.decrypt(ctx[_nixon_\u091d\u0944\u0e2d\u0e29\u0192(194)], _nixon_\u0146\u0442\u043d\u10ec\u012b)\n  6565\t        ctx['h'] = _nixon_\u05e0\u012a\u0e25\u0101\u09a7\u13ec(ctx['h'], 7)\n  6566\t        return S_PAD\n  6567\t    def _nixon_\u0106\u012d\u047c\u304f\u571a():\n  6568\t        ctx[_nixon_\u091d\u0944\u0e2d\u0e29\u0192(195)] = _nixon_\u04ca\u13af\u01d5\u3094\u0121\u0133\u09ed\u03bf\u0163(ctx[_nixon_\u091d\u0944\u0e2d\u0e29\u0192(196)])\n  6569\t        m = _nixon_\u091d\u0944\u0e2d\u0e29\u0192(263).encode()\n  6570\t        if not ctx[_nixon_\u091d\u0944\u0e2d\u0e29\u0192(195)].startswith(m): \n  6571\t            _nixon_\u094d\u099c\u0e35\u0941\u16c6(\"[FATAL] Magic Mismatch (Decryption Failed)\"); _nixon_\u30b7\u30b9\u30c6\u30e0\uc2dc\uc2a4\ud15c.exit(1)\n  6572\t        ctx[_nixon_\u091d\u0944\u0e2d\u0e29\u0192(197)] = ctx[_nixon_\u091d\u0944\u0e2d\u0e29\u0192(195)][len(m):]\n  6573\t        # Authenticate the payload before anything is extracted from\n  6574\t        # it.  The zip is XOR-encrypted with no MAC of its own, so a\n  6575\t        # byte flipped in the payload region used to corrupt the\n  6576\t        # payload SILENTLY -- the loader ran",
+      "round": 9,
+      "status": "ok",
+      "tool": "read_file"
+    },
+    {
+      "arguments": {
+        "max_results": 40,
+        "path": "/work/constructs_source_protected.py",
+        "query": "_RUNTIME_KEY"
+      },
+      "id": "call_1e38ad35013640ce986fcae9",
+      "result_chars": 152,
+      "result_excerpt": "1 match(es) for '_RUNTIME_KEY':\n6457: if _nixon_\u091d\u0944\u0e2d\u0e29\u0192(237) not in globals() or _RUNTIME_KEY != bytes.fromhex(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(242)): import sys; sys.exit(0)",
+      "round": 9,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "max_results": 40,
+        "path": "/work/constructs_source_protected.py",
+        "query": "def _nixon_\u03ec\u16c7\u0494\u10f7\u0e0e\u13e4\u0972"
+      },
+      "id": "call_dfb598a2c340403a894ad519",
+      "result_chars": 65,
+      "result_excerpt": "1 match(es) for 'def _nixon_\u03ec\u16c7\u0494\u10f7\u0e0e\u13e4\u0972':\n6391: def _nixon_\u03ec\u16c7\u0494\u10f7\u0e0e\u13e4\u0972():",
+      "round": 10,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "max_results": 40,
+        "path": "/work/constructs_source_protected.py",
+        "query": "_NX_BUILD_WINDOW"
+      },
+      "id": "call_790297134d1f471181f7f783",
+      "result_chars": 125,
+      "result_excerpt": "3 match(es) for '_NX_BUILD_WINDOW':\n495: _NX_BUILD_WINDOW = 0\n6192: w = _NX_BUILD_WINDOW\n6556: time_window = _NX_BUILD_WINDOW",
+      "round": 10,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "max_results": 40,
+        "path": "/work/constructs_source_protected.py",
+        "query": "SWIZZLE_KEY"
+      },
+      "id": "call_1992ec4b92584061a336a4bb",
+      "result_chars": 181,
+      "result_excerpt": "2 match(es) for 'SWIZZLE_KEY':\n518: SWIZZLE_KEY = b'\\\\\\x96T\\x96\\x07\\xd1\\x0e\\xf7\\xa1\\x1a_d\\x13\\xf3\\xdd-'\n6599: ldr = _nixon_\u041a\u0615\u0928\u0376\u0e26\u3093\u018f\u16ac\u03f0\u04f0(ctx[_nixon_\u091d\u0944\u0e2d\u0e29\u0192(197)], SWIZZLE_KEY, MORPH_MAP)",
+      "round": 10,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "max_results": 40,
+        "path": "/work/constructs_source_protected.py",
+        "query": "FORCE_NATIVE_MODE"
+      },
+      "id": "call_6d8345f579164d6d898d0afb",
+      "result_chars": 165,
+      "result_excerpt": "2 match(es) for 'FORCE_NATIVE_MODE':\n505: FORCE_NATIVE_MODE = False\n6627: if FORCE_NATIVE_MODE and isinstance(_nixon_\u04d5\u10c3\u16ce\u10bb\u0545\u0125\u0158, dict) and any(_nixon_\u04d5\u10c3\u16ce\u10bb\u0545\u0125\u0158.values()):",
+      "round": 10,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "limit": 45,
+        "offset": 6391,
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_5aab6c4a23f74d518f92a984",
+      "result_chars": 2704,
+      "result_excerpt": "constructs_source_protected.py lines 6391-6435 of 6729\n  6391\tdef _nixon_\u03ec\u16c7\u0494\u10f7\u0e0e\u13e4\u0972():\n  6392\t    # Verify the loader's own integrity BEFORE anything else runs.  A\n  6393\t    # tampered loader must not be able to divert the state machine and\n  6394\t    # then exit 0.  _nixon_\u0179\u0268\u10eb\u0103\u05e6\u097f\u10aa\u13a2\u04ed\u304f() exits 137 on a mismatch.\n  6395\t    _nixon_\u0179\u0268\u10eb\u0103\u05e6\u097f\u10aa\u13a2\u04ed\u304f()\n  6396\t    _gc_handle = _nixon_\u13ee\u52ce\u6b02\u01b4\u0681() if _nixon_\u091d\u0944\u0e2d\u0e29\u0192(238) in dir() else None\n  6397\t    _nixon_\u094d\u099c\u0e35\u0941\u16c6(\"[DEBUG] Bootloader starting...\")\n  6398\t    if not _nixon_\u0934\u3077\u0588\u056a\u0914\u0580\u0996\u096c\u10c0\u6f1d(): return\n  6399\t    if _nixon_\u0e0b\u01b2\u05d7\u0645\u01cf\u13c4\u0e49\u0627\u09a1\u063a:\n  6400\t        def _one_shot_cleanup():\n  6401\t            try:\n  6402\t                targets = set()\n  6403\t                # __file__ is NOT a target: in a packed artifact it is the\n  6404\t                # temp file the outer loader extracted, and that loader deletes\n  6405\t                # it at exit anyway.  Wiping it made the loader's own re-entry\n  6406\t                # fail its self-check (ENOENT) and kill a clean run.  The\n  6407\t                # artifact itself (argv[0] / NX_ORIGIN) is still wiped.\n  6408\t                if _nixon_\u30b7\u30b9\u30c6\u30e0\uc2dc\uc2a4\ud15c.argv and _nixon_\u30b7\u30b9\u30c6\u30e0\uc2dc\uc2a4\ud15c.argv[0]: targets.add(_nixon_\u30aa\u30da\u30ec\u30fc\u30b7\u30e7\u30f3\uc6b4\uc601.path.abspath(_nixon_\u30b7",
+      "round": 11,
+      "status": "ok",
+      "tool": "read_file"
+    },
+    {
+      "arguments": {
+        "limit": 40,
+        "offset": 490,
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_8d8db4039dac49729e7f4edf",
+      "result_chars": 10668,
+      "result_excerpt": "constructs_source_protected.py lines 490-529 of 6729\n   490\t_nixon_\u094d\u099c\u0e35\u0941\u16c6(\"[DEBUG] Init start...\")\n   491\t_STR_SESSION_KEY = b'\\xd1\\xe4{Sh.QT\\x8d\\xe6lm\\x15_Z\\xb6\\x88\\xaf3\\xa9\\xa5\\xf3\\x982\\x9c\\xbf\\x8f\\xad\\x07\\xfe\\xe5+'\n   492\tBUILD_TIMESTAMP = 1794325547\n   493\t# The rotation window at pack time (always 0 for a fresh build).  Emitted\n   494\t# so the loader derives the same key whenever it runs.\n   495\t_NX_BUILD_WINDOW = 0\n   496\t\n   497\t_BUILD_ID = _nixon_\u091d\u0944\u0e2d\u0e29\u0192(272)\n   498\tMORPH_MAP_A = {136: 0, 203: 1, 48: 2, 77: 3, 108: 4, 56: 5, 79: 6, 249: 7, 0: 8, 29: 9, 96: 10, 246: 11, 221: 12, 247: 13, 129: 14, 41: 15, 32: 16, 224: 17, 14: 18, 52: 19, 236: 20, 160: 21, 123: 22, 19: 23, 94: 24, 178: 25, 161: 26, 181: 27, 227: 28, 13: 29, 54: 30, 155: 31, 147: 32, 11: 33, 17: 34, 86: 35, 158: 36, 16: 37, 243: 38, 85: 39, 51: 40, 197: 41, 10: 42, 237: 43, 53: 44, 173: 45, 93: 46, 126: 47, 42: 48, 139: 49, 122: 50, 58: 51, 217: 52, 128: 53, 62: 54, 49: 55, 109: 56, 33: 57, 47: 58, 39: 59, 83: 60, 232: 61, 252: 62, 151: 63, 228: 64, 4: 65, 37: 66, 28: 67, 95: 68, 98: 69, 176: 70, 248: 71, 253: 72, 72: 73, 118: 74, 60: 75, 119: 76, 5: 77, 216: 78, 15: 79, 218: 80, 12: 81, 229: 82, 190: 83, 250: 84,",
+      "round": 11,
+      "status": "ok",
+      "tool": "read_file"
+    }
+  ],
+  "usage": {
+    "completion_tokens": 3615,
+    "prompt_tokens": 303895,
+    "total_tokens": 307510
+  }
+}
