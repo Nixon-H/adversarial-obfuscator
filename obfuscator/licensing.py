@@ -70,6 +70,9 @@ class Licence:
     hwid: Optional[str] = None
     watermark: Optional[str] = None
     notes: Optional[str] = None
+    # Optional on-chain binding.  This is signed into the payload so the
+    # loader can verify ownership without trusting runtime CLI flags.
+    chain: Optional[dict] = None
     # Per-licence secret.  The payload key is bound to it at build time
     # (--licence-token) and re-derived from it at run time, so an artefact
     # without its token decrypts to garbage.  It is a *capability*, not a
@@ -93,6 +96,8 @@ class Licence:
             payload["watermark"] = self.watermark
         if self.notes:
             payload["notes"] = self.notes
+        if self.chain:
+            payload["chain"] = self.chain
         if self.key_material:
             payload["key_material"] = self.key_material
         return payload
@@ -109,6 +114,7 @@ class Licence:
                 hwid=payload.get("hwid"),
                 watermark=payload.get("watermark"),
                 notes=payload.get("notes"),
+                chain=payload.get("chain"),
                 key_material=payload.get("key_material"),
             )
         except (KeyError, TypeError, ValueError) as e:
@@ -279,6 +285,83 @@ def verify(
     return licence
 
 
+def chain_owner_of(
+    rpc_url: str,
+    contract_address: str,
+    token_id: int,
+    expected_chain_id=None,
+) -> str:
+    """Read the current owner of an ERC-721 licence token.
+
+    This is a read-only ``eth_call``.  It never sends a transaction and
+    never requires a wallet key.  The RPC endpoint is taken from the
+    signed licence payload, so a runtime caller cannot point the check at
+    an arbitrary fake node.
+    """
+    import json as _json
+    import urllib.request as _request
+
+    if not rpc_url.startswith("https://"):
+        raise ValueError("licence chain RPC must use HTTPS")
+    if not contract_address.startswith("0x") or len(contract_address) != 42:
+        raise ValueError("licence chain contract must be a 20-byte address")
+
+    def _rpc(method, params):
+        body = _json.dumps({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": method,
+            "params": params,
+        }, separators=(",", ":")).encode("utf-8")
+        req = _request.Request(
+            rpc_url,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "Nixon-H-Licence/1",
+            },
+            method="POST",
+        )
+        with _request.urlopen(req, timeout=20) as response:
+            document = _json.loads(response.read().decode("utf-8"))
+        if document.get("error"):
+            raise RuntimeError(str(document["error"]))
+        return document.get("result")
+
+    if expected_chain_id is not None:
+        result = _rpc("eth_chainId", [])
+        if int(result, 16) != int(expected_chain_id):
+            raise RuntimeError(
+                f"licence chain mismatch: want {int(expected_chain_id)}, got {int(result, 16)}"
+            )
+
+    calldata = "0x6352211e" + int(token_id).to_bytes(32, "big").hex()
+    result = _rpc("eth_call", [{"to": contract_address, "data": calldata}, "latest"])
+    if not isinstance(result, str) or len(result) < 66:
+        raise RuntimeError("licence ownerOf returned no address")
+    return "0x" + result[-40:]
+
+
+def parse_chain_spec(items: Iterable[str]) -> dict:
+    """Parse ``--chain key=value ...`` into signed chain metadata."""
+    chain: dict = {}
+    for item in items:
+        if "=" not in item:
+            raise LicenceError(f"invalid --chain entry {item!r}: expected key=value")
+        key, value = item.split("=", 1)
+        key = key.strip().replace("-", "_")
+        value = value.strip()
+        if not key or not value:
+            raise LicenceError(f"invalid --chain entry {item!r}")
+        chain[key] = value
+    for required in ("contract", "token_id", "owner"):
+        if required not in chain:
+            raise LicenceError(f"--chain is missing required field: {required}")
+    chain.setdefault("rpc", "https://ethereum-rpc.publicnode.com")
+    chain.setdefault("chain_id", "1")
+    return chain
+
+
 # ── files ────────────────────────────────────────────────────────────────
 
 def load_token(path: str) -> str:
@@ -318,6 +401,17 @@ def main(argv=None) -> int:
     p_issue.add_argument("--hwid", default=None, help="bind to this machine id")
     p_issue.add_argument("--watermark", default=None, help="per-customer watermark id")
     p_issue.add_argument("--notes", default=None)
+    p_issue.add_argument(
+        "--chain",
+        nargs="+",
+        default=None,
+        metavar="KEY=VALUE",
+        help=(
+            "bind the licence to an ERC-721 token: contract=0x... "
+            "token-id=1 owner=0x... [rpc=https://...] [chain-id=1] "
+            "[explorer=https://...]"
+        ),
+    )
     p_issue.add_argument("--out", default=None, help="write the token here")
 
     p_verify = sub.add_parser("verify", help="check a token")
@@ -345,6 +439,7 @@ def main(argv=None) -> int:
                 hwid=opts.hwid,
                 watermark=opts.watermark,
                 notes=opts.notes,
+                chain=parse_chain_spec(opts.chain) if opts.chain else None,
             )
             token = issue(licence, private_key)
             if opts.out:

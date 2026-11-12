@@ -34,7 +34,7 @@ def _build(tmp_path):
     env["PYTHONPATH"] = REPO_ROOT + os.pathsep + env.get("PYTHONPATH", "")
     proc = subprocess.run(
         [sys.executable, "-m", "obfuscator.core.pipeline", "build", source,
-         "--net-url", "https://127.0.0.1:9443/"],
+         "--access", "net-url=https://127.0.0.1:9443/"],
         cwd=str(tmp_path), env=env, capture_output=True, text=True,
         timeout=_BUILD_TIMEOUT)
     assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]

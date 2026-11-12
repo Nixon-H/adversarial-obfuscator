@@ -84,8 +84,9 @@ def main():
     # rather than an accident.
     os.environ.setdefault("NX_BUILD_SEED", "20261106")
     project_argv = ["ai-obf", "build", payload,
-                    "--portable", "--section-split", "--section-count", sections,
-                    "--zips", zips, "--opt-level", level, "--skip-cloud",
+                    "--package", "portable", "zips=%s" % zips,
+                    "--section-count", sections,
+                    "--opt-level", level, "--skip-cloud",
                     "--watermark", watermark] + EXTRA_FLAGS
 
     # Run the builder as a subprocess. Importing pipeline.main and calling it

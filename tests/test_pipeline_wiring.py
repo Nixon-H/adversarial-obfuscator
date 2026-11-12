@@ -29,8 +29,8 @@ def test_build_help_shows_new_flags():
     )
     assert r.returncode == 0, r.stderr[-2000:]
     out = r.stdout + r.stderr
-    for flag in ("--hwid", "--trial", "--vm-threshold", "--kod",
-                 "--hostguard", "--hwid-lock", "--sign-key-env"):
+    for flag in ("--access", "--package", "--transforms", "--audit",
+                 "--research", "--exclude", "--anti-rea-level"):
         assert flag in out, flag
 
 

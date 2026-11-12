@@ -34,29 +34,30 @@ OUT = os.path.join(ROOT, "build", "flag_effect")
 #: The verified working set from the maximal-hardening study. Any flag here that
 #: produces the same artefact as the baseline is decorative.
 CANDIDATES = [
-    "--advanced-protection", "--phase2-extras", "--data-obfuscation",
-    "--speculation-obfuscation", "--poison-all", "--decoy-apis",
-    "--reasoning-traps", "--llm-resilient", "--manipulation-detector",
-    "--provenance-poison", "--attestation", "--challenge-response",
-    "--crypto-binding", "--invariant-engine", "--self-audit", "--adaptive",
-    "--function-intent", "--generate-payload-h", "--uarch-watermark",
-    "--verification-diversity", "--proof-carrying", "--verify-preservation",
-    "--verify-mutations", "--verify-mba", "--verify-jit", "--verify-watermark",
-    "--proof-soundness",
-    "--cfg-mutation", "--class-dispatch", "--ssa-mutation",
-    "--struct-randomization", "--micro-fragment", "--fragment",
-    "--per-exec-recompile", "--self-healing", "--state-isa",
-    "--history-bound-decryption", "--rolling-keys", "--ephemeral-isa",
-    "--flow-entangle", "--poison-apis", "--poison-imports",
-    "--poison-call-graph", "--poison-paths", "--poison-protocols",
-    "--prompt-resistance", "--multi-agent-deception", "--multi-tool",
-    "--provenance-replace", "--recovery-prevention", "--trust-boundary",
-    "--name-gate", "--rename-internal", "--adversarial-injection",
-    "--adaptive-classifier-loop", "--adversarial-loop", "--llm-fingerprint",
-    "--context-saturation", "--fragment-migration",
-    "--verify-preservation-formal", "--verification-bundle", "--security-gates",
+    ["--transforms", "data"],
+    ["--transforms", "speculation"],
+    ["--transforms", "function-intent"],
+    ["--transforms", "struct"],
+    ["--audit", "invariant-engine"], ["--audit", "self-audit"],
+    ["--audit", "verification-diversity"], ["--audit", "proof-carrying"],
+    ["--audit", "verify-preservation"], ["--audit", "verify-mutations"],
+    ["--audit", "verify-mba"], ["--audit", "verify-jit"],
+    ["--audit", "verify-watermark"], ["--audit", "proof-soundness"],
+    ["--audit", "multi-tool"], ["--audit", "trust-boundary"],
+    ["--audit", "security-gates"], ["--audit", "verification-bundle"],
+    ["--audit", "verify-preservation-formal"],
+    ["--research", "crypto-binding"], ["--research", "adaptive"],
+    ["--research", "uarch-watermark"], ["--research", "cfg-mutation"],
+    ["--research", "class-dispatch"], ["--research", "ssa-mutation"],
+    ["--research", "micro-fragment"], ["--research", "fragment"],
+    ["--research", "per-exec-recompile"], ["--research", "self-healing"],
+    ["--research", "state-isa"], ["--research", "history-bound-decryption"],
+    ["--research", "rolling-keys"], ["--research", "ephemeral-isa"],
+    ["--research", "flow-entangle"], ["--research", "recovery-prevention"],
+    ["--research", "adaptive-classifier-loop"],
+    ["--research", "adversarial-loop"], ["--research", "llm-fingerprint"],
+    ["--research", "fragment-migration"],
 ]
-
 #: Baseline every measurement is taken against: the ladder alone.
 #:
 #: The seed matters more than anything else in this file. Two builds of the same
@@ -64,11 +65,10 @@ CANDIDATES = [
 #: pinned -- measured: 16272 vs 16581 bytes for back-to-back runs. Without
 #: SEED, "the sha256 changed" is true for every flag including one that does
 #: nothing, which makes the whole comparison meaningless.
-SEED = ["--randomization-seed", "4242"]
+SEED = ["--transforms", "seed=4242"]
 BASE = ["--opt-level", "5"] + SEED
 #: Cheap stages only, so a run is seconds not minutes. Documented in the report.
-SKIPS = ["--skip-irgen", "--skip-llvmgen", "--skip-encrypt", "--skip-relay",
-         "--skip-extras"]
+SKIPS = ["--skip", "irgen", "llvmgen", "encrypt", "relay", "extras"]
 
 PAYLOAD = '''def add(a, b):
     return a + b
@@ -121,12 +121,13 @@ def main(argv: list[str]) -> int:
 
     rows = []
     for i, flag in enumerate(flags, 1):
-        digest, secs, size = build([flag], work)
+        label = " ".join(flag)
+        digest, secs, size = build(list(flag), work)
         verdict = ("NO-EFFECT" if digest == base_digest
                    else ("FAILED" if digest.startswith("BUILD-FAILED") else "CHANGES"))
-        rows.append({"flag": flag, "sha256": digest, "bytes": size,
+        rows.append({"flag": label, "sha256": digest, "bytes": size,
                      "seconds": round(secs, 1), "verdict": verdict})
-        print(f"[{i:2d}/{len(flags)}] {flag:<32} {verdict:<10} "
+        print(f"[{i:2d}/{len(flags)}] {label:<40} {verdict:<10} "
               f"{size:>7} bytes {secs:5.1f}s")
 
     groups: dict[str, list[str]] = {}

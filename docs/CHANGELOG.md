@@ -12,9 +12,44 @@ checks they agree).
 
 ## Unreleased
 
+### Changed (2026-11-12)
+
+- **`--package all` ("package with everything else").** One option for the
+  maximum build: on `scripts/build.py` it expands to `pytoc pyinstaller
+  cross=win,linux,macos,linux-arm` plus every opt-in `--transforms` pass and
+  `--validate fail`; on the loader CLI it expands to `layers=25 zips=3 stego`
+  on top of the protections that are already default-on.
+
+- **CLI consolidation to under 100 options.** `scripts/build.py` drops from
+  243 options to 56 and the loader CLI to 44. Report flags become
+  `--audit NAME…`, experimental phases become `--research NAME…`, stage skips
+  become `--skip STAGE…`, and both CLIs share one `--exclude FAMILY…`
+  (`rea`, `rea.poison`, `rea.cognitive`, …). Names are the old flag names
+  without `--`; `key=value` tunes a phase. The six positive transform flags
+  were removed (already default ON); `--no-` opt-outs remain. `advanced-protection`
+  absorbed `extras`/`only=`/`advanced=`; adversarial injection folded into the
+  counter-REA gate.
+
+- **Flag consolidation.** The licence gate and the Web3 machinery now have
+  one flag each: `--licence token=… [env-only] [bootstrap-encrypted] [chain]`
+  and `--web3 rpc=… explorer=… contract=… shards=… deploy deploy-rpc=…`.
+  The former per-knob licence spellings (the `licence-` prefixed flags) and
+  Web3 spellings (contract/rpc/shards/auto-deploy/deploy-rpc/explorer) were
+  removed; the unified flags are the only interface. Four true aliases were
+  also removed (poison-all → counter-REA gate, gpu → `gpu-execution`,
+  cpu-gpu-hybrid → `gpu-hybrid`, advanced-protection → `advanced-protection`); the
+  canonical flags keep every
+  behaviour, including the Item-126 hybrid demo. Two accepted-but-ignored
+  flags now do what they claimed: block-countries/block-regions
+  arm the geofence (previously allow-list-only) and expire arms a real
+  loader deadline gate (previously the date was embedded and never read).
+- **expire** and **block-countries/block-regions** (now under `--access`):
+  see above; previously accepted but never enforced (false security).
+
 ### Added
 
-- **Licence-bound payload keys** (`--licence-token`). The payload key is
+- **Licence-bound payload keys** (the `--licence` flag, `token=` sub-option;
+  formerly a per-knob spelling). The payload key is
   derived from the token's `key_material` at pack time and re-derived by
   the loader at run time (`NIXON_LICENCE`, or `licence.json` beside the
   artefact); a forged token derives a key that does not match the
@@ -23,11 +58,11 @@ checks they agree).
   message rather than decrypting garbage. Only the packed-loader emitter
   has a payload key — `scripts/build.py` emits obfuscated source and
   refuses the flag instead of accepting it silently.
-- **`--customer-salt`** binds a build's payload key to one customer with
+- **`--licence salt=`** binds a build's payload key to one customer with
   a second, domain-separated mask. Empty by default, so existing builds
   are byte-identical. Note it travels inside the artefact: it separates
   builds, it is not a secret.
-- **Build reproducibility: attempted, reverted.** `--randomization-seed`
+- **Build reproducibility: attempted, reverted.** `transforms seed=N`
   drew every key, nonce, salt, timestamp and name table from one stream.
   Two builds still differed, and the seeded builds failed their own magic
   check: several of those values sit on both sides of the pack/run
@@ -67,14 +102,14 @@ checks they agree).
   are byte-identical (33,170 bytes each), and a different seed differs. The
   packed loader remains non-reproducible by design.
 
-- **`--pytoc` kernel swap never ran.** The swap step imported `ast as _ka`
+- **`package pytoc` kernel swap never ran.** The swap step imported `ast as _ka`
   but then used `ast.Name`, so every attempt raised
   `cannot access local variable 'ast'` and was logged as non-fatal; the
   artefact kept the pure-Python shim import. The reference is now `_ka.Name`;
   the swap emits the native `_nxk_*` import and the artefact runs against the
-  compiled kernel (verified with `--lowering io --pytoc --build-id`).
+  compiled kernel (verified with `--lowering io package pytoc --build-id`).
 
-- **The crypto-binding chain secret was written to disk.** `--crypto-binding`
+- **The crypto-binding chain secret was written to disk.** `crypto-binding`
   wrote `build/chain_secret.bin` so the payload-header step could log that it
   was withholding it. Nothing embedded or needed the file. The secret now
   stays in the builder's memory; the header step no longer reads or writes it.
@@ -184,7 +219,7 @@ checks they agree).
   every artefact runs. The honest position is that per-build diversity is
   present and sufficient for its purpose (a scripted crack of one build
   does not apply to the next); "per-customer" adds a salt-based key
-  separation, which is already in place as `--customer-salt`.
+  separation, which is already in place as `--licence salt=`.
 ### Changed
 
 - **Offline licence tokens** (`obfuscator/licensing.py`, `docs/LICENSING.md`).
@@ -221,7 +256,7 @@ checks they agree).
   path until a clean one is written.
 
   `make microjit-so` is gone from CI, `make native-test` now builds
-  only `core-cpp` and `simd-vm-c`, and `--fragment` logs that the
+  only `core-cpp` and `simd-vm-c`, and `fragment` logs that the
   microjit backend is archived instead of compiling an object that
   nothing loaded.
 
@@ -261,7 +296,7 @@ checks they agree).
      block; the other jobs carry `if: github.event_name != 'schedule'`
      so only `lint-pin` runs on the weekly cron. `actionlint` clean.
   2. `validate_dependencies()` ran *before* argparse and demanded `llc`
-     unconditionally, so `--skip-llvmgen` — which never invokes `llc` —
+     unconditionally, so `--skip llvmgen` — which never invokes `llc` —
      failed with "Missing dependency: llc". That is what broke the
      security-artifact job. The check now runs after parsing and honours
      the skip (which also means `--help` works on a box with no
@@ -416,10 +451,10 @@ checks they agree).
 - **The loader CLI dropped 14 of its own flags.** It built a second
   `argparse.Namespace` and passed that to the build instead of the
   parsed one, so any field the copy forgot fell back to its default.
-  `--hwid`, `--trial`, `--vm-threshold`, `--kod`, `--hostguard`,
-  `--hwid-lock`, `--driver-check`, `--split-bootstrap`,
-  `--no-snapshot`, `--no-stdlib-audit`, `--name-gate`, `--lowering`,
-  `--rename-internal` and `--no-audit-hook-plant` were accepted, echoed
+  hwid, access trial=7d, vm-threshold, access kod, access hostguard,
+  `access hwid-lock`, `access driver-check`, `no-split-bootstrap`,
+  `exclude integrity.snapshot`, `exclude integrity.stdlib-audit`, `access name-gate`, `--lowering`,
+  `--rename-internal` and `exclude integrity.audit-hook` were accepted, echoed
   in `--help`, and did nothing.
 - **`scripts/build.py` accepted 11 loader-only flags and ignored them.**
   It compiles a native binary and emits no hybrid loader, so they
@@ -441,9 +476,9 @@ checks they agree).
   tree red with no change to the code.
 - **`z3` was a hard import** in 13 modules, making the build CLI
   unimportable without a proof-only dependency.
-- **The `--expire` path was dead**: a module-level import had been
+- **The expire path was dead** (now `--access expire=`): a module-level import had been
   removed, and the `except` around it swallowed the `NameError` and
-  reported "Bad --expire date" for every date.
+  reported "Bad expire date" for every date.
 - **The CLI's usage message raised `NameError`** instead of printing
   the usage, because a star import cannot bring `_console` across.
 
@@ -460,7 +495,7 @@ checks they agree).
 - **A payload that crashed was swallowed.** The importer retried it and
   then discarded the failure, so a broken artifact exited 0. It now
   fails closed, as does the loader's state machine.
-- **`--kod` armed nothing.** The flag only wrote a marker; the kill
+- **`access kod` armed nothing.** The flag only wrote a marker; the kill
   needed `NIXON_KOD` in the *target's* environment, so the flag's help
   text was false. The arming is now baked into the loader.
 - **The watermark gate was unreachable** from any CLI, while the threat
@@ -525,7 +560,8 @@ checks they agree).
   is the escape hatch.
 - **`--opt-level` applies to the loader build** too, so all three CLIs
   resolve a protection level the same way.
-- `--watermark` on the loader CLI is now `--lock-hwid`; the old
+- `--watermark` on the loader CLI was briefly split from the HWID lock
+  (now `--access lock-hwid=`); the old
   spelling still works and says that it is deprecated.
 
 ### Added
@@ -549,7 +585,7 @@ this file is a summary:
   frozen-stdlib snapshot gate, the stdlib function-audit gate, the
   audit-hook plant detector, the read-only BYOVD driver gate, and the
   kill ladder.
-- **Sealed section streaming** (`--section-split` / `--section-count`):
+- **Sealed section streaming** (`no-section-split` / `--section-count`):
   the payload ships as N independently sealed sections, so no single
   buffer holds the whole encrypted payload. Opt-in.
 - **Enforceable lint gate**: `make lint` runs ruff (pinned) and a
@@ -590,5 +626,5 @@ chaff, canary credentials and URL parser differentials, evidence-contract
 poison, a decoy call graph woven into real functions, a BPE token amplifier,
 shadow business logic, an aliasing illusion, crash-trace decoys and diagnostic
 rabbit holes. Classifier-directed bait layers are on by default and disabled
-with `--exclude-rea`, `--exclude-rea-compliance`, `--exclude-rea-cognitive`
-or `--exclude-rea-bio`.
+with `exclude-rea`, `exclude-rea-compliance`, `exclude-rea-cognitive`
+or `exclude-rea-bio`.

@@ -56,7 +56,7 @@ until one is.)
   and embedded only in the artifact that needs them — never logged, never
   written to shared sidecars. The section-split module
   (`obfuscator/section_split.py`) mints per-section nonces the same way
-  and is wired into the hybrid loader as the opt-in `--section-split`
+  and is wired into the hybrid loader as the opt-in `--no-section-split`
   flag; it is not the default.
 
 ## Enforceable rules (security invariants)

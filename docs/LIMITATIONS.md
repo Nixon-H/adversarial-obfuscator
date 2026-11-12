@@ -50,12 +50,15 @@ them by name.
 ### 1.6 Only a bounded attack measurement exists
 
 The repository now has a **bounded** probe of the maximum-loader surface
-(deterministic string/identifier probes plus one LLM pass) in
-[`MAXIMUM_SECURITY.md`](MAXIMUM_SECURITY.md) §7. It is not a study against a
-frontier automated reverse-engineering agent: one model, one prompt, no tool
-use, no dynamic execution. The research programme measures identification cost
-for a specification-derived attacker on small programs. Extrapolating either to
-"the product resists LLM-assisted reversing" is unsupported.
+(deterministic string/identifier probes, one no-tool LLM pass, and one
+full-tool Kern Qwen agent run) in [`MAXIMUM_SECURITY.md`](MAXIMUM_SECURITY.md)
+§7 and [`research/ai-layer-bench-2026-11-11/RESULTS.md`](research/ai-layer-bench-2026-11-11/RESULTS.md).
+It is not a frontier study: one model, one payload, one full-tool run. That run
+recovered the complete payload and verified its HMAC, but not the 12 original
+pre-obfuscation names. The research programme measures identification cost for
+a specification-derived attacker on small programs. Extrapolating either to
+"the product resists LLM-assisted reversing" is unsupported; the full-tool
+result points the other way for payload confidentiality.
 
 ---
 

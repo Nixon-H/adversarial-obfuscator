@@ -191,6 +191,8 @@ them in `--help` would otherwise assume they protect something. Their rows in
 | `--verify-watermark-survivability` | Probe whether the mark survives transforms | Research instrument |
 | `--name-gate` / `--rename-internal` | Per-build token map / rename proven-internal names | Opt-in |
 | `--licence-token PATH` | Signed Ed25519 token; payload key masked with it | Implemented; packed emitter only |
+| `--licence-env-only` | Require the token path from `NIXON_LICENCE`; no local-file search | Implemented; with `--licence-token` |
+| `--licence-bootstrap-encrypted` | Encrypt the loader string table with a token-derived key | Implemented; with `--licence-token` |
 | `--customer-salt` | Domain-separated per-customer mask | Implemented |
 | `--sign-key-env VAR` | Signing key from the environment | Implemented |
 | `--embed-proof` / `--zk-state` / `--remote-unlock` | Proof / ZK / remote unlock | Research-only |
@@ -199,8 +201,10 @@ them in `--help` would otherwise assume they protect something. Their rows in
 The licence token is the strongest client-side binding currently implemented:
 an artefact built with `--licence-token` derives its payload key from the
 token's key material, so an artefact without its token decrypts to garbage.
-It is still a client-side check; [`LICENSING.md`](LICENSING.md) states the
-three things it does not do.
+`--licence-env-only` closes the easy bypass where the token is shipped beside
+the artefact: the loader reads only `NIXON_LICENCE`, not `licence.json` /
+`licence.licence`. It is still a client-side check; [`LICENSING.md`](LICENSING.md)
+states the three things it does not do.
 
 ---
 

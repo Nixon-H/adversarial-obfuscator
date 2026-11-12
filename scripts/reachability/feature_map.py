@@ -53,7 +53,7 @@ ALL_FEATURES = {
         "test_file": "test_relay.py",
     },
     "cross_compile": {
-        "cli_flag": "--cross",
+        "cli_flag": "--package cross=TARGETS",
         "phase_name": "phase_cross_compile",
         "impl_module": "scripts.phases.phase03_compile",
         "runtime_file": None,
@@ -137,7 +137,7 @@ ALL_FEATURES = {
         "test_file": None,
     },
     "provenance_poisoning": {
-        "cli_flag": "--provenance-poison",
+        "cli_flag": "--anti-rea-level",
         "phase_name": "phase_provenance_poison",
         "impl_module": "scripts.phases.phase10_provenance",
         "runtime_file": "replay_poison.rs",
@@ -207,7 +207,7 @@ ALL_FEATURES = {
         "test_file": "test_code_genome.py",
     },
     "struct_randomization": {
-        "cli_flag": "--struct-randomization",
+        "cli_flag": "--transforms struct",
         "phase_name": "phase_struct_randomization",
         "impl_module": "scripts.phases.phase17_struct_random",
         "runtime_file": "struct_random.rs",
@@ -416,7 +416,7 @@ ALL_FEATURES = {
         "test_file": "test_uarch_watermark.py",
     },
     "data_obfuscation": {
-        "cli_flag": "--data-obfuscation",
+        "cli_flag": "--transforms data",
         "phase_name": None,
         "impl_module": "scripts.data_obfuscation",
         "runtime_file": None,
@@ -486,7 +486,7 @@ ALL_FEATURES = {
         "test_file": "test_microjit.py",
     },
     "speculation_obfuscation": {
-        "cli_flag": "--speculation-obfuscation",
+        "cli_flag": "--transforms speculation",
         "phase_name": None,
         "impl_module": "obfuscator.speculation_obfuscation",
         "runtime_file": "speculative.rs",
@@ -598,14 +598,14 @@ ALL_FEATURES = {
         "test_file": "test_distributed.py",
     },
     "attention_poison": {
-        "cli_flag": "--attention-poison",
+        "cli_flag": "--anti-rea-level",
         "phase_name": None,
         "impl_module": None,
         "runtime_file": None,
         "test_file": "test_attention_poison.py",
     },
     "decoy_apis": {
-        "cli_flag": "--decoy-apis",
+        "cli_flag": "--anti-rea-level",
         "phase_name": None,
         "impl_module": None,
         "runtime_file": None,
@@ -626,14 +626,14 @@ ALL_FEATURES = {
         "test_file": "test_llm_fingerprint.py",
     },
     "reasoning_traps": {
-        "cli_flag": "--reasoning-traps",
+        "cli_flag": "--anti-rea-level",
         "phase_name": None,
         "impl_module": "obfuscator.reasoning_traps",
         "runtime_file": None,
         "test_file": "test_reasoning_traps.py",
     },
     "function_intent": {
-        "cli_flag": "--function-intent",
+        "cli_flag": "--transforms function-intent",
         "phase_name": None,
         "impl_module": "obfuscator.function_intent",
         "runtime_file": None,
@@ -647,7 +647,7 @@ ALL_FEATURES = {
         "test_file": "test_context_saturation.py",
     },
     "prompt_resistance": {
-        "cli_flag": "--prompt-resistance",
+        "cli_flag": "--anti-rea-level",
         "phase_name": None,
         "impl_module": "scripts.metrics.prompt_resistance",
         "runtime_file": None,
@@ -766,7 +766,7 @@ ALL_FEATURES = {
         "test_file": "test_preservation.py",
     },
     "redteam": {
-        "cli_flag": "--red-team",
+        "cli_flag": "--anti-rea-level",
         "phase_name": "phase_redteam",
         "impl_module": "scripts.phases.phase_redteam",
         "runtime_file": None,

@@ -89,22 +89,32 @@ def test_the_watermark_and_the_lock_hwid_are_different_flags():
     machine the build is licensed to.
     """
     parser = _build_parser()
-    args = parser.parse_args(["build", "payload.py", "--watermark", "W1"])
+    from obfuscator.core.pipeline import apply_unified_specs
+    args = apply_unified_specs(
+        parser.parse_args(["build", "payload.py", "--watermark", "W1"]))
     assert args.watermark == "W1"
     assert args.lock_hwid == ""
-    args = parser.parse_args(["build", "payload.py", "--lock-hwid", "H2"])
+    args = apply_unified_specs(
+        parser.parse_args(["build", "payload.py", "--access", "lock-hwid=H2"]))
     assert args.lock_hwid == "H2"
     assert args.watermark == ""
 
 
 def test_platform_choices_match_the_implemented_farms():
-    """--platform must not advertise a backend that does not exist."""
+    """--package platform= must not accept a backend that does not exist."""
+    from obfuscator.core.pipeline import apply_unified_specs
     parser = _build_parser()
     build = parser._subparsers._group_actions[0].choices["build"]
-    action = [a for a in build._actions if a.dest == "platform"][0]
-    assert "gitlab" not in action.choices, (
-        "gitlab is offered but no GitLab farm is implemented")
-    assert set(action.choices) == {"auto", "github"}
+    args = apply_unified_specs(
+        build.parse_args(["payload.py", "--package", "platform=github"]))
+    assert args.platform == "github"
+    try:
+        apply_unified_specs(
+            build.parse_args(["payload.py", "--package", "platform=gitlab"]))
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("gitlab accepted but no GitLab farm is implemented")
 
 
 def test_unknown_command_is_reported_clearly():

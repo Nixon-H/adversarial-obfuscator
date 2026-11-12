@@ -144,16 +144,19 @@ def test_the_loader_cli_separates_the_watermark_from_the_licence_target():
         for opt in action.option_strings:
             if opt.startswith("--"):
                 dests[opt] = action.dest
-    assert "--lock-hwid" in dests, "the loader CLI must offer --lock-hwid"
+    assert "--access" in dests, "the loader CLI must offer --access"
     assert "--watermark" in dests, "the loader CLI must offer --watermark"
-    assert dests["--watermark"] != dests["--lock-hwid"], (
-        "--watermark and --lock-hwid are different controls and must not "
-        "resolve to the same destination")
     assert dests["--watermark"] == "watermark"
-    assert dests["--lock-hwid"] == "lock_hwid"
+    # The HWID lock moved under --access on 2026-11-12; its sub-option must
+    # still resolve to the distinct lock_hwid destination.
+    from obfuscator.core.pipeline import _ACCESS_SPEC_FIELDS
+    assert _ACCESS_SPEC_FIELDS["lock-hwid"] == "lock_hwid"
+    assert _ACCESS_SPEC_FIELDS["lock-hwid"] != dests["--watermark"], (
+        "--watermark and the HWID lock are different controls and must not "
+        "resolve to the same destination")
 
     # --rename-internal is genuinely on both CLIs, with the same meaning.
-    assert "--rename-internal" in _build_py_flags()
+    assert "--access" in _build_py_flags()
 
 
 

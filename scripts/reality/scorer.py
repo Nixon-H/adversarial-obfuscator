@@ -111,7 +111,7 @@ FEATURE_REGISTRY: List[Dict[str, Any]] = [
     {"name": "Per-Exec Recompile", "module": None, "class": None, "cli_flag": "--per-exec-recompile", "phase": "phase14_per_exec_recompile"},
     {"name": "Self-Healing", "module": None, "class": None, "cli_flag": "--self-healing", "phase": "phase15_self_healing"},
     {"name": "Code Genome", "module": None, "class": None, "cli_flag": "--code-genome", "phase": "phase16_code_genome"},
-    {"name": "Structure Randomization", "module": None, "class": None, "cli_flag": "--struct-randomization", "phase": "phase17_struct_random"},
+    {"name": "Structure Randomization", "module": None, "class": None, "cli_flag": "--transforms struct", "phase": "phase17_struct_random"},
     {"name": "History-Bound Decryption", "module": None, "class": None, "cli_flag": "--history-bound-decryption", "phase": "phase12_history_bound"},
     {"name": "HPC Integration", "module": None, "class": None, "cli_flag": "--hpc", "phase": "phase18_hpc"},
     {"name": "HPC Key Derivation", "module": None, "class": None, "cli_flag": "--hpc-key", "phase": "phase19_hpc_key"},
@@ -141,7 +141,7 @@ FEATURE_REGISTRY: List[Dict[str, Any]] = [
     {"name": "Synthesis Engine", "module": "scripts.synthesis", "class": "SynthesisEngine", "cli_flag": "--synthesis", "phase": "phase_synthesis"},
     {"name": "Attack Replay", "module": "scripts.attack_replay.replay", "class": "AttackReplay", "cli_flag": "--capture-attacks", "phase": "phase_attack_replay"},
     {"name": "Artifact Generator", "module": None, "class": None, "cli_flag": "--generate-artifacts", "phase": "phase_artifacts"},
-    {"name": "Red Team Pipeline", "module": None, "class": None, "cli_flag": "--red-team", "phase": "phase_redteam"},
+    {"name": "Red Team Pipeline", "module": None, "class": None, "cli_flag": "--anti-rea-level", "phase": "phase_redteam"},
 ]
 
 

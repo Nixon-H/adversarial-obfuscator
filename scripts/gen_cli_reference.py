@@ -126,9 +126,12 @@ def _help_text(target: str = "build") -> str:
         cmd = [sys.executable, "-m", "obfuscator.core.pipeline", "build", "--help"]
     else:
         cmd = [sys.executable, os.path.join(ROOT, "scripts", "build.py"), "--help"]
+    # Pin the terminal width: argparse wraps --help to COLUMNS, and the
+    # generated reference must not depend on the caller's terminal.
+    env = dict(os.environ, COLUMNS="80")
     proc = subprocess.run(
         cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-        cwd=ROOT,
+        cwd=ROOT, env=env,
     )
     return proc.stdout
 
@@ -145,7 +148,10 @@ def parse_options(help_text: str) -> list[tuple[str, str, str]]:
     entries: list[list[str]] = []
     cur: list[str] | None = None
     for line in body:
-        if re.match(r"^\s{2,}--?[a-zA-Z]", line):
+        # A new option starts with exactly two spaces of indent; help-text
+        # continuation lines are indented deeper, and a wrapped line can
+        # begin with a "--flag" mention -- that must not split the entry.
+        if re.match(r"^  (?!\s)--?[a-zA-Z]", line):
             if cur:
                 entries.append(cur)
             cur = [line.strip()]
@@ -247,6 +253,72 @@ NOTES = {
         "the build to validate them; nothing decrypts at run time. The chain "
         "secret is deliberately not written into `payload.h`."
     ),
+    "attestation": (
+        "**Inert.** Writes a config JSON via the package extras; the canonical "
+        "attestation gate lives in the Rust runtime and is wired independently "
+        "of this flag."
+    ),
+    "challenge-response": (
+        "**Inert.** Simulated pairwise protocol against hardcoded peers; the "
+        "result JSON is never read back and the artefact is untouched."
+    ),
+    "dist-attestation": (
+        "**Inert.** Simulated consensus over synthetic nodes; result JSON only."
+    ),
+    "distributed-mode": (
+        "**Inert.** Switches the Items 110-119 demo block between simulation "
+        "and forking; outputs are demo-only either way."
+    ),
+    "distributed-vm": (
+        "**Inert.** Runs a toy 3-instruction program into a config JSON; no "
+        "reader."
+    ),
+    "cross-process": (
+        "**Inert.** Binds fabricated fragment tuples at build time; no payload "
+        "data or artefact involved."
+    ),
+    "fragment": (
+        "**Inert.** The native fragment runtime is archived and never linked; "
+        "the phase writes a config JSON with no consumer."
+    ),
+    "micro-fragment": (
+        "**Inert.** Writes `micro_fragment_config.json`; emits no transformed "
+        "output."
+    ),
+    "microjit": (
+        "**Inert.** Writes a seed/config JSON; no reassembly reaches the "
+        "emitted binary."
+    ),
+    "multi-host": (
+        "**Inert.** Assigns toy functions to hosts in a JSON; no execution."
+    ),
+    "payload-dispersal": (
+        "**Inert.** Slices config metadata into a JSON; nothing executes the "
+        "slices."
+    ),
+    "recovery-prevention": (
+        "**Inert.** Partitions toy operations into an empty build/ dir."
+    ),
+    "rolling-keys": (
+        "**Inert.** Exercises a demo key-chain on test fragments; the chain "
+        "secret lands in a build/ JSON nobody reads."
+    ),
+    "oram": (
+        "**Inert.** Writes `oram_config.json`; never read back, never reaches "
+        "the artefact."
+    ),
+    "poly-engine": (
+        "**Inert.** Writes `poly_engine_config.json` (including `decrypt_code`); "
+        "nothing embeds or reads it."
+    ),
+    "flow-entangle": (
+        "**Inert.** Writes a flow-entanglement config JSON; no transformation "
+        "is applied and nothing reads it back."
+    ),
+    "remote-unlock": (
+        "**Inert.** Runs an in-process demo server and logs derived keys; "
+        "nothing is emitted into the artefact."
+    ),
     "randomization-seed": (
         "**Partial seeding only.** Seeds structure randomisation, speculation and "
         "the CPU-port phase; it does **not** make builds byte-reproducible, because "
@@ -258,12 +330,12 @@ NOTES = {
         "transformer's RNG and its `secrets` patch, and several injectors. With "
         "the same payload, tool version and flags, the source emitter is "
         "byte-identical. It does **not** make the packed loader reproducible, and "
-        "it is not key material. `--skip-obfuscate` is the copy path."
+        "it is not key material. `--skip obfuscate` is the copy path."
     ),
     "build-id": (
-        "**Lowering-kernel seed only.** Seeds the `--pytoc` semantic-lowering symbol "
+        "**Lowering-kernel seed only.** Seeds the `--package pytoc` semantic-lowering symbol "
         "map and is recorded in the manifest. It does not make the whole build "
-        "reproducible, and a non-`--pytoc` build does not use it."
+        "reproducible, and a build without `--package pytoc` does not use it."
     ),
     "lock-hwid": (
         "**Not a whole-build seed.** Registers a licence for the target HWID and "

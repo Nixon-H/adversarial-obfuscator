@@ -232,18 +232,20 @@ def test_the_anti_rea_flags_reach_the_build_options():
     parser, _ = build_parser()
     sub = parser._subparsers._group_actions[0].choices["build"]
 
-    default = sub.parse_args(["p.py"])
+    from obfuscator.core.pipeline import apply_unified_specs
+    default = apply_unified_specs(sub.parse_args(["p.py"]))
     assert default.anti_rea is True, "the shields are on by default"
-    assert default.anti_rea_level == "balanced"
+    assert default.anti_rea_level == "maximum"  # ON at maximum by default (2026-11-12)
     assert default.strict_detections is True
     assert default.anti_rea_exclude_bait is False
     assert default.anti_rea_exclude_cognitive is False
 
-    off = sub.parse_args(["p.py", "--no-anti-rea", "--anti-rea-level", "maximum"])
+    off = apply_unified_specs(
+        sub.parse_args(["p.py", "--no-anti-rea", "--anti-rea-level", "maximum"]))
     assert off.anti_rea is False
     assert off.anti_rea_level == "maximum"
 
-    one = sub.parse_args(["p.py", "--exclude-rea-cognitive"])
+    one = apply_unified_specs(sub.parse_args(["p.py", "--exclude", "rea.cognitive"]))
     assert one.anti_rea_exclude_cognitive is True
     assert one.anti_rea_exclude_compliance is False, (
         "excluding one layer must not disable the others")

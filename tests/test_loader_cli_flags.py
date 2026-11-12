@@ -6,8 +6,8 @@ Three things this round changed on the loader CLI:
   resolve a protection level the same way.
 * ``--section-split`` is ON by default and ``--no-section-split`` is
   the escape hatch -- the switch the FIRST audit asked for.
-* ``--watermark`` is a deprecated alias of ``--lock-hwid`` and says so
-  when it is used.
+* ``--watermark`` is the loader's watermark message; ``--lock-hwid`` is
+  gone as a flag and lives under ``--access lock-hwid=`` now.
 """
 import os
 import subprocess
@@ -17,14 +17,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from obfuscator.core.pipeline import build_parser  # noqa: E402
+from obfuscator.core.pipeline import apply_unified_specs, build_parser  # noqa: E402
 
 PAYLOAD = 'def main():\n    print("FLAG-OK")\n\nif __name__ == "__main__":\n    main()\n'
 
 
 def _parse(argv):
     parser, _subs = build_parser()
-    return parser.parse_args(argv)
+    return apply_unified_specs(parser.parse_args(argv))
 
 
 def test_section_split_is_on_by_default():
@@ -58,7 +58,8 @@ def test_the_watermark_flag_arms_the_loader_watermark_gate(tmp_path):
     env["PYTHONPATH"] = ROOT + os.pathsep + env.get("PYTHONPATH", "")
     proc = subprocess.run(
         [sys.executable, "-m", "obfuscator.core.pipeline", "build",
-         str(source), "--watermark", "W", "--skip-cloud"],
+         str(source), "--watermark", "W", "--skip-cloud",
+         "--exclude", "rea"],  # hermetic: no network for shield reports
         capture_output=True, text=True, timeout=900, env=env, cwd=str(tmp_path))
     assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-2000:]
     # The gate is armed: the emitted loader carries the message.
@@ -74,7 +75,7 @@ def test_the_lock_hwid_flag_does_not_warn(tmp_path):
     env["PYTHONPATH"] = ROOT + os.pathsep + env.get("PYTHONPATH", "")
     proc = subprocess.run(
         [sys.executable, "-m", "obfuscator.core.pipeline", "build",
-         str(source), "--lock-hwid", "W", "--skip-cloud"],
+         str(source), "--access", "lock-hwid=W", "--skip-cloud"],
         capture_output=True, text=True, timeout=900, env=env, cwd=str(tmp_path))
     assert "deprecated" not in proc.stdout + proc.stderr, (
         "--lock-hwid must not warn about a deprecation it does not have")

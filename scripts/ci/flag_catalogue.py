@@ -28,16 +28,15 @@ HARNESS_OWNED = {
 }
 
 NEEDS_EXTERNAL = {
-    "--net-url": "needs a deployed server", "--bind": "needs a real bind host",
-    "--webhook": "needs a receiver", "--tls-ca-bundle": "needs a CA bundle file",
-    "--lock-hwid": "binds to this machine's hardware id",
+    "--access": "gates need a deployed server, receiver, or this machine's hardware id",
+    "--bind": "needs a real bind host", "--tls-ca-bundle": "needs a CA bundle file",
     "--benchmark-model": "needs a model", "--adversarial-bench": "needs a benchmark model",
     "--attack-corpus": "needs a corpus", "--attack-store": "needs an external store",
     "--llm-api-key": "needs a credential", "--gh-token": "needs a credential",
     "--cf-token": "needs a credential", "--cf-account": "needs a credential",
     "--resume": "needs a previous run", "--watch": "never exits",
     # External tooling this harness does not install or drive.
-    "--cross": "needs a cross-compilation toolchain",
+    "--package cross=TARGETS": "needs a cross-compilation toolchain",
     "--self-audit": "needs the external audit tooling",
     "--multi-tool": "needs several external analysis tools",
     "--independent-audit": "needs an external auditor",

@@ -2,7 +2,8 @@
 
 **Generated:** 2026-11-10 from the live parsers (`scripts/build.py` and
 `obfuscator/core/pipeline.py`). **Status:** current inventory; regenerate after
-adding flags.
+adding flags. **Audited:** 2026-11-12 every flag was re-verified against its
+code path (see "Implementation audit" below).
 
 `Parser` says which entry point accepts the option. `both` means both do, but
 not necessarily with the same behaviour; see the cross-pipeline table in
@@ -11,6 +12,226 @@ not the effective value after the opt-level ladder resolves. When a flag is
 accepted by both parsers and their defaults differ, the table shows the
 `build.py` default; the loader default is in the cross-pipeline table.
 `Objective` is the primary security objective; a flag may serve more than one.
+
+## Unified flags (the only interface since 2026-11-12)
+
+Two one-flag namespaces replace the per-knob spelling. Sub-options land on
+the parser destinations the consumers read (obfuscator/core/pipeline.py
+`apply_unified_specs`). The former per-knob spellings were **removed** on
+2026-11-12 — they are no longer accepted, and tests reject them
+(`tests/test_unified_flags.py::test_removed_legacy_spellings_are_rejected`).
+The tables below are the pre-consolidation inventory (2026-11-10); entries
+for the removed spellings are historical.
+
+| Unified flag | Sub-options | Replaces (removed) |
+|---|---|---|
+| `--web3` | `rpc=URL` `explorer=URL` `contract=ADDR` `shards=URL1,URL2` `deploy` `deploy-rpc=URL` | contract/rpc/shards/auto-deploy/deploy-rpc/explorer |
+| `--licence` | `token=FILE` `env-only` `bootstrap-encrypted` `chain` | the four licence-prefixed spellings |
+| `--access` | `hwid=STR` `hwid-lock` `lock-hwid=STR` `trial=7d` `expire=DATE` `bind-mac` `one-shot` `kod` `hostguard` `driver-check` `name-gate` `rename-internal` `allow-countries=…` `block-countries=…` `allow-regions=…` `block-regions=…` `webhook=URL` `net-url=URL` | the 18 per-knob access-gate spellings (hwid, trial, expire, kod, hostguard, hwid-lock, driver-check, name-gate, rename-internal, lock-hwid, bind-mac, one-shot, allow/block-countries, allow/block-regions, webhook, net-url) |
+
+`scripts/build.py` keeps its own copies of several loader-only names so its
+refusal message ("this pipeline emits no hybrid loader") still reaches the
+operator; those are refused there, not functional, and are not the interface.
+
+**Default-on change (2026-11-12):** the split-bootstrap key (Shamir n=3,k=2
+threshold + fragmented decoder) is now ON in every loader build. The enable
+flag was removed; `--no-split-bootstrap` is the opt-out — the same shape as
+`--section-split`/`--no-section-split`. Verified with a complete-security
+build: the artefact builds and runs with the split bootstrap.
+
+**Deception/provenance merged into the counter-REA gate (2026-11-12).** The
+25 per-knob deception flags (poison-*, provenance-*, honey-functions,
+decoy-apis/count, llm-resilient(+depth,vars), attention-poison,
+reasoning-traps/trap-depth, storyline-count, multi-agent-deception,
+manipulation-detector, prompt-resistance, red-team(+output), self-critique,
+false-confidence-audit) were **removed** from `scripts/build.py`. One gate
+replaces them: `--anti-rea-level {stealth,balanced,maximum}` (default
+**maximum**, ON), `--no-anti-rea` to disable everything, and one exclusion
+list `--exclude-rea poison,honey,decoy,attention,traps,storyline,
+llm-resilient,red-team,self-critique,manipulation,prompt,false-confidence,
+multi-agent`. `_apply_rea_shields` computes the removed destinations before
+any phase reads them, so the phases are unchanged. Note: with maximum as the
+default, every native build now emits the deception layers (poison, honey
+functions, decoys, traps) and runs the red-team/self-critique reports; use
+`--exclude-rea` for any layer you do not want.
+
+The licence identity gate is `--licence … chain` (signed ERC-721
+verification); the `--web3` sub-options drive the *other* Web3 machinery
+(runtime `eth_call` licence check, Shamir key-shard fetch, contract
+deployment) and are not the licence gate. Cloudflare worker deployment
+(`--cf-token` / `--cf-account`) and network auth (`--net-url`) stay
+separate: they belong to the `auth` command's subsystem, not the Ethereum
+licence/Web3 path.
+
+Four true alias flags were also **removed** (no behaviour lost — the
+canonical flag keeps everything, including the Item-126 hybrid demo):
+poison-all → `--provenance-poison`, gpu → `--gpu-execution`,
+cpu-gpu-hybrid → `--gpu-hybrid`, advanced-protection → `--phase2`.
+
+## Namespace flags — the whole CLI in four more flags (2026-11-12)
+
+The report and research phases no longer have one flag each. They are named
+entries of two namespaces, and every removed flag's old spelling is rejected:
+
+| Namespace | What it does | Examples |
+|---|---|---|
+| `--audit NAME…` | run report/verification phases | `--audit reality-score security-gates proof-coverage`<br>`--audit all confidence-level=0.99` |
+| `--research NAME…` | run experimental phases that write `build/` sidecars | `--research cfg-mutation code-genome tee`<br>`--research fragment fragment-size=12` |
+| `--skip STAGE…` | skip build stages | `--skip llvmgen extras generate-payload-h` |
+| `--exclude FAMILY…` | skip shield families | `--exclude rea` (all), `--exclude rea.cognitive rea.bio` |
+
+The names are the old flag names without the leading `--`; `--audit all` /
+`--research all` run everything. `key=value` entries tune a phase
+(`--audit gate-threshold=0.8`, `--research tee-type=sgx`). Both CLIs accept the
+same `--exclude` syntax: `rea`, `rea.poison`, `rea.honey`, `rea.decoy`,
+`rea.attention`, `rea.traps`, `rea.storyline`, `rea.llm-resilient`,
+`rea.red-team`, `rea.self-critique`, `rea.manipulation`, `rea.prompt`,
+`rea.false-confidence`, `rea.multi-agent`, `rea.adversarial` (native build);
+`rea`, `rea.cognitive`, `rea.compliance`, `rea.bio` (loader build).
+
+**Result:** `scripts/build.py` went from **243 options to 30**, the loader CLI
+from **74 to 30**; the distinct union is **50 — half the 100 target**. Every
+removed destination still exists (defaulted by the namespace appliers), so
+phase code is unchanged. The six positive transform flags were removed because
+they already default ON; their `--no-` opt-outs remain. Advanced protection is
+**default-on** (disable with `--exclude advanced-protection`); adversarial
+injection folded into the counter-REA gate as the `adversarial` family.
+Packaging is `--package` (pytoc, pyinstaller, cross=, native, compile, cloud,
+layers=, zips=, stego, portable) and the opt-in passes are `--transforms`
+(data, data-level=, function-intent, speculation, struct, struct-level=,
+seed=). `--validate fail` replaces the old abort flag, `--licence salt=`
+replaces `--customer-salt`, and `--access vm-threshold=` replaces
+`--vm-threshold`.
+
+## False-security fixes (2026-11-12)
+
+Three flags were accepted but did nothing at run time; all three now do what
+their help text claimed:
+
+- **`--block-countries` / `--block-regions`: now enforced.** The values were
+  substituted into the loader but the `Geofence` class only accepted
+  allow-lists. The class now takes and enforces blocked lists (tests:
+  `tests/test_geofence_blocked.py`).
+- **`--expire`: now enforced.** The date was embedded into `VAR_EXP_DATE` and
+  read by nothing. The boot sequence now compares the wall clock to the date
+  and follows the sibling-gate pattern: hash-chain divergence in signal mode,
+  exit 137 under `--strict-detections`.
+
+## Security by default — what is already on, and what stays opt-in
+
+Verified against the code paths (2026-11-12), not just parser defaults:
+
+**Already on in every normal build — no change needed:**
+
+- The six canonical AST transforms (`--cfg-flatten`, `--mba-subs`,
+  `--opaque-predicates`, `--fragment-strings`, `--unicode-ids`,
+  `--bogus-exceptions`): ON in `scripts/build.py` (default True), hardcoded ON
+  on the pipeline `build` path, and kept ON for O1+ by the `--opt-level` ladder.
+- Counter-REA shields (`--anti-rea`): ON by default; `--no-anti-rea` is the
+  opt-out.
+- Sectioned payload sealing (`--section-split`): ON by default.
+- Strict detections (`--strict-detections`, i.e. NOT `--fast`): ON by default;
+  `--fast` is its opt-out twin and prints a reduced-posture warning.
+- Audit-hook plant detector, frozen-stdlib snapshot gate, stdlib function-audit
+  gate: all planted/armed by default; `--no-audit-hook-plant`, `--no-snapshot`,
+  `--no-stdlib-audit` are the opt-outs.
+- Post-build verification suite (PHASE 3): runs on every pipeline build unless
+  `--one-shot` skips it, and fails the build on real output divergence.
+
+**Deliberately opt-in — flipping them on would break correct use:**
+
+- Access gates (`--hwid`, `--hwid-lock`, `--trial`, `--kod`, `--hostguard`,
+  `--name-gate`, `--lock-hwid`, `--bind-mac`): machine binding and
+  kill-on-detect cannot be universal defaults — they would break portability
+  and kill legitimate runs on false positives. Without the flag the emitted
+  gate is explicitly DISABLED.
+- Geofence (`--allow/block-countries/regions`) and `--expire`: network- and
+  clock-dependent checks, opt-in by nature.
+- Licence binding (`--licence token=…`): requires an issued token per
+  customer; it is a capability, not a global switch.
+- Split-bootstrap key: **now default-on** (2026-11-12); `--no-split-bootstrap`
+  is the opt-out. It was opt-in until a complete-security build verified the
+  split key + fragmented decoder runs.
+
+**Net:** the audit found no protection that was default-off and safe to flip
+on; the gaps were flags that did nothing (fixed above) and one inert
+`--crypto-binding` suspicion that the code disproved (it is build-time only,
+but it does run).
+
+## Implementation audit (2026-11-12)
+
+Every flag destination in the tables below was re-verified against the code
+paths — consumers traced through `args.<dest>` / `getattr(args, …)` reads,
+config-dict copies followed one hop, and build/ JSON outputs checked for a
+reader. Coverage: 327 flag destinations across both parsers.
+
+| Status | Count | Meaning |
+|---|---|---|
+| ACTIVE | 226 | consumed; changes the artefact, runtime behaviour, or an operator-readable report |
+| PARTIAL | 54 | consumed on one path only (native/hybrid, loader-only) or only when its parent flag is set — parameters, not dead flags |
+| REDUNDANT | 7 | alias of another flag (same dest or identical branch); all 4 true aliases **removed 2026-11-12**, the 3 opt-out twins remain |
+| INERT | 40 | consumed but lands only in build/ JSON nothing reads back, or a demo/simulation with no artefact effect |
+| DEAD | 0 | parsed but never consumed |
+
+**REDUNDANT aliases — all 4 true aliases REMOVED 2026-11-12** (the canonical
+flag keeps every behaviour): poison-all (→ `--provenance-poison`), gpu (→
+`--gpu-execution`), cpu-gpu-hybrid (→ `--gpu-hybrid`, including the Item-126
+demo the alias alone triggered), advanced-protection (→ `--phase2`). The
+remaining 3 of the 7 "redundant" pairs are normal argparse opt-out twins,
+not aliases, and stay: `--no-anti-rea` (twin of `--anti-rea`),
+`--no-generate-payload-h` (twin of `--generate-payload-h`), `--fast`
+(opt-out twin of `--strict-detections`).
+
+**INERT flags (40).** Each runs a build-time phase that writes a `build/`
+JSON or a demo that never reaches the artefact. All are marked
+`**Inert.**`/`**Metadata-only.**` in the generated CLI reference. The list:
+
+`--cfg-mutation` · `--cfg-mutation-variants` · `--class-dispatch` ·
+`--class-dispatch-count` · `--ssa-mutation` · `--state-isa` ·
+`--state-isa-history-len` · `--temporal-keys` · `--temporal-window` ·
+`--per-exec-recompile` · `--self-healing` · `--oram` · `--poly-engine` ·
+`--flow-entangle` · `--remote-unlock` · `--remote-unlock-ttl` ·
+`--attestation` · `--challenge-response` · `--dist-attestation` ·
+`--dist-attestation-nodes` · `--dist-diversity-nodes` ·
+`--dist-diversity-rotation` · `--dist-diversity-variants` ·
+`--distributed-mode` · `--distributed-vm` · `--cross-process` · `--fragment` ·
+`--fragment-functions` · `--fragment-size` · `--fragment-migration` ·
+`--micro-fragment` · `--micro-fragment-size` · `--microjit` · `--multi-host` ·
+`--multi-host-count` · `--payload-dispersal` · `--dispersal-slices` ·
+`--recovery-prevention` · `--recovery-prevention-nodes` · `--rolling-keys` ·
+`--ephemeral-isa`
+
+Two earlier "inert" suspicions were disproved by the code and corrected:
+`--crypto-binding` (build-time fragment validation, ACTIVE on its path) and
+`--self-healing` stayed inert.
+
+**Decision on the INERT set:** they are research/simulation phases kept for
+compatibility and documentation honesty, not removed — deleting them would
+discard recorded research machinery (`docs/FLAG_AUDIT.md` history and the
+bench tests under `tests/bench_*` cover several). None provides runtime
+security; none is enabled by default; each is labelled at the point a reader
+actually looks: the generated reference table.
+
+**PARTIAL flags worth knowing about (54):** most are parameters of a parent
+flag (`--decoy-api-count` needs `--decoy-apis`, `--genome-generations` needs
+`--code-genome`, …) and `scripts/build.py` already warns when a parameter is
+set without its parent ("dangling use"). The loader-only ones
+(`--hwid`, `--trial`, `--kod`, `--hostguard`, `--hwid-lock`,
+`--split-bootstrap`, `--vm-threshold`, `--customer-salt`, `--no-snapshot`,
+`--no-stdlib-audit`, `--no-audit-hook-plant`, …) are refused or warned on the
+`scripts/build.py` native path with a pointer to
+`python3 -m obfuscator.core.pipeline build`, the only entry point that emits
+the loader that implements them.
+
+**The verification / assurance set (67 report flags) is real machinery:** all
+but their parameter flags are ACTIVE report generators
+(`phase_assumptions`, `phase_reality`, `phase_security_gates`, …) with bench
+tests under `tests/bench_*`; they write operator-readable reports and several
+feed each other (`evidence_ledger` → release-confidence/self-critique;
+`security_gates` → reality score). They are assurance tooling, not runtime
+protections, and correctly cost nothing at artefact run time.
+
+
 
 ## Counter-REA / deception (31)
 
@@ -127,6 +348,9 @@ accepted by both parsers and their defaults differ, the table shows the
 | `--hwid` | both | `''` | Licensing / access gates |
 | `--hwid-lock` | both | `False` | Licensing / access gates |
 | `--kod` | both | `False` | Licensing / access gates |
+| `--licence-bootstrap-encrypted` | loader | `False` | Licensing / access gates |
+| `--licence-chain` | loader | `False` | Licensing / access gates |
+| `--licence-env-only` | loader | `False` | Licensing / access gates |
 | `--licence-token` | loader | `''` | Licensing / access gates |
 | `--lock-hwid` | loader | `''` | Licensing / access gates |
 | `--name-gate` | both | `False` | Licensing / access gates |

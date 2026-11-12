@@ -49,7 +49,8 @@ def test_cli_flag_exists():
         capture_output=True, text=True, timeout=60,
     )
     assert r.returncode == 0, r.stderr[-2000:]
-    assert "--pyinstaller-spec" in (r.stdout + r.stderr)
+    assert "--package" in (r.stdout + r.stderr)
+    assert "pyinstaller" in (r.stdout + r.stderr)
 
 
 def test_build_with_flag_writes_spec(tmp_path):

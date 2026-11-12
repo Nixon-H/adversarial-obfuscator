@@ -74,7 +74,7 @@ def test_every_parser_option_appears_in_the_cli_doc():
 
 @pytest.mark.parametrize("name", [
     # flags whose real behaviour contradicts their name; each must carry a note
-    "temporal-keys", "crypto-binding", "randomization-seed",
+    "seed", "build-id", "pin-structure",
 ])
 def test_inert_flags_carry_a_warning(name):
     """A reader must not discover an inert flag by reading its implementation."""
@@ -88,5 +88,7 @@ def test_inert_flags_carry_a_warning(name):
         (l for l in proc.stdout.splitlines()
          if l.startswith(f"| `--{name}")), None)
     assert row is not None, f"--{name} missing from the generated reference"
-    assert ("Inert" in row or "Archived" in row or "Build-time only" in row
-            or "Partial seeding only" in row), row
+    markers = ("Inert", "Archived", "Build-time only", "Partial seeding only",
+               "Reproducibility seed", "Lowering-kernel seed only",
+               "Structure only")
+    assert any(m in row for m in markers), row

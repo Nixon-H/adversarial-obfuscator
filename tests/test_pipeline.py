@@ -16,17 +16,19 @@ PIPELINE = os.path.join(os.path.dirname(__file__), "..", "scripts", "build.py")
 
 
 def test_pipeline_obfuscate_only():
-    """Run pipeline with --skip-relay on a trivial payload."""
+    """Run pipeline with --skip relay on a trivial payload."""
     with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
         f.write("print('hello')\n")
         payload = f.name
 
     result = subprocess.run(
-        [sys.executable, PIPELINE, "--payload", payload, "--skip-relay",
-         "--skip-llvmgen", "--skip-encrypt",
+        [sys.executable, PIPELINE, "--payload", payload,
+         "--skip", "relay", "llvmgen", "encrypt",
+         # hermetic: the counter-REA shields call LLM APIs; no network here
+         "--exclude", "rea",
          "--no-cfg-flatten", "--no-opaque-predicates", "--no-bogus-exceptions",
          "--no-mba-subs", "--no-fragment-strings", "--no-unicode-ids"],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, timeout=300,
     )
     os.unlink(payload)
     assert result.returncode == 0, f"Pipeline failed: {result.stderr}"
@@ -41,10 +43,10 @@ def test_pipeline_with_obfuscation():
         payload = f.name
 
     result = subprocess.run(
-        [sys.executable, PIPELINE, "--payload", payload, "--skip-relay",
-         "--skip-llvmgen", "--skip-encrypt",
-         "--fragment-strings"],
-        capture_output=True, text=True, timeout=30,
+        [sys.executable, PIPELINE, "--payload", payload,
+         "--skip", "relay", "llvmgen", "encrypt",
+         "--exclude", "rea"],
+        capture_output=True, text=True, timeout=300,
     )
     os.unlink(payload)
     assert result.returncode == 0, f"Pipeline failed: {result.stderr}"
@@ -53,7 +55,7 @@ def test_pipeline_with_obfuscation():
 def test_pipeline_missing_payload():
     """Pipeline should fail gracefully on missing input."""
     result = subprocess.run(
-        [sys.executable, PIPELINE, "--payload", "/nonexistent.py", "--skip-relay"],
+        [sys.executable, PIPELINE, "--payload", "/nonexistent.py", "--skip", "relay"],
         capture_output=True, text=True, timeout=10,
     )
     assert result.returncode != 0

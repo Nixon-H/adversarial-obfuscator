@@ -66,20 +66,18 @@ class TestDependencyValidation:
 class TestLoaderOnlyFlags:
     """Flags this pipeline cannot honour must be refused, not ignored.
 
-    --customer-salt binds the payload key to a customer in the HYBRID
-    LOADER path (`python3 -m obfuscator.core.pipeline build`). The
-    scripts/build.py pipeline emits no hybrid loader, so accepting the
-    flag there and doing nothing would leave an operator believing the
-    build was customer-bound when it was not.
+    --access carries the loader-only gates. This pipeline emits no hybrid
+    loader, so --access here must be refused with a pointer, not ignored;
+    silently proceeding would leave an operator believing gates were armed.
     """
 
-    def test_customer_salt_is_refused_here(self):
+    def test_loader_only_access_is_refused_here(self):
         import subprocess
         root = os.path.join(os.path.dirname(__file__), "..")
         result = subprocess.run(
             [sys.executable, "scripts/build.py", "--payload",
              os.path.join(root, "tests", "fixtures", "test_payload.py"),
-             "--customer-salt", "acme"],
+             "--access", "hwid=ABC"],
             capture_output=True, text=True, timeout=120, cwd=root,
         )
         # The exact code is the refusal path's business (2 locally, 1 when
@@ -89,5 +87,5 @@ class TestLoaderOnlyFlags:
             "expected the loader-only refusal, got 0\n%s"
             % (result.stderr[-500:],)
         )
-        assert "--customer-salt" in result.stderr or "--customer-salt" in result.stdout
+        assert "--access" in result.stderr or "--access" in result.stdout
         assert "pipeline build" in result.stderr or "pipeline build" in result.stdout
