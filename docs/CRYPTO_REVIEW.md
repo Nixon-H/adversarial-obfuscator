@@ -45,6 +45,13 @@ identified this in the O4 artefact and concluded the strings are recoverable.
 The scheme's value is hiding literals from `strings`/grep, not confidentiality.
 Documented; no change.
 
+A 2026-11-11 full-tool agent run made this concrete: it recovered the payload
+stream key, nonce, `SWIZZLE_KEY`, loader session token, and payload HMAC key
+from the artefact, reconstructed the 242,049-byte payload, and verified its
+HMAC. No cryptographic primitive was broken. This is the client-side-key
+ceiling in operation; it is recorded in
+[`research/ai-layer-bench-2026-11-11/RESULTS.md`](research/ai-layer-bench-2026-11-11/RESULTS.md).
+
 ### 2.4 Section sealing now authenticates (fixed)
 
 Sections were sealed with an unkeyed SHA-256 tag; anyone who could touch the
@@ -64,6 +71,17 @@ closed without a key.
 The loader does not verify Ed25519; it re-derives the payload key from the
 token's `key_material`. A forged token with different material derives a key
 that does not match the ciphertext. This stops decryption, not re-issuing.
+
+**Correction (2026-11-11).** The first licence-bound standard build did not
+actually mix the token into `k_dec`; it only checked that a token was present,
+so a forged `00`-material token still ran the payload. The pack-time and
+runtime `k_dec` paths now apply the token mask, and a forged token fails with
+`Magic Mismatch`. This is a binding fix, not a cryptographic break; the token
+remains a client-side capability.
+
+The loader also pins the canonical signed payload hash, so metadata tampering
+is rejected even when `key_material` is unchanged. The signature itself is
+verified during the build; the loader does not reimplement Ed25519.
 
 ### 2.7 Chain secret no longer touches disk (fixed)
 

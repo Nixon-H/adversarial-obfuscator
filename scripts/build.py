@@ -214,6 +214,8 @@ def _warn_dangling(opts, parent, subs):
         return
     if parent_on:
         return
+    if parent in _MANAGED_DESTS:
+        return
     dangling = []
     for sub, default in subs:
         try:
@@ -355,6 +357,293 @@ def _stage_seed(opts):
     return int(hashlib.sha256(("stage:%s" % base).encode()).hexdigest()[:8], 16)
 
 
+_REA_SHIELD_FAMILIES = (
+    "poison", "honey", "decoy", "attention", "traps", "storyline",
+    "llm-resilient", "red-team", "self-critique", "manipulation",
+    "prompt", "false-confidence", "multi-agent",
+)
+
+
+def _apply_rea_shields(opts):
+    """Resolve the counter-REA/deception gate onto the shield destinations.
+
+    One gate, one exclusion list: the per-knob poison/honey/decoy/trap/
+    red-team/self-critique flags were removed on 2026-11-12 and their
+    destinations are now computed here.  Defaults are ON at maximum.
+    """
+    level = ("off" if getattr(opts, "anti_rea_off", False)
+             else getattr(opts, "anti_rea_level", "maximum"))
+    excluded = set(getattr(opts, "_rea_excluded", ()) or ())
+
+    def fam(name):
+        return level != "off" and name not in excluded
+
+    # Level semantics: maximum = every shield at full strength; balanced =
+    # mid-strength poison/honey/attention plus the reports; stealth = the
+    # cheapest layer only (semantic decoy APIs), everything else off.
+    maximum = level == "maximum"
+    balanced = level == "balanced"
+    stealth = level == "stealth"
+    poison = fam("poison")
+    opts.poison_level = (5 if maximum else 3 if balanced else 0) if poison else 0
+    opts.provenance_poison = poison
+    opts.provenance_replace = poison
+    opts.poison_call_graph = poison
+    opts.poison_apis = poison
+    opts.poison_protocols = poison
+    opts.poison_paths = poison
+    opts.poison_imports = poison
+    opts.llm_resilient = fam("llm-resilient") and not stealth
+    opts.llm_resilient_depth = 15
+    opts.llm_resilient_vars = 50
+    opts.honey_functions = ((10 if maximum else 4) if fam("honey") else 0) \
+        if not stealth else 0
+    opts.decoy_apis = fam("decoy")
+    opts.decoy_api_count = 5
+    opts.reasoning_traps = fam("traps") and not stealth
+    opts.trap_depth = 5
+    opts.attention_poison = ((8 if maximum else 3) if fam("attention") else 0) \
+        if not stealth else 0
+    opts.adversarial_injection = fam("adversarial") and not stealth
+    opts.adversarial_level = 3
+    opts.multi_agent_deception = fam("multi-agent") and not stealth
+    # Keep the count at its declared default even when the family is off:
+    # the phase is gated by multi_agent_deception, and a divergent value
+    # would trip the dangling-set warning on every stealth build.
+    opts.storyline_count = 3
+    opts.red_team = fam("red-team") and not stealth
+    opts.red_team_output = "build/redteam"
+    opts.self_critique = fam("self-critique") and not stealth
+    opts.manipulation_detector = fam("manipulation") and not stealth
+    opts.prompt_resistance = fam("prompt") and not stealth
+    opts.false_confidence_audit = fam("false-confidence") and not stealth
+    return opts
+
+
+
+_AUDIT_CATALOG = {'analyst-time': 'analyst_time', 'assumptions-report': 'assumptions_report', 'attack-corpus': 'attack_corpus', 'attack-surface': 'attack_surface', 'audit-drift': 'audit_drift', 'benchmark': 'benchmark', 'benchmark-integrity': 'benchmark_integrity', 'benchmark-report': 'benchmark_report', 'capture-attacks': 'capture_attacks', 'claim-audit': 'claim_audit', 'classify': 'classify', 'classify-features': 'classify_features', 'confidence-interval': 'confidence_interval', 'context-saturation': 'context_saturation', 'cost-model': 'cost_model', 'coverage-map': 'coverage_map', 'dependency-graph': 'dependency_graph', 'embed-proof': 'embed_proof', 'emit-certificates': 'emit_certificates', 'eval-summary': 'eval_summary', 'evaluate': 'evaluate', 'evidence-completeness': 'evidence_completeness', 'evidence-ledger': 'evidence_ledger', 'feature-effectiveness': 'feature_effectiveness', 'generate-artifacts': 'generate_artifacts', 'independent-audit': 'independent_audit', 'invariant-engine': 'invariant_engine', 'knowledge-base': 'knowledge_base', 'knowledge-graph': 'knowledge_graph', 'longitudinal-tracking': 'longitudinal_tracking', 'metrics': 'metrics', 'multi-tool': 'multi_tool', 'plaintext-exposure': 'plaintext_exposure', 'proof-carrying': 'proof_carrying', 'proof-coverage': 'proof_coverage', 'proof-soundness': 'proof_soundness', 'protection-roi': 'protection_roi', 'prove-fragments': 'prove_fragments', 'prove-vm': 'prove_vm', 'reachability-report': 'reachability_report', 'reality-score': 'reality_score', 'release-confidence': 'release_confidence', 'replay-attacks': 'replay_attacks', 'reproducibility-score': 'reproducibility_score', 'retirement-report': 'retirement_report', 'runtime-truth': 'runtime_truth', 'security-debt': 'security_debt', 'security-gates': 'security_gates', 'semantic-leakage': 'semantic_leakage', 'silent-fallback': 'silent_fallback', 'survivability': 'survivability', 'threat-coverage': 'threat_coverage', 'trust-boundary': 'trust_boundary', 'update-baseline': 'update_baseline', 'verification-bundle': 'verification_bundle', 'verification-diversity': 'verification_diversity', 'verify-jit': 'verify_jit', 'verify-mba': 'verify_mba', 'verify-mutations': 'verify_mutations', 'verify-preservation': 'verify_preservation', 'verify-preservation-formal': 'verify_preservation_formal', 'verify-watermark': 'verify_watermark', 'verify-watermark-survivability': 'verify_watermark_survivability', 'self-audit': 'self_audit'}
+_AUDIT_PARAMS = {'attack-store': 'build/attacks', 'artifacts-output': 'build/artifacts', 'benchmark-model': None, 'confidence-level': 0.95, 'coverage-output': None, 'gate-threshold': None, 'knowledge-graph-output': None, 'max-cpu-overhead': 20.0, 'max-size-mult': 3.0, 'min-resilience': None, 'min-security': 0.5, 'require-live-features': None, 'verification-bundle-output': None}
+_RESEARCH_CATALOG = {'adaptive': 'adaptive', 'adaptive-adversarial': 'adaptive_adversarial', 'adaptive-classifier-loop': 'adaptive_classifier_loop', 'adversarial-bench': 'adversarial_bench', 'adversarial-loop': 'adversarial_loop', 'ai-guided-diversity': 'ai_guided_diversity', 'apply-synthesis': 'apply_synthesis', 'attestation': 'attestation', 'cfg-mutation': 'cfg_mutation', 'challenge-response': 'challenge_response', 'class-dispatch': 'class_dispatch', 'code-genome': 'code_genome', 'cpu-port': 'cpu_port', 'cross-process': 'cross_process', 'crypto-binding': 'crypto_binding', 'dist-attestation': 'dist_attestation', 'dist-diversity': 'dist_diversity', 'dist-watermark': 'dist_watermark', 'distributed-vm': 'distributed_vm', 'ephemeral-isa': 'ephemeral_isa', 'fhe-vm': 'fhe_vm', 'flow-entangle': 'flow_entangle', 'fragment': 'fragment', 'fragment-migration': 'fragment_migration', 'gpu-execution': 'gpu_execution', 'gpu-hybrid': 'gpu_hybrid', 'history-bound-decryption': 'history_bound_decryption', 'hpc': 'hpc', 'hpc-key': 'hpc_key', 'io-research': 'io_research', 'kernel-assist': 'kernel_assist', 'llm-fingerprint': 'llm_fingerprint', 'micro-fragment': 'micro_fragment', 'microjit': 'microjit', 'multi-binary': 'multi_binary', 'multi-host': 'multi_host', 'oram': 'oram', 'payload-dispersal': 'payload_dispersal', 'per-exec-recompile': 'per_exec_recompile', 'poly-engine': 'poly_engine', 'recovery-prevention': 'recovery_prevention', 'remote-unlock': 'remote_unlock', 'rolling-keys': 'rolling_keys', 'rop': 'rop', 'self-healing': 'self_healing', 'sgx': 'sgx', 'simd-vm': 'simd_vm', 'ssa-mutation': 'ssa_mutation', 'state-isa': 'state_isa', 'synthesis': 'synthesis', 'tee': 'tee', 'temporal-keys': 'temporal_keys', 'uarch-diversity': 'uarch_diversity', 'uarch-watermark': 'uarch_watermark', 'zk-state': 'zk_state', 'proof-aware-optimizer': 'proof_aware_optimizer'}
+_RESEARCH_PARAMS = {'adversarial-bench-count': 20, 'cfg-mutation-variants': 4, 'class-dispatch-count': 4, 'deobfuscation-threshold': 0.7, 'dispersal-slices': 3, 'dist-attestation-nodes': 5, 'dist-diversity-nodes': 4, 'dist-diversity-rotation': 3600.0, 'dist-diversity-variants': 8, 'dist-watermark-shares': 5, 'distributed-mode': 'simulation', 'diversity': None, 'diversity-dir': 'build/variants', 'diversity-threshold': 0.3, 'evolution-generations': 3, 'evolution-iterations': 1, 'fingerprint-model': 'gpt', 'fhe-vm-functions': None, 'fragment-functions': None, 'fragment-size': 5, 'genome-generations': 50, 'genome-population': 30, 'io-research-functions': None, 'kernel-assist-features': None, 'micro-fragment-size': 64, 'multi-binary-num': 4, 'multi-host-count': 3, 'recovery-prevention-nodes': 5, 'remote-unlock-ttl': 30.0, 'ssa-variants': 4, 'state-isa-history-len': 8, 'synthesis-max-overhead': 50.0, 'synthesis-max-size': 3.0, 'synthesis-output': None, 'synthesis-target-security': 70.0, 'tee-type': 'software', 'temporal-window': 60.0, 'zk-state-config': None, 'diversity-report': None}
+_SKIP_CATALOG = {'conflict': 'skip_conflict_check', 'obfuscate': 'skip_obfuscate', 'irgen': 'skip_irgen', 'llvmgen': 'skip_llvmgen', 'encrypt': 'skip_encrypt', 'relay': 'skip_relay', 'extras': 'skip_extras'}
+_REA_FAMILIES = ("poison", "honey", "decoy", "attention", "traps",
+                 "storyline", "llm-resilient", "red-team", "self-critique",
+                 "manipulation", "prompt", "false-confidence", "multi-agent",
+                 "adversarial")
+_MANAGED_DESTS = set(_AUDIT_CATALOG.values()) | set(_RESEARCH_CATALOG.values()) \
+    | set(_AUDIT_PARAMS.keys()) | set(_RESEARCH_PARAMS.keys()) \
+    | {"pytoc", "pytoc_out", "pyinstaller_spec", "python_dll", "rust_exe",
+       "cross", "data_obfuscation", "data_obf_level", "function_intent",
+       "speculation_obfuscation", "struct_randomization",
+       "randomization_level", "randomization_seed", "validate", "validate_fail",
+       "phase2", "phase2_only", "phase2_extras", "advanced_protection_only",
+       "cfg_flatten", "opaque_predicates", "bogus_exceptions", "mba_subs",
+       "fragment_strings", "unicode_ids"}
+
+
+def _set_defaults(opts):
+    """Every destination a consumer reads must exist after parsing."""
+    for dest in _AUDIT_CATALOG.values():
+        if not hasattr(opts, dest):
+            setattr(opts, dest, False)
+    for name, default in _AUDIT_PARAMS.items():
+        dest = name.replace("-", "_")
+        if not hasattr(opts, dest):
+            setattr(opts, dest, default)
+    for dest in _RESEARCH_CATALOG.values():
+        if not hasattr(opts, dest):
+            setattr(opts, dest, False)
+    for name, default in _RESEARCH_PARAMS.items():
+        dest = name.replace("-", "_")
+        if not hasattr(opts, dest):
+            setattr(opts, dest, default)
+    if not hasattr(opts, "skip_conflict_check"):
+        opts.skip_conflict_check = False
+    if not hasattr(opts, "skip_obfuscate"):
+        opts.skip_obfuscate = False
+    if not hasattr(opts, "skip_irgen"):
+        opts.skip_irgen = False
+    if not hasattr(opts, "skip_llvmgen"):
+        opts.skip_llvmgen = False
+    if not hasattr(opts, "skip_encrypt"):
+        opts.skip_encrypt = False
+    if not hasattr(opts, "skip_relay"):
+        opts.skip_relay = False
+    if not hasattr(opts, "skip_extras"):
+        opts.skip_extras = False
+    if not hasattr(opts, "generate_payload_h"):
+        opts.generate_payload_h = True
+    for dest in ("cfg_flatten", "opaque_predicates", "bogus_exceptions",
+                 "mba_subs", "fragment_strings", "unicode_ids"):
+        if not hasattr(opts, dest):
+            setattr(opts, dest, True)
+    opts.phase2_only = ""
+    opts.phase2_extras = False
+    opts.advanced_protection_only = None
+    opts._rea_excluded = set()
+
+
+def _run_report_namespace(opts, values, catalog, params, flag):
+    """Apply --audit/--research names and key=value parameter overrides."""
+    if not values:
+        return
+    names = list(catalog) if "all" in values else values
+    for item in names:
+        if "=" in item:
+            key, raw = item.split("=", 1)
+            key = key.strip().replace("_", "-")
+            if key not in params:
+                raise SystemExit("--%s: unknown parameter %r" % (flag, key))
+            default = params[key]
+            dest = key.replace("-", "_")
+            try:
+                if isinstance(default, bool):
+                    setattr(opts, dest, raw.strip().lower() in ("1", "true", "yes", "on"))
+                elif isinstance(default, float):
+                    setattr(opts, dest, float(raw))
+                elif isinstance(default, int):
+                    setattr(opts, dest, int(raw))
+                else:
+                    setattr(opts, dest, raw.strip())
+            except ValueError:
+                raise SystemExit("--%s %s=%r: bad value" % (flag, key, raw))
+            continue
+        if item not in catalog:
+            raise SystemExit("--%s: unknown name %r (see --help)" % (flag, item))
+        setattr(opts, catalog[item], True)
+
+
+def _apply_build_namespaces(opts):
+    _set_defaults(opts)
+    for stage in (getattr(opts, "skip", None) or []):
+        stage = str(stage).strip().lower()
+        if stage == "generate-payload-h":
+            opts.generate_payload_h = False
+        elif stage in _SKIP_CATALOG:
+            setattr(opts, _SKIP_CATALOG[stage], True)
+        else:
+            raise SystemExit("--skip: unknown stage %r" % (stage,))
+    for family in (getattr(opts, "exclude", None) or []):
+        family = str(family).strip().lower()
+        if family == "advanced-protection":
+            opts.phase2 = False
+            opts._phase2_excluded = True
+        elif family.startswith("transforms."):
+            dest = {"cfg-flatten": "cfg_flatten",
+                    "opaque-predicates": "opaque_predicates",
+                    "bogus-exceptions": "bogus_exceptions",
+                    "mba-subs": "mba_subs",
+                    "fragment-strings": "fragment_strings",
+                    "unicode-ids": "unicode_ids"}.get(family[11:])
+            if dest is None:
+                raise SystemExit("--exclude: unknown transform %r" % (family,))
+            setattr(opts, dest, False)
+        elif family == "rea":
+            opts._rea_excluded.update(_REA_FAMILIES)
+        elif family.startswith("rea.") and family[4:] in _REA_FAMILIES:
+            opts._rea_excluded.add(family[4:])
+        else:
+            raise SystemExit("--exclude: unknown family %r" % (family,))
+    _run_report_namespace(opts, getattr(opts, "audit", None),
+                          _AUDIT_CATALOG, _AUDIT_PARAMS, "audit")
+    _run_report_namespace(opts, getattr(opts, "research", None),
+                          _RESEARCH_CATALOG, _RESEARCH_PARAMS, "research")
+    # Advanced protection is a security feature: ON by default. Disable it
+    # through the one exclusion flag: --exclude advanced-protection.
+    if not getattr(opts, "_phase2_excluded", False):
+        opts.phase2 = True
+
+    # --package: packaging options onto their destinations.
+    for dest, default in {
+        "pytoc": False, "pytoc_out": "", "pyinstaller_spec": False,
+        "python_dll": None, "rust_exe": None, "cross": None,
+    }.items():
+        if not hasattr(opts, dest):
+            setattr(opts, dest, default)
+    for item in (getattr(opts, "package", None) or []):
+        item = str(item).strip()
+        low = item.lower()
+        if low in ("all", "everything"):
+            # "package with everything else": every packaging option, plus
+            # (applied after the other namespaces below) every opt-in
+            # protection pass and fail-strict validation.
+            opts.pytoc = True
+            opts.pyinstaller_spec = True
+            opts.cross = "win,linux,macos,linux-arm"
+            opts._package_all = True
+        elif low in ("pytoc", "pyinstaller"):
+            setattr(opts, "pyinstaller_spec" if low == "pyinstaller" else "pytoc", True)
+        elif low.startswith("pytoc-out="):
+            opts.pytoc_out = item.split("=", 1)[1]
+        elif low.startswith("python-dll="):
+            opts.python_dll = item.split("=", 1)[1]
+        elif low.startswith("rust-exe="):
+            opts.rust_exe = item.split("=", 1)[1]
+        elif low.startswith("cross="):
+            opts.cross = item.split("=", 1)[1]
+        else:
+            raise SystemExit("--package: unknown option %r" % (item,))
+
+    # --transforms: opt-in AST passes onto their destinations.
+    for dest, default in {
+        "data_obfuscation": False, "data_obf_level": 3,
+        "function_intent": False, "speculation_obfuscation": False,
+        "struct_randomization": False, "randomization_level": 3,
+        "randomization_seed": None,
+    }.items():
+        if not hasattr(opts, dest):
+            setattr(opts, dest, default)
+    for item in (getattr(opts, "transforms", None) or []):
+        item = str(item).strip()
+        low = item.lower()
+        if low == "data":
+            opts.data_obfuscation = True
+        elif low.startswith("data-level="):
+            opts.data_obf_level = int(item.split("=", 1)[1])
+        elif low == "function-intent":
+            opts.function_intent = True
+        elif low == "speculation":
+            opts.speculation_obfuscation = True
+        elif low == "struct":
+            opts.struct_randomization = True
+        elif low.startswith("struct-level="):
+            opts.randomization_level = int(item.split("=", 1)[1])
+        elif low.startswith("seed="):
+            opts.randomization_seed = int(item.split("=", 1)[1])
+        else:
+            raise SystemExit("--transforms: unknown option %r" % (item,))
+
+    # --validate: one flag; 'fail' also aborts on validation failure.
+    value = getattr(opts, "validate", None)
+    if value is None:
+        opts.validate = False
+        opts.validate_fail = False
+    else:
+        low = str(value).strip().lower()
+        if low in ("fail", "true", "yes", "1"):
+            opts.validate = True
+            opts.validate_fail = low == "fail"
+        else:
+            raise SystemExit("--validate: expected no value or 'fail'")
+
+    # --package all also pulls in everything else: the opt-in transform
+    # passes and fail-strict validation. (Anti-REA is already at maximum
+    # by default and the six AST transforms are on unless excluded.)
+    if getattr(opts, "_package_all", False):
+        opts.data_obfuscation = True
+        opts.function_intent = True
+        opts.speculation_obfuscation = True
+        opts.struct_randomization = True
+        opts.validate = True
+        opts.validate_fail = True
+
+    # Loader-only access gates are refused with a pointer, not accepted.
+    if getattr(opts, "access", None):
+        raise SystemExit("--access configures the packed loader; run: "
+                         "python3 -m obfuscator.core.pipeline build --access ...")
+    return opts
+
+
 def main():
     """
     main
@@ -405,485 +694,234 @@ in config/default.json.
     parser.add_argument("--force-output", action="store_true", default=False,
                         help="Allow -o/--output outside the repo build dir "
                              "(default: refuse absolute/escaping paths)")
-    parser.add_argument("--cross", help="Cross-compile targets: win,linux,macos,linux-arm")
-    parser.add_argument("--generate-payload-h", action="store_true", default=True,
-                        help="Auto-generate payload.h from obfuscated payload (default: on)")
-    parser.add_argument("--no-generate-payload-h", action="store_false", dest="generate_payload_h",
-                        help="Skip payload.h generation")
-    parser.add_argument("--python-dll", help="Python DLL to embed in payload.h")
-    parser.add_argument("--rust-exe", help="Rust Windows EXE to embed in payload.h")
-    parser.add_argument("--skip-conflict-check", action="store_true", help="Skip protection conflict detection")
-    parser.add_argument("--skip-obfuscate", action="store_true", help="Skip AST obfuscation")
-    parser.add_argument("--skip-irgen", action="store_true", help="Skip IR compilation")
-    parser.add_argument("--skip-llvmgen", action="store_true", help="Skip LLVM codegen")
-    parser.add_argument("--skip-encrypt", action="store_true", help="Skip post-link encryption")
-    parser.add_argument("--skip-relay", action="store_true", help="Skip Rust relay build")
-    parser.add_argument("--skip-extras", action="store_true", help="Skip optional extras (antidbg, packing, timing checks)")
     parser.add_argument("--include-original", action="store_true", help="Include original payload in build/")
-    parser.add_argument("--cfg-flatten", action="store_true", default=True, help=argparse.SUPPRESS)
-    parser.add_argument("--no-cfg-flatten", action="store_false", dest="cfg_flatten",
+    parser.add_argument("--no-cfg-flatten", action="store_false", default=True, dest="cfg_flatten",
                         help="Disable control-flow flattening (default: on)")
-    parser.add_argument("--opaque-predicates", action="store_true", default=True, help=argparse.SUPPRESS)
-    parser.add_argument("--no-opaque-predicates", action="store_false", dest="opaque_predicates",
+    parser.add_argument("--no-opaque-predicates", action="store_false", default=True, dest="opaque_predicates",
                         help="Disable opaque-predicate insertion (default: on)")
-    parser.add_argument("--bogus-exceptions", action="store_true", default=True, help=argparse.SUPPRESS)
-    parser.add_argument("--no-bogus-exceptions", action="store_false", dest="bogus_exceptions",
+    parser.add_argument("--no-bogus-exceptions", action="store_false", default=True, dest="bogus_exceptions",
                         help="Disable fake exception handlers (default: on)")
-    parser.add_argument("--mba-subs", action="store_true", default=True, help=argparse.SUPPRESS)
-    parser.add_argument("--no-mba-subs", action="store_false", dest="mba_subs",
+    parser.add_argument("--no-mba-subs", action="store_false", default=True, dest="mba_subs",
                         help="Disable MBA expression substitution (default: on)")
-    parser.add_argument("--fragment-strings", action="store_true", default=True, help=argparse.SUPPRESS)
-    parser.add_argument("--no-fragment-strings", action="store_false", dest="fragment_strings",
+    parser.add_argument("--no-fragment-strings", action="store_false", default=True, dest="fragment_strings",
                         help="Disable string fragmentation (default: on)")
-    parser.add_argument("--unicode-ids", action="store_true", default=True, help=argparse.SUPPRESS)
-    parser.add_argument("--no-unicode-ids", action="store_false", dest="unicode_ids",
+    parser.add_argument("--no-unicode-ids", action="store_false", default=True, dest="unicode_ids",
                         help="Disable Unicode symbol renaming (default: on)")
 
     # SMT Validation flags
-    parser.add_argument("--validate", action="store_true", help="Run SMT-backed semantic validation after each obfuscation phase")
-    parser.add_argument("--validate-fail", action="store_true", help="Abort build if SMT validation fails")
 
     # Advanced Protection flags
-    parser.add_argument("--advanced-protection", action="store_true", help="Enable all Advanced Protection features")
-    parser.add_argument("--advanced-protection-only", help="Comma-separated list of Advanced Protection features to enable")
-    parser.add_argument("--phase2", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--phase2-only", help=argparse.SUPPRESS)
-    parser.add_argument("--phase2-extras", action="store_true", help="Enable optional extras (antidbg APIs, packing, timing checks, etc.)")
-    parser.add_argument("--classify", action="store_true", help="Run classification pass and report")
 
     # Function-Level Adaptive Protection
-    parser.add_argument("--adaptive", action="store_true", help="Enable function-level adaptive protection (auto-classify + strategy selection)")
 
     # New feature flags
-    parser.add_argument("--adversarial-injection", action="store_true", help="Enable adversarial dead code + prompt injection")
-    parser.add_argument("--adversarial-level", type=int, default=3, choices=range(1, 6), help="Adversarial injection aggressiveness (1-5, default: 3)")
-    parser.add_argument("--ephemeral-isa", action="store_true", help="Enable ephemeral per-build VM opcode mapping")
-    parser.add_argument("--microjit", action="store_true", help="Enable polymorphic micro-JIT reassembly")
 
     # Micro-JIT Fragment Reassembly flags
-    parser.add_argument("--fragment", action="store_true", help="Enable micro-JIT fragment reassembly (decrypt->execute->wipe)")
-    parser.add_argument("--fragment-size", type=int, default=5, help="Instructions per fragment (default: 5)")
-    parser.add_argument("--fragment-functions", help="Comma-separated functions to fragment, or 'auto'")
 
     # Optimizer flags
     parser.add_argument("--optimize", action="store_true", help="Enable cost-aware protection optimizer")
-    parser.add_argument("--max-cpu-overhead", type=float, default=20.0, help="Max CPU overhead percentage (default: 20)")
-    parser.add_argument("--max-size-mult", type=float, default=3.0, help="Max binary size multiplier (default: 3.0)")
-    parser.add_argument("--min-security", type=float, default=0.5, help="Minimum security score (default: 0.5)")
 
     # Formal Proof flags (Items 92-99)
-    parser.add_argument("--prove-vm", action="store_true", help="Run VM correctness proofs (Item 92)")
-    parser.add_argument("--prove-fragments", action="store_true", help="Run fragment safety proofs (Item 93)")
-    parser.add_argument("--verify-watermark-survivability", action="store_true", help="Verify watermark survivability (Item 95)")
-    parser.add_argument("--verify-mutations", action="store_true", help="Verify mutation safety (Item 96)")
-    parser.add_argument("--verify-jit", action="store_true", help="Verify JIT reassembly correctness (Item 97)")
-    parser.add_argument("--proof-aware-optimizer", action="store_true", help="Use proof-aware optimizer (Item 99)")
 
     # Proof Coverage flag (Feature 153)
-    parser.add_argument("--proof-coverage", action="store_true", help="Generate proof coverage report (Feature 153)")
 
     # Proof Soundness flag (Feature 174)
-    parser.add_argument("--proof-soundness", action="store_true", help="Run proof soundness harness (Feature 174)")
 
     # New pipeline flags
-    parser.add_argument("--oram", action="store_true", help="Enable Oblivious RAM (ORAM) controller")
-    parser.add_argument("--rop", action="store_true", help="Enable ROP chain compilation for crown jewel functions")
-    parser.add_argument("--challenge-response", action="store_true", help="Enable standalone challenge-response protocol (extracted from distributed attestation)")
-    parser.add_argument("--attestation", action="store_true", help="Enable hardware-agnostic attestation engine (whitebox entanglement + dynamic attestation)")
-    parser.add_argument("--crypto-binding", action="store_true", help="Enable cryptographic fragment binding chain")
 
     # Live CFG Mutation flags (Item 80)
-    parser.add_argument("--cfg-mutation", action="store_true", help="Enable live CFG mutation (variant basic-block ordering)")
-    parser.add_argument("--cfg-mutation-variants", type=int, default=4, help="Number of CFG orderings per function (default: 4)")
 
     # Execution-Path-Specific Codegen flags (Item 81)
-    parser.add_argument("--class-dispatch", action="store_true", help="Enable execution-path-specific JIT codegen")
-    parser.add_argument("--class-dispatch-count", type=int, default=4, help="Number of dispatch classes (default: 4)")
 
     # Rolling Key Schedules flag (Item 82)
-    parser.add_argument("--rolling-keys", action="store_true", help="Enable rolling key evolution for fragment chains")
 
     # State-Dependent Opcode Sets flags (Item 84)
-    parser.add_argument("--state-isa", action="store_true", help="Enable state-dependent opcode mapping")
-    parser.add_argument("--state-isa-history-len", type=int, default=8, help="Execution history length for state ISA (default: 8)")
 
     # Execution-History-Bound Decryption flag (Item 89)
-    parser.add_argument("--history-bound-decryption", action="store_true", help="Enable execution-history-bound decryption key derivation")
 
     # Runtime SSA Mutation flags (Item 83)
-    parser.add_argument("--ssa-mutation", action="store_true", help="Enable SSA mutation (variant instruction ordering)")
-    parser.add_argument("--ssa-variants", type=int, default=4, help="Number of SSA variants per function (default: 4)")
 
     # Per-Execution Recompilation flags (Item 85)
-    parser.add_argument("--per-exec-recompile", action="store_true", help="Enable per-execution recompilation")
 
     # Self-Healing Runtime flags (Item 86)
-    parser.add_argument("--self-healing", action="store_true", help="Enable self-healing runtime (redundant code copies)")
 
     # Code Genome Evolution flags (Item 87)
-    parser.add_argument("--code-genome", action="store_true", help="Enable code genome evolution")
-    parser.add_argument("--genome-generations", type=int, default=50, help="Evolution generations (default: 50)")
-    parser.add_argument("--genome-population", type=int, default=30, help="Population size (default: 30)")
 
     # Structure Randomization flags (Item 88)
     parser.add_argument("--seed", type=int, default=None,
                         help="seed the randomised transform order (reproducible builds)")
-    parser.add_argument("--struct-randomization", action="store_true", help="Enable structure randomization (stack/heap/reg)")
-    parser.add_argument("--randomization-level", type=int, default=3, choices=[1, 2, 3], help="Randomization level 1-3 (default: 3)")
-    parser.add_argument("--randomization-seed", type=int, default=None, help="Deterministic seed for structure randomization (also read from SEED/NIXON_SEED env when flag is absent)")
 
     # Adversarial loop flags
-    parser.add_argument("--adversarial-loop", action="store_true", help="Enable self-improving obfuscation via deobfuscation agent")
 
     # Adversarial Benchmark Generator (Feature 175)
-    parser.add_argument("--adversarial-bench", action="store_true", help="Run adversarial benchmark generator against all target systems")
-    parser.add_argument("--adversarial-bench-count", type=int, default=20, help="Number of adversarial tests to generate (default: 20)")
 
-    parser.add_argument("--deobfuscation-threshold", type=float, default=0.7, help="Minimum deobfuscation score (default: 0.7)")
-    parser.add_argument("--evolution-iterations", type=int, default=1, help="Number of evolution steps per build (default: 1)")
 
     # Provenance Replace flag
-    parser.add_argument("--provenance-replace", action="store_true", help="Enable automated provenance replacement (error codes + string encoding + constant obfuscation)")
 
     # Provenance Poisoning flags
-    parser.add_argument("--provenance-poison", action="store_true", help="Enable all provenance poisoning techniques")
-    parser.add_argument("--poison-call-graph", action="store_true", dest="poison_call_graph", help="Enable fake call graphs")
-    parser.add_argument("--poison-apis", action="store_true", dest="poison_apis", help="Enable fake APIs")
-    parser.add_argument("--poison-protocols", action="store_true", dest="poison_protocols", help="Enable fake protocol parsers")
-    parser.add_argument("--poison-paths", action="store_true", dest="poison_paths", help="Enable believable dead paths")
-    parser.add_argument("--poison-imports", action="store_true", dest="poison_imports", help="Enable misleading imports")
-    parser.add_argument("--poison-all", action="store_true", help="Enable all poisoning techniques")
-    parser.add_argument("--poison-level", type=int, default=0, choices=range(0, 6), help="Provenance poisoning level (0-5, default: 0 = disabled)")
 
     # LLM-Resilient flags
-    parser.add_argument("--llm-resilient", action="store_true", dest="llm_resilient", help="Enable LLM-resilient AST obfuscation (context collapse + guard vars + string encoding)")
-    parser.add_argument("--llm-resilient-depth", type=int, default=15, dest="llm_resilient_depth", help="Nesting depth for context collapse (default: 15)")
-    parser.add_argument("--llm-resilient-vars", type=int, default=50, dest="llm_resilient_vars", help="Number of dead variables per function (default: 50)")
-    parser.add_argument("--honey-functions", type=int, default=0, dest="honey_functions", help="Number of honey functions to inject (default: 0)")
 
     # LLM Fingerprint flags (Item 73)
-    parser.add_argument("--llm-fingerprint", action="store_true", help="Enable LLM fingerprint embedding")
-    parser.add_argument("--fingerprint-model", default="gpt", choices=["gpt", "claude", "gemini", "deepseek", "copilot"], help="AI model to fingerprint as (default: gpt)")
 
     # Reasoning Trap flags (Item 75)
-    parser.add_argument("--reasoning-traps", action="store_true", help="Enable reasoning-loop trap injection")
-    parser.add_argument("--trap-depth", type=int, default=5, help="Circular chain depth for reasoning traps (default: 5)")
 
     # Function Intent Obfuscation flags (Item 78)
-    parser.add_argument("--function-intent", action="store_true", help="Enable function intent obfuscation")
 
     # Context Saturation Metrics flag (Item 76)
-    parser.add_argument("--context-saturation", action="store_true", help="Compute context window saturation metrics")
 
     # Prompt Resistance Metrics flag (Item 77)
-    parser.add_argument("--prompt-resistance", action="store_true", help="Compute prompt reconstruction resistance metrics")
 
     # Item 50: Micro-Fragment Execution
-    parser.add_argument("--micro-fragment", action="store_true", help="Enable micro-fragment execution (decrypt->execute->wipe each fragment)")
-    parser.add_argument("--micro-fragment-size", type=int, default=64, help="Bytes per micro-fragment (default: 64)")
 
     # Item 58: Environmental Poly-Engine
-    parser.add_argument("--poly-engine", action="store_true", help="Enable environmental poly-engine (environment-adapted code variants)")
 
     # Item 59: Temporal Micro-Key Evolution
-    parser.add_argument("--temporal-keys", action="store_true", help="Enable temporal micro-key evolution (time-window-based key chain)")
-    parser.add_argument("--temporal-window", type=float, default=60.0, help="Key time window in seconds (default: 60)")
 
     # Item 63: Whitebox-Flow Entanglement
-    parser.add_argument("--flow-entangle", action="store_true", help="Enable whitebox-flow entanglement (crypto-state-dependent control flow)")
 
     # Item 69: Payload Dispersal Execution Model
-    parser.add_argument("--payload-dispersal", action="store_true", help="Enable payload dispersal execution model (disjoint slice execution)")
-    parser.add_argument("--dispersal-slices", type=int, default=3, help="Number of payload slices (default: 3)")
 
     # Item 91: Proof-Carrying Obfuscation
-    parser.add_argument("--proof-carrying", action="store_true", help="Enable proof-carrying obfuscation (Z3 equivalence certificates)")
 
     # Item 101: Analyst Time Estimation
-    parser.add_argument("--analyst-time", action="store_true", help="Estimate analyst reverse-engineering time from complexity metrics")
 
     # Data Obfuscation flags
-    parser.add_argument("--data-obfuscation", action="store_true", dest="data_obfuscation", help="Enable data-oriented obfuscation (protect data layout)")
-    parser.add_argument("--data-obf-level", type=int, default=3, dest="data_obf_level", choices=[1, 2, 3], help="Data obfuscation intensity (1-3, default: 3)")
 
     # Watermark flags
     parser.add_argument("--watermark", type=str, default=None, help="Embed semantic watermark string into IR")
-    parser.add_argument("--verify-watermark", action="store_true", help="Verify watermark after embedding")
-    parser.add_argument("--uarch-watermark", action="store_true", help="Embed microarchitectural timing watermark (Item 122)")
 
     # Certificate flags
-    parser.add_argument("--emit-certificates", action="store_true",
-                        help="Emit transformation equivalence certificates")
-    parser.add_argument("--embed-proof", action="store_true",
-                        help="Embed proof section into packaged binary")
 
     # Verified MBA flags
-    parser.add_argument("--verify-mba", action="store_true",
-                        help="Verify MBA substitutions with SMT before applying")
 
     # Preservation flags
-    parser.add_argument("--verify-preservation", action="store_true",
-                        help="Run machine-checked semantic preservation across pipeline stages")
-    parser.add_argument("--verify-preservation-formal", action="store_true",
-                        help="Run formal Z3-based semantic preservation proofs (Item 61)")
 
     # Plaintext Exposure Metric (Feature 151)
-    parser.add_argument("--plaintext-exposure", action="store_true", help="Measure actual plaintext lifetime during execution (Feature 151)")
 
     # Metrics flags
-    parser.add_argument("--metrics", action="store_true", help="Collect quantitative resilience metrics after build")
-    parser.add_argument("--min-resilience", type=float, default=None, help="Minimum resilience score (0.0-1.0); auto-tune up to 3 iterations")
 
     # Semantic Leakage Metric (Feature 152)
-    parser.add_argument("--semantic-leakage", action="store_true", help="Measure semantic leakage between original and obfuscated IR (Feature 152)")
 
     # Diversity generation flags
-    parser.add_argument("--diversity", type=int, default=None, help="Generate N diversity variants")
-    parser.add_argument("--uarch-diversity", action="store_true", help="Enable microarchitectural-aware diversity generation (Item 129)")
-    parser.add_argument("--diversity-dir", default="build/variants", help="Output directory for diversity variants")
-    parser.add_argument("--diversity-threshold", type=float, default=0.3, help="Minimum diversity score between variants (0.0-1.0)")
-    parser.add_argument("--diversity-report", action="store_true", help="Generate diversity comparison report")
 
     # Distributed Protection flags (Items 110–119)
-    parser.add_argument("--distributed-mode", default="simulation", choices=["simulation", "multiprocess"],
-                        help="Mode for distributed protection features: simulation or multiprocess (default: simulation)")
-    parser.add_argument("--multi-binary", action="store_true", help="Enable multi-binary fragment distribution (Item 110)")
-    parser.add_argument("--multi-binary-num", type=int, default=4, help="Number of binaries for fragment distribution (default: 4)")
-    parser.add_argument("--cross-process", action="store_true", help="Enable cross-process fragment binding (Item 111)")
-    parser.add_argument("--remote-unlock", action="store_true", help="Enable remote fragment unlocking (Item 112)")
-    parser.add_argument("--remote-unlock-ttl", type=float, default=30.0, help="Token TTL for remote unlock in seconds (default: 30)")
-    parser.add_argument("--distributed-vm", action="store_true", help="Enable distributed VM execution (Item 113)")
-    parser.add_argument("--multi-host", action="store_true", help="Enable multi-host execution graphs (Item 114)")
-    parser.add_argument("--multi-host-count", type=int, default=3, help="Number of hosts for multi-host execution (default: 3)")
-    parser.add_argument("--fragment-migration", action="store_true", help="Enable cross-platform fragment migration (Item 115)")
-    parser.add_argument("--dist-attestation", action="store_true", help="Enable distributed attestation (Item 116)")
-    parser.add_argument("--dist-attestation-nodes", type=int, default=5, help="Number of attestation nodes (default: 5)")
-    parser.add_argument("--dist-watermark", action="store_true", help="Enable distributed watermarking (Item 117)")
-    parser.add_argument("--dist-watermark-shares", type=int, default=5, help="Number of watermark shares (default: 5)")
-    parser.add_argument("--dist-diversity", action="store_true", help="Enable distributed diversity pools (Item 118)")
-    parser.add_argument("--dist-diversity-variants", type=int, default=8, help="Number of diversity variants (default: 8)")
-    parser.add_argument("--dist-diversity-nodes", type=int, default=4, help="Number of deployment nodes (default: 4)")
-    parser.add_argument("--dist-diversity-rotation", type=float, default=3600.0, help="Variant rotation interval in seconds (default: 3600)")
-    parser.add_argument("--recovery-prevention", action="store_true", help="Enable distributed execution recovery prevention (Item 119)")
-    parser.add_argument("--recovery-prevention-nodes", type=int, default=5, help="Number of recovery prevention nodes (default: 5)")
 
     # Hardware Research Integration flags (Items 120-124)
-    parser.add_argument("--hpc", action="store_true", help="Enable hardware performance counter integration (Item 120)")
-    parser.add_argument("--hpc-key", action="store_true", help="Enable HPC-based key derivation (Item 121)")
 
     # Hardware Research Integration flags (Items 125-129)
-    parser.add_argument("--tee", action="store_true", help="Enable trusted execution environment partition (Item 127)")
-    parser.add_argument("--tee-type", default="software", choices=["software", "sgx", "sev", "apple"], help="TEE type (default: software)")
-    parser.add_argument("--sgx", action="store_true", help="Enable Intel SGX hardware enclave support (Item 128)")
-    parser.add_argument("--cpu-port", action="store_true", help="Enable CPU execution port entanglement (Item 129)")
-    parser.add_argument("--gpu-hybrid", action="store_true", help="Enable CPU/GPU hybrid protection (Item 126)")
-    parser.add_argument("--gpu-execution", action="store_true", help="Enable GPU fragment execution with hardware detection (Item 125)")
-    parser.add_argument("--gpu", action="store_true", help="Short flag for --gpu-execution (Item 125)")
-    parser.add_argument("--cpu-gpu-hybrid", action="store_true", help="Enable distinct CPU/GPU hybrid protection paths (Item 126)")
 
     # Speculation Obfuscation flag (Item 123)
-    parser.add_argument("--speculation-obfuscation", action="store_true", help="Enable AST-level speculation obfuscation (Item 123)")
 
     # SIMD-VM flag (Item 124)
-    parser.add_argument("--simd-vm", action="store_true", help="Enable SIMD-accelerated VM dispatch (Item 124)")
 
     # Attention Poison flags
-    parser.add_argument("--attention-poison", type=int, default=0, help="Enable attention poisoning with fan-out N (default: 0 = disabled)")
 
     # Decoy API flags
-    parser.add_argument("--decoy-apis", action="store_true", help="Enable semantic decoy API injection")
-    parser.add_argument("--decoy-api-count", type=int, default=5, help="Number of decoy APIs to inject (default: 5)")
 
     # Multi-Agent Deception flags
-    parser.add_argument("--multi-agent-deception", action="store_true", help="Enable multi-agent deception storyline injection")
-    parser.add_argument("--storyline-count", type=int, default=3, help="Number of storylines to inject (default: 3)")
 
     # Adaptive Classifier Loop flag
-    parser.add_argument("--adaptive-classifier-loop", action="store_true", help="Run classify → protect → benchmark → re-classify → re-protect loop")
 
     # Adaptive Adversarial Rewriting flags
-    parser.add_argument("--adaptive-adversarial", action="store_true", help="Enable adaptive adversarial rewriting based on benchmark feedback")
 
     # AI-Guided Diversity flags
-    parser.add_argument("--ai-guided-diversity", action="store_true", help="Enable AI-guided evolutionary diversity generation")
-    parser.add_argument("--evolution-generations", type=int, default=3, help="Number of evolution generations (default: 3)")
 
     # Benchmark flags
-    parser.add_argument("--benchmark", action="store_true", help="Run AI obfuscation benchmark on protected output")
-    parser.add_argument("--benchmark-model", default=None, help="Specify LLM model to test against (gpt4, claude3, gemini, deepseek, or 'all')")
-    parser.add_argument("--benchmark-report", action="store_true", help="Generate HTML benchmark report")
 
     # Evaluation research flags
-    parser.add_argument("--cost-model", action="store_true", help="Run reverse engineering cost model estimation")
-    parser.add_argument("--multi-tool", action="store_true", help="Run multi-tool resistance evaluation")
-    parser.add_argument("--survivability", action="store_true", help="Run protection survivability index measurement")
-    parser.add_argument("--eval-summary", action="store_true", help="Run full evaluation summary report")
 
     # Unified evaluation report flag
-    parser.add_argument("--evaluate", action="store_true", help="Generate unified evaluation report (all 9 metrics)")
 
     # FHE-VM flags
-    parser.add_argument("--fhe-vm", action="store_true", help="Enable FHE-VM compilation for crown-jewel functions")
-    parser.add_argument("--fhe-vm-functions", help="Comma-separated function names for FHE-VM compilation")
 
     # IO Research flags
-    parser.add_argument("--io-research", action="store_true", help="Enable approximate indistinguishability obfuscation research")
-    parser.add_argument("--io-research-functions", help="Comma-separated function names for iO research")
 
     # Kernel-Assisted Execution Research flags
-    parser.add_argument("--kernel-assist", action="store_true", help="Enable kernel-assisted execution research (Linux)")
-    parser.add_argument("--kernel-assist-features", help="Comma-separated kernel features to enable (default: all detected)")
 
     # ZK State-Bound Execution flags
-    parser.add_argument("--zk-state", action="store_true", help="Enable ZK state-bound execution (sigma-protocol-based state proofs)")
-    parser.add_argument("--zk-state-config", help="Path to ZK state config file (optional)")
 
     # Protection Coverage Map flags (Feature 147)
-    parser.add_argument("--coverage-map", action="store_true", help="Generate protection coverage map after all stages")
-    parser.add_argument("--coverage-output", default=None, help="Output directory for coverage map (default: build/coverage/)")
 
     # Security Knowledge Graph flag (Feature 149)
-    parser.add_argument("--knowledge-graph", action="store_true", help="Generate security knowledge graph of protection relationships")
-    parser.add_argument("--knowledge-graph-output", default=None, help="Output directory for knowledge graph (default: build/knowledge_graph/)")
 
     # Protection Synthesis Engine flags (Feature 150)
-    parser.add_argument("--synthesis", action="store_true", help="Enable protection synthesis engine (auto-select protections)")
-    parser.add_argument("--synthesis-target-security", type=float, default=70.0, help="Target security score 0-100 (default: 70)")
-    parser.add_argument("--synthesis-max-overhead", type=float, default=50.0, help="Max allowed overhead percent (default: 50)")
-    parser.add_argument("--synthesis-max-size", type=float, default=3.0, help="Max allowed size multiplier (default: 3.0)")
-    parser.add_argument("--synthesis-output", default=None, help="Output path for synthesis report (default: build/synthesis_report.json)")
-    parser.add_argument("--apply-synthesis", action="store_true", help="Apply synthesis plan flags to pipeline configuration")
 
     # Feature 169: Reachability Coverage Report
-    parser.add_argument("--reachability-report", action="store_true", help="Generate reachability coverage report classifying every feature as REACHABLE/PARTIALLY_REACHABLE/UNREACHABLE (Feature 169)")
 
     # Feature classification flag (Phase 5)
-    parser.add_argument("--classify-features", action="store_true", help="Classify all 129 protection/research features and generate report")
-    parser.add_argument("--require-live-features", type=int, default=None, dest="require_live_features",
-                        metavar="N", help="Fail the build unless at least N features are LIVE in the artefact")
 
     # Security Regression Gates flags (Feature 146)
-    parser.add_argument("--security-gates", action="store_true", help="Enable security regression gates (Feature 146)")
-    parser.add_argument("--update-baseline", action="store_true", help="Save current metrics as new baseline for security gates")
-    parser.add_argument("--gate-threshold", type=float, default=None, help="Global gate threshold override, as a ratio of the baseline metric (0.0-1.0; e.g. 0.9 = at least 90 percent of baseline)")
 
     # Autonomous Red Team Pipeline (Feature 145)
-    parser.add_argument("--red-team", action="store_true", help="Enable autonomous red team pipeline — every build attacks itself")
-    parser.add_argument("--red-team-output", default="build/redteam", help="Output directory for red team attack results (default: build/redteam/)")
 
     # Attack Replay Framework (Feature 154)
-    parser.add_argument("--capture-attacks", action="store_true", help="Capture attack results from red team pipeline for replay")
-    parser.add_argument("--replay-attacks", action="store_true", help="Replay captured attacks and compare results")
-    parser.add_argument("--attack-store", default="build/attacks", help="Store directory for attack captures (default: build/attacks/)")
 
     # False Confidence Detector (Feature 173)
-    parser.add_argument("--false-confidence-audit", action="store_true", help="Scan for false confidence patterns in codebase (Feature 173)")
-    parser.add_argument("--claim-audit", action="store_true", help="Scan for unsupported security claims like 'secure', 'unbreakable', 'tamper-proof' (Feature 172)")
 
     # Research Artifact Generator (Feature 155)
-    parser.add_argument("--generate-artifacts", action="store_true", help="Generate paper-ready research artifacts from build outputs")
-    parser.add_argument("--artifacts-output", default="build/artifacts", help="Output directory for research artifacts (default: build/artifacts/)")
 
     # Reproducibility Score (Feature 178)
-    parser.add_argument("--reproducibility-score", action="store_true", help="Compute reproducibility score for build artifacts (Feature 178)")
 
     # Feature 180: Self-Audit Agent
-    parser.add_argument("--self-audit", action="store_true", help="Run self-audit agent — final pipeline integrity check (Feature 180)")
 
     # Feature 171: Assumption Tracker
-    parser.add_argument("--assumptions-report", action="store_true", help="Generate assumption report for all protection features")
 
     # Feature 176: Feature Retirement Framework
-    parser.add_argument("--retirement-report", action="store_true", help="Generate feature retirement report analyzing features for low effectiveness, high overhead, poor survivability")
 
     # Reality Score (Feature 167)
-    parser.add_argument("--reality-score", action="store_true", help="Compute 0-100 Reality Score for every protection feature")
 
     # Security Debt Index (Feature 170)
-    parser.add_argument("--security-debt", action="store_true", help="Compute security debt index measuring unprotected functions, weak protections, and coverage gaps")
 
     # Evidence Ledger (Feature 168)
-    parser.add_argument("--evidence-ledger", action="store_true", help="Generate evidence ledger mapping claims to source files, tests, benchmarks, and runtime traces")
 
     # Independent Verification Bundle (Feature 177)
-    parser.add_argument("--verification-bundle", action="store_true", help="Generate independent verification bundle (tar.gz + SHA256 manifest) of all build artifacts")
-    parser.add_argument("--verification-bundle-output", default=None, help="Output directory for verification bundle (default: build/verification_bundle/) (set to empty string to use default)")
 
     # Feature 186: Trust Boundary Mapper
-    parser.add_argument("--trust-boundary", action="store_true", help="Map trust boundaries across all domains (Feature 186)")
 
     # Feature 187: Evidence Completeness Score
-    parser.add_argument("--evidence-completeness", action="store_true", help="Compute evidence completeness score for all claims (Feature 187)")
 
     # Feature 188: Dependency Graph Validation
-    parser.add_argument("--dependency-graph", action="store_true", help="Validate dependency graph and detect cycles (Feature 188)")
 
     # Feature 189: Attack Surface Enumerator
-    parser.add_argument("--attack-surface", action="store_true", help="Enumerate attack surfaces across all categories (Feature 189)")
 
     # Feature 190: Security Invariant Engine
-    parser.add_argument("--invariant-engine", action="store_true", help="Verify security invariants across codebase (Feature 190)")
 
     # Feature 181: Independent Auditor Mode
-    parser.add_argument("--independent-audit", action="store_true", help="Run independent audit using separate code paths (Feature 181)")
 
     # Feature 182: Metric Manipulation Detector
-    parser.add_argument("--manipulation-detector", action="store_true", help="Detect metric manipulation, hardcoded scores, inflated coverage (Feature 182)")
 
     # Feature 183: Benchmark Integrity Framework
-    parser.add_argument("--benchmark-integrity", action="store_true", help="Verify benchmark integrity with SHA256 hashing and tamper detection (Feature 183)")
 
     # Feature 184: Verification Diversity
-    parser.add_argument("--verification-diversity", action="store_true", help="Run multiple verification strategies and detect disagreements (Feature 184)")
 
     # Feature 185: Audit Drift Detection
-    parser.add_argument("--audit-drift", action="store_true", help="Detect code changes without corresponding verification updates (Feature 185)")
 
     # Feature 191: Silent Fallback Detector
-    parser.add_argument("--silent-fallback", action="store_true", help="Detect silent fallbacks (try/except without logging) in codebase (Feature 191)")
 
     # Feature 192: Runtime Truth Monitor
-    parser.add_argument("--runtime-truth", action="store_true", help="Record what actually executes vs what was intended (Feature 192)")
 
     # Feature 193: Feature Effectiveness Score
-    parser.add_argument("--feature-effectiveness", action="store_true", help="Score features by demonstrated security improvement, not existence (Feature 193)")
 
     # Feature 194: Protection ROI Engine
-    parser.add_argument("--protection-roi", action="store_true", help="Compute security gain vs runtime/complexity/maintenance cost for each feature (Feature 194)")
 
     # Feature 195: Longitudinal Security Tracking
-    parser.add_argument("--longitudinal-tracking", action="store_true", help="Track security metrics over time and detect drift (Feature 195)")
 
     # Feature 196: Attack Corpus
-    parser.add_argument("--attack-corpus", action="store_true", help="Build permanent corpus of bypasses, deobfuscations, proof failures, replay attacks (Feature 196)")
 
     # Feature 197: Release Confidence Score
-    parser.add_argument("--release-confidence", action="store_true", help="Combine all verification metrics into single release confidence score (Feature 197)")
 
     # Feature 198: Formal Threat Coverage
-    parser.add_argument("--threat-coverage", action="store_true", help="Map threats to features, metrics, and verifications; identify gaps (Feature 198)")
 
     # Feature 199: Security Knowledge Base
-    parser.add_argument("--knowledge-base", action="store_true", help="Build persistent historical record of assumptions, failures, fixes, discoveries (Feature 199)")
 
     # Feature 200: Self-Critique Engine
-    parser.add_argument("--self-critique", action="store_true", help="Before release, critically analyze assumptions, evidence, metrics, proofs (Feature 200)")
 
     # Security Confidence Interval (Feature 179)
-    parser.add_argument("--confidence-interval", action="store_true",
-                        help="Compute security confidence intervals from metric samples (Feature 179)")
-    parser.add_argument("--confidence-level", type=float, default=0.95,
-                        help="Confidence level for intervals (default: 0.95)")
 
     # Phase-2 delivery: optimization ladder + PyTOC placeholder
     parser.add_argument("--opt-level", type=int, default=4, choices=range(0, 6),
                         help="Optimization/protection ladder O0-O5 (default: 4, recommended)")
-    parser.add_argument("--pytoc", action="store_true",
-                        help="Compile the obfuscated output to a native extension via Cython (best-effort, never fails the build)")
-    parser.add_argument("--pytoc-out", type=str, default="",
-                        help="Output path for the --pytoc native extension (default: alongside -o as <out>_pytoc.<so/pyd>)")
-    parser.add_argument("--pyinstaller-spec", action="store_true",
-                        help="Write a best-effort PyInstaller .spec alongside the output (never fails the build)")
 
     # Loader-emission features.  They are applied by the LOADER build
     # path (python3 -m obfuscator.core.pipeline build), which emits the
@@ -892,78 +930,77 @@ in config/default.json.
     # here: they are accepted for backward compatibility and are
     # reported as ignored at run time rather than silently pretended to
     # work.
-    parser.add_argument("--hwid", type=str, default="",
-                        help="[LOADER ONLY -- ignored by this pipeline] HWID string for "
-                             "GET_HWID() macro expansion and HWID-locked fallback. Dynamic "
-                             "(default): any opaque string; the loader collects "
-                             "format(uuid.getnode(), 'x') at runtime. Static (GAP #33): "
-                             "canonical 'HWID:<64 hex chars>' fingerprint (case-insensitive, "
-                             "lowercased) binding the artifact to a known value instead of "
-                             "dynamic collection (documented in obfuscator/hwid_lock.py; "
-                             "default: '')")
-    parser.add_argument("--trial", type=str, default="",
-                        help="[LOADER ONLY -- ignored by this pipeline] Trial period spec, "
-                             "e.g. '7d', '1w2d' (parsed via obfuscator.macros.parse_trial; "
-                             "default: '')")
-    parser.add_argument("--vm-threshold", type=float, default=50.0,
-                        help="[LOADER ONLY -- ignored by this pipeline] VM-score verdict "
-                             "threshold embedded in loader snippet (default: 50.0)")
-    parser.add_argument("--kod", action="store_true", default=False,
-                        help="[LOADER ONLY -- ignored by this pipeline] Arm loader "
-                             "kill-on-detect: the VM snippet reads NIXON_KOD env at runtime "
-                             "(default: report-only)")
-    parser.add_argument("--hostguard", action="store_true", default=False,
-                        help="[LOADER ONLY -- ignored by this pipeline] Prepend hostguard "
-                             "snippet (bind_host/check_host/isolated_exec) to loader (default: off)")
-    parser.add_argument("--hwid-lock", dest="hwid_lock", action="store_true", default=False,
-                        help="[LOADER ONLY -- ignored by this pipeline] HWID-lock the bytecode "
-                             "fallback blob (requires --hwid; static 'HWID:<64 hex>' fingerprints "
-                             "unlock via the embedded value, dynamic HWIDs via uuid.getnode(); "
-                             "default: off)")
+    parser.add_argument("--anti-rea-level", dest="anti_rea_level", default="maximum",
+                        choices=("stealth", "balanced", "maximum"),
+                        help="Counter-REA shields are ON by default at maximum: "
+                             "there is no enable flag. Pass this only to LOWER the "
+                             "intensity (stealth or balanced)")
+    parser.add_argument("--no-anti-rea", dest="anti_rea_off", action="store_true",
+                        help="Disable every counter-REA/deception layer")
+    parser.add_argument("--package", nargs="+", default=None, metavar="OPT",
+                        help="Packaging. All options: pytoc = compile the result "
+                             "to a Cython .so; pytoc-out=PATH = where that .so "
+                             "goes; pyinstaller = write a PyInstaller spec; "
+                             "python-dll=PATH = embed a Python DLL in the payload "
+                             "header; rust-exe=PATH = embed a Rust EXE in the "
+                             "payload header; cross=TARGETS = cross-compile for "
+                             "win,linux,macos,linux-arm; all (or everything) = "
+                             "package with everything else: pytoc pyinstaller "
+                             "cross=all targets plus every --transforms pass and "
+                             "--validate fail")
+    parser.add_argument("--transforms", nargs="+", default=None, metavar="OPT",
+                        help="Extra protection passes (off by default). Options: "
+                             "data = obfuscate data layout, data-level=3 = 1-3 "
+                             "intensity; function-intent = rename functions by "
+                             "what they do; speculation = speculation-resistant "
+                             "code; struct = randomise stack/heap/register "
+                             "layout, struct-level=3 = 1-3 intensity; seed=N = "
+                             "pin the pass RNG for reproducible builds")
+    parser.add_argument("--validate", nargs="?", const="fail", default=None,
+                        metavar="[fail]",
+                        help="Run SMT semantic validation; 'fail' also aborts the "
+                             "build when validation fails")
+    parser.add_argument("--access", nargs="+", default=None, metavar="OPT",
+                        help="Loader-only access gates (hwid, trial, kod, ...). This "
+                             "native pipeline emits no packed loader, so --access is "
+                             "refused here; use 'python3 -m obfuscator.core.pipeline "
+                             "build --access ...' instead")
+    parser.add_argument("--audit", nargs="+", default=None, metavar="NAME",
+                        help="Run report/verification phases. Names are the old "
+                             "flag names without '--' (e.g. reality-score, "
+                             "security-gates, proof-coverage, verify-preservation); "
+                             "'all' runs every report. key=value tunes a phase, "
+                             "e.g. confidence-level=0.99 or gate-threshold=0.8")
+    parser.add_argument("--research", nargs="+", default=None, metavar="NAME",
+                        help="Run experimental/sidecar phases (the ones that write "
+                             "build/ metadata but do not change the artefact), e.g. "
+                             "cfg-mutation, code-genome, tee, gpu-execution. "
+                             "'all' runs every research phase")
+    parser.add_argument("--skip", nargs="+", default=None, metavar="STAGE",
+                        help="Skip build stages: conflict, obfuscate, irgen, "
+                             "llvmgen, encrypt, relay, extras, generate-payload-h")
+    parser.add_argument("--exclude", nargs="+", default=None, metavar="FAMILY",
+                        help="Skip shield families. 'rea' turns every counter-REA "
+                             "layer off; namespaced entries skip one: rea.poison, "
+                             "rea.honey, rea.decoy, rea.attention, rea.traps, "
+                             "rea.storyline, rea.llm-resilient, rea.red-team, "
+                             "rea.self-critique, rea.manipulation, rea.prompt, "
+                             "rea.false-confidence, rea.multi-agent, rea.adversarial")
     parser.add_argument("--sign-key-env", type=str, default="",
                         help="Env var name holding hex key for artifact signing sidecars (.sig.json; default: '' = disabled)")
-    parser.add_argument("--name-gate", dest="name_gate", action="store_true", default=False,
-                        help="Rewrite privileged call sites through per-build token map (default: off)")
-    parser.add_argument("--rename-internal", dest="rename_internal", action="store_true", default=False,
-                        help="Rename proven-internal public methods/attributes (used only "
-                             "inside their own class; opt-in, default: off)")
     parser.add_argument("--lowering", type=str, default="",
                         help="Semantic-lowering families CSV (io,scalar,string,container,service,protocol,function,import,fusion + opt-in: arithmetic,truth,slice,format,augassign); default '' = disabled")
     parser.add_argument("--diagnostic", action="store_true", default=False,
                         help="Diagnostic build: per-stage timings + transform counts + NOT-FOR-RELEASE marker")
-    parser.add_argument("--no-audit-hook-plant", dest="audit_hook_plant_off", action="store_true", default=False,
-                        help="[LOADER ONLY -- ignored by this pipeline] Omit the site-packages "
-                             "audit-hook plant detector from the loader (default: detector ON)")
-    parser.add_argument("--driver-check", dest="driver_check", action="store_true", default=False,
-                        help="[LOADER ONLY -- ignored by this pipeline] Bake the V10 "
-                             "kernel-driver gate into the loader (fail-closed on "
-                             "known-vulnerable BYOVD drivers only when armed; default: off, "
-                             "also armable at runtime via NIXON_DRIVER_CHECK=1)")
-    parser.add_argument("--split-bootstrap", dest="split_bootstrap", action="store_true", default=False,
-                        help="[LOADER ONLY -- ignored by this pipeline] V10 kernel "
-                             "split-bootstrap: Shamir (n=3,k=2) threshold key + fragmented "
-                             "decoder in the loader instead of the single embedded key path "
-                             "(opt-in until battle-tested; default: off)")
-    parser.add_argument("--no-snapshot", dest="snapshot_off", action="store_true", default=False,
-                        help="[LOADER ONLY -- ignored by this pipeline] Omit the frozen-stdlib "
-                             "snapshot gate from the loader (default: gate ON; also disarmable "
-                             "at runtime via NIXON_SNAPSHOT_OFF=1)")
-    parser.add_argument("--no-stdlib-audit", dest="stdlib_audit_off", action="store_true", default=False,
-                        help="[LOADER ONLY -- ignored by this pipeline] Omit the stdlib "
-                             "function-audit gate from the loader (default: gate ON; also "
-                             "disarmable at runtime via NIXON_STDLIB_AUDIT_OFF=1)")
     parser.add_argument("--build-id", dest="build_id", type=str, default="",
                         help="Stable build id: seeds the semantic-lowering kernel and is "
                              "recorded in the signature sidecar, so two builds with the same "
                              "--build-id lower identically. It does not by itself make the "
                              "whole build reproducible (default: empty = random per build)")
-    parser.add_argument("--customer-salt", dest="customer_salt", type=str, default="",
-                        help="Bind the payload key to one customer (hybrid-loader "
-                             "build only: `python3 -m obfuscator.core.pipeline build`). "
-                             "Refused here rather than silently ignored — this pipeline "
-                             "emits no hybrid loader to carry the mask")
 
     opts = parser.parse_args()
+    _apply_build_namespaces(opts)
+    _apply_rea_shields(opts)
 
     # Deterministic builds. Without a seed every run of the same command
     # produced a DIFFERENT artefact (verified: two builds, two md5s), which is
@@ -981,49 +1018,6 @@ in config/default.json.
         # while an in-process import still crashes, depending on import order.
         # Python's own RNG is seeded above, which is what the transforms use.
 
-    # Refuse unsupported flags BEFORE the dependency check: an operator
-    # asking for something this pipeline cannot do should learn that on a
-    # box without llc too, instead of 'Missing dependency: llc'.
-    # The loader-emission flags do not apply here: this pipeline compiles
-    # the payload to a native binary and emits NO hybrid loader, so these
-    # could never do anything.  They used to be accepted, logged as if
-    # applied, and silently ignored -- which is worse than refusing:
-    # an operator believed they had armed a gate.  They now fail with a
-    # pointer to the CLI that does arm them.
-    _LOADER_ONLY_FLAGS = (
-        ("hwid", "", "--hwid", "the HWID string"),
-        ("trial", "", "--trial", "the trial period"),
-        ("vm_threshold", 50.0, "--vm-threshold", "the VM-score threshold"),
-        ("kod", False, "--kod", "kill-on-detect"),
-        ("hostguard", False, "--hostguard", "the hostguard snippet"),
-        ("hwid_lock", False, "--hwid-lock", "the HWID-locked fallback"),
-        ("audit_hook_plant_off", False, "--no-audit-hook-plant",
-         "the audit-hook plant detector"),
-        ("driver_check", False, "--driver-check", "the kernel-driver gate"),
-        ("split_bootstrap", False, "--split-bootstrap", "the split-bootstrap key"),
-        ("snapshot_off", False, "--no-snapshot", "the frozen-stdlib snapshot gate"),
-        ("stdlib_audit_off", False, "--no-stdlib-audit", "the stdlib audit gate"),
-        ("customer_salt", "", "--customer-salt", "the customer key binding"),
-    )
-    _misused = []
-    for _dest, _default, _flag, _what in _LOADER_ONLY_FLAGS:
-        if getattr(opts, _dest, _default) != _default:
-            _misused.append("%s (%s)" % (_flag, _what))
-    if _misused:
-        # This pipeline emits TRANSFORMED SOURCE (decoys, integrity hash,
-        # no marshal/exec/zlib), so there is no encrypted payload and no
-        # payload key for any of these to bind.  Saying "no hybrid loader"
-        # pointed at the wrong fact -- the point is that nothing here has a
-        # key to bind.
-        print("[!] This pipeline emits obfuscated source, not an encrypted "
-              "payload, so these options have nothing to bind:", file=sys.stderr)
-        for _m in _misused:
-            print("      %s" % _m, file=sys.stderr)
-        print("    The packed-loader build applies them:",
-              file=sys.stderr)
-        print("      python3 -m obfuscator.core.pipeline build <script.py> "
-              "--<flag> ...", file=sys.stderr)
-        sys.exit(2)
 
     # Dependency validation runs after parsing so it can honour the skip
     # flags: --skip-llvmgen never invokes llc, so requiring it there made
@@ -1497,7 +1491,6 @@ in config/default.json.
             opts.poison_protocols,
             opts.poison_paths,
             opts.poison_imports,
-            opts.poison_all,
             opts.poison_level,
         ]):
             poison_input = obfuscated_output
@@ -2364,7 +2357,7 @@ in config/default.json.
     # Item 125: GPU Fragment Execution
     # =========================================================================
 
-    if opts.gpu_execution or opts.gpu:
+    if opts.gpu_execution:
         log("GPU_EXECUTION", "Running GPU fragment execution (Item 125)...")
         try:
             from scripts.gpu.gpu_execution import GPUExecutor, is_gpu_available
@@ -2384,7 +2377,7 @@ in config/default.json.
     # Item 126: Hybrid CPU/GPU Protection
     # =========================================================================
 
-    if opts.gpu_hybrid or opts.cpu_gpu_hybrid:
+    if opts.gpu_hybrid:
         log("GPU_HYBRID", "Running CPU/GPU hybrid protection (Item 126)...")
         try:
             from scripts.gpu.hybrid_protection import HybridProtector
@@ -3921,7 +3914,7 @@ in config/default.json.
         log("SKIP", "GPU execution not enabled (use --gpu-execution)")
 
     # Item 126: CPU/GPU Hybrid Protection
-    if opts.cpu_gpu_hybrid:
+    if opts.gpu_hybrid:
         log("GPU_HYBRID", "Running CPU/GPU hybrid protection (Item 126)...")
         try:
             from scripts.gpu.hybrid_protection import HybridProtector

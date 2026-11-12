@@ -133,9 +133,8 @@ class TestWiredDetection:
     build.py and reported eight genuinely wired flags as unwired.
     """
 
-    WIRED = ("--fragment-strings", "--unicode-ids", "--advanced-protection",
-             "--phase2", "--include-original", "--phase2-extras",
-             "--data-obfuscation", "--llm-resilient", "--adversarial-level")
+    WIRED = ("--fragment-strings", "--unicode-ids", "--include-original",
+             "--watermark", "--lowering")
 
     def test_known_wired_flags_are_wired(self):
         from scripts import classify_features as cf

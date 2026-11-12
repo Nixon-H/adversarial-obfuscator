@@ -91,7 +91,7 @@ def _run(path):
 def test_section_split_flag_produces_a_working_artifact(tmp_path):
     src_dir, run_dir, source = _prepare(tmp_path, "split")
     proc = _build(str(source), str(run_dir),
-                  ["--section-split", "--section-count", "4"])
+                  ["--section-count", "4"])
     assert proc.returncode == 0, proc.stdout[-4000:] + proc.stderr[-2000:]
 
     artifact = _packed_artifact(src_dir)
@@ -105,12 +105,13 @@ def test_section_split_flag_changes_the_artifact(tmp_path):
     plain_dir, plain_run, plain_source = _prepare(tmp_path, "plain")
     split_dir, split_run, split_source = _prepare(tmp_path, "split")
 
-    assert _build(str(plain_source), str(plain_run)).returncode == 0
+    assert _build(str(plain_source), str(plain_run),
+                  ["--no-section-split"]).returncode == 0
     assert _build(str(split_source), str(split_run),
-                  ["--section-split", "--section-count", "4"]).returncode == 0
+                  ["--section-count", "4"]).returncode == 0
 
     plain = open(_packed_artifact(plain_dir), "rb").read()
     split = open(_packed_artifact(split_dir), "rb").read()
     assert plain != split, (
-        "--section-split produced a byte-identical artifact: the flag did "
+        "section splitting produced a byte-identical artifact: the control did "
         "not reach the loader")

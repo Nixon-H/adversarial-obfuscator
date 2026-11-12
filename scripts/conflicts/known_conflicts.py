@@ -210,11 +210,11 @@ KNOWN_CONFLICTS = [
     ),
     Conflict(
         flag_a="gpu_execution",
-        flag_b="cpu_gpu_hybrid",
+        flag_b="gpu_hybrid",
         conflict_type=ConflictType.SUBSUMES,
         severity=Severity.WARNING,
-        description="--gpu-execution is a subset of --cpu-gpu-hybrid protection",
-        resolution="Use --cpu-gpu-hybrid for combined CPU/GPU paths, or --gpu-execution for GPU only",
+        description="--gpu-execution is a subset of --gpu-hybrid protection",
+        resolution="Use --gpu-hybrid for combined CPU/GPU paths, or --gpu-execution for GPU only",
     ),
     Conflict(
         flag_a="phase2",

@@ -54,5 +54,5 @@ def test_flag_exists():
         capture_output=True, text=True, timeout=60,
     )
     assert "--diagnostic" in proc.stdout
-    assert "--name-gate" in proc.stdout
+    assert "--access" in proc.stdout
     assert "--lowering" in proc.stdout

@@ -87,7 +87,7 @@ def load_advanced_protection_config(opts) -> dict:
         log("CONFIG", "WARN: default config not found at %s "
                       "-- continuing with empty feature set" % DEFAULT_CONFIG)
 
-    if opts.advanced_protection or opts.phase2:
+    if opts.phase2:
         cfg["enabled"] = True
 
     if opts.advanced_protection_only or opts.phase2_only:

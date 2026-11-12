@@ -102,8 +102,8 @@ def test_end_to_end_artifact_runs_across_seeds():
         proc = subprocess.run(
             [sys.executable, "scripts/build.py",
              "--payload", payload,
-             "--skip-irgen", "--skip-llvmgen", "--skip-encrypt",
-             "--skip-relay", "--skip-extras"],
+             "--skip", "irgen", "llvmgen", "encrypt",
+             "relay", "extras"],
             cwd=REPO_ROOT, env=env, capture_output=True, text=True,
             timeout=300)
         assert proc.returncode == 0, proc.stderr[-2000:]

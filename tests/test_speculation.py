@@ -100,8 +100,8 @@ class TestSpeculationPipeline:
     def test_spec_flag_wired_in_build(self):
         with open("scripts/build.py") as f:
             content = f.read()
-        assert "--speculation-obfuscation" in content
         assert "speculation_obfuscation" in content
+        assert "transforms" in content  # --transforms speculation
 
     def test_spec_flag_wired_in_phase01(self):
         with open("scripts/phases/phase01_obfuscate.py") as f:

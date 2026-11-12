@@ -136,14 +136,14 @@ version, and flag set. Verified: three O4 builds gave 29,802 bytes each; two
 builds with phase-2 defaults on gave 33,170 bytes each; a different seed gave
 32,911 bytes.
 
-`--randomization-seed` (or `SEED` / `NIXON_SEED`) is a separate structural
+`--transforms seed=N` (or `SEED` / `NIXON_SEED`) is a separate structural
 seed: structure randomisation, speculation, and the CPU-port phase. It does not
 seed the AST path.
 
 What the flags do **not** buy:
 
 1. Level 0 is not a byte-identical copy through the CLI; always-on rename,
-   checksum and string passes still run. `--skip-obfuscate` is the copy path.
+   checksum and string passes still run. `--skip obfuscate` is the copy path.
 2. The packed loader is not byte-reproducible: blob keys, string keys, section
    keys, timestamps and packaging draws come from `secrets`/`os.urandom` and
    several values cross the pack/run boundary.
@@ -154,5 +154,5 @@ What the flags do **not** buy:
 
 `docs/EMITTER_PIPELINE.md` has the entropy inventory; the current limitations
 are in [`REPRODUCIBILITY.md`](REPRODUCIBILITY.md) §6.1. The historical entry in
-`CHANGELOG.md` saying `--randomization-seed` was gone is stale; the flag is
+`CHANGELOG.md` saying `--transforms seed=N` was gone is stale; the flag is
 still accepted by `scripts/build.py` and now carries a dated correction.

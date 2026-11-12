@@ -374,7 +374,7 @@ def blind_constants(code):
         return ''.join(_out)
     except Exception:
         return _pat.sub(replace, code)
-def get_Nixon_Enc_table():
+def get_Nixon_Enc_table(outer_key: bytes | None = None):
     result = {'tables': {}, 'router': {}, 'keys': {}}
     for tbl_name, strings in STRING_TABLES.items():
         tbl_key = STRING_TABLE_KEYS[tbl_name]
@@ -390,7 +390,9 @@ def get_Nixon_Enc_table():
     for gid, route in STRING_ROUTER.items():
         result['router'][gid] = route
     raw_bytes = zlib.compress(marshal.dumps(result), 9)
-    enc_key = secrets.token_bytes(32)
+    enc_key = outer_key or secrets.token_bytes(32)
+    if len(enc_key) != 32:
+        raise ValueError("bootstrap table key must be 32 bytes")
     encrypted = bytes([b ^ enc_key[i % 32] for i, b in enumerate(raw_bytes)])
     blob_b85 = base64.b85encode(encrypted).decode('ascii')
     key_a_b85 = base64.b85encode(enc_key[:16]).decode('ascii')
@@ -1293,7 +1295,8 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
                                    split_bootstrap=False, snapshot_off=False,
                                    stdlib_audit_off=False,
                                    section_split=False, section_count=4,
-                                   customer_salt="", licence_bound=False):
+                                   customer_salt="", licence_bound=False,
+                                   licence_env_only=False):
     # Phase-4 wiring: all new kwargs default to current behavior (no change
     # when absent). vm/secure-temp snippets are always appended (report-only,
     # safe); hostguard only when requested (changes exec semantics).
@@ -1743,10 +1746,7 @@ def _nx_licence_key():
         _named = _nx_os.environ.get("NIXON_LICENCE")
         if _named:
             _cands.append(_named)
-        _base = _nx_os.path.dirname(_nx_os.path.abspath(_nx_sys.argv[0] or ""))
-        for _d in (_base, _nx_os.getcwd()):
-            for _n in ("licence.json", "licence.licence", "license.json"):
-                _cands.append(_nx_os.path.join(_d, _n))
+        __LOCAL_TOKEN_SEARCH__
         for _c in _cands:
             try:
                 with open(_c, "r", encoding="utf-8") as _f:
@@ -2235,8 +2235,24 @@ if __name__ == "__main__":
         _phase4_suffix += _section_snippet
     except Exception:
         pass
+    if licence_env_only:
+        # The template carries the placeholder on its own indented line, so
+        # the replacement must NOT repeat the leading indentation: the
+        # placeholder line's prefix supplies it.  (The raw template must
+        # stay compilable for the fragment test.)
+        _local_token_search = "# env-only build: no local token search"
+    else:
+        _local_token_search = (
+            '_base = _nx_os.path.dirname(_nx_os.path.abspath('
+            '_nx_sys.argv[0] or ""))\n'
+            '        for _d in (_base, _nx_os.getcwd()):\n'
+            '            for _n in ("licence.json", "licence.licence", '
+            '"license.json"):\n'
+            '                _cands.append(_nx_os.path.join(_d, _n))'
+        )
     loader_src = (
         loader_template
+        .replace("__LOCAL_TOKEN_SEARCH__", _local_token_search)
         .replace("{build_id}", build_id)
         .replace("{customer_salt}", _customer_salt)
         .replace("{licence_bound}", "1" if licence_bound else "0")
@@ -2249,6 +2265,7 @@ if __name__ == "__main__":
     assert "{share0}" not in loader_src and "{share1}" not in loader_src
     assert "{build_id}" not in loader_src and "{fallback_blob_val}" not in loader_src
     assert "{key_hex}" not in loader_src, "stale {key_hex} placeholder"
+    assert "__LOCAL_TOKEN_SEARCH__" not in loader_src
     # The payload entry point must be LAST.
     #
     # The template ends with `if __name__ == "__main__": _load_native()`,
@@ -2427,27 +2444,13 @@ def load_tls_ca_bundle(path):
 _KEY_BINDING_TEMPLATE = r"""
 def _nx_bind_blob_key(_raw):
     try:
-        import hashlib as _h, json as _j, os as _o, sys as _s
+        import hashlib as _h
         if "__MODE__" == "licence":
-            _mat = None
-            _cands = []
-            _named = _o.environ.get("NIXON_LICENCE")
-            if _named:
-                _cands.append(_named)
-            _base = _o.path.dirname(_o.path.abspath((_s.argv[0] if _s.argv else "") or ""))
-            for _d in (_base, _o.getcwd()):
-                for _n in ("licence.json", "licence.licence", "license.json"):
-                    _cands.append(_o.path.join(_d, _n))
-            for _c in _cands:
-                try:
-                    with open(_c, "r", encoding="utf-8") as _f:
-                        _mat = ((_j.load(_f) or {}).get("payload") or {}).get("key_material")
-                    if _mat:
-                        break
-                except Exception:
-                    continue
+            import sys as _s
+            _payload = _nx_licence_payload()
+            _mat = _payload.get("key_material")
             if not _mat:
-                _s.stderr.write("licence token required: set NIXON_LICENCE or place licence.json beside the artefact\n")
+                _s.stderr.write("licence token carries no key_material\n")
                 raise SystemExit(1)
         else:
             _mat = "__SALT__"
@@ -2459,19 +2462,151 @@ def _nx_bind_blob_key(_raw):
         raise SystemExit(1)
 
 
-BLOB_KEY = _nx_bind_blob_key(BLOB_KEY)"""
+BLOB_KEY = _nx_bind_blob_key(BLOB_KEY)
+
+_NX_PAYLOAD_LICENCE = "__MODE__" == "licence"
 
 
-def _key_binding_source(mode: str, customer_salt: str) -> str:
+def _nx_payload_licence_mask(_k):
+    if not _NX_PAYLOAD_LICENCE:
+        return _k
+    _m = _nx_bind_blob_key(bytes(32))
+    return bytes([_a ^ _b for _a, _b in zip(_k, _m)])"""
+
+
+def _licence_runtime_helpers(token_hash_hex: str, chain_enabled: bool,
+                             env_only: bool) -> str:
+    """Emit the loader-side licence verifier used before any key material.
+
+    The token signature is verified during the build, and the loader pins the
+    exact canonical token bytes with SHA-256.  Chain verification is a
+    read-only ``eth_call`` against the ERC-721 contract named in the signed
+    token; the RPC endpoint is signed too, so a runtime caller cannot point
+    the check at a fake node.
+    """
+    import inspect
+    from obfuscator.licensing import chain_owner_of
+
+    env_only_literal = "1" if env_only else "0"
+    chain_enabled_literal = "1" if chain_enabled else "0"
+    payload_fn = r'''
+_NX_LICENCE_PAYLOAD = None
+
+
+def _nx_licence_canonical(payload):
+    import json as _j
+    return _j.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _nx_licence_payload():
+    global _NX_LICENCE_PAYLOAD
+    if _NX_LICENCE_PAYLOAD is not None:
+        return _NX_LICENCE_PAYLOAD
+    import json as _j, os as _o, sys as _s
+    candidates = []
+    named = _o.environ.get("NIXON_LICENCE")
+    if named:
+        candidates.append(named)
+    if "__ENV_ONLY__" != "1":
+        base = _o.path.dirname(_o.path.abspath(
+            (_s.argv[0] if _s.argv else "") or ""))
+        for directory in (base, _o.getcwd()):
+            for name in ("licence.json", "licence.licence", "license.json"):
+                candidates.append(_o.path.join(directory, name))
+    payload = None
+    for path in candidates:
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                document = _j.load(handle)
+            if not isinstance(document, dict) or "payload" not in document:
+                continue
+            candidate_hash = _nixon_ハッシュ해시.sha256(
+                _nx_licence_canonical(document["payload"])).hexdigest()
+            if candidate_hash != "__TOKEN_HASH__":
+                _s.stderr.write("licence token does not match the pinned token\n")
+                raise SystemExit(1)
+            if "__CHAIN_ENABLED__" == "1":
+                chain = document["payload"].get("chain") or {}
+                missing = [k for k in ("rpc", "contract", "token_id", "owner")
+                           if k not in chain]
+                if missing:
+                    _s.stderr.write(
+                        "licence token is missing signed chain fields: "
+                        + ",".join(missing) + "\n")
+                    raise SystemExit(1)
+                try:
+                    owner = chain_owner_of(
+                        chain["rpc"],
+                        chain["contract"],
+                        int(chain["token_id"]),
+                        int(chain.get("chain_id") or 1),
+                    )
+                except SystemExit:
+                    raise
+                except Exception as _chain_exc:
+                    # Never fall through to "licence token required": a chain
+                    # failure is a different answer than a missing token, and
+                    # continuing would just retry the same signed RPC.  Both
+                    # paths fail closed.
+                    _s.stderr.write(
+                        "licence chain verification failed: %s\n" % _chain_exc)
+                    raise SystemExit(1)
+                if owner.lower() != str(chain["owner"]).lower():
+                    _s.stderr.write("licence chain owner mismatch\n")
+                    raise SystemExit(1)
+            payload = document["payload"]
+            break
+        except SystemExit:
+            raise
+        except Exception:
+            continue
+    if payload is None:
+        _s.stderr.write("licence token required: __REQUIRED_HELP__\n")
+        raise SystemExit(1)
+    _NX_LICENCE_PAYLOAD = payload
+    return payload
+'''.replace("__ENV_ONLY__", env_only_literal) \
+       .replace("__CHAIN_ENABLED__", chain_enabled_literal) \
+       .replace("__TOKEN_HASH__", token_hash_hex) \
+       .replace("__REQUIRED_HELP__",
+                "set NIXON_LICENCE to a token stored outside the artefact directory")
+    return (
+        inspect.getsource(chain_owner_of)
+        + "\n"
+        + payload_fn
+    )
+
+
+def _key_binding_source(mode: str, customer_salt: str,
+                        env_only: bool = False) -> str:
     """The run-time binding emit for a key-bound artefact.
 
     ``mode='salt'`` ships the salt (so this separates builds), ``'licence'``
     ships nothing and reads the token's key_material at run time (so the
-    artefact alone cannot decrypt).
+    artefact alone cannot decrypt).  ``env_only`` removes the local-file
+    search: the token must come from ``NIXON_LICENCE``, so it cannot be
+    picked up from a ``licence.json`` shipped beside the artefact.
     """
     if '"' in customer_salt or "\\" in customer_salt or "\n" in customer_salt:
         raise SystemExit("customer_salt contains characters the loader cannot carry")
+    if env_only:
+        local_search = "            # env-only build: no local token search"
+        required_help = ("set NIXON_LICENCE to a token stored outside the "
+                         "artefact directory")
+    else:
+        local_search = (
+            '            _base = _o.path.dirname(_o.path.abspath('
+            '(_s.argv[0] if _s.argv else "") or ""))\n'
+            '            for _d in (_base, _o.getcwd()):\n'
+            '                for _n in ("licence.json", "licence.licence", '
+            '"license.json"):\n'
+            '                    _cands.append(_o.path.join(_d, _n))'
+        )
+        required_help = ("set NIXON_LICENCE or place licence.json beside "
+                         "the artefact")
     return (_KEY_BINDING_TEMPLATE
+            .replace("__LOCAL_SEARCH__", local_search)
+            .replace("__REQUIRED_HELP__", required_help)
             .replace("__MODE__", str(mode))
             .replace("__SALT__", str(customer_salt)))
 
@@ -2556,20 +2691,49 @@ def build_project(args):
     # artefact alone cannot decrypt.  Resolved first: the hybrid-loader call
     # below happens before the rest of the build context exists.
     _licence_bound = False
+    _licence_env_only = bool(getattr(args, "licence_env_only", False))
+    _licence_bootstrap_encrypted = bool(
+        getattr(args, "licence_bootstrap_encrypted", False))
+    _licence_chain_enabled = bool(getattr(args, "licence_chain", False))
     _key_raw = None
     _customer_salt = str(getattr(args, "customer_salt", "") or "")
     _licence_path = str(getattr(args, "licence_token", "") or "")
+    if _licence_chain_enabled and not _licence_path:
+        raise SystemExit("--licence-chain requires --licence-token")
+    _licence_public_key = os.environ.get("NIXON_LICENCE_PUBLIC_KEY", "")
+    _licence_token_hash = ""
     if _licence_path:
         import json as _lic_json
         with open(_licence_path, "r", encoding="utf-8") as _lic_fh:
             _lic_doc = _lic_json.load(_lic_fh)
-        _lic_km = ((_lic_doc or {}).get("payload") or {}).get("key_material")
+        _lic_payload = (_lic_doc or {}).get("payload") or {}
+        _lic_km = _lic_payload.get("key_material")
         if not _lic_km:
             raise SystemExit(
                 "licence token %s carries no key_material; reissue it with "
                 "this version of obfuscator.licensing" % _licence_path)
+        if not _licence_public_key:
+            raise SystemExit(
+                "licence binding: set NIXON_LICENCE_PUBLIC_KEY to the issuer "
+                "public key so the artefact can pin the signed token")
+        from obfuscator.licensing import canonical as _lic_canonical
+        from obfuscator.licensing import public_key_from_hex as _lic_pk
+        from obfuscator.licensing import verify as _lic_verify
+        try:
+            _lic_verify(_lic_json.dumps(_lic_doc, separators=(",", ":")),
+                        _lic_pk(_licence_public_key))
+        except Exception as _lic_verify_exc:
+            raise SystemExit(
+                "licence token signature verification failed: %s"
+                % _lic_verify_exc)
+        if _licence_chain_enabled and not (_lic_payload.get("chain") or {}):
+            raise SystemExit(
+                "--licence-chain requires a licence token with signed chain "
+                "metadata; issue it with obfuscator.licensing --chain ...")
         _customer_salt = str(_lic_km)
         _licence_bound = True
+        _licence_token_hash = hashlib.sha256(
+            _lic_canonical(_lic_payload)).hexdigest()
     # Both key bindings are applied on this path too (see the blob-key
     # emission below), so the flags no longer require --native.
     if not os.path.exists(source): 
@@ -2642,7 +2806,7 @@ def build_project(args):
             _w_hostguard = bool(getattr(args, 'hostguard', False))
             _w_hwid_lock = bool(getattr(args, 'hwid_lock', False))
             _w_driver_check = bool(getattr(args, 'driver_check', False))
-            _w_split_bootstrap = bool(getattr(args, 'split_bootstrap', False))
+            _w_split_bootstrap = bool(getattr(args, 'split_bootstrap', True))
             _w_snapshot_off = bool(getattr(args, 'snapshot_off', False))
             _w_stdlib_audit_off = bool(getattr(args, 'stdlib_audit_off', False))
             fallback_opts['hwid'] = _w_hwid
@@ -2721,6 +2885,7 @@ def build_project(args):
                 watermark=str(getattr(args, 'watermark', '') or '') or None,
                 customer_salt=_customer_salt,
                 licence_bound=_licence_bound,
+                licence_env_only=_licence_env_only,
             )
             if getattr(args, 'section_split', False):
                 # The split needs a fallback payload to split, and there
@@ -3106,6 +3271,14 @@ def _VERIFY_INTEGRITY():
             for i in range(7): sim_h = next_h(sim_h, i)
             prov_salt = hashlib.sha256(str(sim_h).encode()).digest()
             encryption_key = bytes([a ^ b ^ c for a, b, c in zip(key, time_salt, prov_salt)])
+            if _licence_bound:
+                # Bind the actual payload stream key to the token, not only
+                # BLOB_KEY (which decrypts native blobs).  The loader applies
+                # the same mask after k_dec is derived.
+                _plm = hashlib.sha256(
+                    b"nx-customer:" + _customer_salt.encode()).digest()
+                encryption_key = bytes([
+                    _a ^ _b for _a, _b in zip(encryption_key, _plm)])
             # Loader-compatibility: the artifact-side decryptors (CIPHER_SOURCE
             # XOR-stream, hybrid _xor_decrypt) have no AES-CTR inverse, and the
             # loader must stay stdlib-only (cryptography is build-time-only).
@@ -3233,6 +3406,15 @@ def _VERIFY_INTEGRITY():
                 'build_id': build_id,
                 'customer_salt': _customer_salt,
                 'licence_bound': '1' if _licence_bound else '0',
+                'licence_env_only': '1' if _licence_env_only else '0',
+                'licence_bootstrap_encrypted': (
+                    '1' if (_licence_bound and _licence_bootstrap_encrypted)
+                    else '0'),
+                'licence_helpers': _licence_runtime_helpers(
+                    _licence_token_hash,
+                    _licence_chain_enabled,
+                    _licence_env_only,
+                ) if _licence_bound else '',
                 'required_python_version': f"({args.python.split('.')[0]}, {args.python.split('.')[1]})" if getattr(args, 'python', None) and '.' in args.python else f"({sys.version_info[0]}, {sys.version_info[1]})",
                 'VAR_PAYLOAD': VARS["PAYLOAD"],
                 'VAR_NONCE': VARS["NONCE"],
@@ -3604,7 +3786,30 @@ def _VERIFY_INTEGRITY():
                         "key binding: the emitted loader has no BLOB_KEY literal")
                 _mode = "licence" if _licence_bound else "salt"
                 raw_script = raw_script.replace(
-                    _anchor, _anchor + "\n" + _key_binding_source(_mode, _customer_salt))
+                    _anchor, _anchor + "\n" + _key_binding_source(
+                        _mode, _customer_salt, env_only=_licence_env_only))
+                if _licence_bound:
+                    # Bind the payload stream key, not only BLOB_KEY.  The
+                    # runtime derives k_dec from the VM chain; apply the same
+                    # token mask after that derivation.  The pack-side mask is
+                    # applied to encryption_key where the payload is sealed.
+                    _dec_anchor = (
+                        "k_dec = bytes([a ^ b ^ c for a, b, c in zip("
+                        "k_final, time_salt, prov_salt)])")
+                    _dec_match = re.search(
+                        r"(?m)^(\s*)" + re.escape(_dec_anchor) + r"[ \t]*$",
+                        raw_script)
+                    if not _dec_match:
+                        raise SystemExit(
+                            "licence binding: the emitted loader has no "
+                            "k_dec assignment")
+                    _indent = _dec_match.group(1)
+                    raw_script = (
+                        raw_script[:_dec_match.end()]
+                        + "\n" + _indent
+                        + "k_dec = _nx_payload_licence_mask(k_dec)"
+                        + raw_script[_dec_match.end():]
+                    )
             # Hardening A2.2/A2.3: strip the fixed runtime vocabulary
             # (_nx_kill, _NX_AUDIT_*) out of the artifact.  The rename runs
             # on the assembled source -- after every emitter contributed its
@@ -3701,7 +3906,13 @@ def _VERIFY_INTEGRITY():
                     print("    [+] Auto-fix successful (AST round-trip)")
                 except Exception as fix_err:
                     print(f"    [!] Auto-fix failed: {fix_err}")
-            enc_blob, enc_key_a, enc_key_b = get_Nixon_Enc_table()
+            _bootstrap_key = None
+            if _licence_bound and _licence_bootstrap_encrypted:
+                # The loader derives the same key from the external token at
+                # run time; the artefact itself never carries this mask.
+                _bootstrap_key = hashlib.sha256(
+                    b"nx-bootstrap-string-table:" + _customer_salt.encode()).digest()
+            enc_blob, enc_key_a, enc_key_b = get_Nixon_Enc_table(_bootstrap_key)
             final_script = Nixon_Enc_script
             # Quote-robust: an AST round-trip (auto-fix above) normalizes
             # quotes to single, so replace both variants.
@@ -3806,6 +4017,218 @@ def _make_farm(args, gh_token):
                      % (platform,))
 
 
+# ── unified flag specs (--web3 / --licence) ─────────────────────────────
+# One flag per subsystem instead of a flag per knob.  Each sub-option maps
+# onto the destination the consumers below read.  The former per-knob
+# spellings (--contract, --rpc, --shards, --auto-deploy, --deploy-rpc,
+# --explorer, --licence-token, --licence-env-only,
+# --licence-bootstrap-encrypted, --licence-chain) were removed on
+# 2026-11-12: this flag is now the only interface.
+
+_WEB3_SPEC_FIELDS = {
+    # sub-option -> destination it feeds
+    "rpc": "rpc",
+    "explorer": "explorer",
+    "contract": "contract",
+    "shards": "shards",
+    "deploy": "auto_deploy",
+    "deploy-rpc": "deploy_rpc",
+}
+_WEB3_BOOLEAN = {"deploy"}
+
+_LICENCE_SPEC_FIELDS = {
+    "token": "licence_token",
+    "salt": "customer_salt",
+    "env-only": "licence_env_only",
+    "bootstrap-encrypted": "licence_bootstrap_encrypted",
+    "chain": "licence_chain",
+}
+_LICENCE_BOOLEAN = {"env-only", "bootstrap-encrypted", "chain"}
+
+# Access gates: hwid binding, trial/expiry, hostile-host gates, geofence,
+# alerting and network auth.  All opt-in at the value level, but one flag.
+_ACCESS_SPEC_FIELDS = {
+    "hwid": "hwid",
+    "hwid-lock": "hwid_lock",
+    "lock-hwid": "lock_hwid",
+    "trial": "trial",
+    "expire": "expire",
+    "bind-mac": "bind_mac",
+    "one-shot": "one_shot",
+    "kod": "kod",
+    "hostguard": "hostguard",
+    "driver-check": "driver_check",
+    "name-gate": "name_gate",
+    "rename-internal": "rename_internal",
+    "allow-countries": "allow_countries",
+    "block-countries": "block_countries",
+    "allow-regions": "allow_regions",
+    "block-regions": "block_regions",
+    "webhook": "webhook",
+    "net-url": "net_url",
+    "vm-threshold": "vm_threshold",
+}
+_ACCESS_BOOLEAN = {
+    "hwid-lock", "bind-mac", "one-shot", "kod", "hostguard",
+    "driver-check", "name-gate", "rename-internal",
+}
+# Consumers of the access dests read them directly (args.bind_mac, ...), so
+# every destination must exist after parsing even when --access is absent.
+_ACCESS_DEFAULTS = {
+    dest: (False if key in _ACCESS_BOOLEAN else "")
+    for key, dest in _ACCESS_SPEC_FIELDS.items()
+}
+# The VM-score threshold has a numeric default, not an empty string.
+_ACCESS_DEFAULTS["vm_threshold"] = 50.0
+
+
+def _parse_unified_spec(items, fields, booleans, flag):
+    """Parse ``--<flag> key=value ...`` into {sub-option: value}.
+
+    Boolean sub-options may be written bare (``--licence env-only``), the
+    same style the issue CLI's ``--chain`` uses.  Unknown keys are refused,
+    not ignored: a misspelled sub-option must never look configured.
+    """
+    parsed = {}
+    for item in items:
+        key, eq, raw = item.partition("=")
+        key = key.strip().lower().replace("_", "-")
+        if key not in fields:
+            raise SystemExit(
+                "--%s: unknown sub-option %r; expected one of: %s"
+                % (flag, key, ", ".join(sorted(fields))))
+        if key in parsed:
+            raise SystemExit("--%s: sub-option %r given twice" % (flag, key))
+        if key in booleans:
+            if not eq:
+                parsed[key] = True
+            else:
+                low = raw.strip().lower()
+                if low in ("true", "1", "yes", "on"):
+                    parsed[key] = True
+                elif low in ("false", "0", "no", "off"):
+                    parsed[key] = False
+                else:
+                    raise SystemExit(
+                        "--%s %s: expected a boolean, got %r" % (flag, key, raw))
+        else:
+            value = raw.strip()
+            if not value:
+                raise SystemExit(
+                    "--%s %s: expected key=value (only %s take a bare value)"
+                    % (flag, key, ", ".join(sorted(booleans))))
+            parsed[key] = value
+    if not parsed:
+        raise SystemExit("--%s: no sub-options given" % flag)
+    return parsed
+
+
+def apply_unified_specs(args):
+    """Apply ``--web3`` / ``--licence`` sub-options onto the flag dests.
+
+    Called once by main() after parsing, before the build dispatch.
+    Non-build commands (whose namespace has no ``web3``/``licence``) pass
+    through untouched.
+    """
+    web3 = getattr(args, "web3", None)
+    if web3:
+        parsed = _parse_unified_spec(web3, _WEB3_SPEC_FIELDS, _WEB3_BOOLEAN,
+                                     "web3")
+        for key, value in parsed.items():
+            setattr(args, _WEB3_SPEC_FIELDS[key], value)
+    licence = getattr(args, "licence", None)
+    if licence:
+        parsed = _parse_unified_spec(licence, _LICENCE_SPEC_FIELDS,
+                                     _LICENCE_BOOLEAN, "licence")
+        for key, value in parsed.items():
+            setattr(args, _LICENCE_SPEC_FIELDS[key], value)
+    access = getattr(args, "access", None)
+    if access:
+        parsed = _parse_unified_spec(access, _ACCESS_SPEC_FIELDS,
+                                     _ACCESS_BOOLEAN, "access")
+        for key, value in parsed.items():
+            if key == "vm-threshold":
+                try:
+                    value = float(value)
+                except ValueError:
+                    raise SystemExit("--access vm-threshold=%r: expected a number"
+                                     % (value,))
+            setattr(args, _ACCESS_SPEC_FIELDS[key], value)
+    # --package destinations must exist for main()'s direct reads.
+    package_defaults = {
+        "native": False, "native_only": False, "compile": False, "auto": "",
+        "platform": "auto", "layers": None, "zips": None, "stego": False,
+        "portable": False,
+    }
+    for dest, default in package_defaults.items():
+        if not hasattr(args, dest):
+            setattr(args, dest, default)
+    for item in (getattr(args, "package", None) or []):
+        item = str(item).strip()
+        low = item.lower()
+        if low in ("native", "native-only", "compile", "stego", "portable"):
+            setattr(args, low.replace("-", "_"), True)
+        elif low.startswith("cloud="):
+            args.auto = item.split("=", 1)[1]
+        elif low == "cloud":
+            args.auto = "cf,nk"
+        elif low.startswith("platform="):
+            value = item.split("=", 1)[1]
+            if value not in ("auto", "github"):
+                raise SystemExit("--package platform=%r: implemented farm is github" % value)
+            args.platform = value
+        elif low.startswith("layers="):
+            args.layers = int(item.split("=", 1)[1])
+        elif low.startswith("zips="):
+            args.zips = int(item.split("=", 1)[1])
+        elif low in ("all", "everything"):
+            # "package with everything else": maximum recursive packaging
+            # on top of the protections that are already on by default
+            # (anti-REA at maximum, sectioned sealing, split bootstrap,
+            # strict detections, the integrity gates).
+            args.layers = 25
+            args.zips = 3
+            args.stego = True
+        else:
+            raise SystemExit("--package: unknown option %r" % (item,))
+
+    # Unified --exclude: namespaced shield families onto the exclusion dests.
+    for dest in ("anti_rea_exclude_bait", "anti_rea_exclude_cognitive",
+                 "anti_rea_exclude_compliance", "anti_rea_exclude_bio",
+                 "snapshot_off", "stdlib_audit_off", "audit_hook_plant_off"):
+        if not hasattr(args, dest):
+            setattr(args, dest, False)
+    if not hasattr(args, "section_split"):
+        args.section_split = True
+    for family in (getattr(args, "exclude", None) or []):
+        family = str(family).strip().lower()
+        if family == "rea":
+            args.anti_rea_exclude_bait = True
+        elif family == "rea.cognitive":
+            args.anti_rea_exclude_cognitive = True
+        elif family == "rea.compliance":
+            args.anti_rea_exclude_compliance = True
+        elif family == "rea.bio":
+            args.anti_rea_exclude_bio = True
+        elif family == "integrity.snapshot":
+            args.snapshot_off = True
+        elif family == "integrity.stdlib-audit":
+            args.stdlib_audit_off = True
+        elif family == "integrity.audit-hook":
+            args.audit_hook_plant_off = True
+        else:
+            raise SystemExit("--exclude: unknown family %r (rea, rea.cognitive, "
+                             "rea.compliance, rea.bio, integrity.snapshot, "
+                             "integrity.stdlib-audit, integrity.audit-hook)"
+                             % (family,))
+    # Direct readers (args.bind_mac, args.expire, ...) need the dests to
+    # exist even when --access is absent: fill the defaults once here.
+    for dest, default in _ACCESS_DEFAULTS.items():
+        if not hasattr(args, dest):
+            setattr(args, dest, default)
+    return args
+
+
 def build_parser():
     """Construct the pipeline CLI parser.
 
@@ -3830,17 +4253,8 @@ def build_parser():
     build = subparsers.add_parser('build', help='Obfuscate and Compile a Python script', formatter_class=custom_fmt, add_help=False)
     build.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     build.add_argument('source', help='Python script path')
-    mode_group = build.add_mutually_exclusive_group()
-    mode_group.add_argument('--native', action='store_true', help='Native Mode: Cloud Farm Cython Compilation (Hybrid - With Fallback)')
-    mode_group.add_argument('--native-only', dest='native_only', action='store_true', help='Strict Native Mode: Cloud Farm Cython Compilation (No Fallback)')
-    build.add_argument('--auto', nargs='?', const='cf,nk', help='Automation: cf=Cloudflare, nk=Nuitka (Defaults to cf,nk if no value)')
-    build.add_argument('--stego', action='store_true', help='Steganography wrapping')
     build.add_argument('--tor', action='store_true', help='Route build traffic through Tor (default 127.0.0.1:9050; override via --tor-proxy or NIXON_TOR_PROXY)')
     build.add_argument('--tor-proxy', default=None, help='Tor SOCKS endpoint host:port (default 127.0.0.1:9050; env NIXON_TOR_PROXY)')
-    build.add_argument('--compile', action='store_true', help='Compile FINAL loader with Nuitka (Creates EXE/ELF)')
-    build.add_argument('--lock-hwid', dest='lock_hwid', default='',
-                       help='Lock the build to a target HWID: registers a license for it and '
-                            'seeds the build deterministically')
     build.add_argument('--watermark', dest='watermark', default='',
                        help='Embed an owner-supplied watermark message in the loader, '
                             'HMAC-tagged and checked at load time: a stripped or edited '
@@ -3866,33 +4280,19 @@ def build_parser():
                        help="Counter-REA shields: architecture-mirage chaff, canary "
                             "credentials, evidence-contract poison, a decoy call "
                             "graph and high-salience bait procedures (ON by default)")
-    build.add_argument('--exclude-rea', dest='anti_rea_exclude_bait',
-                       action='store_true', default=False,
-                       help="Exclude ALL classifier-directed bait layers (compliance "
-                            "notices, cognitive-armor canaries, fabricated classifier-bait "
-                            "corpus) from the counter-REA shields. The base shields "
-                            "(chaff, decoy call graph, canary credentials) stay on; use "
-                            "--no-anti-rea to skip those too")
-    build.add_argument('--exclude-rea-compliance', dest='anti_rea_exclude_compliance',
-                       action='store_true', default=False,
-                       help="Exclude only the compliance-notice layer. Exclusions "
-                            "combine: pass any of --exclude-rea-* together")
-    build.add_argument('--exclude-rea-cognitive', dest='anti_rea_exclude_cognitive',
-                       action='store_true', default=False,
-                       help="Exclude only the cognitive-armor layer (canary notices "
-                            "and in-band abort markers). Exclusions combine: pass any "
-                            "of --exclude-rea-* together")
-    build.add_argument('--exclude-rea-bio', dest='anti_rea_exclude_bio',
-                       action='store_true', default=False,
-                       help="Exclude only the fabricated classifier-bait corpus (BLA's "
-                            "keyword-only bio/chem/cyber trigger strings; inert, no "
-                            "actionable content). Exclusions combine: pass any of "
-                            "--exclude-rea-* together")
+    build.add_argument('--exclude', nargs='+', default=None, metavar='FAMILY',
+                       help='Skip shield families: "rea" turns every bait layer '
+                            'off; "rea.compliance", "rea.cognitive", "rea.bio" '
+                            'skip one; "integrity.snapshot", '
+                            '"integrity.stdlib-audit", "integrity.audit-hook" '
+                            'omit one default-on integrity gate')
     build.add_argument('--no-anti-rea', dest='anti_rea', action='store_false',
                        help="Skip the counter-REA shields")
     build.add_argument('--anti-rea-level', dest='anti_rea_level',
-                       choices=['stealth', 'balanced', 'maximum'], default='balanced',
-                       help="How much decoy material the counter-REA shields emit")
+                       choices=['stealth', 'balanced', 'maximum'], default='maximum',
+                       help="Counter-REA shields are ON by default at maximum: "
+                            "there is no enable flag. Pass this only to LOWER "
+                            "the intensity (stealth or balanced)")
     build.add_argument('--fast', dest='strict_detections', action='store_false',
                        help="Build the reduced-protection profile: detections only "
                             "warn, entropy noise and rdtsc pressure are lower. "
@@ -3903,70 +4303,68 @@ def build_parser():
                             '(it writes the decrypted payload to a 0600 temp file when '
                             'NIXON_DUMP_RAW=1). Off by default: a normal artifact has '
                             'no such capability')
-    build.add_argument('--one-shot', action='store_true', help='Self-destruct')
-    build.add_argument('--net-url', help='Auth URL (if not using auto=cf)')
     build.add_argument('--tls-ca-bundle', help='PEM CA bundle for the emitted key fetch. The artifact verifies the certificate chain AND the hostname against the system trust store plus this CA (it never disables verification)')
-    build.add_argument('--portable', action='store_true', default=False,
-                        help='Skip the native core so one file runs on every OS. '
-                             'The FHE/ORAM layer falls back to pure Python with a small '
-                             'batch; every other protection is unchanged.')
-    build.add_argument('--section-split', dest='section_split', action='store_true', default=True,
-                       help='Ship the payload as N independently sealed sections instead of one blob, so the whole encrypted payload is never resident in a single buffer. Needs a fallback payload to split, so it is not available with --native-only (default: on)')
     build.add_argument('--no-section-split', dest='section_split', action='store_false',
                        help='Ship the payload as a single blob instead of N sealed sections (default: sections are on)')
-    build.add_argument('--section-count', type=int, default=4, help='Number of sealed sections when --section-split is used (default 4)')
+    build.add_argument('--section-count', type=int, default=4, help='Number of sealed sections when section splitting is on (default 4)')
     build.add_argument('--opt-level', dest='opt_level', type=int, default=None,
                        help='Protection ladder 0-5: resolve the 17 canonical transform flags from the level. Without it the loader build applies the full set')
     build.add_argument('--bind', help='Bind files inside payload')
-    build.add_argument('--expire', help='Expiration Date (YYYY-MM-DD)')
-    build.add_argument('--webhook', help='Alert Webhook URL')
-    build.add_argument('--bind-mac', help='Bind to MAC address')
-    build.add_argument('--allow-countries', help='Allowed country codes')
-    build.add_argument('--block-countries', help='Blocked country codes')
-    build.add_argument('--allow-regions', help='Allowed regions')
-    build.add_argument('--block-regions', help='Blocked regions')
-    build.add_argument('--contract', help='Contract address')
-    build.add_argument('--rpc', help='RPC URL')
-    build.add_argument('--shards', help='Key shard URLs')
-    build.add_argument('--auto-deploy', action='store_true', help='Auto deploy contract')
-    build.add_argument('--deploy-rpc', help='RPC URL for deployment')
-    build.add_argument('--explorer', help='Blockscout URL')
     build.add_argument('--private-key', help='Deployment key')
     build.add_argument('--cf-token', help='Cloudflare API Token (overrides the stored config)')
     build.add_argument('--cf-account', help='Cloudflare Account ID (overrides the stored config)')
-    build.add_argument('--licence-token', default='',
-                       help='Bind the payload key to a licence token (its '
-                            'key_material becomes the customer mask; the '
-                            'artefact then needs that token at run time)')
+    build.add_argument('--web3', nargs='+', default=None, metavar='KEY=VALUE',
+                       help='Web3 configuration: one flag for RPC, explorer, '
+                            'contract, deployment and key shards. Sub-options: '
+                            'rpc=URL explorer=URL contract=ADDR shards=URL1,'
+                            'URL2 deploy deploy-rpc=URL (the former per-knob '
+                            'spellings were removed 2026-11-12)')
+    build.add_argument('--licence', nargs='+', default=None, metavar='KEY=VALUE',
+                       help='Licence configuration: one flag for the whole '
+                            'licence gate. Sub-options: token=FILE = require '
+                            'this signed token at run time; salt=STRING = bind '
+                            'the key to a customer without a token; env-only = '
+                            'read the token only from NIXON_LICENCE; '
+                            'bootstrap-encrypted = encrypt the loader string '
+                            'table with a token key; chain = verify the signed '
+                            'ERC-721 owner on-chain. Booleans may be bare or '
+                            '=true/=false')
+    build.add_argument('--access', nargs='+', default=None, metavar='KEY=VALUE',
+                       help='Access gates: one flag for HWID/trial/expiry, '
+                            'hostile-host gates, geofence and alerting. '
+                            'Sub-options: hwid=STR hwid-lock lock-hwid=STR '
+                            'trial=7d expire=YYYY-MM-DD bind-mac one-shot kod '
+                            'hostguard driver-check name-gate rename-internal '
+                            'allow-countries=US,DE block-countries=RU '
+                            'allow-regions=R1 block-regions=R2 webhook=URL '
+                            'net-url=URL vm-threshold=50 (the former per-knob '
+                            'spellings were removed 2026-11-12)')
     build.add_argument('--pin-structure', action='store_true',
                        help='Pin the EMITTER-ONLY draws (encoding order, slot '
                             'picks, names, VM op-map) so two builds share a '
                             'structure. Debugging aid; key material is not '
                             'pinned, so artefacts are not byte-identical.')
-    build.add_argument('--customer-salt', default='',
-                       help='Bind the payload key to one customer (mixed as a '
-                            'domain-separated second mask; empty = no binding)')
-    build.add_argument('--skip-cloud', action='store_true', help='Skip the cloud build farm: build the artifact locally even if --compile/--auto would send it to the farm')
+    build.add_argument('--package', nargs='+', default=None, metavar='OPT',
+                       help='Packaging and mode. All options: native = cloud '
+                            'Cython compile keeping the bytecode fallback; '
+                            'native-only = cloud Cython with no fallback; compile '
+                            '= wrap the final loader in a Nuitka EXE/ELF; cloud = '
+                            'auto-build (cf,nk); platform=github = build farm (the '
+                            'only implemented one); layers=N = recursive packaging '
+                            'layers; zips=N = ZIP wrapper count; stego = hide the '
+                            'payload inside an image; portable = no native core, '
+                            'run anywhere; all (or everything) = package with '
+                            'everything else: layers=25 zips=3 stego on top of the '
+                            'protections that are already on by default')
+    build.add_argument('--skip-cloud', action='store_true', help='Skip the cloud build farm: build the artifact locally even if --package compile/cloud would send it to the farm')
     build.add_argument('--resume', help='Resume waiting for a specific GitHub Run ID (skip upload)')
     build.add_argument('--exclude-android', action='store_true', help='Skip Android build in Nuitka cloud compilation')
     build.add_argument('--public', action='store_true', help='Public Repo Mode (Flash Mode) - Nukes repo after build')
-    build.add_argument('--platform', choices=['auto', 'github'], default='auto', help='Build farm platform. "auto" selects the only implemented farm, GitHub')
-    build.add_argument('--layers', type=int, help='Recursive packaging layers (default 100)')
-    build.add_argument('--zips', type=int, help='Number of ZIP layers')
-    build.add_argument('--hwid', default='', help='HWID string for macro expansion / HWID-locked fallback')
-    build.add_argument('--trial', default='', help="Trial period spec, e.g. '7d' (parsed via obfuscator.macros.parse_trial)")
-    build.add_argument('--vm-threshold', dest='vm_threshold', type=float, default=50.0, help='VM-score verdict threshold (default: 50.0)')
-    build.add_argument('--kod', action='store_true', help='Arm the loader kill-on-detect response: the artifact terminates when a detection fires')
-    build.add_argument('--hostguard', action='store_true', help='Prepend hostguard snippet to loader')
-    build.add_argument('--hwid-lock', dest='hwid_lock', action='store_true', help='HWID-lock the bytecode fallback blob (requires --hwid)')
-    build.add_argument('--driver-check', dest='driver_check', action='store_true', help='Bake the kernel-driver gate into the loader')
-    build.add_argument('--split-bootstrap', dest='split_bootstrap', action='store_true', help='Shamir (n=3,k=2) threshold key + fragmented decoder')
-    build.add_argument('--no-snapshot', dest='snapshot_off', action='store_true', help='Omit the frozen-stdlib snapshot gate')
-    build.add_argument('--no-stdlib-audit', dest='stdlib_audit_off', action='store_true', help='Omit the stdlib function-audit gate')
-    build.add_argument('--name-gate', dest='name_gate', action='store_true', help='Rewrite privileged call sites through per-build token map')
+    build.add_argument('--no-split-bootstrap', dest='split_bootstrap',
+                       action='store_false', default=True,
+                       help='Ship the bootstrap key as one string instead of '
+                            'the default Shamir (n=3,k=2) split key + fragmented decoder')
     build.add_argument('--lowering', default='', help='Semantic-lowering families CSV (default: disabled)')
-    build.add_argument('--rename-internal', dest='rename_internal', action='store_true', help='Rename proven-internal public methods/attributes')
-    build.add_argument('--no-audit-hook-plant', dest='audit_hook_plant_off', action='store_true', help='Omit the audit-hook plant detector')
     build.add_argument('--python', default=f"{sys.version_info.major}.{sys.version_info.minor}", help='Python version for GitHub Actions (Defaults to local)')
     auth_desc = "Registers a Target Machine Hardware ID (HWID) to the Cloudflare licensing system.\nUses the Cloudflare API Key configured in the setup wizard."
     auth = subparsers.add_parser('auth', help='Authorize a hardware ID (Cloudflare)', description=auth_desc, formatter_class=custom_fmt, add_help=False)
@@ -4064,6 +4462,9 @@ def main():
             parser.print_help(file=_nixon_utils._console)
             sys.exit(1)
         if args.command == 'build':
+            # Unified --web3 / --licence sub-options land on the same
+            # destinations the legacy flags write, before anything reads them.
+            apply_unified_specs(args)
             # --fast ships the reduced posture. That is a legitimate choice, but it
             # must never be a silent one: the flag is one word from the hardened
             # default and the difference is every detection this project has.

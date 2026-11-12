@@ -41,8 +41,8 @@ sensitive to structure, and the benchmark conflated the two.
 | Identification is a singleton in every measured cell | **Measured** | 51 cells, 0 non-singleton |
 | Transform-family diversity does not raise identification cost | **Not claimed** | The instrument cannot separate diversity from callable count |
 | Per-build diversity fails to resist attack | **Not claimed** | The original flat-cost claim was withdrawn |
-| The full protection stack resists a capable analyst | **Not measured** | No attack on the packed product in this programme |
-| Counter-REA/deception affects an analyst | **Not measured** | Implemented, not evaluated against an adversary |
+| The full protection stack resists a capable analyst | **Disconfirmed for payload confidentiality; not for names** | Full-tool Kern Qwen agent recovered the 242,049-byte payload and verified its HMAC, but scored 0/12 original names |
+| Counter-REA/deception affects an analyst | **Measured: no refusal** | Source and packed LLM probes, including a full-tool agent, treated BLA bait as inert data; 0 refusals |
 
 ---
 
@@ -304,7 +304,8 @@ Source: [`research/transform-defects-2026-11.md`](research/transform-defects-202
 | Maximum practical build | **69–99 s**, **1.46–8.25 MB**, licence token required; anti-REA max + 6 sections + watermark + trial + 25 packaging layers | [`MAXIMUM_SECURITY.md`](MAXIMUM_SECURITY.md) §2.2 |
 | Maximum flags (negative) | **>600 s timeout** at 100 packaging layers | [`MAXIMUM_SECURITY.md`](MAXIMUM_SECURITY.md) §6 |
 | Seed determinism | **Source emitter:** three same-`--seed` runs at 29,802 bytes each; **packed loader:** still random (keys/packaging) | [`SEED_ARCHITECTURE.md`](SEED_ARCHITECTURE.md) §5 |
-| Bounded attack probe | Max loader: **no payload identifier/plaintext recovered** from 16 KB + 500 strings; O4 source artefact: cipher, embedded key and decoys identified | [`MAXIMUM_SECURITY.md`](MAXIMUM_SECURITY.md) §7 |
+| Bounded attack probe | No-tool max loader: **no payload identifier/plaintext** from 16 KB + 500 strings. Full-tool Kern Qwen agent: **242,049-byte payload recovered and HMAC verified**, 10 credential-like items, **0/12 original names** | [`MAXIMUM_SECURITY.md`](MAXIMUM_SECURITY.md) §7; [`ai-layer-bench/RESULTS.md`](research/ai-layer-bench-2026-11-11/RESULTS.md) |
+| Licence-binding fix | Correct token runs; **forged 64-hex token fails** with `Magic Mismatch`; local token file ignored under `--licence-env-only` | `tests/test_licence_binding.py`; [`MAXIMUM_SECURITY.md`](MAXIMUM_SECURITY.md) §5.2 |
 | Cross-version build | Source emitter built and ran on **3.10–3.14**; packed loader is version-locked to its build interpreter | [`MAXIMUM_SECURITY.md`](MAXIMUM_SECURITY.md) §8 |
 | Build spread | **5,596 bytes (17.9%)** across 8 seeds of a 17,762-byte source; 8 distinct ASTs | `research/paper-draft.md` §4.3 |
 | Level-3 non-determinism | Two builds differed until `decoys` was seeded; `phase01_obfuscate.py` omitted `'seed'` | `research/transform-defects-2026-11.md` |

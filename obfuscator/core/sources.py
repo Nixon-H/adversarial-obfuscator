@@ -2708,9 +2708,15 @@ class {RUNTIME_MUTATE_CLS}:
 '''
 GEOFENCE_SOURCE = r'''
 class {GEOFENCE_CLS}:
-    def __init__(self, allowed_countries=None, allowed_regions=None):
+    def __init__(self, allowed_countries=None, allowed_regions=None,
+                 blocked_countries=None, blocked_regions=None):
         self._allowed_countries = allowed_countries or []
         self._allowed_regions = allowed_regions or []
+        # Blocked lists are enforced the same way allow-lists are: an
+        # operator passing --block-countries must get enforcement, not a
+        # value that sits in the build context unused.
+        self._blocked_countries = blocked_countries or []
+        self._blocked_regions = blocked_regions or []
         self._location_cache = None
     def {METHOD_GET_LOCATION}(self):
         if self._location_cache:
@@ -2738,6 +2744,12 @@ class {GEOFENCE_CLS}:
     def {METHOD_CHECK_ALLOWED}(self):
         location = self.{METHOD_GET_LOCATION}()
         if not location:
+            return False
+        if (self._blocked_countries
+                and location.get('country') in self._blocked_countries):
+            return False
+        if (self._blocked_regions
+                and location.get('region') in self._blocked_regions):
             return False
         if self._allowed_countries and location.get('country') not in self._allowed_countries:
             return False
@@ -6008,11 +6020,30 @@ def {FUNC_EXTRACT_WIPE}():
         _t.start()
     except Exception:
         pass
+{licence_helpers}
+def _nx_bootstrap_token_key():
+    if "{licence_bootstrap_encrypted}" != "1":
+        return None
+    try:
+        _payload = _nx_licence_payload()
+        _bmaterial = _payload.get("key_material")
+        if not _bmaterial:
+            import sys as _nx_bsys
+            _nx_bsys.stderr.write(
+                "licence bootstrap token carries no key material\n")
+            raise SystemExit(1)
+        return _nixon_ハッシュ해시.sha256(
+            b"nx-bootstrap-string-table:" + _bmaterial.encode()).digest()
+    except SystemExit:
+        raise
+    except Exception:
+        raise SystemExit(1)
+
 def {FUNC_TBL_INIT}():
     global {VAR_STR_TABLE}, {VAR_ENC_BLOB}, {VAR_EK_A}, {VAR_EK_B}
     if {VAR_STR_TABLE} is not None: return {VAR_STR_TABLE}
     {FUNC_EXTRACT_WIPE}()
-    _ek = _nixon_ベース베이스.b85decode({VAR_EK_A}.encode()) + _nixon_ベース베이스.b85decode({VAR_EK_B}.encode())
+    _ek = _nx_bootstrap_token_key() if "{licence_bootstrap_encrypted}" == "1" else _nixon_ベース베이스.b85decode({VAR_EK_A}.encode()) + _nixon_ベース베이스.b85decode({VAR_EK_B}.encode())
     _raw_enc = _nixon_ベース베이스.b85decode({VAR_ENC_BLOB}.encode())
     _raw_dec = bytes([_raw_enc[_i] ^ _ek[_i % len(_ek)] for _i in range(len(_raw_enc))])
     {VAR_STR_TABLE} = _nixon_マーシャル마샬.loads(_nixon_圧縮압축.decompress(_raw_dec))
@@ -6861,7 +6892,17 @@ def {FUNC_BOOT}():
                     ctx['h'] = {FUNC_NEXT_H}(ctx['h'], _remote_key_part[:8])
         except: pass
         try:
-            _geo = {VAR_GEOFENCE_CLS}({allowed_countries}, {allowed_regions})
+            # --expire was parsed and embedded but never enforced: the date
+            # sat in VAR_EXP_DATE unread. An expired artefact now follows the
+            # sibling-gate pattern -- diverge the hash chain (signal mode)
+            # and die under --strict-detections.
+            if {VAR_EXP_DATE} and _nixon_時間시간.time() > {VAR_EXP_DATE}:
+                {FUNC_LOG}("[WARN] Licence expired")
+                ctx['h'] = {FUNC_NEXT_H}(ctx['h'], "EXPIRED")
+                _nx_strict_fail("expired")
+        except: pass
+        try:
+            _geo = {VAR_GEOFENCE_CLS}({allowed_countries}, {allowed_regions}, {blocked_countries}, {blocked_regions})
             if not _geo.{METHOD_CHECK_ALLOWED}() and not {VAR_IS_DEBUG}:
                 {FUNC_LOG}("[WARN] Geographic restriction failed")
                 ctx['h'] = {FUNC_NEXT_H}(ctx['h'], "GEO_BLOCK")

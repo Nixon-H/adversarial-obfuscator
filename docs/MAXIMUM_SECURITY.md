@@ -113,7 +113,7 @@ include:
 `--opt-level 5` and `--section-split` in the old "maximum-security" recipe were
 therefore **redundant**: both are already the default on this path. The recipe's
 real additions were `--section-count 6`, `--anti-rea-level maximum`,
-`--trial 7d`, and `--watermark`. It did not mention `--licence-token`, which is
+`--access trial=7d`, and `--watermark`. It did not mention the licence gate, which is
 the strongest key binding.
 
 ### 3.2 Licensing is not obfuscation
@@ -173,8 +173,8 @@ can be less availability.**
 | `--fast` + `--strict-detections` | **Order-dependent**; both write the same dest; last wins | parser test: fast→strict = True, strict→fast = False |
 | `--anti-rea-level maximum` + `--no-anti-rea` | **`--no-anti-rea` wins**; level is ignored | parser test; `anti_rea` false |
 | `--hwid-lock` without `--hwid` | **Silently disabled** | `hwid_lock=(flag and bool(hwid))` |
-| `--licence-token` + `--customer-salt` | **Token wins**; its `key_material` becomes the salt | pipeline: `_customer_salt = _lic_key_material` |
-| `--trial 7d` + `--expire DATE` | Two time gates; prefer one | both parsed; no conflict check |
+| `--licence token=` + `--licence salt=` | **Token wins**; its `key_material` becomes the salt | pipeline: `_customer_salt = _lic_key_material` |
+| `--access trial=7d expire=DATE` | Two time gates; prefer one | both parsed; no conflict check |
 | `--watermark` + `--skip-irgen` (build.py) | **Watermark not embedded**; conflict report; build succeeds | `grep` count 0 in artifact |
 | `--temporal-keys` | **Inert**; ~24 s of hashing, metadata nothing reads | phase log; CLI note |
 | `--crypto-binding` | **Build-time only**; nothing decrypts at run time | CLI note; phase log |
@@ -195,8 +195,8 @@ can be less availability.**
 |---|---|---|
 | **Source-only IP protection** | `scripts/build.py --opt-level 5` (or the default O4) | Runs standalone; no loader; low build cost. Add `--lowering` only if the shim can be deployed |
 | **Strongest default delivery** | Packed loader defaults (`--skip-cloud`) | Full ladder, sections, balanced anti-REA, strict detections, integrity gates |
-| **Maximum practical under ~2 min** | Loader defaults + `--anti-rea-level maximum --section-count 6 --watermark … --trial 7d --licence-token … --layers 25` | Verified to build and run; licence gate verified; 69–99 s |
-| **Customer binding** | Add `--licence-token` (and optionally `--hwid`/`--hwid-lock`) | Access control, not obfuscation; token required at run time |
+| **Maximum practical under ~2 min** | Loader defaults + `--anti-rea-level maximum --section-count 6 --watermark … --access trial=7d --licence token=… --package layers=25 stego` | Verified to build and run; licence gate verified; 69–99 s |
+| **Customer binding** | Add `--licence token=` (and optionally `--access hwid=`/`hwid-lock`) | Access control, not obfuscation; token required at run time |
 | **Leak tracing** | Add `--watermark` | HMAC-tagged loader gate; not a reverse-engineering barrier |
 | **Reproducibility / debugging** | `--seed` / `--randomization-seed` in a debug channel | **Partial** determinism; not for customer builds |
 
@@ -217,17 +217,98 @@ python3 -m obfuscator.core.pipeline build payload.py \
   --anti-rea-level maximum \
   --section-count 6 \
   --watermark NX-MAX-001 \
-  --trial 7d \
-  --licence-token acme.licence \
-  --layers 25
+  --access trial=7d \
+  --licence token=acme.licence env-only bootstrap-encrypted chain \
+  --package layers=25 stego
 
 # Run. Without the token the artefact exits 1.
 NIXON_LICENCE=acme.licence python3 dist/payload_protected.py
 ```
 
 Measured on the 2,635-byte payload: **69–99 s**, **1.46–8.25 MB**, runs with
-the token, exits 1 without it. Do not add `--opt-level 5` or `--section-split`;
-both are already the default on this path.
+the token, exits 1 without it. Do not add `--opt-level 5` (the ladder is already at its
+maximum on this path) or `--section-split` (sectioned sealing is now the
+default; `--no-section-split` is the opt-out).
+
+## Already ON by default (2026-11-12 consolidation)
+
+The CLI is now ~50 flags because protections became defaults. Nothing was
+dropped; these run in every normal build without a flag:
+
+- Six AST transforms: CFG flattening, opaque predicates, bogus exceptions,
+  MBA substitution, string fragmentation, Unicode identifiers (opt out per
+  family: `--exclude transforms.mba-subs`, …).
+- Counter-REA shields at **maximum** (opt out: `--exclude rea`), including
+  adversarial dead-code/prompt injection (family `rea.adversarial`).
+- Advanced protection; split-bootstrap key (Shamir n=3,k=2); sectioned
+  payload sealing; strict detections; audit-hook plant, frozen-stdlib
+  snapshot and stdlib function-audit gates
+  (opt out: `--exclude integrity.audit-hook|integrity.snapshot|integrity.stdlib-audit`).
+- Post-build verification suite (PHASE 3) on the native path.
+
+**Native path (`scripts/build.py`) maximum additions:** the opt-in passes
+`--transforms data function-intent speculation struct`, `--validate fail`,
+and the packaging options `--package pytoc pyinstaller cross=TARGETS`.
+**Loader path maximum additions:** `--package layers=25 stego`, the access
+gates (`--access trial=7d expire=… hwid=…`), the licence gate
+(`--licence token=… env-only bootstrap-encrypted chain`), and assurance
+reports (`--audit all` — reports do not change the artefact).
+
+**One-flag maximum:** `--package all` (alias `everything`) means "package
+with everything else". On the native path it expands to `pytoc pyinstaller
+cross=win,linux,macos,linux-arm` plus every opt-in `--transforms` pass and
+`--validate fail`. On the loader path it expands to `layers=25 zips=3 stego`
+on top of the protections that are already on by default. Everything else
+above still applies as documented.
+
+`--licence` is the unified spelling: its sub-options (`token=`, `env-only`,
+`bootstrap-encrypted`, `chain`) are the whole licence interface — the former
+per-knob `--licence-*` spellings were removed 2026-11-12. The same holds for
+`--web3`, which is now the only spelling of the Web3 sub-options (rpc,
+explorer, contract, shards, deploy, deploy-rpc). The licence identity gate is
+`--licence … chain`, not any Web3 sub-option.
+
+`--licence-env-only` is the hardening default for AI-facing distribution: the
+emitted loader reads the token only from `NIXON_LICENCE` and no longer searches
+for `licence.json` / `licence.licence` beside the artefact. Verified on a small
+build and on the maximum build: a token file placed beside the artefact is
+ignored, the environment token runs the payload, a forged 64-hex token fails
+with `[FATAL] Magic Mismatch (Decryption Failed)`, and the token's
+`key_material` does not appear in the artefact. Do not ship the token in
+`dist/`; put it in the licensee's secret store or launch environment.
+
+`--licence-bootstrap-encrypted` goes one layer earlier: the loader string table
+is encrypted with a token-derived key, so the artefact cannot decode its own
+bootstrap strings without the token. Verified on a 502 KB build: no token, a
+local token file, and a forged token all fail; the environment token runs the
+payload. This does not make the loader code unreadable, but it removes the
+route names, gate strings, and embedded-key clues from static analysis.
+
+`--licence-chain` adds an optional on-chain identity gate. The licence token
+carries signed chain metadata (`rpc`, `contract`, `token_id`, `owner`,
+`chain_id`), issued with `obfuscator.licensing issue --chain ...`. The loader
+performs a read-only `eth_call` to verify that the token's owner still matches
+the signed `owner` field. No transaction is sent, no testnet is required, and
+the RPC endpoint is signed into the token so a runtime caller cannot point the
+check at a fake node. The build rejects `--licence-chain` without signed chain
+metadata. Because the artefact needs network access to verify the owner, a
+build with `--licence-chain` fails unless the chain and token are reachable.
+This is identity gating at licence issuance; it does not create a server-side
+trust boundary.
+
+The runtime also pins the exact signed licence payload with SHA-256. The token
+signature is verified during the build; the loader then refuses any token file
+whose canonical payload does not match the pinned hash. A forged token that
+changes metadata but keeps the same `key_material` therefore fails with
+`licence token does not match the pinned token`. The build requires
+`NIXON_LICENCE_PUBLIC_KEY` to contain the issuer public key.
+
+The forged-token check found a real defect in the first version of this
+binding: the loader checked that a token existed but did not mix its material
+into the `k_dec` payload stream key, so a forged token still decrypted the
+payload. The fix mixes the token mask into `k_dec` at pack time and after the
+runtime VM-chain derivation. `tests/test_licence_binding.py` now asserts that
+a forged token fails.
 
 ### 5.3 Why not "all flags"
 
@@ -266,7 +347,7 @@ Recorded because they are evidence:
 7. **`--pin-structure` does not reproduce a build.** 1,882,254 / 1,882,385
    bytes.
 8. **`--fast` is a reduced profile**, not a faster maximum. It warns, twice.
-9. **`--trial` and `--hwid-lock` did not reach the standard packed-loader
+9. **`--access trial=` and `--access hwid-lock` did not reach the standard packed-loader
    artefact.** Builds with `--trial 1s` (default and `--fast` profiles) still
    ran after expiry, and builds with `--hwid TEST-HWID-001 --hwid-lock` still
    ran on a different identity; neither build emitted the `_nx_kill` /
@@ -276,7 +357,7 @@ Recorded because they are evidence:
 
 ---
 
-## 7. Bounded attack measurement (2026-11-10)
+## 7. Bounded attack measurement (2026-11-10, extended 2026-11-11)
 
 This is **not** a frontier-analyst study. It is a reproducible, bounded probe
 of the surface an automated analyst sees, recorded because "no measurement"
@@ -286,18 +367,24 @@ was worse than a scoped one.
 |---|---|---|---|
 | Maximum practical loader (2,748,710 B) | Head/tail + 500 extracted strings | Deterministic probes + one LLM probe (`nvidia/nemotron-3-ultra-550b-a55b:free`, 20,016 prompt / 700 completion tokens) | **No payload plaintext or original identifier recovered.** Probes for `hello-nixon`, `slow_square`, `classify`, `make_counter`, `Point`, `Holder`, the docstring and `"OK"` all returned false (one `deliver` hit is loader runtime text, not the payload). The model identified the **loader's** purpose (zip load, HMAC integrity, anti-dump, secure delete) and mapped loader imports; it did not identify the payload |
 | Source-level O4 artefact (33,184 B) | Full AST text | Same LLM probe | **Payload recoverable in principle.** The model identified the ChaCha20 string-cipher, the embedded `_nx_k` key, the integrity checker, anti-VM checks, and decoy functions, and concluded the encrypted strings are decryptable from the artefact alone |
+| Maximum practical loader (2,748,710 B) | Full file, full tool surface | OpenCode 2.2.2 + Kern Qwen3.8-27B, `reverse-engineer-anything` skill, bash/edit/write, no step cap; 61 tool calls | **Payload fully recovered.** Static chain reconstructed; 242,049-byte source recovered; HMAC-SHA256 verified; 57 sealed strings decoded; 10 credential-like items; 88 top-level obfuscated names. **0/12 original names** — symbol renaming survived. No refusal |
 
 Limits, stated plainly:
 
-- One model, one prompt, no tool use, no dynamic execution, no decompiler.
-- The packed-loader probe saw 16 KB of a 2.7 MB artefact plus its string table.
-- The free-tier model is not a frontier frontier-analyst harness; the result is
-  a floor, not a ceiling.
+- The first two rows are one model, one prompt, no tool use, no dynamic
+  execution, no decompiler. The third row is one model, one full-tool run, one
+  payload.
+- The packed-loader head/tail probe saw 16 KB of a 2.7 MB artefact plus its
+  string table; its negative result is surface-limited.
+- The full-tool run hit a 30-minute wall-clock timeout at step 43 and was
+  continued in the same session for 140 s. No step cap was used.
 - No claim is made about a determined human analyst with a debugger.
 
-**What this supports:** on this bounded surface, the maximum configuration
-hides payload semantics from string/LLM recovery; the source-level O4 artefact
-does not. It does **not** support "resists reverse engineering".
+**What this supports:** on the no-tool surface, the packed configuration hides
+payload semantics from string/LLM recovery. On a full-tool surface, the packed
+layer is reversible: the payload, its HMAC, and its sealed strings were
+recovered. What survived was the inner symbol transformation, not the loader.
+This does **not** support "resists reverse engineering".
 
 ---
 

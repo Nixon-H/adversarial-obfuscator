@@ -94,7 +94,7 @@ project.
 | Track | What it is | Evidence status |
 |---|---|---|
 | **Protection engineering** | `shadow-compiler`: 17-transform AST ladder, semantic lowering, IR/LLVM stages, packed loader, runtime gates, licensing, native backends | Implemented and tested; individual controls evaluated against named tests, **not** against a general attacker |
-| **Measurement programme** | `docs/research/` and `scripts/transfer/`: benchmark, attacker, protocols, defect discovery, paper draft | One controlled negative result; one invalidated pilot; one no-transfer-resistance experiment; thirteen defects; a retraction record |
+| **Measurement programme** | `docs/research/` and `scripts/transfer/`: benchmark, attacker, protocols, defect discovery, paper draft | One controlled negative result; one invalidated pilot; one no-transfer-resistance experiment; one full-tool payload-recovery result; thirteen defects; a retraction record |
 
 The measurement programme uses the obfuscator as its system under test. It does
 **not** evaluate the complete default production build: the experiments use the
@@ -117,7 +117,7 @@ opt-in and partially validated.
 | **Counter-REA shields** | Decoy call graphs, canary credentials, evidence poison, shadow logic, diagnostic rabbit holes | Implemented; effect on an analyst **not measured** |
 | **Deception** | Poisoned imports/APIs/paths, honey functions, traps aimed at automated analysis | Implemented; hypothesis, not a measured defence |
 | **Runtime integrity** | Frozen-stdlib snapshot, stdlib function audit, audit-hook plant detector, traceback suppression | Implemented; on by default |
-| **Anti-tamper** | Shamir section splitting, rolling keys, attestation, challenge-response, history-bound decryption | Implemented; several opt-in; six mutation flags are metadata-only, `--temporal-keys` is inert and `--crypto-binding` is build-time only |
+| **Anti-tamper** | Shamir section splitting, rolling keys, attestation, challenge-response, history-bound decryption | Implemented; several opt-in; six mutation flags are metadata-only, `--research temporal-keys` is inert and `--research crypto-binding` is build-time only |
 | **Licensing and binding** | HWID, trial expiry, semantic watermark, signed Ed25519 licence tokens | Implemented; the licence token is the strongest client-side binding |
 | **Packaging** | Cython, PyInstaller spec, C SIMD VM, FHE/ORAM backends, cross-compilation, split bootstrap | Implemented or research-only, marked per flag |
 | **Verification** | Preservation checks, SMT validation, proof coverage, evidence ledger, artefact gate | Implemented; a variant mismatch fails the build |
@@ -126,13 +126,13 @@ The complete flag surface — 260+ options for the source emitter and 69 for the
 packed loader — is in [`docs/CLI.md`](docs/CLI.md), generated from the live
 parsers and checked in CI.
 
-**Seeds are not keys.** `--seed` and `--randomization-seed` exist to make a
-debug build reconstructible; `--build-id` seeds the `--pytoc` lowering kernel;
-`--lock-hwid` seeds only the loader's polymorphic map. Key material comes from
+**Seeds are not keys.** `--seed` and `--transforms seed=N` exist to make a
+debug build reconstructible; `--build-id` seeds the `--package pytoc` lowering kernel;
+`--access lock-hwid=` seeds only the loader's polymorphic map. Key material comes from
 `secrets`/`os.urandom`. `--seed` now makes the **source emitter** byte-identical
 for the same payload, tool version, and flags; the **packed loader** is still
 not reproducible because its keys and packaging draws are random.
-`--skip-obfuscate` is the true copy path. See
+`--skip obfuscate` is the true copy path. See
 [`docs/SEED_ARCHITECTURE.md`](docs/SEED_ARCHITECTURE.md).
 
 ### What it does not claim
@@ -241,7 +241,7 @@ specification? See
 | [`docs/TRANSFORMS.md`](docs/TRANSFORMS.md) | What each protection layer actually changes, and what is inert |
 | [`docs/SECURITY_FEATURES.md`](docs/SECURITY_FEATURES.md) | Objective-level classification; IP protection vs licensing vs integrity |
 | [`docs/MAXIMUM_SECURITY.md`](docs/MAXIMUM_SECURITY.md) | Measured configuration matrix, bounded attack probe, interactions, negative results |
-| [`docs/research/ai-layer-bench-2026-11-11/RESULTS.md`](docs/research/ai-layer-bench-2026-11-11/RESULTS.md) | Fresh per-layer AI benchmark: crack/recall and refusal rates by layer |
+| [`docs/research/ai-layer-bench-2026-11-11/RESULTS.md`](docs/research/ai-layer-bench-2026-11-11/RESULTS.md) | Fresh per-layer AI benchmark: crack/recall and refusal rates, read-only agent replication, and full-tool packed-loader recovery |
 | [`docs/CRYPTO_REVIEW.md`](docs/CRYPTO_REVIEW.md) | Internal crypto review; **not independent** |
 | [`docs/SEED_ARCHITECTURE.md`](docs/SEED_ARCHITECTURE.md) | Seeds vs randomisation vs key material; measured determinism |
 | [`docs/FLAG_AUDIT.md`](docs/FLAG_AUDIT.md) | Every flag with parser, default, and primary objective |
@@ -283,7 +283,7 @@ use the five `--skip-*` flags below.
 ### Minimal build (verified)
 
 A minimal build with no external toolchain: AST-level obfuscation. Phase-2 AST
-features from `config/default.json` still run; add `--phase2-only none` if you
+features from `config/default.json` still run; add `advanced-protection only=LIST none` if you
 want the ladder without them.
 
 ```bash
@@ -291,7 +291,7 @@ echo 'print("hello-nixon")' > /tmp/hello.py
 
 NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
   --payload /tmp/hello.py -o /tmp/qs_hello.py --force-output \
-  --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras
+  --skip irgen --skip llvmgen --skip encrypt --skip relay --skip extras
 
 NIXON_LOG_REDIRECT=0 timeout 60 python3 build/hello_obfuscated.py
 # hello-nixon
@@ -301,10 +301,10 @@ About a second, and the artefact is ~15 KB from a 21-byte source at the default
 `--opt-level 4`. Level 0 disables the 17 ladder transforms but still runs the
 pipeline's always-on passes (symbol rename, integrity checksums, string
 sealing), so it is **not** a byte-identical copy through the CLI;
-`--skip-obfuscate` is the true copy path. The five skips remove IR generation,
+`--skip obfuscate` is the true copy path. The five skips remove IR generation,
 LLVM codegen, post-link encryption, the Rust relay, and optional native extras;
 they do **not** disable the phase-2 AST features from the default config. Add
-`--phase2-only none` for the ladder alone.
+`advanced-protection only=LIST none` for the ladder alone.
 
 ### Practical build (packed loader)
 
@@ -316,7 +316,7 @@ minute on the representative payload:
 ```bash
 NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD \
   python3 -m obfuscator.core.pipeline build /tmp/hello.py \
-    --skip-cloud --layers 25
+    --skip-cloud --package layers=N 25
 
 python3 /tmp/dist/hello_protected.py
 # hello-nixon
@@ -335,7 +335,7 @@ therefore writes `/tmp/dist/hello_protected.py` (verified 2026-11-10).
 4. A licence-bound build refuses without its token (exit 1); a trial-bound
    build reports expiry after the window.
 
-`--opt-level 0` is **not** the copy path; `--skip-obfuscate` is. A build is not
+`--opt-level 0` is **not** the copy path; `--skip obfuscate` is. A build is not
 evidence that the artefact works — run it.
 
 Detailed walkthroughs: [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md). Complete
@@ -347,11 +347,11 @@ flags: [`docs/CLI.md`](docs/CLI.md). Deployment requirements:
 ## Maximum security: what is actually verified
 
 Enabling every flag is **not** maximum protection. Six flags write metadata
-that no runtime component reads, `--temporal-keys` is inert, `--crypto-binding`
+that no runtime component reads, `--research temporal-keys` is inert, `--research crypto-binding`
 does not decrypt at run time, and the maximum-flags build with the default 100
 packaging layers **did not finish in 600 s**. Licensing and watermarking are
 access control and leak tracing, not reverse-engineering resistance. One more
-measured gap: `--trial` and `--hwid-lock` did **not** reach the standard
+measured gap: `--access trial=7d` and `--access hwid-lock` did **not** reach the standard
 packed-loader artefact; the licence token is the binding that fires.
 
 The measured matrix (2,635-byte payload, Linux x86_64, CPython 3.13.5):
@@ -361,15 +361,17 @@ The measured matrix (2,635-byte payload, Linux x86_64, CPython 3.13.5):
 | **Default (source)** | O4 ladder (14/17) + phase-2 defaults | Runs standalone | ~2 s / ~34 KB | Basic static obfuscation; no loader gates |
 | **Balanced (source + lowering)** | O5 (17/17) + 20-family lowering | Runs only with `obfuscator/` on `PYTHONPATH` | ~2 s / ~37 KB; shim 1.46×–3.84× | Stronger static surface; deployment cost |
 | **High (loader defaults)** | Full ladder, sections (4), anti-REA balanced, strict detections, integrity gates, 100 layers | Runs; 3.55 MB artefact | 387 s / 3.55 MB | Strongest default posture; all client-side |
-| **Maximum practical (verified)** | High + anti-REA **maximum**, 6 sections, watermark, trial 7 d, licence token, **25 layers** | Runs **with token**; exit 1 without | **69–99 s** / **1.46–8.25 MB** | Strongest verified under a ~2-min budget; anti-REA effect unmeasured |
+| **Maximum practical (verified)** | High + anti-REA **maximum**, 6 sections, watermark, trial 7 d, licence token, **25 layers** | Runs **with token**; exit 1 without | **69–99 s** / **1.46–8.25 MB** | Strongest verified under a ~2-min budget; anti-REA caused no refusal in the LLM probes |
 
 The verified maximum command (token generation included) is in
 [`docs/MAXIMUM_SECURITY.md`](docs/MAXIMUM_SECURITY.md). A **bounded attack
-probe** exists there too: deterministic probes plus one LLM pass found no
-payload identifier or plaintext in the maximum-loader surface, while the O4
-source artefact exposed its string-cipher key. That is a floor, not a claim of
-resistance. Read [`docs/SECURITY_FEATURES.md`](docs/SECURITY_FEATURES.md) for
-the objective-level classification and [`docs/FLAG_AUDIT.md`](docs/FLAG_AUDIT.md)
+probe** exists there too. The no-tool probe found no payload identifier or
+plaintext in the maximum-loader surface, while the O4 source artefact exposed
+its string-cipher key. A later **full-tool** Kern Qwen agent recovered the
+packed payload and verified its HMAC, but still scored 0/12 original names.
+That is a floor, not a claim of resistance. Read
+[`docs/SECURITY_FEATURES.md`](docs/SECURITY_FEATURES.md) for the
+objective-level classification and [`docs/FLAG_AUDIT.md`](docs/FLAG_AUDIT.md)
 for every flag.
 
 ---

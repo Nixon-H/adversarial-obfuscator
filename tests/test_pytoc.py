@@ -14,8 +14,8 @@ def test_pytoc_flag_exists():
     )
     assert r.returncode == 0, r.stderr[-2000:]
     out = r.stdout + r.stderr
-    assert "--pytoc" in out
-    assert "--pytoc-out" in out
+    assert "--package" in out
+    assert "pytoc" in out
 
 
 def test_pytoc_helper_importable():

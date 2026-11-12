@@ -332,7 +332,7 @@ def test_build_flag_present():
         capture_output=True, text=True, timeout=60,
     )
     assert out.returncode == 0, out.stderr[-2000:]
-    assert "--driver-check" in (out.stdout + out.stderr)
+    assert "--access" in (out.stdout + out.stderr)  # loader gates, consolidated
 
 
 def test_driver_names_survive_rename_passes():

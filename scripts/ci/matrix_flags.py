@@ -18,7 +18,7 @@ from flag_catalogue import catalogue  # noqa: E402
 # Representative, value-safe transforms: one per major technique family.
 WANTED = [
     "--cfg-flatten", "--mba-subs", "--opaque-predicates",
-    "--fragment-strings", "--class-dispatch", "--attention-poison",
+    "--fragment-strings", "--class-dispatch", "--anti-rea-level",
 ]
 
 

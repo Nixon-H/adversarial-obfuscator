@@ -36,7 +36,7 @@ def _build(tmp_path):
     env["PYTHONPATH"] = ROOT + os.pathsep + env.get("PYTHONPATH", "")
     proc = subprocess.run(
         [sys.executable, "-m", "obfuscator.core.pipeline", "build", source,
-         "--net-url", "https://127.0.0.1:9443/"],
+         "--access", "net-url=https://127.0.0.1:9443/"],
         # 900s, matching the other build-fixture budgets. The build measures
         # ~700s on a loaded runner, so 600 killed it rather than catching a
         # hang -- test (3.14) on CI hit TimeoutExpired with this suite green

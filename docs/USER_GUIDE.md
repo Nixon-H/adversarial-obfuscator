@@ -29,7 +29,7 @@ but library import paths without that `setdefault` still redirect).
 echo 'print("hello-nixon")' > /tmp/hello.py
 NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
   --payload /tmp/hello.py -o /tmp/qs_hello.py --force-output \
-  --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras
+  --skip irgen --skip llvmgen --skip encrypt --skip relay --skip extras
 # [   OBFUSCATE] Done: 1.1KB (was 0.0KB)
 # [     PACKAGE]   Payload: /home/nixon/Projects/adversarial-obfuscator/build/hello_obfuscated.py
 #   Build artifacts: /home/nixon/Projects/adversarial-obfuscator/build/
@@ -54,7 +54,7 @@ Default `''` = disabled. Value is a CSV with three forms
 ```bash
 NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
   --payload /tmp/hello.py -o /tmp/out3.py --force-output \
-  --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras \
+  --skip irgen --skip llvmgen --skip encrypt --skip relay --skip extras \
   --lowering io,scalar
 # [         OPT] Semantic lowering families: io,scalar
 # [    LOWERING] Semantic lowering: 15 families, 11 call sites
@@ -84,11 +84,11 @@ plain CPython (`obfuscator/lowering_DESIGN.md`, reproduced with
 `NIXON_LOG_REDIRECT=0 python3 scripts/benchmark/lowering_perf.py`).
 Vendor-native 0.19x–1.56x figures are not reproduced in-repo.
 
-## 3. Trial gate (`--trial`)
+## 3. Trial gate (`--access trial=7d`)
 
 ```bash
 NIXON_LOG_REDIRECT=0 timeout 300 python3 -m obfuscator.core.pipeline build \
-  /tmp/hello.py --trial 7d
+  /tmp/hello.py --access trial=7d 7d
 ```
 
 Spec format (`obfuscator/macros.py: parse_trial`): number+unit pairs such
@@ -96,7 +96,7 @@ as `90s`, `1w2d`, `1mo1hr`. Units: `s m h d w mo` — **`m` = minute,
 `mo` = month**. Empty string = disabled. Garbage raises `ValueError`
 (`tests/test_macros.py`, `tests/test_trial_bind.py`).
 
-This is a LOADER gate. `scripts/build.py --trial 7d` is accepted but
+This is a LOADER gate. `scripts/build.py --access trial=7d 7d` is accepted but
 ignored by that pipeline, and it now says so:
 
 ```text
@@ -104,7 +104,7 @@ ignored by that pipeline, and it now says so:
 [        WARN] Use `python3 -m obfuscator.core.pipeline build` for the loader build path.
 ```
 
-## 4. HWID binding (`--hwid` + `--hwid-lock`)
+## 4. HWID binding (`--hwid` + `--access hwid-lock`)
 
 > These are LOADER gates: they apply to
 > `python3 -m obfuscator.core.pipeline build`, not to
@@ -122,7 +122,7 @@ Two modes (`obfuscator/hwid_lock.py`):
 NIXON_LOG_REDIRECT=0 timeout 300 python3 -m obfuscator.core.pipeline build \
   /tmp/hello.py \
   --hwid HWID:9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c9f2c \
-  --hwid-lock
+  --access hwid-lock
 ```
 
 These are LOADER gates: the native pipeline ignores them and reports
@@ -141,11 +141,11 @@ Malformed `HWID:`-prefixed values raise `ValueError`
 ```bash
 NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
   --payload /tmp/hello.py -o /tmp/stage_hw.py --force-output \
-  --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras \
+  --skip irgen --skip llvmgen --skip encrypt --skip relay --skip extras \
   --watermark testmark-123
 #  1. skip_irgen <-> watermark (requires)
-#     Semantic watermarking operates on IR; --skip-irgen disables IR
-#     Fix: Remove --skip-irgen to use --watermark, or accept watermark on AST only
+#     Semantic watermarking operates on IR; --skip irgen disables IR
+#     Fix: Remove --skip irgen to use --watermark, or accept watermark on AST only
 # [   WATERMARK] Embedding semantic watermark: 'testmark-123'
 # [   WATERMARK] Watermarked IR written to .../build/program_wm.ir
 ```
@@ -153,7 +153,7 @@ NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
 The conflict hint is informational: the build still completes and the AST
 path proceeds. With IR stages enabled the semantic watermark plus the
 refuse-to-run gate (`obfuscator/watermark_gate.py`,
-`tests/test_watermark_gate.py`) are baked in. `--verify-watermark`
+`tests/test_watermark_gate.py`) are baked in. `--audit verify-watermark`
 verifies after embedding (`tests/test_watermark.py`).
 
 ## 6. Diagnostic build (`--diagnostic`)
@@ -161,7 +161,7 @@ verifies after embedding (`tests/test_watermark.py`).
 ```bash
 NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
   --payload /tmp/hello.py -o /tmp/out2.py --force-output \
-  --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras \
+  --skip irgen --skip llvmgen --skip encrypt --skip relay --skip extras \
   --diagnostic
 # [         OPT] DIAGNOSTIC BUILD (not for release)
 # [  PROVENANCE] Provenance removal loaded for 20 bytes (diagnostic only)
@@ -170,7 +170,7 @@ NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
 Adds per-stage timings + transform counts and stamps a NOT-FOR-RELEASE
 marker (`tests/test_diagnostic.py`). Never ship a `--diagnostic` artifact.
 
-## 7. `--pytoc` and `--pyinstaller-spec` (best-effort)
+## 7. `--package pytoc` and `--package pyinstaller` (best-effort)
 
 Both are best-effort and never fail the build
 (`scripts/build.py --help`, `tests/test_pytoc.py`,
@@ -179,44 +179,49 @@ Both are best-effort and never fail the build
 ```bash
 NIXON_LOG_REDIRECT=0 timeout 300 python3 scripts/build.py \
   --payload /tmp/hello.py -o /tmp/stage_hw.py --force-output \
-  --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras \
-  --pyinstaller-spec
+  --skip irgen --skip llvmgen --skip encrypt --skip relay --skip extras \
+  --package pyinstaller
 # [         OPT] PyInstaller .spec generation requested (best-effort)
 # build/hello_obfuscated.spec   (alongside the packaged payload)
 ```
 
-`--pytoc [--pytoc-out PATH]` compiles the obfuscated output to a native
+`--package pytoc [--package pytoc-out=PATH PATH]` compiles the obfuscated output to a native
 extension via Cython (default output: alongside `-o` as
 `<out>_pytoc.<so/pyd>`); missing toolchain = skipped, build continues.
 
-## 8. Opt-in hardening: `--name-gate`, `--rename-internal`, `--driver-check`, `--split-bootstrap`
+`--package all` (alias `everything`) is the one-flag maximum: it packages
+with everything else — `pytoc pyinstaller cross=win,linux,macos,linux-arm`
+plus every opt-in `--transforms` pass and `--validate fail` (see
+`docs/MAXIMUM_SECURITY.md`).
 
-`--name-gate` and `--rename-internal` are transform-level and work on
+## 8. Opt-in hardening: `--access name-gate`, `--rename-internal`, `--access driver-check`, `--no-split-bootstrap`
+
+`--access name-gate` and `--rename-internal` are transform-level and work on
 BOTH CLIs:
 
 ```bash
 # Per-build token map for privileged call sites (default off; tests/test_name_gate.py)
---name-gate
+--access name-gate
 # Rename proven-internal public methods/attributes only (default off; tests/test_internal_rename.py)
 --rename-internal
 ```
 
-`--driver-check` and `--split-bootstrap` are LOADER gates: they take
+`--access driver-check` and `--no-split-bootstrap` are LOADER gates: they take
 effect in `python3 -m obfuscator.core.pipeline build`, and the native
 pipeline reports them as ignored.
 
 ```bash
 # Bake the read-only BYOVD driver gate into the loader (default off; tests/test_driver_blocklist.py)
---driver-check
+--access driver-check
 # Shamir (n=3,k=2) threshold key + fragmented decoder in the loader
 # (opt-in until battle-tested; default off; tests/test_split_bootstrap.py)
---split-bootstrap
+--no-split-bootstrap
 ```
 
-`--driver-check` on the loader build logs:
+`--access driver-check` on the loader build logs:
 
 ```text
-[OPT] Kernel-driver gate baked into loader (--driver-check; also armable via NIXON_DRIVER_CHECK=1)
+[OPT] Kernel-driver gate baked into loader (--access driver-check; also armable via NIXON_DRIVER_CHECK=1)
 ```
 
 ## 9. Environment-variable reference

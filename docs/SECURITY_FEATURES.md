@@ -59,7 +59,7 @@ implementation (regex over `opts.<dest>`, `args.<dest>`, `getattr(...)`,
 | **`--skip-obfuscate` is the true copy path** | 2,635 → 2,635 bytes, `diff` clean |
 | **`--fast` and `--strict-detections` share one dest** | last flag on the command line wins; order-dependent |
 | **`--hwid-lock` without `--hwid` is silently disabled** | `pipeline.py` passes `hwid_lock=(flag and bool(hwid))` |
-| **`--licence-token` overrides `--customer-salt`** | the token's `key_material` becomes the customer salt |
+| **`--licence token=` overrides `--customer-salt`** | the token's `key_material` becomes the customer salt |
 | **`--section-count` has no effect with `--native-only`** | section split needs a fallback payload; code skips it |
 
 ---
@@ -133,7 +133,9 @@ strip/tamper cases. No independent evaluation of bypass resistance.
 
 ### 3.4 Cryptographic protection and key handling
 
-`--sign-key-env` · `--customer-salt` · `--licence-token` · `--section-split` ·
+`--sign-key-env` · `--customer-salt` · `--licence token=` ·
+`--licence env-only` · `--licence bootstrap-encrypted` · `--licence chain` ·
+`--section-split` ·
 `--shards` (loader) · encrypted payload/string paths (no user flag)
 
 **Wiring.** Blob encryption uses AES-CTR when `cryptography` is available and
@@ -149,20 +151,49 @@ the scheme as "secure" beyond "the client can decrypt it".
 
 ### 3.5 Licensing, hardware binding, and access gates
 
-`--licence-token` · `--customer-salt` · `--trial` · `--expire` · `--hwid` ·
-`--hwid-lock` · `--lock-hwid` · `--name-gate` · `--rename-internal` ·
-`--bind-mac` · `--allow-countries` · `--block-countries` ·
-`--allow-regions` · `--block-regions` · `--webhook` · `--remote-unlock` ·
-`--one-shot` · `--kod` · `--hostguard` · `--driver-check`
+`--licence token=` · `--licence env-only` · `--customer-salt` · `--trial` ·
+`--expire` · `--hwid` · `--hwid-lock` · `--lock-hwid` · `--name-gate` ·
+`--rename-internal` · `--bind-mac` · `--allow-countries` ·
+`--block-countries` · `--allow-regions` · `--block-regions` · `--webhook` ·
+`--remote-unlock` · `--one-shot` · `--kod` · `--hostguard` · `--driver-check`
 
 **Wiring.** These are loader-only (or loader-first). `build.py` accepts several
 but ignores them; `--customer-salt` is refused with a message.
 `--hwid-lock` requires `--hwid` or is silently disabled.
-`--licence-token` subsumes `--customer-salt`.
+`--licence token=` subsumes `--customer-salt`. The licence gate is spelled
+through the unified `--licence` flag (`token=` / `env-only` /
+`bootstrap-encrypted` / `chain`) since 2026-11-12, when the per-knob
+`licence-` prefixed spellings were removed.
+All access gates are opt-in — none runs without its flag.
+
+**Enforced as of 2026-11-12 (previously accepted-but-ignored):** `--expire`
+now arms a real deadline gate — the boot sequence compares the wall clock to
+the embedded date and follows the sibling-gate pattern (hash-chain divergence
+in signal mode, exit under `--strict-detections`); before this the date sat in
+`VAR_EXP_DATE` unread. `--block-countries` / `--block-regions` now arm the
+geofence: the loader's `Geofence` class takes the blocked lists and rejects a
+matching location, where previously only allow-lists were enforced and the
+blocked values were substituted into the template but read by nothing.
+Geofence and expiry run-time checks call external IP/location services; a
+failed lookup fails closed in the geofence gate.
 
 **Evidence.** The licence gate was verified: an artefact built with
-`--licence-token` exits 1 without the token and 0 with it. This is access
-control, **not** reverse-engineering resistance: the code is still readable.
+`--licence token=` exits 1 without the token and 0 with it. With
+`--licence env-only`, a token file placed beside the artefact is ignored and
+only `NIXON_LICENCE` is accepted; the token's `key_material` is not in the
+artefact. A forged 64-hex token fails with `Magic Mismatch`: the pack-time and
+runtime `k_dec` paths now mix the token mask, rather than only checking that a
+token exists. With `--licence bootstrap-encrypted`, the loader string table is
+also token-bound; a 502 KB build fails without the token and runs with it.
+With `--licence chain`, the loader performs a read-only `eth_call` against the
+ERC-721 contract named in the signed token and refuses the token if the signed
+owner no longer matches. The build also verifies the Ed25519 token signature
+and pins the canonical payload hash, so a forged token with the same
+`key_material` but changed metadata fails with
+`licence token does not match the pinned token`; the build requires
+`NIXON_LICENCE_PUBLIC_KEY`.
+This is access control, **not** reverse-engineering resistance: the code is
+still readable.
 
 **Measured defect.** `--trial 1s` and `--hwid … --hwid-lock` did **not** reach
 the standard packed-loader artefact: both builds still ran past expiry / on the
@@ -243,7 +274,7 @@ behaviour.
 | `--no-snapshot`, `--no-stdlib-audit` | accepted, **ignored** | disarm the loader gates | Loader only |
 | `--vm-threshold` | accepted, **ignored** | VM-score verdict threshold | Loader only |
 | `--customer-salt` | **refused** with guidance | per-customer key mask | Build.py has no payload key |
-| `--licence-token` | **not accepted** (unrecognized) | key bound to token | Packed loader only |
+| `--licence token=` | **not accepted** (unrecognized) | key bound to token | Packed loader only |
 | `--driver-check` | emits read-only BYOVD gate | loader gate | Both, different emission |
 | `--split-bootstrap` | emits split bootstrap | loader path | Both |
 | `--lowering` | source lowering; shim required | loader lowering | Both; deployment requirement |

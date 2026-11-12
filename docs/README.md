@@ -47,7 +47,7 @@ wins; if a current document and the code disagree, the code and its tests win.
 | [`TRANSFORMS.md`](TRANSFORMS.md) | Protection layers, transformation taxonomy, flag-to-effect map, inert flags | Maintained |
 | [`SECURITY_FEATURES.md`](SECURITY_FEATURES.md) | Objective-level classification; IP protection vs licensing vs integrity; wiring | Maintained |
 | [`MAXIMUM_SECURITY.md`](MAXIMUM_SECURITY.md) | Configuration matrix, interactions, measured builds, bounded attack probe, negative results | Maintained |
-| [`research/ai-layer-bench-2026-11-11/RESULTS.md`](research/ai-layer-bench-2026-11-11/RESULTS.md) | Fresh per-layer AI benchmark: crack/recall and refusal rates by layer | Pilot measurement |
+| [`research/ai-layer-bench-2026-11-11/RESULTS.md`](research/ai-layer-bench-2026-11-11/RESULTS.md) | Fresh per-layer AI benchmark: crack/recall and refusal rates, read-only agent replication, and full-tool packed-loader recovery | Pilot measurement |
 | [`CRYPTO_REVIEW.md`](CRYPTO_REVIEW.md) | Internal review of payload/string/section/licence crypto; **not independent** | Maintained |
 | [`SEED_ARCHITECTURE.md`](SEED_ARCHITECTURE.md) | Reproducibility seeds vs randomisation vs key material; measured determinism | Maintained |
 | [`FLAG_AUDIT.md`](FLAG_AUDIT.md) | Every flag with parser, default, and primary objective | Generated from the parsers, 2026-11-10 |
@@ -170,4 +170,5 @@ Recorded here rather than hidden:
    [`CRYPTO_REVIEW.md`](CRYPTO_REVIEW.md) records the first-party audit.
 10. **Flag categories in [`FLAG_AUDIT.md`](FLAG_AUDIT.md) are a primary-objective
    classification.** A flag may serve more than one objective (for example,
-   `--licence-token` is both access control and key binding).
+   `--licence-token` is both access control and key binding, and
+   `--licence-env-only` removes the local token-file search).

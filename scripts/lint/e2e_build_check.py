@@ -93,7 +93,7 @@ def _build_and_run(index, extra=()):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     iterations = int(args[0]) if args else 5
-    extra = ["--section-split"] if "--section-split" in sys.argv else []
+    extra = ["--no-section-split"] if "--no-section-split" in sys.argv else []
     failures = []
     for i in range(iterations):
         ok, why = _build_and_run(i, extra)

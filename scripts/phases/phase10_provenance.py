@@ -50,7 +50,7 @@ def phase_provenance_poison(payload: str, output: str, opts) -> None:
 
     all_categories = list(ProvenancePoisoner.CATEGORIES)
     enabled_categories = []
-    if opts.poison_all or opts.provenance_poison:
+    if opts.provenance_poison:
         enabled_categories = list(all_categories)
     else:
         mapping = {
