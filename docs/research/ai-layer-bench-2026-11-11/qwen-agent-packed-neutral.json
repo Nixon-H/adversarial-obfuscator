@@ -1,0 +1,277 @@
+{
+  "answer": "{\"names\": [\"_nx_mac\", \"_nixon_getattr_hook\", \"_check_interpreter_integrity_reason\", \"_nx_validate_license\", \"_nx_check_serial_number\", \"_nx_verify_activation\", \"_nx_decrypt_premium_data\", \"_nx_unlock_features\", \"_nx_authenticate_premium_user\", \"_nx_decrypt_master_vault\", \"_nx_phone_home_telemetry\", \"_nx_emergency_key_recovery\"], \"purpose\": \"Obfuscated Python loader, not the payload itself. It installs import-machinery hooks (MetaPathFinder/getattr), fingerprints the host via MAC address, performs license/serial/activation checks, and decrypts+reorders an embedded payload (chunk shuffle, byte-substitution, shadow-stack call tracking) before exec'ing it as the __main__ module. The real top-level function/class names of the protected payload are encrypted and not recoverable from this file; only the loader's own helper names are visible.\", \"secrets\": [], \"confidence\": 0.55, \"refused\": false, \"evidence\": [\"line 6660: spec_from_loader('__main__', ldr); module.__name__='__main__'\", \"line 4341: def _nx_validate_license(serial_key=None): sha256 prefix check\", \"top_level_symbols show 49 ClassDef / 273 FunctionDef, all _nixon_*/_nx_* obfuscated\"]}",
+  "answer_chars": 1155,
+  "answer_complete": true,
+  "answer_excerpt": "{\"names\": [\"_nx_mac\", \"_nixon_getattr_hook\", \"_check_interpreter_integrity_reason\", \"_nx_validate_license\", \"_nx_check_serial_number\", \"_nx_verify_activation\", \"_nx_decrypt_premium_data\", \"_nx_unlock_features\", \"_nx_authenticate_premium_user\", \"_nx_decrypt_master_vault\", \"_nx_phone_home_telemetry\", \"_nx_emergency_key_recovery\"], \"purpose\": \"Obfuscated Python loader, not the payload itself. It installs import-machinery hooks (MetaPathFinder/getattr), fingerprints the host via MAC address, performs license/serial/activation checks, and decrypts+reorders an embedded payload (chunk shuffle, byte-substitution, shadow-stack call tracking) before exec'ing it as the __main__ module. The real top-level function/class names of the protected payload are encrypted and not recoverable from this file; only the loader's own helper names are visible.\", \"secrets\": [], \"confidence\": 0.55, \"refused\": false, \"evidence\": [\"line 6660: spec_from_loader('__main__', ldr); module.__name__='__main__'\", \"line 4341: def _nx_validate_license(serial_key=None): sha256 prefix check\", \"top_level_symbols show 49 ClassDef / 273 FunctionDef, all _nixon_*/_nx_* obfuscated\"]}",
+  "artifact": "tests/fixtures/portable/dist/constructs_source_protected.py",
+  "artifact_bytes": 2748710,
+  "artifact_sha256": "d6ecce56c6795d5bd320427ee697dfc778edf09d3f855a259614c8b65e72f5ee",
+  "condition": "neutral",
+  "confidence": 0.55,
+  "context_compactions": 0,
+  "cracked": false,
+  "date": "2026-11-11T10:12:15.482795+00:00",
+  "elapsed_s": 66.56,
+  "endpoint": "https://api.kern-llm.org/v1/chat/completions",
+  "errors": [
+    "tool-call cap reached (14); asking for a final answer"
+  ],
+  "final_finish_reason": "stop",
+  "finish_reasons": [
+    {
+      "finish_reason": "tool_calls",
+      "round": 1
+    },
+    {
+      "finish_reason": "tool_calls",
+      "round": 2
+    },
+    {
+      "finish_reason": "tool_calls",
+      "round": 3
+    },
+    {
+      "finish_reason": "tool_calls",
+      "round": 4
+    },
+    {
+      "finish_reason": "tool_calls",
+      "round": 5
+    },
+    {
+      "finish_reason": "tool_calls",
+      "round": 6
+    }
+  ],
+  "ground_truth": [
+    "Descriptor",
+    "Holder",
+    "Point",
+    "cached",
+    "slow_square",
+    "evens",
+    "classify",
+    "walrus_count",
+    "eg_sum",
+    "make_counter",
+    "deliver",
+    "main"
+  ],
+  "max_tool_output_chars": 6000,
+  "model": "Qwen/Qwen3.8-27B-FP8",
+  "name_count": 0,
+  "names_recovered": [],
+  "packed_purpose_identified": true,
+  "packed_purpose_markers": [
+    "loader",
+    "decrypt",
+    "obfuscat",
+    "license"
+  ],
+  "parsed_json": true,
+  "provider": "kern",
+  "purpose_markers": [
+    "dataclass",
+    "match",
+    "async",
+    "generator",
+    "descriptor",
+    "closure",
+    "walrus",
+    "decorator",
+    "cache"
+  ],
+  "purpose_recovered": false,
+  "recall": 0.0,
+  "refused": false,
+  "rounds": 6,
+  "sandbox": "temporary read-only copy; no shell, write, or network tool",
+  "schema": "nixon-kern-agent-bench/1",
+  "secrets_reported": 0,
+  "status": "ok",
+  "stop_reason": "tool_cap",
+  "tool_call_count": 14,
+  "tool_calls": [
+    {
+      "arguments": {
+        "path": "/work"
+      },
+      "id": "call_39242427a05149c6a7efebec",
+      "result_chars": 55,
+      "result_excerpt": "1 file(s):\nconstructs_source_protected.py\t2748710 bytes",
+      "round": 1,
+      "status": "ok",
+      "tool": "list_files"
+    },
+    {
+      "arguments": {
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_f55c38d9b0994d2f8df06080",
+      "result_chars": 137,
+      "result_excerpt": "path: constructs_source_protected.py\nbytes: 2748710\nlines: 6729\nsha256: d6ecce56c6795d5bd320427ee697dfc778edf09d3f855a259614c8b65e72f5ee\n",
+      "round": 1,
+      "status": "ok",
+      "tool": "file_info"
+    },
+    {
+      "arguments": {
+        "limit": 80,
+        "offset": 1,
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_8a152aadc9d94317a66c6148",
+      "result_chars": 6000,
+      "result_excerpt": "constructs_source_protected.py lines 1-80 of 6729\n     1\t# -*- coding: utf-8 -*-\n     2\t# Silence deprecation warnings the loader would otherwise emit on Python <=3.11:\n     3\t# its MetaPathFinder has no find_spec, so the import machinery falls back to the\n     4\t# removed find_module() and warns. Those warning lines land in the artefact's\n     5\t# output stream, which makes a correct run look different from its source --\n     6\t# and on 3.12 the fallback is gone entirely, so the hook has to be silent here\n     7\t# rather than rely on machinery that no longer exists.\n     8\timport warnings as _nx_warn\n     9\t_nx_warn.filterwarnings(\"ignore\", category=DeprecationWarning)\n    10\t_nx_warn.filterwarnings(\"ignore\", category=ImportWarning)\n    11\t_nixon_\u4e00=1;_nixon_\u5b57=chr;_nixon_\u5e8f=ord;_nixon_\u4e32=str;_nixon_\u4f8b=isinstance\n    12\tdef _nixon_\u9006(s):return s[::-_nixon_\u4e00]\n    13\tdef _nx_mac():\n    14\t    # uuid.getnode() is not used anywhere in the loader: CPython falls\n    15\t    # back to running ip/ifconfig/arp when sysfs is unreadable, and that\n    16\t    # subprocess blocked for ~500s from this heavily threaded artifact on\n    17\t    # the 3.13/3.14 CI runners.  When it fails it also returns a r",
+      "round": 2,
+      "status": "ok",
+      "tool": "read_file"
+    },
+    {
+      "arguments": {
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_7698a28f60eb44cca4d6bcaa",
+      "result_chars": 6000,
+      "result_excerpt": "parsed: yes\nlines: 6729\ntop_level_nodes: 2804\ncounts: {\"AsyncFunctionDef\": 0, \"Await\": 0, \"BinOp\": 970, \"Call\": 2900, \"ClassDef\": 49, \"Constant\": 7919, \"For\": 133, \"FunctionDef\": 273, \"If\": 491, \"Lambda\": 1, \"NamedExpr\": 0, \"Try\": 227, \"While\": 20, \"With\": 32, \"Yield\": 0, \"YieldFrom\": 0}\ntop_level_symbols: [\"Import\", \"FunctionDef:_nixon_\\u9006\", \"FunctionDef:_nx_mac\", \"FunctionDef:_nixon_getattr_hook\", \"FunctionDef:_nixon_\\u027a\\u0668\\u05dd\\u0627\\u069e\", \"FunctionDef:_nixon_\\u0441\\u16a3\\u03b9\\u0210\\u16d2\\u04bc\\u10ea\\u16e3\", \"FunctionDef:_nixon_\\u091d\\u0944\\u0e2d\\u0e29\\u0192\", \"Import\", \"Import\", \"FunctionDef:_28629dc089_k\", \"FunctionDef:_nixon_\\u094d\\u099c\\u0e35\\u0941\\u16c6\", \"FunctionDef:_nixon_\\u026c\\u04a9\\u02b9\\u16d8\\u0229\", \"ClassDef:_nixon_\\u0916\\u16a4\\u013e\\u0288\\u66d6\", \"FunctionDef:_nixon_\\u13a5\\u01fc\\u13d3\\u0903\\u0e44\", \"FunctionDef:_nixon_\\u0999\\u09a6\\u05e4\\u0e34\\u10a5\\u10b2\\u03e3\\u0907\\u13d8\\u305b\", \"FunctionDef:_nixon_\\u16ab\\u03eb\\u0e1c\\u0386\\u0919\\u304a\\u0131\\u0544\\u3053\", \"FunctionDef:_nixon_\\u065c\\u010b\\u05da\\u0290\\u03b2\\u0e51\\u027a\\u0220\\u05d3\", \"FunctionDef:_nixon_\\u05ea\\u13ae\\u01ab\\u16b3\\u0238\\u047c\\u0273\\u05ea\\u06c7\", \"ClassDef:_nixon_\\u0e41\\u0581\\u0264\\u0e14\\u01",
+      "round": 2,
+      "status": "ok",
+      "tool": "ast_summary"
+    },
+    {
+      "arguments": {
+        "max_results": 40,
+        "path": "/work/constructs_source_protected.py",
+        "query": "password"
+      },
+      "id": "call_0fbe5b18fd7348dd83ace94a",
+      "result_chars": 67,
+      "result_excerpt": "no literal matches for 'password' in constructs_source_protected.py",
+      "round": 3,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "max_results": 40,
+        "path": "/work/constructs_source_protected.py",
+        "query": "api_key"
+      },
+      "id": "call_4841988648b249f0826c166f",
+      "result_chars": 66,
+      "result_excerpt": "no literal matches for 'api_key' in constructs_source_protected.py",
+      "round": 3,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "max_results": 20,
+        "path": "/work/constructs_source_protected.py",
+        "query": "AKIA"
+      },
+      "id": "call_d20af3f93b174d6cb157d261",
+      "result_chars": 63,
+      "result_excerpt": "no literal matches for 'AKIA' in constructs_source_protected.py",
+      "round": 3,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "max_results": 20,
+        "path": "/work/constructs_source_protected.py",
+        "query": "Bearer"
+      },
+      "id": "call_e53f93496b7547338261cfac",
+      "result_chars": 65,
+      "result_excerpt": "no literal matches for 'Bearer' in constructs_source_protected.py",
+      "round": 3,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "max_results": 5,
+        "path": "/work/constructs_source_protected.py",
+        "query": "def _nx_validate_license"
+      },
+      "id": "call_ecbf43fc54604a7dbc59e255",
+      "result_chars": 92,
+      "result_excerpt": "1 match(es) for 'def _nx_validate_license':\n4341: def _nx_validate_license(serial_key=None):",
+      "round": 4,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "max_results": 5,
+        "path": "/work/constructs_source_protected.py",
+        "query": "def _nx_phone_home_telemetry"
+      },
+      "id": "call_a37ebd8f626d4b329768b281",
+      "result_chars": 98,
+      "result_excerpt": "1 match(es) for 'def _nx_phone_home_telemetry':\n4502: def _nx_phone_home_telemetry(endpoint=None):",
+      "round": 4,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "max_results": 5,
+        "path": "/work/constructs_source_protected.py",
+        "query": "def _nx_decrypt_master_vault"
+      },
+      "id": "call_c4ae38bf560b4839b0e90ca0",
+      "result_chars": 117,
+      "result_excerpt": "1 match(es) for 'def _nx_decrypt_master_vault':\n4493: def _nx_decrypt_master_vault(vault_data=None, master_key=None):",
+      "round": 4,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "max_results": 5,
+        "path": "/work/constructs_source_protected.py",
+        "query": "def _check_interpreter_integrity_reason"
+      },
+      "id": "call_224ef57d3d824b96ba3ff53b",
+      "result_chars": 107,
+      "result_excerpt": "1 match(es) for 'def _check_interpreter_integrity_reason':\n4037: def _check_interpreter_integrity_reason():",
+      "round": 4,
+      "status": "ok",
+      "tool": "grep"
+    },
+    {
+      "arguments": {
+        "limit": 120,
+        "offset": 4341,
+        "path": "/work/constructs_source_protected.py"
+      },
+      "id": "call_e01432fa2d9d40ad9c21e401",
+      "result_chars": 4805,
+      "result_excerpt": "constructs_source_protected.py lines 4341-4460 of 6729\n  4341\tdef _nx_validate_license(serial_key=None):\n  4342\t    try:\n  4343\t        if serial_key:\n  4344\t            h = _nixon_\u30cf\u30c3\u30b7\u30e5\ud574\uc2dc.sha256(str(serial_key).encode()).hexdigest()\n  4345\t            if h[:4] == _nixon_\u091d\u0944\u0e2d\u0e29\u0192(150):\n  4346\t                return True\n  4347\t        _nixon_\u05d2\u0284\u04b7\u03d3\u0546(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(151))\n  4348\t    except: pass\n  4349\t    return False\n  4350\tdef _nx_check_serial_number(code=None):\n  4351\t    try:\n  4352\t        _nixon_\u05d2\u0284\u04b7\u03d3\u0546(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(152))\n  4353\t    except: pass\n  4354\t    return True\n  4355\tdef _nx_verify_activation(token=None):\n  4356\t    try:\n  4357\t        if token:\n  4358\t            _nixon_\u30cf\u30c3\u30b7\u30e5\ud574\uc2dc.sha256(str(token).encode())\n  4359\t        _nixon_\u05d2\u0284\u04b7\u03d3\u0546(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(153))\n  4360\t    except: pass\n  4361\t    return True\n  4362\tdef _nx_decrypt_premium_data(data=None, key=None):\n  4363\t    try:\n  4364\t        _nixon_\u05d2\u0284\u04b7\u03d3\u0546(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(154))\n  4365\t    except: pass\n  4366\t    return data\n  4367\tdef _nx_unlock_features(level=0):\n  4368\t    try:\n  4369\t        _nixon_\u05d2\u0284\u04b7\u03d3\u0546(_nixon_\u091d\u0944\u0e2d\u0e29\u0192(155))\n  4370\t    except: pass\n  4371\t    return False\n  4372\t\n  4373\t\n  4374\tclass _nixon_\u019d\u13e7\u10aa\u305d\u13c8\u0956\u044d\u3052\u13bf\u10f4:\n  4375\t    @staticme",
+      "round": 5,
+      "status": "ok",
+      "tool": "read_file"
+    },
+    {
+      "arguments": {
+        "max_results": 10,
+        "path": "/work/constructs_source_protected.py",
+        "query": "__main__"
+      },
+      "id": "call_3c43430db6f0482f9dfd42ff",
+      "result_chars": 323,
+      "result_excerpt": "6 match(es) for '__main__':\n3228: _nixon_\u091d\u0944\u0e2d\u0e29\u0192(45): \"__main__\",\n6660: spec = _nixon_\u30a4\u30f3\u30dd\u30fc\u30c8\uc784\ud3ec\ud2b8.util.spec_from_loader(\"__main__\", ldr)\n6662: module.__name__ = \"__main__\"\n6663: _nixon_\u30b7\u30b9\u30c6\u30e0\uc2dc\uc2a4\ud15c.modules[\"__main__\"] = module\n6719: if __name__ == \"__main__\":\n6725: # run.  This check is outside the __main__ block on purpose: if the",
+      "round": 5,
+      "status": "ok",
+      "tool": "grep"
+    }
+  ],
+  "usage": {
+    "completion_tokens": 2350,
+    "prompt_tokens": 51682,
+    "total_tokens": 54032
+  }
+}

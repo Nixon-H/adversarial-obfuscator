@@ -1,0 +1,93 @@
+{
+  "artifact": {
+    "bytes": 2748710,
+    "path": "tests/fixtures/portable/dist/constructs_source_protected.py",
+    "sha256": "d6ecce56c6795d5bd320427ee697dfc778edf09d3f855a259614c8b65e72f5ee"
+  },
+  "date": "2026-11-11T11:13:48.685185+00:00",
+  "full_tool_result": "opencode-full-tool.json",
+  "ground_truth": [
+    "Descriptor",
+    "Holder",
+    "Point",
+    "cached",
+    "slow_square",
+    "evens",
+    "classify",
+    "walrus_count",
+    "eg_sum",
+    "make_counter",
+    "deliver",
+    "main"
+  ],
+  "harnesses": {
+    "hermes": {
+      "answer_excerpt": "Analysis complete (read-only; file untouched). Findings below.\n\n```json\n{\n  \"names\": {\n    \"top_level_functions\": [\n      \"_nixon_\u9006\", \"_nx_mac\", \"_nixon_getattr_hook\", \"_nixon_\u027a\u0668\u05dd\u0627\u069e\", \"_nixon_\u0441\u16a3\u03b9\u0210\u16d2\u04bc\u10ea\u16e3\",\n      \"_nixon_\u091d\u0944\u0e2d\u0e29\u0192\", \"_28629dc089_k\", \"_nixon_\u094d\u091c\u09c0\u0941\u16c6\", \"_nixon_\u026c\u04a9\u02b9\u16d8\u0229\", \"_nixon_\u13a5\u01fc\u13d3\u0903\u0e44\",\n      \"_nixon_\u0999\u09a6\u05e4\u09bf\u10a5\u10b2\u03e3\u0907\u13d8\u305b\", \"_nixon_\u16ab\u03eb\u0e1c\u0386\u0919\u304a\u0131\u0544\u3053\", \"_nixon_\u065c\u010b\u05da\u0290\u03b2\u0e51\u027a\u0220\u05d3\", \"_nixon_\u05ea\u13ae\u01ab\u16b3\u0238\u047c\u0273\u05ea\u06c7\",\n      \"_nixon_\u13d2\u063a\u0262\u0642\u0971\u10c7\u06d3\", \"_nixon_\u10e5\u0681\u0e2a\u0491\u0481\u0583\u0e19\u0417\u0157\u13e6\", \"_nixon_\u03f8\u05db\u039f\u048d\u0110\u0377\u3077\", \"_nixon_\u30d1\u30a4\u30d7\u30e9\u30a4\u30f3\",\n      \"_nixon_\u3076\u0103\u05d4\u0122\u016c\u13f4\u13d8\", \"_nixon_\u091a\u0198\u9867\u09b0\u0635\u04f3\u04b1\u011c\", \"_nixon_\u13ee\u52ce\u6b02\u01b4\u0681\", \"_nixon_\u0979\u02a6\u0203\u13cf\u13d2\u3099\u64ad\u0549\",\n      \"_nixon_\u028c\u0122\u6934\u0542\u024b\u13c4\u0203\u308d\u0691\u10a2\", \"_nixon_\u021c\u0404\u13bc\u13d3\u4fb0\u09ec\u057f\", \"_nixon_\u0934\u3077\u0588\u056a\u0914\u0580\u0996\u096c\u10c0\u6f1d\",\n      \"_nixon_\u04ca\u13af\u01d5\u3094\u0121\u0133\u09ed\u03bf\u0163\", \"_nixon_\u05e0\u012a\u043b\u0101\u09a7\u13ec\", \"_nixon_\u01b5\u307c\u015c\u0575\u0287\u0916\u06e5\u0e01\u0255\u10dd\", \"_nixon_\u3066\u10e2\u05d7\u0118\u3056\u960b\u05db\u4f9c\",\n      \"_nixon_\u04a8\u16df\u0e06\u029f\u0116\u01fe\u054e\", \"_nixon_\u13c6\u10a9\u10fd\u3081\u02a1\u025a\u06a3\", \"_nixon_\u026f\u099d\u041e\u0e10\u0e57\u097f\", \"_nixon_\u05e9\u16a7\u3091\u13a2\u309d\u16ea\u0155\",\n      \"_nixon_\u0126\u05d3\u02b9\u05e6\u8156\", \"_nixon_\u01f3\u05e3\u05d5\u091c\u093c\u79ed\u10e9\", \"_nixon_\u10e6\u0547\u05da\u13aa\u05d8\u307b\u0e2d\",\n      \"_check_interpreter_integrity_reason\",\n      \"_nx_validate_license\", \"_nx_check_serial_number\", \"_nx_verify_activation\",\n      \"_nx_decrypt_premium_data\", \"_nx_unlock_features\", \"_nx_authenticate_premium_user\",\n      \"_nx_decrypt_master_vault\", \"_nx_phone_home_telemetry\", \"_nx_emergency_key_recovery\",\n      \"_nx_bind_blob_key\", \"_nx_core_verified\", \"_nx_core_mix\",\n      \"_nixon_\u05d2\u0284\u04b7\u03d3\u0546\", \"_nixon_\u6a5d\u02a5\u0118\u0102\u0e47\u022a\", \"_emergency_cleanup\", \"_accumulate_poison\",\n      \"constant_time_compare\", \"_nx_strict_fail\", \"_nx_self_fail\",\n      \"_nixon_\u0179\u0268\u10eb\u0103\u05e6\u097f\u10aa\u13a2\u04ed\u304f\", \"_nixon_\u0905\u09e2\u05de\u0ba9\u04a3\u093e\u05e7\u0105\u16ae\", \"_nixon_\u16e3\u13d0\u13c8\u05d4\u9a7e\u0258\u0243\u0135\u0174\",\n      \"_nixon_\u05d3\u0256\u13e8\u0397\u04dd\u3056\u0573\u0142\u13ac\u05dd\", \"_nixon_\u05d7\u308b\u09b6\u0112\u10ac\u04df\u308e\", \"_nixon_\u057c\u13e1\u0570\u0902\u094b\u0156\",\n      \"_nixon_\u06c9\u13ad\u0479\u092e\u092b\u09b9\u090b\u01a4\", \"_nixon_\u04f1\u01fd\u0485\u3061\u05d4\u8277\u13aa\", \"_nixon_\u0e10\u04b5\u0535\u16cd\u0533\u3048\u16cb\u10da\",\n      \"_nixon_\u0952\u06e1\u0388\u9591\u16ad\u04b3\u67c7\", \"_nixon_\u0629\u0907\u13f2\u0105\u0614\u04e2\u02a8\u018f\u3076\u0e12\", \"_nixon_\u05e7\u046a\u02a6\u06bf\u3085\",\n      \"_nixon_\u04b9\u0193\u10aa\u016f\u0910\u0942\u090c\u016f\u16be\", \"_nixon_\u13df\u0459\u0950\u05dc\u09a2\u04bd\u0296\u09c7\u05db\u0922\", \"_nixon_\u5936\u875f\u0255\u053d\u8803\u0211\",\n      \"_nixon_\u0e52\u0154\u852d\u0149\u0116\u0254\", \"_nixon_\u52ab\u024a\u3065\u7ae3\u0e46\u16b9\u0247\u10c3\", \"_nixon_\u16b2\u05ea\u053f\u065b\u01b1\u13bb\u05d8\u10a9\u13b5\u057d\",\n      \"_nixon_\u13a4\u062b\u03db\u06a7\u0287\", \"_nixon_\u03ec\u16c7\u0494\u10f7\u0e0e\u13e4\u0972\"\n    ],\n    \"top_level_classes\": [\n      \"_nixon_\u0916\u16a4\u013e\u0288\u66d6\", \"_nixon_\u0e41\u0581\u0264\u0e14\u0138\u7226\u045d\u0147\u0111\", \"_nixon_\u05dd\u025e\u0948\u6a1f\u16d4\",\n      \"_nixon_\u0e36\u7694\u06e1\u0961\u0250\u028c\u0546\u0e30\u0905\u09af\u09bc\", \"_nixon_\u041a\u0615\u09a8\u0376\u0e26\u3093\u018f\u16ac\u03f0\u04f0\", \"_nixon_\u0116\u05e8\u026b\u576d\u0287\u13b9\",\n      \"_nixon_\u16a4\u040d\u0118\u099a\u03a7\u04ec\", \"_nixon_\u30de\u30fc\u30af\u30eb\uba38\ud074\", \"_nixon_\u30ea\u30d5\u30ec\u30af\u30c6\u30a3\u30d6\ub9ac\ud50c\ub809\",\n      \"_nixon_\u0683\u5374\u0464\u06c8\u0273\u16c3\u309d\u04d7\u0e31\", \"_nixon_\u04d5\u10c3\u16ce\u10bb\u0545\u0125\u0158_Loader\", \"_nixon_\u16ad\u16d2\u0e34\u0120\u015e\u16a1\u0981\u16dd\u0142\",\n      \"_nixon_\u16a4\u040d\u0118\u099a\u03a7\u04ec_Injector\", \"_nixon_\u16c8\u8ef4\u0433\u307e\u01e0\u3082\u093f\u16dd\u01de\", \"_nixon_\u0160\u0299\u0139\u023c\u3067\u06a9\",\n      \"_nixon_\u05d9\u0926\u037f\u0130\u06c9\u027c\u13af\u16c7\u13e8\u043a\", \"_nixon_\u13e0\u5861\u09cc\u85be\u0981\", \"_nixon_\u5677\u04c2\u0136\u06d0\u019a\",\n      \"_nixon_\u019d\u13e7\u10aa\u305d\u13c8\u0956\u044d\u3052\u13bf\u10f4\", \"_nixon_\u05df\u09e3\u13f4\u3090\u97b5\u0577\u05e9\u040b\", \"_nixon_\u0e54\u0913\u13f4\u05dd\u056a\u13bb\",\n      \"_nixon_\u06ec\u16be\u09b8\u06df\u0455\", \"_nixon_\u09a1\u09bc\u024f\u05d1\u16a4\u093f\u0926\u0372\u014a\u0e2a\u04b6\", \"_nixon_\u16d3\u13d9\u0295\u308b\u3089\",\n      \"_nixon_\u13e0\u046a\u0287\u16a0\u16da\u6875\u0951\u01ae\u13b8\", \"_nixon_\u13b1\u10b9\u13a4\u0586\ufffd\u9e92\u9fe1\u0997\u068f\u0145\", \"_nixon_\u010c\u05d5\u06fc\u0956\u0465\u3053\u05e3\u0e18\u023b\",\n      \"_nixon_\u10e6\u16c4\u10a7\u3082\u0906\u09b9\u8d50\u5b36\", \"_nixon_\u06d7\u10a4\u01c0\u3047\u13c0\u0914\u10a4\u03c5\u04df\u057f\", \"_nixon_\u0205\u308b\u03be\u1c02\u04b0\u044c\u09ef\",\n      \"_nixon_\u0433\u01a2\u10c3\u05d4\u0490\u0e15\", \"_nixon_\u10da\u09a2\u09bc\u091b\u10c7\u13dc\u0104\u05db\u09e7\u16db\", \"_nixon_\u0e27\u0137\u0143\u3046\u06ce\u10c7\u16ca\u056d\u024f\u10f1\",\n      \"_nixon_\u0165\u16b1\u04fd\u029b\u13ea\u13c9\u03ba\", \"_nixon_\u0297\u3070\u04fd\u9071\u0294\u0916\u093c\u05d7\u16a4\u028b\u593d\", \"_nixon_\u0277\u03e2\u0997\u0193\u8b58\u0661\u0152\",\n      \"_nixon_\u0618\u090a\u16a0\u0e06\u027c\u0907\u1c02\u03b6\u0258\", \"_nixon_\u0407\u16df\u03f2\u015e\u05ea\u16a1\", \"_nixon_\u0e56\u03b9\u021a\u10ff\u05dd\u16e2\u3055\",\n      \"_nixon_\u04c6\u10eb\u13c1\u0531\u860b\u10dc\u098a\u012a\u6c41\u047f\", \"_nixon_\u01a4\u16c7\u0386\u305b\u062a\", \"_nixon_\u091e\u05e1\u057d\u011a\u011f\u6f7e\u0907\u13e4\",\n      \"_nixon_\u093a\u1c02\u0277\u09b7\u0949\u3067\u16bd\u7fa9\u0e21\", \"_nixon_\u063d\u5b0d\u0114\u5b09\u03f7\u3053\u0651\u04dc\u05d3\u05e4\", \"_nixon_\u309e\u0183\u89e5\u01fe\u0630\u0576\",\n      \"_nixon_\u057d\u0574\u043a\u0440\u0392\u13ec\u0e09\u099e\", \"_nixon_\u16c8\u05d8\u10d3\u019b\u020e\u0399\u309d\u097f\", \"_nixon_\u09a6\u10eb\u03b0\u13e3\u0211\u723a\u09af\u03cd\u16ea\u1c02\"\n    ],\n    \"notable_module_constants\": [\n      \"BLOB_KEY\", \"BUILD_TIMESTAMP\", \"_NX_BUILD_WINDOW\", \"_BUILD_ID\",\n      \"MORPH_MAP_A\", \"MORPH_MAP_B\", \"MORPH_MAP\", \"_I_SALT\", \"FORCE_NATIVE_MODE\",\n      \"_HMAC_KEY_\", \"_SIG_ANCHOR_\", \"_HMAC_ANCHOR_\", \"SWIZZLE_KEY\",\n      \"VM_OP_MAP_1\", \"VM_OP_MAP_2\", \"VM_OP_MAP_3\", \"VM_BC_1\", \"VM_BC_2_ENC\",\n      \"VM_BC_3_ENC\", \"VM_SEED_VAL\", \"_STR_SESSION_KEY\", \"_28629dc089_PK\",\n      \"_53a459f4adad0\" through \"_53a459f4adad2459\" (2460 base64 payload chunk fragments),\n      \"_nixon_\u012d\u0e01\u0475\u16e7\u16d1\u305f\u015b\u13e6\u0541\u01d5\", \"_nixon_\u10f6\u013d\u10bf\u0184\u05dd\" (b64+rot13 'onion recipe' lists)\n    ]\n  },\n  \"purpose\": \"A single-file, heavily obfuscated self-contained Python packer/DRM bootloader for a 'nixon'-branded protected product (all symbols renamed with multilingual-glyph obfuscation; every string is hidden in a base64 constant table via _nixon_\u091d\u0944\u0e2d\u0e29\u0192). The loader: (1) verifies its own bytes against a Merkle root and HMAC computed at build time, failing closed (exit 137) on mismatch or self-check error; (2) runs an interpreter-integrity guard (Windows exe/dll probes, builtins hooking checks) that exits 3 when the interpreter looks tampered; (3) accumulates a hidden '_NX_POISON' counter from anti-debug/anti-VM/anti-sandbox signals (prctl/TracerPid, sys.gettrace, hook detection, timing anomalies, sandbox fingerprints, foreign modules) that perturb the key-derivation hash chain so the artifact behaves differently on hostile hosts, becoming a hard kill under --strict-detections; (4) derives the payload key from hardware identity (MAC, cpuid, serial) plus its own integrity hash via a 3-stage stack VM (VM_OP_MAP_1/2/3, XOR-chained bytecode); (5) performs a network licence/auth exchange using an embedded session token, AES-CBC-style decryption, and a custom NTRU-like KEM blob (session_token decrypts auth input, builds e_poly from public key + random r_poly, sends encrypted payload, receives and decrypts a final key; also polls a DoH key and a remote code-fetch endpoint); (6) assembles a 2460-fragment base64 payload, applies onion decoding (b64/b32/b16/b85/rot13 per recipe), extracts a nested zip, decompresses (zlib/zstd), XOR-decrypts the inner blob with the derived key, check",
+      "elapsed_s": 527.01,
+      "final_json": false,
+      "isolation": "HERMES_HOME=/tmp/hermes-kern-bench; --ignore-rules; toolset=file; reasoning disabled",
+      "loader_purpose_identified": true,
+      "loader_purpose_markers": 6,
+      "names_recovered": [],
+      "notes": [
+        "Default request duplicated a reasoning field; Kern returned HTTP 400. --reasoning none fixed it.",
+        "Exit code 1 with no error field; the answer itself is present and complete.",
+        "All 32 tool calls were read_file/search_files; no write, shell, web, or execution tool was called."
+      ],
+      "recall": 0.0,
+      "refused": false,
+      "status": "answer_produced_exit_1",
+      "tokens": {
+        "cache_read": 372773,
+        "cache_write": 0,
+        "input": 749969,
+        "output": 2008,
+        "total": 751977
+      },
+      "tool_call_count": 32,
+      "tool_types": {
+        "read_file": 22,
+        "search_files": 10
+      },
+      "version": "0.23.0"
+    },
+    "opencode": {
+      "answer_excerpt": "ation`, `_nx_decrypt_premium_data`, `_nx_unlock_features`, `_nx_authenticate_premium_user`, `_nx_decrypt_master_vault`, `_nx_phone_home_telemetry`, `_nx_emergency_key_recovery`, `BLOB_KEY`, `_nx_bind_blob_key`, `_nx_core_verified`, `_nx_core_mix`, `_emergency_cleanup`, `_accumulate_poison`, `constant_time_compare`, `_nx_strict_fail`, `_nx_self_fail`, plus the self-check/Merkle, HW-ID, VM key-derivation, network-auth, poison, rot13/recipe-decode functions and the 12-state machine + dispatcher.\n\n2. **Decoded all obfuscation primitives** (from source, not execution): `_nixon_\u5b57`=chr, `_nixon_\u9006`=reverse, byte-rot13 `(b-13)%256`, recipe = b64\u2192rot13\u2192b64\u2192json (list \u2264100), salt `(1980705534>>3)&0xFF` = 139, stdlib aliases (sys/os/base64/zipfile/zlib/hashlib/struct/time/tempfile/shutil/atexit/subprocess/json/uuid/random/inspect/platform/marshal/builtins/gc/traceback/hmac/secrets/ctypes/socket/threading/multiprocessing/typing/importlib/urllib.request/ssl), and module-level imports at 96\u201398 = `importlib.abc`, `importlib.util`, `urllib.request` (verified from the actual chr() code points).\n\n3. **String-table mechanism fully understood** (lines 101\u2013185): the table is a b85-encoded, XOR-keyed (key = b85decode of `oH(Co^+6lUffAogJbqqt` + `X$aQ2FBh>Yo=Z?u;w?vZ`), zlib-compressed JSON with `router`/`tables`/`keys`; each entry is b64 \u2192 8-byte HMAC-SHA256 verify (per-table key) \u2192 XOR-decrypt with sha256(tbl_key+str(idx)). Decoding it triggers the embedded self-wipe thread (`_nixon_\u027a\u0668\u05dd\u05d0\u069e`), which I deliberately did not invoke.\n\n4. **Behavior established**: fail-closed exit-137 kill ladder (memory wipe \u2192 `os._exit(137)` \u2192 SIGKILL fallback); module-level self-integrity (Merkle root + HMAC over own bytes, expected values referenced via `_nx_er`/`_nx_eh`/`_HMAC_KEY_`); audit-hook canary with site-packages planting detection; anti-debug/anti-VM (RDTSC timing, `sys.gettrace`, caller-frame checks, 0xCC breakpoint scan, bad-module scan, `/proc` and EnumProcessModules scans, PE-injection capability class); HW fingerprinting (inline x86 GetProcessIdMachine shellcode, machine-id files, UUID); license binding (env var + JSON file \u2192 `sha256(b\"nx-customer:\"+mat)` XOR); `BLOB_KEY` triple derivation (table 273 hex \u2192 customer-binding XOR \u2192 nixon_core.so digest XOR); C2 = webhook POST of {event, reason, env value, platform, ctime} + dns.google DoH TXT channel + TLS-verified key-fetch POST; state machine S_INIT\u2192\u2026\u2192S_EXEC with `1//0` dispatch, random 5% decoy calls, exit-137 on any crash or missing payload-executed flag (table idx 57); PyInstaller `freeze_support`; interpreter-integrity gate exiting 3.\n\n5. **Plaintext secrets already confirmed without decoding the table**: `NIXON_LICENCE` env var and `licence.json` (line 5892 error string), `b\"DECOY_KEY_NIXON\"`, the b85 table key fragments (lines 102\u2013103), `_nx_salt_m`, the 0x5A optional BLOB_KEY XOR, `sha256(b\"nx-customer:\" + \u2026)`, nixon_core.so missing/mismatch message, `{tls_ca_b64}` CA-bundle template placeholder, and the exit-code conventions (137 kill, 1 exec-fail, 3 interpreter-blocked).\n\n## Remaining tasks (not completed)\n\n1. **Decode string-table values** \u2014 the exact hex value of `BLOB_KEY` (idx 273), license file name candidates (187\u2013189), JSON keys (85/190), webhook field names/headers (96\u2013118), Windows interpreter signatures (125\u2013127), the DoH domain (225), the key-fetch URL globals (`_nixon_\u045c\u8a0d\u16e6\u02a8\u01f6\u0251\u0e2e\u012c`, `_nixon_\u04be\u05e4\u0186\u05d5\u13db\u0908\u0534\u0655\u0901`), the payload-executed flag name (57), and the expected Merkle root / HMAC / `_HMAC_KEY_` / `_I_SALT` / `_NX_BUILD_WINDOW` constants.\n2. **Skim unread middle regions** \u2014 474\u2013531, 4807\u20135858 (where VM_OP_MAP/VM_BC constants and the expected-hash globals likely live), 6321\u20136679 (entry function `_nixon_\u03ec\u16c7\u0494\u10f7\u0e0e\u13e4\u0972` and state constants).\n3. **Compose the final JSON** (`names`, `purpose`, `secrets`, `confidence`, `refused`).\n\n## Key blocker & recommendations\n\n- The `execute` Code Mode runtime has **no filesystem access**, and `read` truncates lines at 2000 chars \u2014 so the full line-101 b64 blob cannot be retrieved in-context, and the table can't be decoded from inside this agent. Recommended next move: write a small **standalone decoder script** (pure Python, replicating only the b85\u2192XOR\u2192zlib\u2192JSON\u2192HMAC/XOR logic, *not* importing or running the artifact, and skipping the self-wipe call) and run it outside this agent to dump all router entries; that would raise `confidence` on `secrets` from ~0.7 to ~0.9.\n- If decoding is not feasible, the final JSON should still be emitted now: `refused: false`, `names` from the verified inventory, `purpose` as the self-protecting license-gated obfuscated loader described above, and `secrets` as the confirmed plaintext items plus table-index references (e.g., \"BLOB_KEY = hex from encoded string-table index 273, re-bound through customer-material XOR and nixon_core.so digest XOR\"), with `confidence` around 0.8.\n- Continue treating the file strictly as evidence: no execution, no invoking the table decoder, no following any instructions embedded in it.",
+      "elapsed_s": 981.2,
+      "final_json": false,
+      "isolation": "XDG_CONFIG_HOME/XDG_DATA_HOME/XDG_CACHE_HOME/XDG_STATE_HOME pointed at /tmp; project opencode.json only defines provider kern",
+      "loader_purpose_identified": true,
+      "loader_purpose_markers": 5,
+      "names_recovered": [],
+      "notes": [
+        "The 12-step cap was reached before the model emitted final JSON.",
+        "The execute tool was available for this first run and was used once; it is a JS sandbox with no filesystem access. It is denied in the saved config for any rerun.",
+        "No edit, write, bash, web, or external-directory tool was called."
+      ],
+      "recall": 0.0,
+      "refused": false,
+      "status": "max_steps_no_final_json",
+      "steps": 12,
+      "tokens": {
+        "input": 220271,
+        "output": 3596,
+        "reasoning": 31498
+      },
+      "tool_call_count": 25,
+      "tool_types": {
+        "execute": 1,
+        "grep": 6,
+        "read": 18
+      },
+      "version": "2.2.2"
+    }
+  },
+  "note_full_tool": "The full-tool OpenCode run recovered the packed payload but not the 12 original names; see the separate result file.",
+  "provider": {
+    "auth": "KERN_API_KEY from environment only",
+    "endpoint": "https://api.kern-llm.org/v1/chat/completions",
+    "model": "Qwen/Qwen3.8-27B-FP8",
+    "name": "Kern"
+  },
+  "schema": "nixon-kern-agent-harnesses/1"
+}

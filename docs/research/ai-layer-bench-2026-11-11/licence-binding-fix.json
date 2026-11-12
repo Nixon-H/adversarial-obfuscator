@@ -1,0 +1,45 @@
+{
+  "date": "2026-11-11T15:41:51.946856+00:00",
+  "fix": [
+    "pack time: XOR the token mask into encryption_key after the stream key is derived",
+    "run time: XOR the same token mask into k_dec after the VM-chain derivation",
+    "new --licence-env-only removes licence.json/licence.licence/local file search; only NIXON_LICENCE is read",
+    "new --licence-bootstrap-encrypted encrypts the loader string table with a token-derived key",
+    "new --licence-chain verifies the signed ERC-721 owner with a read-only eth_call",
+    "loader pins the canonical signed licence payload with SHA-256; forged metadata is rejected"
+  ],
+  "issue": "A forged 64-hex licence token still decrypted the payload: the standard build checked token presence but did not mix the token material into k_dec.",
+  "limits": [
+    "Client-side capability: a process that can read NIXON_LICENCE can decrypt.",
+    "The full-tool agent rerun against the fixed artifact is unavailable because Kern returned HTTP 503; not a protection result.",
+    "One model, one payload, one trial."
+  ],
+  "schema": "nixon-licence-binding-fix/1",
+  "tests": [
+    "tests/test_licence_binding.py::test_licence_helper_pins_token_hash",
+    "tests/test_licence_binding.py::test_bound_build_marks_the_artefact_and_demands_the_token",
+    "tests/test_licence_binding.py::test_env_only_helper_does_not_search_local_files",
+    "tests/test_licence_binding.py::test_hybrid_env_only_binding_does_not_search_local_files",
+    "tests/test_licence_binding.py::test_chain_gate_owner_mismatch_stops_the_loader",
+    "tests/test_licence_binding.py::test_chain_gate_success_returns_the_payload",
+    "tests/test_licence_binding.py::test_chain_gate_failure_names_the_cause",
+    "tests/test_licence_binding.py::test_chain_gate_missing_signed_fields"
+  ],
+  "verified": {
+    "bootstrap_encrypted_build_bytes": 502000,
+    "bootstrap_encrypted_env_token": "runs",
+    "bootstrap_encrypted_forged_token": "fails",
+    "bootstrap_encrypted_local_token_file_only": "fails; ignored",
+    "bootstrap_encrypted_no_token": "fails before decoding bootstrap strings",
+    "chain_gate_runtime": "exercised with a stubbed ownerOf: missing signed fields, owner mismatch, and RPC failure all exit 1; success returns the payload (2026-11-12)",
+    "chain_gate_failure_message": "licence chain verification failed: <cause> - the loader never reports a chain failure as a missing token",
+    "correct_token": "runs",
+    "forged_metadata_token": "exit 1, licence token does not match the pinned token",
+    "forged_token": "exit 1, [FATAL] Magic Mismatch (Decryption Failed)",
+    "local_token_file_only": "exit 1, ignored",
+    "maximum_build_bytes": 4194304,
+    "no_token": "exit 1, licence token required",
+    "small_build_bytes": 312000,
+    "token_material_in_artifact": false
+  }
+}
