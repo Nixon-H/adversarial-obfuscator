@@ -114,7 +114,11 @@ def test_the_wrapper_reaches_the_full_pipeline_output():
            "RESULT = total()\n")
     out = build_pipeline(src, extra_options={"opt_level": 0})
 
-    wrappers = re.findall(r"\*args, \*\*kwargs\):\s*\n\s*\S+ = ", out)
+    # The checksum guard is injected as the first statement of every
+    # module-level function, so it sits between the signature and the
+    # first assignment.  Its presence is not what this test is about.
+    wrappers = re.findall(
+        r"\*args, \*\*kwargs\):\s*\n(?:\s*_nx_verify\(\)\s*\n)?\s*\S+ = ", out)
     assert wrappers, (
         "no purity-gated redundancy wrapper in the assembled payload; the "
         "protection would be dead code again")

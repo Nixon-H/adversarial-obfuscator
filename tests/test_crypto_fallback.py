@@ -294,8 +294,12 @@ class TestFallbackHonesty:
         # ... and the same CTR construction is produced (see §4).
         assert P.Nixon_Enc_AES_CTR(data, key, nonce) == expected
 
-    def test_simulated_no_crypto_libs_selects_xor_blob(
+    def test_simulated_no_crypto_libs_fails_closed(
             self, aes_cache_reset, monkeypatch):
+        # AUDIT M2: a missing AES backend used to downgrade silently to the
+        # XOR stream.  A caller that asked for AES by name got a different
+        # cipher than it asked for and was never told.  The seal now fails
+        # the build; the XOR stream is selected explicitly.
         _block_imports(monkeypatch, "cryptography",
                        "cryptography.hazmat",
                        "cryptography.hazmat.primitives",
@@ -305,11 +309,12 @@ class TestFallbackHonesty:
         assert P._check_aes_ctr() is False
         key, nonce = b"K" * 32, b"N" * 16
         data = b"pure-xor fallback probe " * 6
-        # encrypt_payload routes to Nixon_Enc_blob ...
-        assert (P.encrypt_payload(data, key, nonce)
-                == P.Nixon_Enc_blob(data, key, nonce))
-        # ... and Nixon_Enc_AES_CTR itself degrades to it (no exception).
-        assert (P.Nixon_Enc_AES_CTR(data, key, nonce)
+        with pytest.raises(SystemExit, match="no AES backend"):
+            P.encrypt_payload(data, key, nonce)
+        with pytest.raises(SystemExit, match="no AES backend"):
+            P.Nixon_Enc_AES_CTR(data, key, nonce)
+        # The XOR stream is still reachable, but only by asking for it.
+        assert (P.encrypt_payload(data, key, nonce, use_aes_ctr=False)
                 == P.Nixon_Enc_blob(data, key, nonce))
 
     def test_loader_decrypts_fallback_blob(self):

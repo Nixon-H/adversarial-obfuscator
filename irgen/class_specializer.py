@@ -170,6 +170,22 @@ def _make_nop() -> Any:
     return NopInstr()
 
 
+def _is_movable(inst, defined: set) -> bool:
+    """True when reordering this instruction cannot change the program.
+
+    Side-effecting opcodes stay put, and so does anything that reads a value
+    defined in the same block.
+    """
+    if getattr(inst, 'opcode', None) in (
+            'store', 'call', 'br', 'jmp', 'ret', 'phi', 'alloca', 'load',
+            'unreachable', 'nop'):
+        return False
+    for operand in getattr(inst, 'operands', None) or []:
+        if getattr(operand, 'name', None) in defined:
+            return False
+    return True
+
+
 def _reschedule_instructions(variant: Any, class_id: int, seed: bytes) -> None:
     """
     Reorder instructions within basic blocks for class-specific scheduling.
@@ -181,9 +197,22 @@ def _reschedule_instructions(variant: Any, class_id: int, seed: bytes) -> None:
         instrs = getattr(block, 'instructions', [])
         if len(instrs) < 3:
             continue
+        defined = {getattr(getattr(inst, 'result', None), 'name', None)
+                   for inst in instrs}
+        defined.discard(None)
         rng = rng_seed
-        for i in range(len(instrs) - 1, 0, -1):
-            j = int(rng % (i + 1))
-            rng = ((rng * 6364136223846793005) & 0xFFFFFFFFFFFFFFFF) + 1442695040888963407
-            rng = rng & 0xFFFFFFFFFFFFFFFF
-            instrs[i], instrs[j] = instrs[j], instrs[i]
+        # Shuffle only runs of independent instructions. Reordering a
+        # definition past its use (or moving a store) changes the program.
+        run: list[int] = []
+        for idx, inst in enumerate(instrs + [None]):
+            if inst is not None and _is_movable(inst, defined):
+                run.append(idx)
+                continue
+            if len(run) > 1:
+                for i in range(len(run) - 1, 0, -1):
+                    j = int(rng % (i + 1))
+                    rng = ((rng * 6364136223846793005) & 0xFFFFFFFFFFFFFFFF) + 1442695040888963407
+                    rng = rng & 0xFFFFFFFFFFFFFFFF
+                    a, b = run[i], run[j]
+                    instrs[a], instrs[b] = instrs[b], instrs[a]
+            run = []

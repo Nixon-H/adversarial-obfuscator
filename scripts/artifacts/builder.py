@@ -60,6 +60,39 @@ from .report_generator import generate_verification_report, generate_security_su
 from .bundler import ReproducibilityBundle
 
 
+def _normalize_test_results(test_results: dict) -> dict:
+    """Normalize both supported shapes to the report generator's summary."""
+    if not isinstance(test_results, dict) or not test_results:
+        return {}
+    if {"total", "passed", "failed"} & set(test_results):
+        return test_results
+    total = len(test_results)
+    failed = [name for name, t in test_results.items()
+              if not (isinstance(t, dict) and t.get("status") == "PASS")]
+    return {
+        "total": total,
+        "passed": total - len(failed),
+        "failed": len(failed),
+        "skipped": 0,
+        "failed_tests": [{"name": n, "error": "not PASS"} for n in failed],
+    }
+
+
+def _tests_passed(test_results: dict) -> bool:
+    """True only when every reported test passed.
+
+    ``test_results`` has two shapes in this codebase: the report
+    generator's summary (``{"total", "passed", "failed", ...}``) and a
+    per-test map (``{name: {"status": "PASS"}}``).  The old check only
+    understood the second, so a summary with ``failed == 0`` was
+    reported as NOT ALL PASSED.
+    """
+    summary = _normalize_test_results(test_results)
+    if not summary:
+        return False
+    return bool(summary.get("total", 0)) and summary.get("failed", 0) == 0
+
+
 class ArtifactBuilder:
     def __init__(self, build_dir: str, output_dir: str):
         self.build_dir = os.path.abspath(build_dir)
@@ -239,12 +272,15 @@ class ArtifactBuilder:
         result = {}
         if metrics or benchmark_data:
             verif_path = os.path.join(reports_dir, "verification_report.md")
+            _test_results = metrics.get("test_results", {})
+            _normalized = _normalize_test_results(_test_results)
+            _passed = _tests_passed(_test_results)
             result["verification"] = generate_verification_report(
                 {
-                    "test_results": metrics.get("test_results", {}),
+                    "test_results": _normalized,
                     "benchmark_results": benchmark_data,
                     "metrics": metrics,
-                    "passed": True,
+                    "passed": _passed,
                 },
                 verif_path,
             )

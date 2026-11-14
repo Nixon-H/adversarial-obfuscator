@@ -278,6 +278,22 @@ def _instruction_length(code: bytes, offset: int) -> int:
     return consumed
 
 
+def _instruction_boundaries(code: bytes) -> list[int]:
+    """Byte offsets where an instruction starts (plus the end of the block)."""
+    boundaries = []
+    pos = 0
+    while pos < len(code):
+        boundaries.append(pos)
+        length = _instruction_length(code, pos)
+        if length <= 0:
+            # Undecodable byte: treat it as a one-byte instruction so the
+            # walk still terminates.
+            length = 1
+        pos += length
+    boundaries.append(len(code))
+    return boundaries
+
+
 def _get_instruction_regs(code: bytes, offset: int) -> set[int]:
     """
     Extract register numbers referenced at a given instruction offset.
@@ -629,6 +645,12 @@ class MicroJITEngine:
         """
         if not register_map:
             return code
+        # RSP and RBP are structural: remapping either one breaks every
+        # stack access in the block, so they stay pinned.
+        register_map = {old_r: new_r for old_r, new_r in register_map.items()
+                        if old_r not in (REG_RSP, REG_RBP)}
+        for pinned in (REG_RSP, REG_RBP):
+            register_map[pinned] = pinned
         result = bytearray(code)
         pos = 0
         while pos < len(result):
@@ -688,9 +710,9 @@ class MicroJITEngine:
                         new_rex |= 0x01
                     code[rex_idx] = new_rex
                 elif new_rex_b:
-                    code[opcode_pos] = 0x41
-                    code[opcode_pos + 1:opcode_pos + 1] = bytes([new_opcode])
-                    return
+                    # No REX slot to extend: leave the instruction alone
+                    # rather than inserting a byte mid-stream.
+                    code[opcode_pos] = first
             return
 
         # Handle mov reg,imm opcodes (0xB0-0xBF)
@@ -709,9 +731,7 @@ class MicroJITEngine:
                         new_rex |= 0x01
                     code[rex_idx] = new_rex
                 elif new_rex_b:
-                    code[opcode_pos] = 0x41
-                    code[opcode_pos + 1:opcode_pos + 1] = bytes([new_opcode])
-                    return
+                    code[opcode_pos] = first
             return
 
         # Handle instructions with ModRM
@@ -727,32 +747,35 @@ class MicroJITEngine:
             modrm_pos = pos
             modrm = code[pos]
             mod_bits = modrm >> 6
+            rm_low = modrm & 0x07
+            if mod_bits != 3 and (rm_low == 4 or (mod_bits == 0 and rm_low == 5)):
+                # SIB byte or RIP-relative displacement: the rm field is not
+                # a register, and the real base/index live in the SIB byte.
+                # Rewriting rm here would corrupt the addressing mode.
+                return
             old_reg = ((modrm >> 3) & 0x07) | (4 if rex_r else 0)
-            old_rm = (modrm & 0x07) | (8 if rex_b else 0)
+            old_rm = rm_low | (8 if rex_b else 0)
             new_reg = reg_map.get(old_reg, old_reg)
             new_rm = reg_map.get(old_rm, old_rm)
-            if new_reg != old_reg or new_rm != old_rm:
-                new_modrm = (mod_bits << 6) | ((new_reg & 0x07) << 3) | (new_rm & 0x07)
-                code[modrm_pos] = new_modrm
-                new_rex_r = (new_reg & 0x08) != 0
-                new_rex_b = (new_rm & 0x08) != 0
-                if rex_idx >= 0:
-                    new_rex = 0x40
-                    if rex & 0x08:
-                        new_rex |= 0x08
-                    if new_rex_r:
-                        new_rex |= 0x04
-                    if new_rex_b:
-                        new_rex |= 0x01
-                    code[rex_idx] = new_rex
-                else:
-                    if new_rex_r or new_rex_b:
-                        new_rex = 0x40
-                        if new_rex_r:
-                            new_rex |= 0x04
-                        if new_rex_b:
-                            new_rex |= 0x01
-                        code[opcode_pos - 1:opcode_pos - 1] = bytes([new_rex])
+            if new_reg == old_reg and new_rm == old_rm:
+                return
+            new_rex_r = (new_reg & 0x08) != 0
+            new_rex_b = (new_rm & 0x08) != 0
+            if rex_idx < 0 and (new_rex_r or new_rex_b):
+                # Adding a REX prefix would shift every following byte while
+                # the caller still walks the original instruction lengths.
+                return
+            new_modrm = (mod_bits << 6) | ((new_reg & 0x07) << 3) | (new_rm & 0x07)
+            code[modrm_pos] = new_modrm
+            if rex_idx >= 0:
+                new_rex = 0x40
+                if rex & 0x08:
+                    new_rex |= 0x08
+                if new_rex_r:
+                    new_rex |= 0x04
+                if new_rex_b:
+                    new_rex |= 0x01
+                code[rex_idx] = new_rex
 
     # ---- Stack offset alteration ----
 
@@ -835,18 +858,20 @@ class MicroJITEngine:
         different code block.
         """
         block = bytearray(block)
-        regs = list(range(8))
-        self._shuffle(regs)
-        reg_map = {i: regs[i] for i in range(8)}
+        reg_map = self.generate_random_register_map()
         block = bytearray(self.swap_regrites(bytes(block), reg_map))
         nop_count = self._randrange(1, 5)
-        if len(block) > 4:
-            for _ in range(nop_count):
-                pos = self._randrange(0, len(block))
-                nop = self.generate_nop_sled(self._randrange(1, 4))
-                block[pos:pos] = nop
-                if len(block) > 256:
-                    break
+        # Insert only at instruction boundaries: a NOP dropped inside an
+        # instruction splits it and changes what the CPU decodes.
+        boundaries = _instruction_boundaries(bytes(block))
+        for _ in range(nop_count):
+            if not boundaries or len(block) > 256:
+                break
+            pos = self._choice(boundaries)
+            nop = self.generate_nop_sled(self._randrange(1, 4))
+            block[pos:pos] = nop
+            boundaries = [b + len(nop) if b >= pos else b for b in boundaries]
+            boundaries.append(pos + len(nop))
         offset_delta = self._choice([8, 16, -8, -16, 32, -32, 0, 0])
         if offset_delta != 0:
             block = bytearray(self.alter_stack_offtsets(bytes(block), offset_delta))
@@ -861,10 +886,22 @@ class MicroJITEngine:
         return self.alter_stack_offsets(code, offset_delta)
 
     def generate_random_register_map(self) -> dict:
-        """Generate a random bijective register mapping (RAX=0..RDI=7)."""
-        regs = list(range(8))
-        self._shuffle(regs)
-        return {i: regs[i] for i in range(8)}
+        """Generate a random bijective register mapping (RAX=0..RDI=7).
+
+        RSP and RBP are pinned: shuffling them would break every stack
+        access in the rewritten block.
+        """
+        movable = [r for r in range(8) if r not in (REG_RSP, REG_RBP)]
+        shuffled = list(movable)
+        # Derangement: a register that maps to itself leaves the code
+        # unchanged, so retry until every movable register actually moves.
+        for _ in range(64):
+            self._shuffle(shuffled)
+            if all(a != b for a, b in zip(movable, shuffled)):
+                break
+        mapping = {r: r for r in range(8)}
+        mapping.update(dict(zip(movable, shuffled)))
+        return mapping
 
 
 # ---- CLI ----

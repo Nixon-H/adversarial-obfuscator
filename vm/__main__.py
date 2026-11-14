@@ -139,12 +139,24 @@ def _cmd_compile(args) -> int:
 
     encrypted = encrypt_bytecode(all_bytecode, key)
 
+    # Key material is NOT written into the container: seed -> key means
+    # co-locating either with the ciphertext is a self-contained break.
+    # The key goes to a 0600 sidecar the operator distributes separately.
+    key_path = args.output + ".key"
+    # os.open returns a raw fd, which is not a context manager; the previous
+    # `with os.open(...)` raised TypeError before writing anything.
+    fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, ("seed=%s\nkey=%s\n" % (seed.hex(), key.hex())).encode())
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    print(f"key material written to {key_path} (0600) - distribute separately")
+
     output = {
         "bytecode": encrypted.hex(),
         "num_functions": len(target_functions),
         "bytecode_size": len(encrypted),
-        "seed": seed.hex(),
-        "key": key.hex(),
         "functions": target_functions,
     }
 

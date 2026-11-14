@@ -101,29 +101,26 @@ def inject_entropy_branches(source: str, config: dict) -> str:
     )
     if "os" in bound and not has_bare_os:
         return source
-    at = 0
-    if not has_bare_os:
-        import_os = ast.Import(names=[ast.alias(name="os", asname=None)])
-        tree.body.insert(0, import_os)
-        at = 1
-
-    tree.body.insert(at, ast.Assign(
-        targets=[ast.Name(id="_nx_entropy_buf", ctx=ast.Store())],
-        value=ast.Call(
-            func=ast.Attribute(
-                value=ast.Name(id="os", ctx=ast.Load()),
-                attr="urandom",
-                ctx=ast.Load(),
+    from obfuscator.core.ast_prologue import insert_module_prologue
+    insert_module_prologue(tree, [
+        ast.Import(names=[ast.alias(name="os", asname=None)]),
+        ast.Assign(
+            targets=[ast.Name(id="_nx_entropy_buf", ctx=ast.Store())],
+            value=ast.Call(
+                func=ast.Attribute(
+                    value=ast.Name(id="os", ctx=ast.Load()),
+                    attr="urandom",
+                    ctx=ast.Load(),
+                ),
+                args=[ast.Constant(value=256)],
+                keywords=[],
             ),
-            args=[ast.Constant(value=256)],
-            keywords=[],
         ),
-    ))
-
-    tree.body.insert(at + 1, ast.Assign(
-        targets=[ast.Name(id="_nx_entropy_idx", ctx=ast.Store())],
-        value=ast.Constant(value=0),
-    ))
+        ast.Assign(
+            targets=[ast.Name(id="_nx_entropy_idx", ctx=ast.Store())],
+            value=ast.Constant(value=0),
+        ),
+    ])
 
     injector = _EntropyBranchInjector(config)
     tree = injector.visit(tree)

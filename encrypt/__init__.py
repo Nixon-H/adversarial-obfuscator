@@ -108,10 +108,10 @@ def main(argv=None):
                 seed=args.seed, block_size=args.block_size,
             )
         print(f'Encrypted {result["num_blocks"]} blocks ({result["block_size"]}B each)')
-        print(f'  Seed:          {result["seed"]}')
         print(f'  Entry point:   {result["entry_point"]}')
         print(f'  Original text: {result["text_size"]} bytes')
         print(f'  Stub size:     {result["stub_size"]} bytes')
+        print(f'  Key file:      {result["key_file"]} (distribute with the artifact)')
 
     elif args.command == 'pack':
         container = _container.pack_encrypted_payload(args.input, args.key)

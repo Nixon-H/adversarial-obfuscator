@@ -305,7 +305,9 @@ class RemoteUnlockClient:
     def _fallback(self, fragment_id: int) -> Optional[UnlockToken]:
         if fragment_id in self._cached_tokens:
             cached = self._cached_tokens[fragment_id]
-            if time.time() <= cached.expires_at + 300:
+            # No grace window: an expired token is an expired token. The
+            # old +300 s fallback honored stale tokens past their validity.
+            if time.time() <= cached.expires_at:
                 return cached
         return None
 
@@ -323,7 +325,7 @@ class RemoteUnlockClient:
     def simulate_network_failure(self, fragment_id: int) -> Optional[bytes]:
         if fragment_id in self._cached_tokens:
             cached = self._cached_tokens[fragment_id]
-            if time.time() <= cached.expires_at + 300:
+            if time.time() <= cached.expires_at:
                 return self.derive_key(fragment_id, cached)
         return None
 

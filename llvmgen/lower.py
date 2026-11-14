@@ -566,7 +566,10 @@ class NixonIRParser:
                     "type": "i32", "ptr": ptr_val, "indices": indices,
                     # The IR passes pointers as i32; LLVM needs a real
                     # pointer, so the base is converted at the GEP.
-                    "ptr_type": var_types.get(ptr_val.lstrip("%"), "i32")}
+                    # var_types is keyed by the operand as written ("%3"),
+                    # so stripping the sigil here never matched and every
+                    # GEP base was typed i32.
+                    "ptr_type": var_types.get(ptr_val, "i32")}
 
         if opcode == "getelementptr":
             vtype = _parse_type(parts[1])
@@ -652,13 +655,35 @@ def _emit_instruction(instr: dict) -> str:
                              instr["type"])
         rhs = _reject_string_operand(_value_ref(instr["operands"][1]))
         t = instr["type"]
-        # The project's IR spells a logical right shift "shr"; LLVM
-        # spells it "lshr".  Emitting "shr" verbatim would not
-        # assemble.
-        # The project's IR also spells signed integer division "div";
-        # LLVM has no such opcode and wants "sdiv".  A bare "div" reached
-        # the unlowered guard and failed the whole build.
-        op = {"shr": "lshr", "div": "sdiv"}.get(opcode, opcode)
+        # Python >> is arithmetic on signed ints; lshr is logical and
+        # differs for every negative value.
+        # Python // floors toward -inf; sdiv truncates toward zero, so a
+        # plain sdiv is wrong for mixed-sign operands.  Emit the
+        # adjustment sequence below.
+        if opcode == "div" and t in ("i32", "i64"):
+            res = instr.get("result")
+            if not res:
+                return f"  sdiv {t} {lhs}, {rhs}"
+            # LLVM numeric ids must be pure digits; `%4_q` is a parse
+            # error.  Prefix numeric results with a legal name.
+            base = res.lstrip("%")
+            if base.isdigit():
+                base = "_nx_div_" + base
+            q, r = f"%{base}_q", f"%{base}_r"
+            rz, rn, bn = f"%{base}_rz", f"%{base}_rn", f"%{base}_bn"
+            diff, fix, q1 = f"%{base}_diff", f"%{base}_fix", f"%{base}_q1"
+            return "\n".join([
+                f"  {q} = sdiv {t} {lhs}, {rhs}",
+                f"  {r} = srem {t} {lhs}, {rhs}",
+                f"  {rz} = icmp ne {t} {r}, 0",
+                f"  {rn} = icmp slt {t} {r}, 0",
+                f"  {bn} = icmp slt {t} {rhs}, 0",
+                f"  {diff} = icmp ne i1 {rn}, {bn}",
+                f"  {fix} = and i1 {rz}, {diff}",
+                f"  {q1} = sub {t} {q}, 1",
+                f"{result_prefix}select i1 {fix}, {t} {q1}, {t} {q}",
+            ])
+        op = {"shr": "ashr"}.get(opcode, opcode)
         # Floating-point arithmetic uses LLVM's f-prefixed opcodes
         # ("fmul double"), not the integer ones.
         if t in ("double", "float"):

@@ -158,7 +158,7 @@ Every option `python3 -m obfuscator.core.pipeline build` accepts, generated from
 `scripts/gen_cli_reference.py` and checked by `tests/test_readme_matches_cli.py`,
 so it cannot drift. Editorial notes are marked where a flag is inert or archived.
 
-**30 options.**
+**31 options.**
 
 ### Input, output and build control
 
@@ -213,11 +213,12 @@ so it cannot drift. Editorial notes are marked where a flag is inert or archived
 | `--debug-dump-raw` | Compile the plaintext-dump debug aid into the artifact (it writes the decrypted payload to a 0600 temp file when NIXON_DUMP_RAW=1). Off by default: a normal artifact has no such capability |
 | `--exclude FAMILY [FAMILY ...]` | Skip shield families: "rea" turns every bait layer off; "rea.compliance", "rea.cognitive", "rea.bio" skip one; "integrity.snapshot", "integrity.stdlib-audit", "integrity.audit-hook" omit one default-on integrity gate |
 | `--fast` | Build the reduced-protection profile: detections only warn, entropy noise and rdtsc pressure are lower. Faster builds and faster artefacts; weaker posture. |
-| `--package OPT [OPT ...]` | Packaging and mode. All options: native = cloud Cython compile keeping the bytecode fallback; native-only = cloud Cython with no fallback; compile = wrap the final loader in a Nuitka EXE/ELF; cloud = auto-build (cf,nk); platform=github = build farm (the only implemented one); layers=N = recursive packaging layers; zips=N = ZIP wrapper count; stego = hide the payload inside an image; portable = no native core, run anywhere; all (or everything) = package with everything else: layers=25 zips=3 stego on top of the protections that are already on by default |
+| `--package OPT [OPT ...]` | Packaging and mode. All options: native = cloud Cython compile keeping the bytecode fallback; native-only = cloud Cython with no fallback; compile = wrap the final loader in a Nuitka EXE/ELF; cloud = auto-build (cf,nk); platform=github = build farm (the only implemented one); layers=N = recursive packaging layers; zips=N = ZIP wrapper count; stego = hide the payload inside an image; portable = no native core, run anywhere; all (or everything) = every LOCAL packaging option: layers=25 zips=3 stego. The cloud compile (native/compile/cloud) is NOT part of all: it needs build-farm credentials and conflicts with stego — add it explicitly for cloud builds |
 | `--pin-structure` | Pin the EMITTER-ONLY draws (encoding order, slot picks, names, VM op-map) so two builds share a structure. Debugging aid; key material is not pinned, so artefacts are not byte-identical. **Structure only.** Pins emitter draws and the build timestamp; key material is not pinned, so artefacts are not byte-identical. |
 | `--private-key PRIVATE_KEY` | Deployment key |
 | `--strict-detections` | Make the loader's environment detections (sandbox, emulator, debugger frame, geo-fence, licence) terminate the artifact instead of only perturbing it (ON by default; use --fast to opt out) |
 | `--tls-ca-bundle TLS_CA_BUNDLE` | PEM CA bundle for the emitted key fetch. The artifact verifies the certificate chain AND the hostname against the system trust store plus this CA (it never disables verification) |
+| `--transforms OPT [OPT ...]` | Extra protection passes on the payload before packing (off by default). Options: data = data-layout obfuscation, data-level=N (1-3), function-intent = rename functions by what they do, speculation = speculation-resistant code. struct stays native-pipeline only (it configures the LLVM/IR flow) |
 | `--web3 KEY=VALUE [KEY=VALUE ...]` | Web3 configuration: one flag for RPC, explorer, contract, deployment and key shards. Sub-options: rpc=URL explorer=URL contract=ADDR shards=URL1,URL2 deploy deploy-rpc=URL (the former per-knob spellings were removed 2026-11-12) |
 
 <!-- END GENERATED LOADER REFERENCE -->

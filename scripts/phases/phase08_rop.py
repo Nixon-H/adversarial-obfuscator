@@ -101,7 +101,9 @@ def phase_rop_compile(input_ir, output_rop, config):
                 enc_key = [os.urandom(1)[0] for _ in range(32)]
                 encrypted = compiler.generate_encrypted_rop_blob(chain, enc_key)
                 compiled[fname]["encrypted"] = list(encrypted)
-                compiled[fname]["enc_key"] = enc_key
+                # enc_key withheld: co-locating it with "encrypted" makes
+                # the whole sidecar self-decrypting (audit round 2).
+                compiled[fname]["enc_key"] = "<withheld>"
             except (RuntimeError, ValueError) as e:
                 log("ERROR", f"  Failed to compile {fname}: {e}")
 

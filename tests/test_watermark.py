@@ -348,6 +348,28 @@ class TestCLI:
     
     Positive test cases for cli.
     """
+    def test_irgen_watermark_cli_embed_detect(self, tmp_path):
+        """The irgen watermark CLI must embed and detect the same message."""
+        import ast
+        import subprocess
+        from irgen.compile import IrCompiler, ir_module_to_text
+
+        module = IrCompiler("wm").compile(
+            ast.parse("def f(x):\n    return x + 1\n"))
+        in_path = tmp_path / "in.ir"
+        out_path = tmp_path / "out.ir"
+        in_path.write_text(ir_module_to_text(module))
+
+        subprocess.run(
+            [sys.executable, "-m", "irgen.watermark", "embed",
+             str(in_path), "-o", str(out_path), "--watermark", "abcd"],
+            check=True, capture_output=True, text=True)
+        proc = subprocess.run(
+            [sys.executable, "-m", "irgen.watermark", "detect",
+             str(out_path), "--seed", "00" * 16],
+            check=True, capture_output=True, text=True)
+        assert "abcd" in proc.stdout
+
     def test_main_runs(self):
         from scripts.watermark.semantic_watermark import main
         import io

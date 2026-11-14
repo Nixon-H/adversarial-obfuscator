@@ -22,6 +22,14 @@ from scripts.z3_optional import z3
 BITWIDTH = 64
 
 
+class _SmtUnsupported(Exception):
+    """The module cannot be faithfully modeled by this translator.
+
+    Raising (instead of returning a vacuous True) lets the caller record a
+    decline rather than a proof.
+    """
+
+
 class IRToSMT:
     """
     Translates IR modules into Z3 formulas for equivalence checking.
@@ -63,6 +71,14 @@ class IRToSMT:
     def translate(self, module) -> z3.BoolRef:
         constraints = []
         for func in module.functions:
+            blocks = getattr(func, "blocks", []) or []
+            if len(blocks) > 1:
+                # The block-dispatch encoding admits contradictory state
+                # constraints for multi-block CFGs (unsat => "equivalent"
+                # regardless of the transformation). Only single-block
+                # functions are provable with this encoding; DECLINE.
+                raise _SmtUnsupported(
+                    "multi-block CFG (%d blocks) is not modeled" % len(blocks))
             result = self._translate_function(func)
             if result is not None:
                 constraints.append(result)

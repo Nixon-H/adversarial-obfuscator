@@ -49,7 +49,8 @@ def phase_micro_fragment(code: str, opts) -> dict:
         )
         executor.fragment_code(code)
         mf_config = {
-            "master_key": micro_frag_key.hex(),
+            # master_key withheld from the sidecar (audit round 2).
+            "master_key": "<withheld>",
             "fragment_size": fragment_size,
             "total_fragments": len(executor.fragments),
             "enabled": True,

@@ -104,11 +104,13 @@ def inject_timing_checks(source: str, config: dict) -> str:
     tree = ast.parse(source)
 
     import_time = ast.Import(names=[ast.alias(name="time", asname=None)])
-    tree.body.insert(0, import_time)
+    prologue = [import_time]
     if hard_exit:
         # The trap body calls sys.exit(); import sys as well (without it
         # the emitted module raises NameError instead of exiting).
-        tree.body.insert(1, ast.Import(names=[ast.alias(name="sys", asname=None)]))
+        prologue.append(ast.Import(names=[ast.alias(name="sys", asname=None)]))
+    from obfuscator.core.ast_prologue import insert_module_prologue
+    insert_module_prologue(tree, prologue)
 
     injector = _TimingInjector(threshold=threshold, hard_exit=hard_exit)
     tree = injector.visit(tree)

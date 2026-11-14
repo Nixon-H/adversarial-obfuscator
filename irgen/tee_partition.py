@@ -32,6 +32,7 @@ resulting in no TEE partitioning.
 """
 
 from __future__ import annotations
+import hashlib
 from typing import List, Tuple, Optional
 
 from irgen.compile import IrModule
@@ -44,6 +45,15 @@ TEE_KEYWORDS: List[str] = [
     "attest", "seal", "tee_entry",
 ]
 
+
+
+def _stable_id(name: str) -> int:
+    """32-bit id that does not change between processes.
+
+    ``hash()`` on str is salted per interpreter run, so using it here made
+    the generated C differ on every build.
+    """
+    return int.from_bytes(hashlib.blake2b(name.encode(), digest_size=4).digest(), "little")
 
 def identify_critical_functions(
     ir_module: IrModule,
@@ -135,7 +145,7 @@ def generate_enclave_entry_stubs(critical_funcs: List[str]) -> str:
     2. Calls the runtime tee_enclave_call() function.
     3. Deserializes and returns the result.
 
-    The function ID is hash(func_name) & 0xFFFFFFFF, providing a
+    The function ID is a stable 32-bit digest of the name, providing a
     compact identifier for the enclave dispatcher.
     """
     lines: List[str] = []
@@ -147,7 +157,7 @@ def generate_enclave_entry_stubs(critical_funcs: List[str]) -> str:
     for func_name in critical_funcs:
         stub_name = f"tee_enclave_{func_name}"
         lines.append(f"int {stub_name}(int argc, void* argv[]) {{")
-        lines.append(f"    uint32_t fn_id = {hash(func_name) & 0xFFFFFFFF}u;")
+        lines.append(f"    uint32_t fn_id = {_stable_id(func_name)}u;")
         lines.append("    size_t input_len = 0;")
         lines.append("    for (int i = 0; i < argc; i++) {")
         lines.append("        if (argv[i]) {")

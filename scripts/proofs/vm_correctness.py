@@ -84,17 +84,27 @@ class VmProof:
     counterexample: Optional[dict] = None
     timestamp: str = ""
     proof_hash: str = ""
+    hmac_tag: str = ""
 
     def __post_init__(self):
         if not self.timestamp:
             self.timestamp = datetime.now(timezone.utc).isoformat()
+        raw = f"{self.pass_name}:{self.opcode}:{self.equivalent}:{self.solver_time_ms}"
         if not self.proof_hash:
-            raw = f"{self.pass_name}:{self.opcode}:{self.equivalent}:{self.solver_time_ms}"
             self.proof_hash = hashlib.sha256(raw.encode()).hexdigest()[:16]
+        # Tamper-evidence: keyed with NIXON_PROOF_HMAC_KEY when set, so
+        # flipping `equivalent` in a serialized certificate is detected.
+        import hmac as _hm
+        import os as _os
+        key = _os.environ.get("NIXON_PROOF_HMAC_KEY", "").encode()
+        self.hmac_tag = (_hm.new(key, raw.encode(), hashlib.sha256).hexdigest()
+                         if key else
+                         hashlib.sha256(raw.encode()).hexdigest())
 
     def to_certificate_dict(self) -> dict:
         return {
             "pass_name": self.pass_name,
+            "opcode": self.opcode,
             "input_hash": hashlib.sha256(self.opcode.encode()).hexdigest(),
             "output_hash": self.proof_hash,
             "equivalence_proof": {
@@ -106,7 +116,37 @@ class VmProof:
             "duration_ms": self.solver_time_ms,
             "timestamp": self.timestamp,
             "validated": self.equivalent,
+            # Tamper-evidence over the decision fields.  The verifier
+            # recomputes this from the dict; flipping `equivalent` fails.
+            "hmac_tag": self.hmac_tag,
         }
+
+
+def verify_certificate_dict(cert: dict, key: bytes | None = None) -> bool:
+    """Recompute the certificate tag and compare it in constant time.
+
+    When ``NIXON_PROOF_HMAC_KEY`` is set (or ``key`` is passed) the tag is
+    a keyed HMAC, so an attacker cannot mint a new one.  Without a key the
+    tag is an unkeyed digest: it still detects accidental corruption, but
+    it is not tamper-evidence against an attacker who can edit the JSON.
+    """
+    import hmac as _hm
+    import os as _os
+    try:
+        raw = "%s:%s:%s:%s" % (
+            cert["pass_name"],
+            cert["opcode"],
+            cert["equivalence_proof"]["equivalent"],
+            cert["equivalence_proof"]["solver_time_ms"],
+        )
+        tag = cert.get("hmac_tag", "")
+    except (KeyError, TypeError):
+        return False
+    if key is None:
+        key = _os.environ.get("NIXON_PROOF_HMAC_KEY", "").encode()
+    expected = (_hm.new(key, raw.encode(), hashlib.sha256).hexdigest()
+                if key else hashlib.sha256(raw.encode()).hexdigest())
+    return _hm.compare_digest(tag, expected)
 
 
 class VMCorrectnessProver:

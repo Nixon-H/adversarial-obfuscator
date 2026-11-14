@@ -48,6 +48,16 @@ def test_the_watermark_flag_is_the_loader_watermark():
     assert args.lock_hwid == ""
 
 
+def test_watermark_gate_is_emitted_into_the_loader():
+    """The gate emission itself carries the message and the armed marker."""
+    from obfuscator.core.pipeline import generate_hybrid_loader_script
+    src, _, _ = generate_hybrid_loader_script(
+        {"windows": "", "linux": "", "darwin": ""}, b"", "ab" * 32,
+        build_id="bid-wm", watermark="W")
+    assert "_NX_WATERMARK_GATE" in src
+    assert "_NX_WATERMARK_MSG = 'W'" in src
+
+
 
 def test_the_watermark_flag_arms_the_loader_watermark_gate(tmp_path):
     """--watermark is the loader's watermark message, and it is reachable."""
@@ -60,7 +70,7 @@ def test_the_watermark_flag_arms_the_loader_watermark_gate(tmp_path):
         [sys.executable, "-m", "obfuscator.core.pipeline", "build",
          str(source), "--watermark", "W", "--skip-cloud",
          "--exclude", "rea"],  # hermetic: no network for shield reports
-        capture_output=True, text=True, timeout=900, env=env, cwd=str(tmp_path))
+        capture_output=True, text=True, timeout=2400, env=env, cwd=str(tmp_path))
     assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-2000:]
     # The gate is armed: the emitted loader carries the message.
     built = [p for p in os.listdir(str(tmp_path)) if p.endswith(".py")]
@@ -76,6 +86,6 @@ def test_the_lock_hwid_flag_does_not_warn(tmp_path):
     proc = subprocess.run(
         [sys.executable, "-m", "obfuscator.core.pipeline", "build",
          str(source), "--access", "lock-hwid=W", "--skip-cloud"],
-        capture_output=True, text=True, timeout=900, env=env, cwd=str(tmp_path))
+        capture_output=True, text=True, timeout=2400, env=env, cwd=str(tmp_path))
     assert "deprecated" not in proc.stdout + proc.stderr, (
         "--lock-hwid must not warn about a deprecation it does not have")

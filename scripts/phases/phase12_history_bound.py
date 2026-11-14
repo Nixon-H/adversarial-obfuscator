@@ -70,7 +70,9 @@ def phase_execution_history_binding(config=None):
 
             history_state = {
                 "accumulated_hash": binder._accumulated_hash.hex() if binder._accumulated_hash else None,
-                "chain_secret": chain_secret.hex(),
+                # Key material withheld: the JSON lands in build/ and would
+                # ship the chain secret next to the fragments it protects.
+                "chain_secret": "<withheld>",
                 "num_fragments": len(bound),
                 "fragment_ids": [bf.fragment_id for bf in bound],
             }

@@ -121,7 +121,10 @@ class SynthesisEngine:
                 if c in protections_set:
                     conflicts.append((p, c))
             for prereq in cost.prerequisites:
-                if prereq in protections_set:
+                # REQUIRES violation: the protection is enabled but its
+                # prerequisite is missing (the old check flagged the
+                # satisfied case instead).
+                if prereq not in protections_set:
                     conflicts.append((p, prereq))
         return conflicts
 

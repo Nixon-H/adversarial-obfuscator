@@ -563,21 +563,27 @@ def _make_watermark_block(
         block.mul(IrType.i32(), x_val, y_val)
         predicate = _make_opaque_predicate(block, False, rand)
     else:
-        block.add(IrType.i32(), loaded.result, const_val)
+        # No arithmetic here: the detector classifies a block as bit=1 by the
+        # presence of add/sub/mul/div, so a P0 block that added anything
+        # would decode as a 1.
         predicate = _make_opaque_predicate(block, True, rand)
 
     pred_cond = predicate.result
 
     dead_block = func.new_block(label=f"_wm_dead_{rand.randint(0, 0xFFFF):04x}")
     dead_val = IrValue.const_int(rand.randint(0, 0xFFFFFF))
+    # The IR's ret format is `ret <type> <value>`; dropping the type
+    # operand made IrInstruction.__str__ raise IndexError.
     dead_block.set_terminator("ret", operands=[IrType.i32(), dead_val])
 
-    continue_label = block.label
+    # Both targets start out dead. The embedder repoints the taken edge at
+    # the block that follows the watermark block once it knows the position;
+    # branching to block.label here made the block its own successor.
     block.set_terminator(
         "br",
         operands=[
             pred_cond,
-            continue_label,
+            dead_block.label,
             dead_block.label,
         ],
     )
@@ -645,6 +651,15 @@ def embed_watermark(
             if insert_pos < len(func.blocks):
                 last = func.blocks.pop()
                 func.blocks.insert(insert_pos, last)
+                # Point the taken edge at the block that now follows, so the
+                # watermark block is not its own successor.
+                if insert_pos + 1 < len(func.blocks):
+                    target = func.blocks[insert_pos + 1].label
+                else:
+                    target = func.blocks[0].label
+                term = last.terminator
+                if term is not None and term.opcode == "br" and len(term.operands) >= 3:
+                    term.operands[1] = target
 
     return ir_module
 
@@ -839,7 +854,8 @@ def main():
 
         module: IrModule = load_ir(args.input)
         module = embed_watermark(module, watermark_bytes, meta)
-        ir_module_to_text(module, args.output)
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(ir_module_to_text(module))
         print(f"Watermarked IR written to {args.output}")
 
     elif args.command == "detect":
@@ -891,17 +907,40 @@ def load_ir(path: str) -> IrModule:
                 label = stripped.rstrip(":")
                 current_block = current_func.new_block(label)
             elif current_block and current_func:
-                IrInstruction('nop')
-                if stripped.startswith("ret"):
+                parts = stripped.split()
+                if (len(parts) > 2 and parts[0].startswith("%")
+                        and parts[1] == "="):
+                    op = parts[2]
+                else:
+                    op = parts[0] if parts else ""
+                if op == "ret":
                     current_block.set_terminator("ret")
-                elif stripped.startswith("jmp"):
-                    parts = stripped.split()
-                    if len(parts) >= 2:
-                        current_block.set_terminator("jmp", operands=[parts[1].replace("label", "").strip()])
-                elif stripped.startswith("br"):
-                    current_block.set_terminator("br")
-                elif stripped.startswith("nop"):
+                elif op == "jmp":
+                    labels = [parts[i + 1].rstrip(",")
+                              for i, p in enumerate(parts)
+                              if p == "label" and i + 1 < len(parts)]
+                    if labels:
+                        current_block.set_terminator("jmp", operands=[labels[0]])
+                elif op == "br":
+                    labels = [parts[i + 1].rstrip(",")
+                              for i, p in enumerate(parts)
+                              if p == "label" and i + 1 < len(parts)]
+                    cond = (parts[2].rstrip(",")
+                            if len(parts) > 2 else "cond")
+                    if len(labels) >= 2:
+                        current_block.set_terminator(
+                            "br", operands=[cond, labels[0], labels[1]])
+                elif op == "nop":
                     current_block.nop()
+                elif op in ("alloca", "store", "load", "add", "sub", "mul",
+                            "div", "and", "or", "xor", "eq", "ne", "lt",
+                            "le", "gt", "ge", "icmp", "select", "gep",
+                            "call", "zext", "sext", "trunc", "bitcast"):
+                    # The detector classifies watermark blocks by opcode
+                    # presence; keep the instruction (the old parser
+                    # replaced every line with a NOP, so every block
+                    # looked empty and detection always failed).
+                    current_block.instructions.append(IrInstruction(op))
 
     return module
 

@@ -148,7 +148,9 @@ def call_model(model: str, code: str, timeout_s: int = 180, max_tokens: int = 71
 def score_ai_resistance(original: str, deobf: Optional[str]) -> dict:
     """Score how well the obfuscation resisted AI analysis. Higher = more resistant."""
     if not deobf:
-        return {"resistance_score": 10, "details": ["model_failed_to_respond"]}
+        # A model that failed to respond proved nothing: scoring that as
+        # 10/10 resistance fabricated a pass out of an error.
+        return {"resistance_score": 0, "details": ["model_failed_to_respond"]}
     s = 0
     d = []
     # Original non-ASCII count
@@ -213,7 +215,7 @@ def main():
                 logger.info("  → %.1fs | resistance: %s", elapsed, sc["details"])
                 model_results[name] = {"elapsed": round(elapsed,1), "resistance": sc}
             else:
-                model_results[name] = {"elapsed": round(elapsed,1), "resistance": {"resistance_score": 10, "details": ["no_response"]}}
+                model_results[name] = {"elapsed": round(elapsed,1), "resistance": {"resistance_score": 0, "details": ["no_response"]}}
                 logger.warning("  → NO RESPONSE")
         results[model] = model_results
 

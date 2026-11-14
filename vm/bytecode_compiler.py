@@ -40,6 +40,7 @@ import os
 import struct
 
 from .vm_isa import VMInstruction, VMOpcode, VMOperand, _phase2_enabled
+from irgen.compile import IrValue
 
 
 def secure_zero(data):
@@ -157,39 +158,37 @@ def _translate_instruction(ir_inst, opcode_map, rng) -> list[VMInstruction]:
 
     if opcode in ir_to_vm:
         vm_op = ir_to_vm[opcode]
-        vm_ops = []
-        for op in operands:
-            if isinstance(op, IrValue):
-                vm_ops.append((VMOperand.REG, _value_to_reg(op, rng)))
-            elif isinstance(op, str):
-                vm_ops.append((VMOperand.IMM16, hash(op) & 0xFFFF))
-            else:
-                vm_ops.append((VMOperand.IMM32, int(op)))
-        return [VMInstruction(vm_op, vm_ops)]
+        pre: list[VMInstruction] = []
+        vm_ops = [(VMOperand.REG, _materialize(op, rng, pre)) for op in operands]
+        return pre + [VMInstruction(vm_op, vm_ops)]
 
     if opcode == "alloca":
-        return [VMInstruction(VMOpcode.LEA, [(VMOperand.REG, _value_to_reg(ir_inst.result, rng)), (VMOperand.IMM16, 0)])]
+        # LEA reads two registers; an IMM16 here desynchronised the stream.
+        return [VMInstruction(VMOpcode.LEA, [(VMOperand.REG, _value_to_reg(ir_inst.result, rng)),
+                                             (VMOperand.REG, 0)])]
 
     if opcode == "call":
-        vm_ops = []
-        for op in operands:
-            if isinstance(op, IrValue):
-                vm_ops.append((VMOperand.REG, _value_to_reg(op, rng)))
-            else:
-                vm_ops.append((VMOperand.IMM32, int(op) if hasattr(op, '__int__') else hash(str(op)) & 0xFFFFFFFF))
-        return [VMInstruction(VMOpcode.CALL, vm_ops)]
+        # CALL reads one 32-bit target. The VM has no calling convention for
+        # arguments, so they are not encoded.
+        callee = getattr(ir_inst, "func_name", None) or (operands[0] if operands else "exit")
+        if isinstance(callee, str):
+            target = _label_to_int(callee)
+        elif isinstance(callee, int):
+            target = callee
+        else:
+            # An IrValue callee has no address in this VM; fall back to the
+            # exit label rather than raising on int().
+            target = _label_to_int("exit")
+        return [VMInstruction(VMOpcode.CALL, [(VMOperand.ABS_ADDR, target)])]
 
     if opcode == "ret":
-        vm_ops = []
-        for op in operands:
-            if isinstance(op, IrValue):
-                vm_ops.append((VMOperand.REG, _value_to_reg(op, rng)))
-            else:
-                vm_ops.append((VMOperand.IMM32, int(op) if hasattr(op, '__int__') else 0))
-        return [VMInstruction(VMOpcode.RET, vm_ops)]
+        # RET pops the return address; it carries no operand bytes.
+        return [VMInstruction(VMOpcode.RET)]
 
     if opcode == "phi":
-        return [VMInstruction(VMOpcode.MOV, [(VMOperand.REG, _value_to_reg(ir_inst.result, rng)), (VMOperand.IMM32, 0)])]
+        # MOV reads a register plus a 16-bit immediate split into two bytes.
+        return [VMInstruction(VMOpcode.MOV, [(VMOperand.REG, _value_to_reg(ir_inst.result, rng)),
+                                             (VMOperand.IMM8, 0), (VMOperand.IMM8, 0)])]
 
     if opcode == "gep":
         return [VMInstruction(VMOpcode.LEA, [(VMOperand.REG, _value_to_reg(ir_inst.result, rng)), (VMOperand.REG, _value_to_reg(operands[0], rng) if operands else 0)])]
@@ -242,18 +241,37 @@ def _translate_terminator(term_inst, opcode_map, rng) -> list[VMInstruction]:
         return [VMInstruction(VMOpcode.FUSED_CMP_JMP, vm_ops)]
 
     if opcode == "ret":
-        vm_ops = []
-        for op in operands:
-            if hasattr(op, 'id'):
-                vm_ops.append((VMOperand.REG, _value_to_reg(op, rng)))
-            else:
-                vm_ops.append((VMOperand.IMM32, int(op) if hasattr(op, '__int__') else 0))
-        return [VMInstruction(VMOpcode.RET, vm_ops)]
+        return [VMInstruction(VMOpcode.RET)]
 
     if opcode == "unreachable":
         return [VMInstruction(VMOpcode.NOP)]
 
     return []
+
+
+def _materialize(op, rng, out: list) -> int:
+    """Return a register holding ``op``, emitting a MOV for constants.
+
+    The interpreter reads register indices for arithmetic operands, so a
+    constant has to be loaded into a register first.
+    """
+    if isinstance(op, IrValue):
+        return _value_to_reg(op, rng)
+    reg = _value_to_reg(op, rng) if hasattr(op, 'id') else rng.randint(1, 14)
+    if isinstance(op, str):
+        # A salted builtin hash() changes between processes; the VM
+        # bytecode must be reproducible and the C/Python interpreters
+        # must agree on the value.
+        val = int.from_bytes(
+            hashlib.blake2b(op.encode(), digest_size=2).digest(), "little")
+    else:
+        val = int(op) & 0xFFFF if hasattr(op, '__int__') else 0
+    out.append(VMInstruction(VMOpcode.MOV, [
+        (VMOperand.REG, reg),
+        (VMOperand.IMM8, val & 0xFF),
+        (VMOperand.IMM8, (val >> 8) & 0xFF),
+    ]))
+    return reg
 
 
 def _value_to_reg(value, rng) -> int:

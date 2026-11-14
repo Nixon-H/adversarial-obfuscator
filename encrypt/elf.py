@@ -12,12 +12,13 @@ Public API:
       - replace_text(new_text_data, add_stub_size) -> None
       - set_entry_point(new_entry) -> None
       - add_shadorenc_section(metadata) -> None
-      - save(path) -> None
+      - save(path, mode=None) -> None
 
 Dependencies:
-    - None (standard library only: struct)
+    - None (standard library only: os, struct)
 """
 
+import os
 import struct
 
 EI_NIDENT = 16
@@ -33,6 +34,7 @@ SHT_PROGBITS = 1
 SHT_NOBITS = 8
 
 PT_LOAD = 1
+PT_PHDR = 6
 
 SHADORENC_SECTION_NAME = b'.shadorenc'
 
@@ -216,30 +218,44 @@ class ELFParser:
 
     def get_entry_offset_in_text(self):
         _, text_sec = self.get_text_section()
-        return self.e_entry - text_sec['addr']
+        off = self.e_entry - text_sec['addr']
+        if off < 0 or off >= text_sec['size']:
+            raise ValueError(
+                f"entry point {self.e_entry:#x} is outside .text "
+                f"[{text_sec['addr']:#x}, "
+                f"{text_sec['addr'] + text_sec['size']:#x})")
+        return off
 
     def replace_text(self, new_text_data: bytes, add_stub_size: int = 0):
         idx, text_sec = self.get_text_section()
         old_size = text_sec['size']
-        new_size = old_size + add_stub_size
+        new_size = len(new_text_data)
+        if add_stub_size and new_size != old_size + add_stub_size:
+            raise ValueError(
+                f"new_text_data is {new_size} bytes but old_size + "
+                f"add_stub_size is {old_size + add_stub_size}")
         old_offset = text_sec['offset']
-
-        need_expand = new_size > old_size
-        extra = new_size - old_size if need_expand else 0
-
-        text_start = old_offset
         text_end = old_offset + old_size
-        before = self.data[:text_start]
-        after = self.data[text_end:]
-        self.data = before + new_text_data + after
+        delta = new_size - old_size
+
+        self.data = (self.data[:old_offset] + new_text_data
+                     + self.data[text_end:])
+
+        if delta:
+            # The section header table usually sits after .text.  Move it
+            # with the splice before any _set_shdr_field call reads e_shoff.
+            if self.e_shoff >= text_end:
+                self.e_shoff += delta
+                self._set_e_shoff(self.e_shoff)
+            if self.e_phoff >= text_end:
+                self.e_phoff += delta
+                self._set_e_phoff(self.e_phoff)
+            self._shift_sections_after(text_end, delta)
+            self._shift_program_headers(old_offset, old_size, new_size, delta)
 
         text_sec['size'] = new_size
-        self._set_shdr_field(idx, 'offset', text_start)
+        self._set_shdr_field(idx, 'offset', old_offset)
         self._set_shdr_field(idx, 'size', new_size)
-
-        if need_expand:
-            self._shift_sections_after(text_end, extra)
-            self._shift_program_headers(text_sec, old_offset, new_size, extra)
 
     def _shdr_field_index(self, name):
         if self.is_64:
@@ -277,6 +293,30 @@ class ELFParser:
                      struct.pack(self._phdr_fmt, *fields) +
                      self.data[offset + self._phdr_size:])
 
+    def _set_e_shoff(self, value):
+        off = 0x28 if self.is_64 else 0x20
+        fmt = '<Q' if self.is_64 else '<I'
+        size = struct.calcsize(fmt)
+        self.data = (self.data[:off] + struct.pack(fmt, value)
+                     + self.data[off + size:])
+
+    def _set_e_phoff(self, value):
+        off = 0x20 if self.is_64 else 0x1c
+        fmt = '<Q' if self.is_64 else '<I'
+        size = struct.calcsize(fmt)
+        self.data = (self.data[:off] + struct.pack(fmt, value)
+                     + self.data[off + size:])
+
+    def _set_e_phnum(self, value):
+        off = 56 if self.is_64 else 44
+        self.data = (self.data[:off] + struct.pack('<H', value)
+                     + self.data[off + 2:])
+
+    def _set_e_shnum(self, value):
+        off = 60 if self.is_64 else 48
+        self.data = (self.data[:off] + struct.pack('<H', value)
+                     + self.data[off + 2:])
+
     def _shift_sections_after(self, from_offset, delta):
         for i, sec in enumerate(self.sections):
             if sec['type'] == SHT_NULL:
@@ -287,17 +327,95 @@ class ELFParser:
                 sec['offset'] = new_off
                 self._set_shdr_field(i, 'offset', new_off)
 
-    def _shift_program_headers(self, text_sec, old_offset, new_size, delta):
+    def _shift_program_headers(self, old_offset, old_size, new_size, delta):
         if self.e_phnum == 0:
             return
+        text_end = old_offset + old_size
         for i, ph in enumerate(self.program_headers):
+            ph_off = ph['offset']
             if ph['type'] == PT_LOAD:
-                ph_off = ph['offset']
-                if ph_off >= old_offset:
-                    ph['offset'] += delta
-                    ph['filesz'] += delta
-                    self._set_phdr_field(i, 'offset', ph['offset'])
+                ph_filesz = ph['filesz']
+                contains_text = (ph_off <= old_offset
+                                 and text_end <= ph_off + ph_filesz)
+                if contains_text:
+                    ph['filesz'] = ph_filesz + delta
+                    if ph['memsz'] == ph_filesz:
+                        ph['memsz'] = ph['filesz']
+                    else:
+                        ph['memsz'] = max(ph['memsz'], ph['filesz'])
                     self._set_phdr_field(i, 'filesz', ph['filesz'])
+                    self._set_phdr_field(i, 'memsz', ph['memsz'])
+                    continue
+            # Every other header that points past the splice (PT_DYNAMIC,
+            # PT_GNU_RELRO, PT_GNU_EH_FRAME, ...) moves with the data.
+            if ph_off >= text_end:
+                ph['offset'] = ph_off + delta
+                self._set_phdr_field(i, 'offset', ph['offset'])
+
+    def plan_load_segment(self, length: int, flags: int = 5) -> dict:
+        """Plan a new PT_LOAD segment appended at EOF.
+
+        Returns the file offset, virtual address and program-header table
+        size so the caller can compute the stub's text_base_delta before
+        generating it.  The table is placed at the start of the new segment
+        so it stays mapped (AT_PHDR stays valid).
+        """
+        page = 0x1000
+        file_off = (len(self.data) + page - 1) & ~(page - 1)
+        max_end = 0
+        for ph in self.program_headers:
+            if ph['type'] == PT_LOAD:
+                max_end = max(max_end, ph['vaddr'] + ph['memsz'])
+        vaddr = (max_end + page - 1) & ~(page - 1)
+        if vaddr == 0:
+            vaddr = page
+        table_size = (len(self.program_headers) + 1) * self._phdr_size
+        return {'file_off': file_off, 'vaddr': vaddr,
+                'table_size': table_size, 'length': length, 'flags': flags}
+
+    def add_load_segment(self, data: bytes, plan: dict) -> int:
+        """Append ``data`` as a new executable PT_LOAD segment.
+
+        The program-header table is relocated into the new segment (so it
+        remains mapped) and PT_PHDR, when present, is updated.  Returns the
+        virtual address of ``data``.
+        """
+        file_off = plan['file_off']
+        vaddr = plan['vaddr']
+        table_size = plan['table_size']
+        stub_vaddr = vaddr + table_size
+
+        # The segment covers the relocated header table *and* the payload,
+        # so PT_PHDR's vaddr stays mapped.
+        new_ph = {'type': PT_LOAD, 'flags': plan['flags'], 'offset': file_off,
+                  'vaddr': vaddr, 'paddr': vaddr,
+                  'filesz': table_size + len(data),
+                  'memsz': table_size + len(data), 'align': 0x1000}
+        phdrs = list(self.program_headers) + [new_ph]
+        for ph in phdrs:
+            if ph['type'] == PT_PHDR:
+                ph['offset'] = file_off
+                ph['vaddr'] = vaddr
+                ph['paddr'] = vaddr
+                ph['filesz'] = table_size
+                ph['memsz'] = table_size
+
+        table = b''.join(
+            struct.pack(self._phdr_fmt, ph['type'], ph['flags'], ph['offset'],
+                        ph['vaddr'], ph['paddr'], ph['filesz'], ph['memsz'],
+                        ph['align'])
+            for ph in phdrs)
+        if len(table) != table_size:
+            raise ValueError("program header table size mismatch")
+
+        self.data += b'\x00' * (file_off - len(self.data))
+        self.data += table + data
+        self.program_headers = phdrs
+        self.e_phoff = file_off
+        self.e_phnum = len(phdrs)
+        self._set_e_phoff(file_off)
+        self._set_e_phnum(self.e_phnum)
+        return stub_vaddr
 
     def set_entry_point(self, new_entry: int):
         self.e_entry = new_entry
@@ -312,22 +430,23 @@ class ELFParser:
 
     def add_shadorenc_section(self, metadata: bytes):
         name_padded = SHADORENC_SECTION_NAME + b'\x00'
-        if self._shstrtab is not None:
-            name_offset = len(self._shstrtab)
-        else:
-            name_offset = 0
-
         shstrtab_sec = self.sections[self.e_shstrndx]
         old_shstr_size = shstrtab_sec['size']
-        old_shstr_data = self.data[shstrtab_sec['offset']:shstrtab_sec['offset'] + old_shstr_size]
-        new_shstr_data = old_shstr_data + name_padded
-        new_shstr_size = len(new_shstr_data)
+        old_shstr_off = shstrtab_sec['offset']
+        name_offset = old_shstr_size
 
-        self.data = (self.data[:shstrtab_sec['offset']] +
-                     new_shstr_data +
-                     self.data[shstrtab_sec['offset'] + old_shstr_size:])
-        shstrtab_sec['size'] = new_shstr_size
-        self._set_shdr_field(self.e_shstrndx, 'size', new_shstr_size)
+        # Relocate the string table to EOF instead of splicing into it:
+        # splicing would shift every later section and break the
+        # p_offset == p_vaddr (mod p_align) rule the kernel enforces.
+        new_shstr_data = (self.data[old_shstr_off:old_shstr_off
+                                    + old_shstr_size] + name_padded)
+        new_shstr_off = len(self.data)
+        self.data += new_shstr_data
+        shstrtab_sec['offset'] = new_shstr_off
+        shstrtab_sec['size'] = len(new_shstr_data)
+        self._set_shdr_field(self.e_shstrndx, 'offset', new_shstr_off)
+        self._set_shdr_field(self.e_shstrndx, 'size', len(new_shstr_data))
+        self._shstrtab = new_shstr_data
 
         new_sec_offset = len(self.data)
         self.data += metadata
@@ -354,26 +473,25 @@ class ELFParser:
                                 sec['addr'], sec['offset'], sec['size'],
                                 sec['link'], sec['info'],
                                 sec['addralign'], sec['entsize'])
-        prev_shdr_end = self.e_shoff + (self.e_shnum - 1) * self._shdr_size
+        # Relocate the whole table to EOF so appending the new entry cannot
+        # land between the old table and the metadata appended above.
+        old_count = self.e_shnum - 1
+        old_table = self.data[self.e_shoff:
+                              self.e_shoff + old_count * self._shdr_size]
+        new_shoff = len(self.data)
+        self.data += old_table + shdr_data
+        self.e_shoff = new_shoff
+        self._set_e_shoff(new_shoff)
+        self._set_e_shnum(self.e_shnum)
 
-        if prev_shdr_end >= len(self.data):
-            self.data += shdr_data
-        else:
-            self.data = (self.data[:prev_shdr_end] +
-                         shdr_data +
-                         self.data[prev_shdr_end:])
+    def save(self, path: str, mode: int | None = None):
+        """Write the image out.
 
-        if self.is_64:
-            self.data = (self.data[:60] +
-                         struct.pack('<H', self.e_shnum) +
-                         struct.pack('<H', self.e_shstrndx) +
-                         self.data[64:])
-        else:
-            self.data = (self.data[:48] +
-                         struct.pack('<H', self.e_shnum) +
-                         struct.pack('<H', self.e_shstrndx) +
-                         self.data[52:])
-
-    def save(self, path: str):
+        ``mode`` should be the source file's permission bits: an encrypted
+        executable that lands as 0644 cannot be run, which makes the tool look
+        broken even though the transform succeeded.
+        """
         with open(path, 'wb') as f:
             f.write(self.data)
+        if mode is not None:
+            os.chmod(path, mode)

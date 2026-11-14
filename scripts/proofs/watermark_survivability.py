@@ -172,10 +172,11 @@ class WatermarkSurvivabilityProver:
 
         result = solver.check()
 
-        if result == z3.unsat:
-            ce = {}
-            return False, ce
-        return True, None
+        # Fail closed: only a definitive sat proves the watermark survived.
+        # unknown/timeout and unsat both mean "not proven preserved".
+        if result == z3.sat:
+            return True, None
+        return False, {}
 
     def prove_survives_pass(
         self, watermark: str, transformation: Transformation
@@ -248,7 +249,9 @@ class WatermarkSurvivabilityProver:
         result = solver.check()
         elapsed = (time.time() - start) * 1000
 
-        survived = result != z3.unsat
+        # Fail closed: only a definitive sat proves survival. unknown
+        # and timeout previously counted as "survived" (audit round 2).
+        survived = result == z3.sat
 
         proof = WatermarkProof(
             pass_name="watermark_survivability_pipeline",

@@ -61,6 +61,7 @@ class ContextCollapseObfuscator(ast.NodeTransformer):
         self._guard_counter = 0
 
     def obfuscate(self, tree: ast.AST) -> ast.AST:
+        self._collect_string_skips(tree)
         self._guard_vars = self._rng.sample(_GUARD_VAR_POOL, min(4, len(_GUARD_VAR_POOL)))
         self.visit(tree)
         ast.fix_missing_locations(tree)
@@ -194,9 +195,49 @@ class ContextCollapseObfuscator(ast.NodeTransformer):
 
     # -- visit overrides ---------------------------------------------------
 
+    def _collect_string_skips(self, tree: ast.AST) -> None:
+        self._joined_depth = 0
+        self._skip_ids = set()
+        """Constants that must stay cleartext: f-string parts, docstrings,
+        and the contents of __all__ (star-import contract)."""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.JoinedStr):
+                for part in ast.walk(node):
+                    if isinstance(part, ast.Constant):
+                        self._skip_ids.add(id(part))
+            if isinstance(node, (ast.Module, ast.FunctionDef,
+                                 ast.AsyncFunctionDef, ast.ClassDef)):
+                body = node.body
+                if (body and isinstance(body[0], ast.Expr)
+                        and isinstance(body[0].value, ast.Constant)
+                        and isinstance(body[0].value.value, str)):
+                    self._skip_ids.add(id(body[0].value))
+            if isinstance(node, (ast.Assign, ast.AugAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for t in targets:
+                    if isinstance(t, ast.Name) and t.id == "__all__":
+                        for elt in ast.walk(node.value):
+                            if isinstance(elt, ast.Constant):
+                                self._skip_ids.add(id(elt))
+
+    def visit_JoinedStr(self, node: ast.JoinedStr) -> ast.JoinedStr:
+        self._joined_depth += 1
+        try:
+            return self.generic_visit(node)
+        finally:
+            self._joined_depth -= 1
+
     def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
         self.generic_visit(node)
         body = node.body
+        # A docstring must remain the first statement or it stops being a
+        # docstring (__doc__ became None when the guard wrapped it).
+        doc = None
+        if (body and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)):
+            doc = body[0]
+            body = body[1:]
 
         guard_checks = self._inject_guard_checks(body)
         body_with_vars = self._dead_var_chain() + guard_checks
@@ -207,14 +248,16 @@ class ContextCollapseObfuscator(ast.NodeTransformer):
                     ast.ExceptHandler(
                         type=ast.Name(id="Exception", ctx=ast.Load()),
                         name="_nx_skip",
-                        body=[ast.Pass()],
+                        # Re-raise: swallowing here turned `raise` into
+                        # `return None` and silently changed semantics.
+                        body=[ast.Raise()],
                     )
                 ],
                 orelse=[],
                 finalbody=[],
             )
         )
-        node.body = self._inject_guard_vars([nested])
+        node.body = ([doc] if doc is not None else []) + self._inject_guard_vars([nested])
         return node
 
     def visit_Constant(self, node: ast.Constant) -> ast.AST:
@@ -222,6 +265,8 @@ class ContextCollapseObfuscator(ast.NodeTransformer):
             isinstance(node.value, str)
             and len(node.value) >= 4
             and len(node.value) <= 2000
+            and self._joined_depth == 0
+            and id(node) not in self._skip_ids
         ):
             return self._encode_string(node.value)
         return node

@@ -148,6 +148,10 @@ def encrypt_template(template: dict, key: bytes) -> bytes:
     """
     if not template:
         return b""
+    if len(key) != 32:
+        raise ValueError(
+            f"JIT template key must be 32 bytes, got {len(key)}; a short key "
+            "would be zero-padded into a weaker one")
     template_ir_bytes = template.get("template_ir", "").encode("utf-8")
     slot_map_bytes = json.dumps(template.get("slot_map", {}), separators=(",", ":")).encode("utf-8")
     specializer_bytes = template.get("specializer_ir", "").encode("utf-8")
@@ -157,10 +161,11 @@ def encrypt_template(template: dict, key: bytes) -> bytes:
     comp_spec = zlib.compress(specializer_bytes)
     meta = template.get("metadata", {})
     meta_bytes = json.dumps(meta, separators=(",", ":")).encode("utf-8")
-    metadata_hash = hashlib.sha256(meta_bytes).digest()
     payload = comp_ir + comp_slot + comp_spec
-    xor_key = key.ljust(32, b'\0')[:32]
-    encrypted = _xor_encrypt(payload, xor_key)
+    # Cover the payload too: hashing only the metadata left the body
+    # unauthenticated (a consumer could not detect a tampered template).
+    metadata_hash = hashlib.sha256(meta_bytes + payload).digest()
+    encrypted = _xor_encrypt(payload, key)
     header = struct.pack("<III", _ENCRYPT_MAGIC, 1, len(comp_ir))
     header += struct.pack("<II", len(comp_slot), len(comp_spec))
     header += metadata_hash[:32]
@@ -241,7 +246,14 @@ def main():
     elif args.command == "encrypt":
         with open(args.input) as f:
             template = json.load(f)
-        key = bytes.fromhex(args.key) if args.key else b'\0' * 32
+        if not args.key:
+            print("Error: --key is required; refusing to encrypt with an "
+                  "all-zero key", file=sys.stderr)
+            sys.exit(1)
+        key = bytes.fromhex(args.key)
+        if len(key) != 32:
+            print(f"Error: --key must be 32 bytes, got {len(key)}", file=sys.stderr)
+            sys.exit(1)
         blob = encrypt_template(template, key)
         with open(args.output, "wb") as f:
             f.write(blob)

@@ -310,27 +310,40 @@ class ChaffCircuitGenerator:
             return fn(t, a, b).result
         return None
 
+    @staticmethod
+    def _shift_mask(t: IrType) -> int:
+        """Bit width minus one, from the IR type."""
+        kind = getattr(t, "kind", "i32")
+        try:
+            return int(kind[1:]) - 1
+        except (ValueError, TypeError):
+            return 31
+
     def _emit_rotl(self, block: IrBlock, t: IrType, a: IrValue, b: IrValue) -> IrValue:
         """
-        Rotate left: (a << (b & 31)) | (a >> (32 - (b & 31))).
+        Rotate left: (a << s) | (a >> ((0 - s) & mask)), s = b & mask.
 
-        Emulates a CPU rotate-left instruction using shifts.
+        The complement is computed as (0 - s) & mask rather than width - s:
+        when s is 0 the latter is the full width, and a shift by the width is
+        undefined in LLVM.
         """
-        shift = block.and_(t, b, IrValue.const_int(31)).result
+        mask = self._shift_mask(t)
+        shift = block.and_(t, b, IrValue.const_int(mask)).result
         left = block.shl(t, a, shift).result
-        neg = block.sub(t, IrValue.const_int(32), shift).result
+        neg = block.and_(t, block.sub(t, IrValue.const_int(0), shift).result,
+                         IrValue.const_int(mask)).result
         right = block.shr(t, a, neg).result
         return block.or_(t, left, right).result
 
     def _emit_rotr(self, block: IrBlock, t: IrType, a: IrValue, b: IrValue) -> IrValue:
         """
-        Rotate right: (a >> (b & 31)) | (a << (32 - (b & 31))).
-
-        Emulates a CPU rotate-right instruction using shifts.
+        Rotate right: (a >> s) | (a << ((0 - s) & mask)), s = b & mask.
         """
-        shift = block.and_(t, b, IrValue.const_int(31)).result
+        mask = self._shift_mask(t)
+        shift = block.and_(t, b, IrValue.const_int(mask)).result
         right = block.shr(t, a, shift).result
-        neg = block.sub(t, IrValue.const_int(32), shift).result
+        neg = block.and_(t, block.sub(t, IrValue.const_int(0), shift).result,
+                         IrValue.const_int(mask)).result
         left = block.shl(t, a, neg).result
         return block.or_(t, left, right).result
 

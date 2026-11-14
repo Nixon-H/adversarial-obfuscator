@@ -221,9 +221,48 @@ python3 -m obfuscator.core.pipeline build payload.py \
   --licence token=acme.licence env-only bootstrap-encrypted chain \
   --package layers=25 stego
 
+# CLOUD maximum (adds the Cython/Nuitka compile on the GitHub build farm).
+# Needs build-farm credentials (pipeline config or --cf-token) and network.
+# NOTE: stego conflicts with the cloud build (enforced, exit 1) — drop it
+# from --package when cloud is present.
+NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD \
+python3 -m obfuscator.core.pipeline build payload.py \
+  --section-count 6 \
+  --watermark NX-001 \
+  --access trial=7d \
+  --licence token=acme.licence env-only bootstrap-encrypted chain \
+  --package native compile cloud platform=github layers=25 zips=3
+
+# ABSOLUTE maximum — every namespace, every gate, one command. Everything
+# below resolves (parse-verified); defaults not shown are already on
+# (all six transforms, anti-REA maximum, advanced protection,
+# split-bootstrap, sectioned sealing, strict detections, integrity gates).
+NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD \
+python3 -m obfuscator.core.pipeline build payload.py \
+  --section-count 8 \
+  --watermark NX-001 \
+  --lowering io,scalar,string,container,service,protocol,function,import,fusion,arithmetic,truth,slice,format,augassign \
+  --transforms data function-intent speculation \
+  --access trial=7d expire=2027-12-31 hwid=<machine-hwid> hwid-lock kod driver-check \
+           name-gate rename-internal bind-mac webhook=https://alerts.example/hook \
+           vm-threshold=65 \
+  --licence token=acme.licence env-only bootstrap-encrypted chain \
+  --tls-ca-bundle /etc/ssl/certs/ca.pem \
+  --package native compile cloud platform=github layers=25 zips=3
+
 # Run. Without the token the artefact exits 1.
 NIXON_LICENCE=acme.licence python3 dist/payload_protected.py
 ```
+
+Every remaining loader flag is either in this command or deliberately
+excluded: `--access one-shot` (self-destruct after the first run — breaks
+re-runs, add only for burn-after-use payloads), `--package native-only`
+(removes the bytecode fallback entirely — stronger, but hwid-lock then has
+no fallback blob to lock and a farm compile failure bricks the artifact),
+`--exclude …` (nothing: every shield family is on), `--fast` / `--public` /
+`--debug-dump-raw` / `--pin-structure` (weaken or debug — never in a max
+build), `--tor`/`--tor-proxy` (build-host privacy, not artifact security),
+`--resume`/`--exclude-android`/`--python` (farm ops).
 
 Measured on the 2,635-byte payload: **69–99 s**, **1.46–8.25 MB**, runs with
 the token, exits 1 without it. Do not add `--opt-level 5` (the ladder is already at its

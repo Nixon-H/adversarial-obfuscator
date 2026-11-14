@@ -1,4 +1,7 @@
 import os
+import platform
+import shutil
+import subprocess
 import sys
 
 import pytest
@@ -116,19 +119,22 @@ class TestStub:
     Positive test cases for stub.
     """
     def test_stub_generation(self):
-        stub = make_stub_xor_decrypt(text_size=64, original_entry=0)
-        assert len(stub) > 0
-        # Code portion should be 49 bytes, header 20, keystream 64 = 133
-        assert len(stub) == 133
+        stub = make_stub_xor_decrypt(text_size=64, original_entry=0,
+                                     keystream=b"\x00" * 64)
+        assert len(stub) == stub_size(64)
+
+    def test_stub_requires_keystream(self):
+        with pytest.raises(ValueError, match="keystream"):
+            make_stub_xor_decrypt(text_size=64, original_entry=0)
 
     def test_stub_with_keystream(self):
         ks = b"\xAB" * 128
         stub = make_stub_with_keystream(text_size=128, original_entry=16, keystream=ks)
-        assert len(stub) == 49 + 20 + 128
+        assert len(stub) == stub_size(128)
 
     def test_stub_size_calculation(self):
-        assert stub_size(64) == 49 + 64 + 20
-        assert stub_size(128) == 49 + 128 + 20
+        assert stub_size(64) == stub_size(64)
+        assert stub_size(128) - stub_size(64) == 64
 
 
 class TestContainer:
@@ -239,3 +245,104 @@ def test_seed_reproducibility():
     seq3 = [r3.random() for _ in range(20)]
     assert seq1 == seq2, "Same seed Random produced different sequences"
     assert seq1 != seq3, "Different seed Random produced same sequence"
+
+
+@pytest.mark.skipif(
+    not (sys.platform.startswith("linux") and platform.machine() == "x86_64"),
+    reason="stub is x86-64 Linux shellcode",
+)
+def test_stub_executes_and_decrypts():
+    """The stub must decrypt its text and jump to the original entry."""
+    import ctypes
+    import mmap
+
+    text = b"\xb8\x2a\x00\x00\x00\xc3" + b"\x90" * 58  # mov eax,42; ret
+    ks = bytes(range(64))
+    ct = bytes(a ^ b for a, b in zip(text, ks))
+    stub = make_stub_with_keystream(64, 0, ks)
+    blob = ct + stub
+
+    mm = mmap.mmap(-1, 4096,
+                   prot=mmap.PROT_READ | mmap.PROT_WRITE | mmap.PROT_EXEC)
+    mm.write(blob)
+    addr = ctypes.addressof(ctypes.c_char.from_buffer(mm))
+    fn = ctypes.CFUNCTYPE(ctypes.c_int)(addr + 64)
+    assert fn() == 42
+    assert bytes(mm[:64]) == text
+    mm.close()
+
+
+@pytest.mark.skipif(
+    not (sys.platform.startswith("linux") and platform.machine() == "x86_64"),
+    reason="stub is x86-64 Linux shellcode",
+)
+def test_keyed_stub_executes_and_decrypts(tmp_path):
+    """The keyed stub unmasks the keystream from the runtime key file."""
+    import ctypes
+    import mmap
+
+    text = b"\xb8\x2a\x00\x00\x00\xc3" + b"\x90" * 58
+    ks = os.urandom(64)
+    key = os.urandom(32)
+    masked = bytes(k ^ key[i % 32] for i, k in enumerate(ks))
+    key_path = tmp_path / "enc.key"
+    key_path.write_bytes(key)
+
+    stub = make_stub_with_keystream(64, 0, masked, key_path=str(key_path))
+    ct = bytes(a ^ b for a, b in zip(text, ks))
+    blob = ct + stub
+
+    mm = mmap.mmap(-1, 4096,
+                   prot=mmap.PROT_READ | mmap.PROT_WRITE | mmap.PROT_EXEC)
+    mm.write(blob)
+    addr = ctypes.addressof(ctypes.c_char.from_buffer(mm))
+    fn = ctypes.CFUNCTYPE(ctypes.c_int)(addr + 64)
+    assert fn() == 42
+    assert bytes(mm[:64]) == text
+    mm.close()
+
+
+def test_keyed_stub_does_not_embed_the_raw_keystream(tmp_path):
+    """The embedded bytes are keystream XOR runtime key, not the keystream."""
+    ks = os.urandom(64)
+    key = os.urandom(32)
+    masked = bytes(k ^ key[i % 32] for i, k in enumerate(ks))
+    key_path = tmp_path / "enc.key"
+    key_path.write_bytes(key)
+    stub = make_stub_with_keystream(64, 0, masked, key_path=str(key_path))
+    assert ks not in stub
+    assert masked in stub
+    assert key not in stub
+
+
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="gcc not available")
+def test_encrypt_binary_runs(tmp_path):
+    """A bulk-encrypted ELF must still run and produce the original output."""
+    src = tmp_path / "hello.c"
+    src.write_text('#include <stdio.h>\n'
+                   'int main(void) { puts("encrypted-ok"); return 7; }\n')
+    exe = tmp_path / "hello"
+    subprocess.run(["gcc", "-O0", "-o", str(exe), str(src)], check=True)
+    out = tmp_path / "hello.enc"
+    result = encrypt_binary(str(exe), str(out), block_size=64)
+    assert os.path.exists(result["key_file"])
+    assert os.path.getsize(result["key_file"]) == 32
+    assert (os.stat(result["key_file"]).st_mode & 0o777) == 0o600
+    assert "runtime key" in result["confidentiality"]
+    run = subprocess.run([str(out)], capture_output=True, text=True)
+    assert run.returncode == 7
+    assert "encrypted-ok" in run.stdout
+
+
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="gcc not available")
+def test_encrypt_binary_fails_closed_without_the_key_file(tmp_path):
+    """The runtime key is required; removing it must not decrypt."""
+    src = tmp_path / "hello.c"
+    src.write_text('int main(void) { return 7; }\n')
+    exe = tmp_path / "hello"
+    subprocess.run(["gcc", "-O0", "-o", str(exe), str(src)], check=True)
+    out = tmp_path / "hello.enc"
+    result = encrypt_binary(str(exe), str(out), block_size=64)
+    os.unlink(result["key_file"])
+    run = subprocess.run([str(out)], capture_output=True, text=True)
+    assert run.returncode != 7

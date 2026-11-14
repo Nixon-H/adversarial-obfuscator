@@ -109,21 +109,80 @@ class AdaptiveRewriter:
             "a": "а", "c": "с", "e": "е", "o": "о", "p": "р",
             "A": "А", "B": "В", "C": "С", "E": "Е", "H": "Н",
         }
+
+        def _repl(name: str) -> str:
+            if name in self.BUILTIN_NAMES:
+                return name
+            for orig, repl in homoglyphs.items():
+                name = name.replace(orig, repl)
+            return name
+
+        # Pass 1: decide the mapping for def names and params ONLY. Pass 2
+        # rewrites uses that are provably local:
+        #   * Name / arg / def names -- always local;
+        #   * Attribute.attr -- only names that are methods defined in a
+        #     local class.  Renaming every attribute also renamed external
+        #     APIs (`obj.data` -> `obj.dаtа`), which the first fix did;
+        #   * keyword.arg -- only a direct call to a local function whose
+        #     signature has that parameter.  Renaming every keyword broke
+        #     external APIs (`json.dumps(..., default=...)`).
+        rename_map: dict[str, str] = {}
+        local_funcs: dict[str, set[str]] = {}
+        method_names: set[str] = set()
         for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 if node.name not in self.BUILTIN_NAMES:
-                    for orig, repl in homoglyphs.items():
-                        node.name = node.name.replace(orig, repl)
+                    rename_map[node.name] = _repl(node.name)
+                args = (list(getattr(node.args, "posonlyargs", []))
+                        + list(node.args.args)
+                        + list(getattr(node.args, "kwonlyargs", [])))
+                local_funcs[node.name] = {a.arg for a in args}
             if isinstance(node, ast.arg):
                 if node.arg not in self.BUILTIN_NAMES:
-                    for orig, repl in homoglyphs.items():
-                        node.arg = node.arg.replace(orig, repl)
-            if isinstance(node, ast.Name):
-                if node.id in self.BUILTIN_NAMES:
-                    continue
-                for orig, repl in homoglyphs.items():
-                    node.id = node.id.replace(orig, repl)
-        return tree
+                    rename_map[node.arg] = _repl(node.arg)
+            if isinstance(node, ast.ClassDef):
+                for stmt in node.body:
+                    if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        method_names.add(stmt.name)
+        rename_map = {k: v for k, v in rename_map.items() if k != v}
+
+        class _Rename(ast.NodeTransformer):
+            def visit_Name(self, node: ast.Name) -> ast.Name:
+                if node.id in rename_map:
+                    node.id = rename_map[node.id]
+                return node
+
+            def visit_arg(self, node: ast.arg) -> ast.arg:
+                if node.arg in rename_map:
+                    node.arg = rename_map[node.arg]
+                return node
+
+            def visit_FunctionDef(self, node):
+                if node.name in rename_map:
+                    node.name = rename_map[node.name]
+                self.generic_visit(node)
+                return node
+
+            visit_AsyncFunctionDef = visit_FunctionDef
+
+            def visit_Attribute(self, node: ast.Attribute) -> ast.Attribute:
+                if node.attr in method_names and node.attr in rename_map:
+                    node.attr = rename_map[node.attr]
+                self.generic_visit(node)
+                return node
+
+            def visit_Call(self, node: ast.Call) -> ast.Call:
+                if isinstance(node.func, ast.Name):
+                    params = local_funcs.get(node.func.id)
+                    if params:
+                        for kw in node.keywords:
+                            if (kw.arg and kw.arg in params
+                                    and kw.arg in rename_map):
+                                kw.arg = rename_map[kw.arg]
+                self.generic_visit(node)
+                return node
+
+        return _Rename().visit(tree)
 
     def _inject_opaque_predicates(self, tree: ast.AST) -> ast.AST:
         for node in ast.walk(tree):
@@ -230,9 +289,11 @@ class AdaptiveRewriter:
     def _inject_misleading_imports(self, tree: ast.AST) -> ast.AST:
         if not isinstance(tree, ast.Module):
             return tree
+        from obfuscator.core.ast_prologue import insert_module_prologue
         misleading = ["cryptography", "requests", "ssl", "nacl"]
+        guards = []
         for imp in misleading:
-            guarded = ast.Try(
+            guards.append(ast.Try(
                 body=[ast.Import(names=[ast.alias(name=imp, asname=None)])],
                 handlers=[
                     ast.ExceptHandler(
@@ -243,8 +304,8 @@ class AdaptiveRewriter:
                 ],
                 orelse=[],
                 finalbody=[],
-            )
-            tree.body.insert(0, guarded)
+            ))
+        insert_module_prologue(tree, guards)
         return tree
 
     @staticmethod
@@ -276,10 +337,73 @@ class AdaptiveRewriter:
                 node.body.extend(dup)
         return tree
 
+    _DECODER_NAME = "_nx_rev_b64d"
+
+    def _ensure_b64_decoder(self, tree: ast.AST) -> None:
+        """Inject the reversible decoder once at module top."""
+        import ast as _ast
+        for node in tree.body:
+            if isinstance(node, _ast.FunctionDef) and node.name == self._DECODER_NAME:
+                return
+        decoder = _ast.FunctionDef(
+            name=self._DECODER_NAME,
+            args=_ast.arguments(
+                posonlyargs=[],
+                args=[_ast.arg(arg="s", annotation=None)],
+                kwonlyargs=[], kw_defaults=[], defaults=[]),
+            body=[
+                _ast.Return(
+                    value=_ast.Call(
+                        func=_ast.Attribute(
+                            value=_ast.Call(
+                                func=_ast.Attribute(
+                                    value=_ast.Call(
+                                        func=_ast.Name(id="__import__", ctx=_ast.Load()),
+                                        args=[_ast.Constant(value="base64")],
+                                        keywords=[]),
+                                    attr="b64decode", ctx=_ast.Load()),
+                                args=[_ast.Name(id="s", ctx=_ast.Load())],
+                                keywords=[]),
+                            attr="decode", ctx=_ast.Load()),
+                        args=[_ast.Constant(value="utf-8")],
+                        keywords=[]))
+            ],
+            decorator_list=[],
+            returns=None,
+            type_params=[],
+        )
+        from obfuscator.core.ast_prologue import insert_module_prologue
+        insert_module_prologue(tree, [_ast.fix_missing_locations(decoder)])
+
     def _encode_strings(self, tree: ast.AST) -> ast.AST:
         import base64
         skip_ids = set()
         for node in ast.walk(tree):
+            if isinstance(node, ast.JoinedStr):
+                for part in ast.walk(node):
+                    if isinstance(part, ast.Constant):
+                        skip_ids.add(id(part))
+            # A `case "literal":` pattern must stay a literal: wrapping it
+            # in a call turns a value pattern into a class pattern and the
+            # match raises "called match pattern must be a class".
+            if hasattr(ast, "pattern") and isinstance(node, ast.pattern):
+                for part in ast.walk(node):
+                    if isinstance(part, ast.Constant):
+                        skip_ids.add(id(part))
+            if isinstance(node, (ast.Module, ast.FunctionDef,
+                                 ast.AsyncFunctionDef, ast.ClassDef)):
+                body = getattr(node, "body", [])
+                if (body and isinstance(body[0], ast.Expr)
+                        and isinstance(body[0].value, ast.Constant)
+                        and isinstance(body[0].value.value, str)):
+                    skip_ids.add(id(body[0].value))
+            if isinstance(node, (ast.Assign, ast.AugAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for t in targets:
+                    if isinstance(t, ast.Name) and t.id == "__all__":
+                        for elt in ast.walk(node.value):
+                            if isinstance(elt, ast.Constant):
+                                skip_ids.add(id(elt))
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == '__import__':
                 for arg in node.args:
                     if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
@@ -289,14 +413,31 @@ class AdaptiveRewriter:
                         for elt in ast.walk(kw.value):
                             if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
                                 skip_ids.add(id(elt))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str) and len(node.value) >= 4:
-                if id(node) in skip_ids:
-                    continue
-                if all(c in '0123456789abcdefABCDEF' for c in node.value):
-                    continue
-                encoded = base64.b64encode(node.value.encode()).decode()
-                node.value = encoded
+        class _Encode(ast.NodeTransformer):
+            def __init__(self, skip_ids, decoder_name):
+                self._skip = skip_ids
+                self._decoder_name = decoder_name
+
+            def visit_Constant(self, node: ast.Constant) -> ast.AST:
+                if (isinstance(node.value, str) and len(node.value) >= 4
+                        and id(node) not in self._skip
+                        and not all(c in '0123456789abcdefABCDEF'
+                                    for c in node.value)):
+                    # Reversible: wrap in a decoder call instead of
+                    # corrupting the constant in place with no decode step.
+                    encoded = base64.b64encode(node.value.encode()).decode()
+                    return ast.copy_location(ast.Call(
+                        func=ast.Name(id=self._decoder_name, ctx=ast.Load()),
+                        args=[ast.Constant(value=encoded)],
+                        keywords=[]), node)
+                return node
+
+        tree = _Encode(skip_ids, self._DECODER_NAME).visit(tree)
+        ast.fix_missing_locations(tree)
+        # Injected AFTER encoding so the decoder's own literals ("utf-8")
+        # are never fed through the encoder (that would recurse at runtime).
+        self._ensure_b64_decoder(tree)
+        ast.fix_missing_locations(tree)
         return tree
 
     def get_history(self) -> list[dict]:

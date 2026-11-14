@@ -83,6 +83,20 @@ class VMOperand:
     ABS_ADDR = 7
 
 
+# Wire width of each operand type, in bytes. The type tag itself is not
+# written; the interpreter knows the width from the opcode.
+_OPERAND_WIDTH = {
+    VMOperand.IMM8: 1,
+    VMOperand.IMM16: 2,
+    VMOperand.IMM32: 4,
+    VMOperand.IMM64: 8,
+    VMOperand.REG: 1,
+    VMOperand.REG_INDIRECT: 1,
+    VMOperand.REL_OFFSET: 2,
+    VMOperand.ABS_ADDR: 4,
+}
+
+
 class VMOpcode:
     """
     Opcode constants for the 35-instruction VM ISA.
@@ -188,7 +202,7 @@ class VMInstruction:
                 else:
                     total += 4
             elif isinstance(op, tuple):
-                total += 1 + op[1]
+                total += _OPERAND_WIDTH.get(op[0], 1)
             else:
                 total += 1
         return total
@@ -198,11 +212,12 @@ class VMInstruction:
         Encode this instruction to variable-width bytecode.
 
         The first byte is the opcode (mapped through opcode_map if
-        provided). Then each operand is serialized:
+        provided). Then each operand is serialized at the width its
+        type implies, with no type tag:
         - Raw ints: 1, 2, or 4 bytes depending on magnitude.
-        - Tuples (type, value): type byte followed by value encoded
-          per type (IMM8=1B, IMM16=2B, IMM32=4B, REG/REG_INDIRECT=1B,
-          REL_OFFSET=2B signed, ABS_ADDR=4B).
+        - Tuples (type, value): value only (IMM8=1B, IMM16=2B, IMM32=4B,
+          IMM64=8B, REG/REG_INDIRECT=1B, REL_OFFSET=2B signed,
+          ABS_ADDR=4B).
 
         Args:
             opcode_map: Optional mapping from logical to physical
@@ -221,19 +236,20 @@ class VMInstruction:
                     buf.extend(struct.pack('<I', op))
             elif isinstance(op, tuple):
                 typ, val = op[0], op[1]
-                buf.append(typ & 0xFF)
-                if typ == VMOperand.IMM8:
-                    buf.append(val & 0xFF)
-                elif typ == VMOperand.IMM16:
-                    buf.extend(struct.pack('<H', val))
+                # No type tag on the wire: the interpreter (Python and C)
+                # reads a fixed width per opcode, so the tag byte would be
+                # consumed as the operand itself and shift every following
+                # read by one byte.
+                if typ == VMOperand.IMM16:
+                    buf.extend(struct.pack('<H', val & 0xFFFF))
                 elif typ == VMOperand.IMM32:
-                    buf.extend(struct.pack('<I', val))
-                elif typ in (VMOperand.REG, VMOperand.REG_INDIRECT):
-                    buf.append(val & 0xFF)
+                    buf.extend(struct.pack('<I', val & 0xFFFFFFFF))
+                elif typ == VMOperand.IMM64:
+                    buf.extend(struct.pack('<Q', val & 0xFFFFFFFFFFFFFFFF))
                 elif typ == VMOperand.REL_OFFSET:
                     buf.extend(struct.pack('<h', val))
                 elif typ == VMOperand.ABS_ADDR:
-                    buf.extend(struct.pack('<I', val))
+                    buf.extend(struct.pack('<I', val & 0xFFFFFFFF))
                 else:
                     buf.append(val & 0xFF)
             else:

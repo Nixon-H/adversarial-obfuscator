@@ -25,6 +25,7 @@ Dependencies:
 """
 
 from __future__ import annotations
+import hashlib
 import json
 import os
 import sys
@@ -163,7 +164,8 @@ class AlgorithmAnalyzer:
 
 def _name_from_pool(base: str, seed: bytes, index: int) -> str:
     """Generate a seeded obfuscated function name."""
-    h = hash((base, seed, index)) & 0xFFFFFFFF
+    h = int.from_bytes(hashlib.blake2b(f'{base}:{seed!r}:{index}'.encode(),
+                                       digest_size=4).digest(), 'little')
     return f"_p{index}_{h:x}"
 
 
@@ -226,8 +228,11 @@ def generate_coordinator(
     """
     Generate a coordinator function that calls fragments in obfuscated order.
 
-    The calling sequence is XOR-encrypted with a build-derived IV
-    to prevent static analysis of the execution order.
+    The order comes from ``metadata["calling_sequence"]``, which
+    ``fragment_function`` already permutes. It is used as-is: the previous
+    version XORed each index with a key byte and then dropped every index
+    that fell outside the fragment list, so most fragments were never
+    called.
     """
     if not _phase2_enabled():
         return IrFunction("coordinator_stub")
@@ -235,19 +240,18 @@ def generate_coordinator(
     coord = IrFunction(cname, IrType.void())
     coord.params = [("state_buf", IrType.ptr()), ("state_len", IrType.i32())]
     entry = coord.new_block("entry")
+
+    # One value per parameter, reused by every call site.
+    state_buf = IrValue(IrType.ptr(), name="%state_buf")
+    state_len = IrValue(IrType.i32(), name="%state_len")
+
     seq = metadata.get("calling_sequence", [])
-    iv = int.from_bytes(seed[:8], 'little')
-    IrValue(IrType.i32(), name='%key')
-    entry.instructions.append(IrInstruction('add', IrType.i32(), operands=[IrValue.const_int(iv & 0xFF), IrValue.const_int(0)]))
-    for i, raw_idx in enumerate(seq):
-        dec_idx = raw_idx ^ ((iv >> (i % 32)) & 0xFF)
-        if 0 <= dec_idx < len(fragments):
-            fname = fragments[dec_idx].name
-            state_buf = IrValue(IrType.ptr(), name="%state_buf")
-            state_len = IrValue(IrType.i32(), name="%state_len")
+    for raw_idx in seq:
+        if 0 <= raw_idx < len(fragments):
             entry.instructions.append(
-                IrInstruction('call', result_type=IrType.void(), operands=[state_buf, state_len],
-                              func_name=fname)
+                IrInstruction('call', result_type=IrType.void(),
+                              operands=[state_buf, state_len],
+                              func_name=fragments[raw_idx].name)
             )
     entry.set_terminator('ret')
     return coord

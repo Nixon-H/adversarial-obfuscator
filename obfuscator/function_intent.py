@@ -55,11 +55,22 @@ class FunctionIntentObfuscator(ast.NodeTransformer):
         self._name_map: dict[str, str] = {}
         self._call_sites: dict[str, list[ast.Call]] = {}
 
+    def _rng_hex(self) -> str:
+        import secrets as _secrets
+        return _secrets.token_hex(4)
+
     def obfuscate_intent(self, tree: ast.AST) -> ast.AST:
         self._name_map.clear()
         funcs = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        # Collision-free: two functions mapping to the same misleading name
+        # silently redirected every caller to the wrong function.
+        taken = {f.name for f in funcs}
         for func in funcs:
-            self._name_map[func.name] = self._pick_misleading_name(func.name)
+            candidate = self._pick_misleading_name(func.name)
+            while candidate in taken or candidate == func.name:
+                candidate += "_" + self._rng_hex()
+            self._name_map[func.name] = candidate
+            taken.add(candidate)
         # Index direct Name call sites per function (original names) so the
         # parameter swap can prove single-caller safety + rewrite the site.
         self._call_sites = {}

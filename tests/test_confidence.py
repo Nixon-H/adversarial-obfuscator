@@ -219,6 +219,45 @@ def test_compute_all_intervals():
         assert ci.lower < ci.upper
 
 
+def test_single_sample_is_reported_separately_not_mixed_in():
+    """A skipped metric must not become a dict inside the intervals map."""
+    from scripts.phases.phase_confidence import (
+        compute_all_intervals,
+        compute_all_intervals_with_skips,
+        format_intervals_report,
+    )
+    samples = {"security": [80, 85, 90], "lonely": [42]}
+    intervals = compute_all_intervals(samples)
+    assert set(intervals) == {"security"}
+    assert all(isinstance(ci, SecurityConfidenceInterval)
+               for ci in intervals.values())
+
+    intervals, skipped = compute_all_intervals_with_skips(samples)
+    assert set(intervals) == {"security"}
+    assert skipped == {"lonely": "insufficient samples (1)"}
+
+    report = format_intervals_report(intervals, skipped)
+    assert "SKIPPED" in report and "Lonely" in report
+
+
+def test_phase_confidence_survives_a_single_sample(tmp_path, monkeypatch):
+    """The phase used to crash formatting the skipped-metric marker."""
+    import importlib
+    pc = importlib.import_module("scripts.phases.phase_confidence")
+
+    monkeypatch.setattr(pc, "collect_metric_samples",
+                        lambda args: {"lonely": [42]})
+    monkeypatch.setattr(pc, "atomic_write",
+                        lambda path, text: open(path, "w").write(text))
+    args = type("A", (), {"build_dir": str(tmp_path),
+                          "confidence_level": 0.95})()
+    out = pc.phase_confidence(args)
+    assert out == {}
+    report = tmp_path / "confidence_interval_report.json"
+    assert report.exists()
+    assert '"skipped"' in report.read_text()
+
+
 def test_format_intervals_report():
     from scripts.phases.phase_confidence import format_intervals_report
     ci = SecurityConfidenceInterval(

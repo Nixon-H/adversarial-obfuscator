@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import time
 from scripts.z3_optional import z3
 from dataclasses import dataclass, field
@@ -116,6 +117,16 @@ class ProofCarryingObfuscator:
             "transformation": transformation_name,
             "timestamp": time.time(),
             "formulas": [smt2_str],
+            # Expr-bound verification data (audit round 2): the verifier
+            # rebuilds the equivalence query from THESE expressions instead
+            # of trusting whatever assertions the JSON carries, so a
+            # tampered `(assert false)` can no longer verify as
+            # "equivalent". Legacy certificates without these fields fail
+            # verification (fail closed).
+            "original_expr": original_expr.sexpr(),
+            "transformed_expr": transformed_expr.sexpr(),
+            "input_size": int(getattr(inputs[0], "size", lambda: 0)())
+            if inputs else 0,
         }
         if result == z3.sat:
             model = solver.model()
@@ -157,26 +168,40 @@ class ProofCarryingObfuscator:
     def verify_certificate(self, cert: ProofCertificate) -> bool:
         """Independently re-verify a certificate by re-running the solver.
 
-        The stored ``solver_result`` string is UNTRUSTED (anyone holding
-        the JSON can flip "sat" to "unsat"). The verdict is re-derived by
-        parsing the stored SMT-LIB formulas and re-checking them with a
-        fresh solver: unsat => equivalent, anything else => not.
-        Fail-closed: missing formulas, parse errors, solver errors, and
-        ``unknown`` all return False.
+        Audit round 2: the verifier is EXPR-BOUND. The stored
+        ``original_expr`` / ``transformed_expr`` S-EXPRESSIONS (written by
+        prove_equivalence from the actual input and output expressions) are
+        re-combined into a fresh equivalence query — so an attacker editing
+        the JSON to `(assert false)` verifies as NOT equivalent (the query
+        becomes trivially sat on any differing input... in fact it forces a
+        model where they differ, which exists, hence sat -> False).
+
+        Fail-closed: missing expr bindings, parse errors, solver errors,
+        and ``unknown`` all return False. Legacy certificates without the
+        expr bindings return False.
         """
         if not cert.proof_json:
             return False
         try:
-            formulas = cert.proof_json.get("formulas") or []
-            if not formulas:
+            orig_s = cert.proof_json.get("original_expr")
+            trans_s = cert.proof_json.get("transformed_expr")
+            names = cert.proof_json.get("input_names") or []
+            size = cert.proof_json.get("input_size") or 0
+            if not orig_s or not trans_s or not names or size <= 0:
                 return False
+            # Only real SMT symbols get declarations.  A constant input
+            # (z3.BitVecVal) stringifies to a numeral, and
+            # `(declare-fun 5 ...)` is a parse error -- valid constant
+            # certificates used to verify as False.
+            symbols = [n for n in dict.fromkeys(names)
+                       if re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", n)]
+            decls = "".join(
+                f"(declare-fun {n} () (_ BitVec {size}))\n" for n in symbols)
+            query = f"(assert (not (= {orig_s} {trans_s})))\n"
             solver = z3.Solver()
             solver.set("timeout", self.timeout_ms)
-            for smt2 in formulas:
-                if not isinstance(smt2, str) or not smt2.strip():
-                    return False
-                for assertion in z3.parse_smt2_string(smt2):
-                    solver.add(assertion)
+            for assertion in z3.parse_smt2_string(decls + query):
+                solver.add(assertion)
             recheck = solver.check()
             if recheck == z3.unsat:
                 return True
