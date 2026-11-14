@@ -116,3 +116,16 @@ def test_vmproof_dataclass():
     assert proof.solver_time_ms == 1.5
     assert proof.timestamp != ""
     assert proof.proof_hash != ""
+
+
+def test_certificate_hmac_detects_tamper(monkeypatch):
+    from scripts.proofs.vm_correctness import verify_certificate_dict
+    monkeypatch.setenv("NIXON_PROOF_HMAC_KEY", "test-key")
+    proof = VmProof(pass_name="vm_correctness", opcode="ADD",
+                    equivalent=True, solver_time_ms=1.0)
+    cert = proof.to_certificate_dict()
+    assert cert["hmac_tag"]
+    assert verify_certificate_dict(cert) is True
+
+    cert["equivalence_proof"]["equivalent"] = False
+    assert verify_certificate_dict(cert) is False

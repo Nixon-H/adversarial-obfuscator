@@ -163,9 +163,10 @@ class MasterIndex:
         buf += struct.pack(">I", len(self.fragment_map))
         for fid, bid in self.fragment_map:
             buf += struct.pack(">II", fid, bid)
-        buf += struct.pack(">I", len(self.cross_keys))
-        for k in self.cross_keys:
-            buf += struct.pack(">I", len(k)) + k
+        # Cross keys are NOT serialized: they are the fragment encryption
+        # keys, and anyone holding the index could decrypt every share with
+        # them. Holders re-derive them from the master secret.
+        buf += struct.pack(">I", 0)
         # The master secret is deliberately NOT serialized. `reconstruct()`
         # derives cross keys from the holder's own secret; persisting the
         # secret beside the shares would let any reader of the index decrypt
@@ -201,7 +202,14 @@ class MultiBinaryDistributor:
         self.mode = mode
 
     def _derive_cross_key(self, binary_a: int, binary_b: int) -> bytes:
-        data = self.master_secret + struct.pack(">II", binary_a, binary_b)
+        """Derive the key shared by two binaries.
+
+        The pair is sorted first so the derivation is symmetric: the ring
+        key for the last binary is derive(n-1, 0), which has to equal
+        derive(0, n-1) or the two sides disagree about the key.
+        """
+        lo, hi = sorted((binary_a, binary_b))
+        data = self.master_secret + struct.pack(">II", lo, hi)
         return hashlib.sha256(data).digest()
 
     def distribute(self, fragments: List[bytes], num_binaries: int, threshold: Optional[int] = None) -> Tuple[List[bytes], MasterIndex]:
@@ -249,6 +257,9 @@ class MultiBinaryDistributor:
                     next_fragment_id=fid + 1 if fid + 1 < len(fragments) else 0xFFFFFFFF,
                 )
                 assignments[bid].append(ef)
+            # Every binary holds a share of every fragment, so the map
+            # records the primary holder (binary 0). It is informational;
+            # reassembly reads the shares out of the binaries themselves.
             frag_map.append((fid, 0))
 
         index = MasterIndex(

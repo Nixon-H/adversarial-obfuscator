@@ -43,6 +43,54 @@ CPU_PORT_MAP = {
 }
 
 
+def _function_body_span(text: str, body_start: int) -> tuple[int, int]:
+    """Return (start, end) of a function body, where end is its closing brace."""
+    depth = 1
+    i = body_start
+    while i < len(text):
+        ch = text[i]
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                return body_start, i
+        i += 1
+    return body_start, len(text)
+
+
+def _first_block_label_end(text: str, body_start: int) -> int:
+    """Offset just past the first basic-block label in a function body.
+
+    Inserting the prologue directly after ``{`` puts instructions in an
+    implicit entry block that then has no terminator, which llc rejects.
+    """
+    start, end = _function_body_span(text, body_start)
+    m = re.search(r'^[A-Za-z_.][\w.$]*:\s*$', text[start:end], re.MULTILINE)
+    if m is None:
+        return body_start
+    return start + m.end()
+
+
+def _insert_before_terminator(text: str, body_start: int, snippet: str) -> str:
+    """Insert ``snippet`` just before the function's final terminator.
+
+    Appending the epilogue at end-of-file put instructions outside any
+    function, and appending it before the closing brace put them after the
+    existing ``ret``. Both are invalid IR. The epilogue's last block falls
+    through into the original terminator instead.
+    """
+    start, end = _function_body_span(text, body_start)
+    body = text[start:end]
+    last_ret = None
+    for m in re.finditer(r'^\s*ret\s+[^\n]*$', body, re.MULTILINE):
+        last_ret = m
+    if last_ret is None:
+        return text[:end] + snippet + text[end:]
+    cut = start + last_ret.start()
+    return text[:cut] + snippet + text[cut:]
+
+
 class PortEntanglementPass:
     """
     CPU port entanglement pass for anti-debug / anti-emulation.
@@ -86,11 +134,10 @@ class PortEntanglementPass:
         if not match:
             return ir_text
 
-        pos = match.end()
+        pos = _first_block_label_end(ir_text, match.end())
         inserted = '\n' + prologue + '\n'
         result = ir_text[:pos] + inserted + ir_text[pos:]
-        result += '\n' + epilogue + '\n'
-        return result
+        return _insert_before_terminator(result, pos, '\n' + epilogue + '\n')
 
     def generate_timing_prologue(self) -> str:
         """
@@ -107,12 +154,17 @@ class PortEntanglementPass:
         """
         port_cfg = self.port_config
         total_ports = port_cfg['alu_ports'] + port_cfg['branch_ports'] + port_cfg['load_ports'] + port_cfg['store_ports']
+        # LLVM IR has no hex integer literals; the packed port counts have to
+        # be emitted in decimal.
+        packed_seed = int(
+            f"{total_ports:02x}{port_cfg['alu_ports']:02x}"
+            f"{port_cfg['branch_ports']:02x}{port_cfg['load_ports']:02x}", 16)
         ir = f"""
 ; Port Entanglement Timing Prologue
 ; Target: {self.target_cpu}
 ; Port config: alu={port_cfg['alu_ports']} branch={port_cfg['branch_ports']} load={port_cfg['load_ports']} store={port_cfg['store_ports']}
 %port_entangle_seed = alloca i64, align 8
-store i64 0x{total_ports:02x}{port_cfg['alu_ports']:02x}{port_cfg['branch_ports']:02x}{port_cfg['load_ports']:02x}, ptr %port_entangle_seed
+store i64 {packed_seed}, ptr %port_entangle_seed
 %port_entangle_t0 = call i64 @__rdtsc()
 """
         return ir
@@ -210,7 +262,6 @@ pe_ok:
         match = func_pattern.search(result)
         if not match:
             return result
-        pos = match.end()
+        pos = _first_block_label_end(result, match.end())
         result = result[:pos] + '\n' + prologue + result[pos:]
-        result += '\n' + epilogue + '\n'
-        return result
+        return _insert_before_terminator(result, pos, '\n' + epilogue + '\n')

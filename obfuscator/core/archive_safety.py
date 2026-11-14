@@ -68,4 +68,13 @@ def extract_tar_confined(tar_path: str, output_dir: str,
             # Explicit, because Python 3.14 changes the default.
             t.extractall(output_dir, filter="data")
         else:
+            # Pre-3.12 fallback without the data filter: the path checks
+            # above cannot see where a symlink POINTS, so a member named
+            # inside output_dir could still land outside via its target.
+            # Refuse link members outright instead of trusting extraction.
+            for member in t.getmembers():
+                if member.issym() or member.islnk():
+                    raise ValueError(
+                        "archive contains a link member and this Python has "
+                        "no tarfile data filter; extraction refused")
             t.extractall(output_dir)

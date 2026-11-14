@@ -403,12 +403,13 @@ def _sub_instr(line: str) -> str | list[str] | None:
     sub_m = re.match(r'sub\s+(i\d+)\s+(%\S+)\s*,\s*(%\S+)', rhs)
     if sub_m:
         t, a, b = sub_m.groups()
-        t1, t2, t3 = _get_new_var("t1"), _get_new_var("t2"), _get_new_var("t3")
+        t1, t2 = _get_new_var("t1"), _get_new_var("t2")
+        # a - b == a + (~b + 1). The previous form added one to a and then
+        # subtracted one from the total, which computes a - b - 1.
         return [
-            f"  {t1} = add {t} {a}, 1",
-            f"  {t2} = xor {t} {b}, -1",
-            f"  {t3} = add {t} {t1}, {t2}",
-            f"  {result} = sub {t} {t3}, 1",
+            f"  {t1} = xor {t} {b}, -1",
+            f"  {t2} = add {t} {t1}, 1",
+            f"  {result} = add {t} {a}, {t2}",
         ]
 
     mul_m = re.match(r'mul\s+(i\d+)\s+(%\S+)\s*,\s*(%\S+)', rhs)

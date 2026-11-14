@@ -205,8 +205,10 @@ def _build_knowledge_graph(args, build_dir: str) -> dict:
     for k, mname in enumerate(mitigations_raw):
         mitigations.append({"name": mname})
 
-    before_metrics = _load_json_if_exists(os.path.join(build_dir, "metrics_report.json"), {"entropy": 0.2, "cyclomatic_complexity": 5, "instruction_count": 100})
-    after_metrics = _load_json_if_exists(os.path.join(build_dir, "benchmark_report.json"), {"entropy": 0.8, "cyclomatic_complexity": 50, "instruction_count": 500})
+    # Missing reports stay missing: substituting 0.2/0.8 defaults fabricated
+    # a before/after improvement out of thin air (audit round 2).
+    before_metrics = _load_json_if_exists(os.path.join(build_dir, "metrics_report.json"), {})
+    after_metrics = _load_json_if_exists(os.path.join(build_dir, "benchmark_report.json"), {})
 
     return {
         "attack_vectors": attack_vectors,
@@ -217,11 +219,11 @@ def _build_knowledge_graph(args, build_dir: str) -> dict:
         "before_metrics": before_metrics,
         "after_metrics": after_metrics,
         "threats": [
-            {"name": "Reverse Engineering", "severity": "high", "mitigation": "CFG Flattening, MBA", "status": "mitigated"},
-            {"name": "Decompilation", "severity": "high", "mitigation": "VM Compilation", "status": "mitigated"},
-            {"name": "String Analysis", "severity": "medium", "mitigation": "String Fragmentation", "status": "mitigated"},
-            {"name": "Symbolic Execution", "severity": "critical", "mitigation": "Opaque Predicates", "status": "mitigated"},
-            {"name": "LLM-Assisted Analysis", "severity": "medium", "mitigation": "Provenance Poisoning, Reasoning Traps", "status": "mitigated"},
+            {"name": "Reverse Engineering", "severity": "high", "mitigation": "CFG Flattening, MBA", "status": "declared"},
+            {"name": "Decompilation", "severity": "high", "mitigation": "VM Compilation", "status": "declared"},
+            {"name": "String Analysis", "severity": "medium", "mitigation": "String Fragmentation", "status": "declared"},
+            {"name": "Symbolic Execution", "severity": "critical", "mitigation": "Opaque Predicates", "status": "declared"},
+            {"name": "LLM-Assisted Analysis", "severity": "medium", "mitigation": "Provenance Poisoning, Reasoning Traps", "status": "declared"},
         ],
     }
 

@@ -143,12 +143,14 @@ class BenchmarkReport:
 
         llm_rows = ""
         for model, scores in llm_results.items():
-            avg = sum(scores.values()) / max(len(scores), 1)
+            numeric = {k: v for k, v in scores.items()
+                       if isinstance(v, (int, float)) and not isinstance(v, bool)}
+            avg = sum(numeric.values()) / max(len(numeric), 1)
             llm_rows += f"""<tr>
 <td style="padding:8px;border-bottom:1px solid #e5e7eb;font-weight:500;">{escape(model)}</td>
 <td style="padding:8px;border-bottom:1px solid #e5e7eb;">{_score_bar(avg)}</td>
 <td style="padding:8px;border-bottom:1px solid #e5e7eb;font-size:13px;">
-{', '.join(f'{k}: {v:.2f}' for k, v in sorted(scores.items()))}
+{', '.join(f'{k}: {v:.2f}' for k, v in sorted(numeric.items()))}
 </td>
 </tr>"""
 
@@ -250,8 +252,10 @@ radarData.forEach(d => drawRadar('radar', radarMetrics, [d.values]));
             lines.append("")
             lines.append(f"  {'--- LLM Evaluation ---':^60s}")
             for model, scores in llm_results.items():
-                avg = sum(scores.values()) / max(len(scores), 1)
-                lines.append(f"  {model:30s}: avg={avg:.4f}  {scores}")
+                numeric = {k: v for k, v in scores.items()
+                           if isinstance(v, (int, float)) and not isinstance(v, bool)}
+                avg = sum(numeric.values()) / max(len(numeric), 1)
+                lines.append(f"  {model:30s}: avg={avg:.4f}  {numeric}")
 
         lines.append("=" * 60)
         return "\n".join(lines)

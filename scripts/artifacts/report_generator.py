@@ -83,7 +83,7 @@ def generate_verification_report(
 
     md_parts = ["# Verification Report", ""]
     md_parts.append(f"**Generated:** {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}")
-    md_parts.append(f"**Status:** {'ALL PASSED' if verification_data.get('passed', True) else 'SOME FAILED'}")
+    md_parts.append(f"**Status:** {'ALL PASSED' if verification_data.get('passed', False) else 'NOT ALL PASSED'}")
     md_parts.append("")
 
     ts = test_results

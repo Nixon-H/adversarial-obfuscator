@@ -82,7 +82,9 @@ class ConflictDetector:
                     detected.append(c)
 
             elif c.conflict_type == ConflictType.REQUIRES:
-                if b_present and a_present:
+                # Violation: A is enabled but its prerequisite B is not
+                # (the old check flagged the satisfied combination).
+                if a_present and not b_present:
                     detected.append(c)
 
             elif c.conflict_type == ConflictType.SUBSUMES:

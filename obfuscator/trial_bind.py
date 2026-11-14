@@ -401,6 +401,11 @@ def check_and_update(build_key, fingerprint, deadline_epoch, token,
                         # closed like a tampered state file instead of
                         # silently degrading rollback protection.
                         return "tampered"
+                    # Fallback path (no O_NOFOLLOW on this platform): a
+                    # symlink at the state path is attacker-controlled, so
+                    # check before trusting the plain write.
+                    if os.path.islink(path):
+                        return "tampered"
                     with open(path, "w", encoding="utf-8") as fh:
                         fh.write(seal_last_seen(build_key, moment))
                     return "ok"

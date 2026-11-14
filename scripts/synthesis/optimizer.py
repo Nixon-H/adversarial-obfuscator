@@ -67,7 +67,10 @@ class ProtectionOptimizer:
                 if c in pset:
                     return False
             for prereq in cost.prerequisites:
-                if prereq in pset:
+                # A prerequisite must be PRESENT: the old check inverted
+                # this and rejected every plan that satisfied its prereqs
+                # (audit round 2).
+                if prereq not in pset:
                     return False
         return True
 

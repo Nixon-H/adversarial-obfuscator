@@ -244,6 +244,10 @@ def verify(
         signature = bytes.fromhex(doc["sig"])
     except (ValueError, KeyError, TypeError) as e:
         raise LicenceError(f"not a licence token: {e}") from e
+    if not isinstance(payload, dict):
+        raise LicenceError(
+            "malformed licence payload: expected an object, got "
+            f"{type(payload).__name__}")
 
     if payload.get("schema") != SCHEMA:
         raise LicenceError(f"unsupported licence schema: {payload.get('schema')!r}")
@@ -330,6 +334,9 @@ def chain_owner_of(
 
     if expected_chain_id is not None:
         result = _rpc("eth_chainId", [])
+        if not isinstance(result, str) or not result:
+            raise RuntimeError(
+                f"licence chain RPC returned no chain id: {result!r}")
         if int(result, 16) != int(expected_chain_id):
             raise RuntimeError(
                 f"licence chain mismatch: want {int(expected_chain_id)}, got {int(result, 16)}"
@@ -370,9 +377,23 @@ def load_token(path: str) -> str:
 
 
 def save_token(token: str, path: str) -> str:
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(token + "\n")
+    # mkstemp creates a unique 0600 file in the destination directory, so
+    # a pre-created predictable ".tmp" (or a symlink planted there) cannot
+    # control the mode or the target.  os.replace is atomic on the same
+    # filesystem.
+    import tempfile
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    fd, tmp = tempfile.mkstemp(
+        prefix=os.path.basename(path) + ".", dir=directory)
+    try:
+        try:
+            os.fchmod(fd, 0o600)
+        except (AttributeError, OSError):
+            os.chmod(tmp, 0o600)
+        os.write(fd, (token + "\n").encode("utf-8"))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
     os.replace(tmp, path)
     return path
 

@@ -1,9 +1,14 @@
 """Binary encryption pipeline — Stage 4.
 
-Encrypts compiled ELF binaries block-by-block using AES-256-CTR. Supports
+Obfuscates compiled ELF binaries block-by-block using AES-256-CTR. Supports
 two modes: bulk (single stub, safe for linked executables) and per-block
 (individual stubs, for relocatable objects). Embeds decryption metadata
 in a `.shadorenc` ELF section.
+
+Confidentiality note: the keystream embedded in the stub is XOR-masked with
+a 32-byte runtime key written to a 0600 sidecar (`<output>.key`).  The stub
+reads that file at startup and exits(1) if it is missing, so the artifact
+alone does not decrypt.  The sidecar must be distributed with the artifact.
 
 Public API:
     - encrypt_binary(input_path, output_path, seed, block_size, ...) -> dict
@@ -13,6 +18,7 @@ Dependencies:
     - encrypt.aes, encrypt.elf, encrypt.stub
 """
 
+import os
 import struct
 import hashlib
 
@@ -85,22 +91,45 @@ def encrypt_binary(input_path: str, output_path: str,
 
     encrypted_text = b''.join(encrypted_blocks)
 
+    # Runtime key source: the embedded keystream is XOR-masked with a key
+    # that lives in a sidecar file, not in the binary.  Without the file the
+    # stub exits(1); ciphertext XOR the embedded bytes is not the plaintext.
+    runtime_key_path = os.path.abspath(output_path) + ".key"
+    env_key = os.environ.get("NIXON_ENC_RUNTIME_KEY", "").strip()
+    if env_key:
+        try:
+            runtime_key = bytes.fromhex(env_key)
+        except ValueError as exc:
+            raise ValueError("NIXON_ENC_RUNTIME_KEY must be hex") from exc
+        if len(runtime_key) != 32:
+            raise ValueError("NIXON_ENC_RUNTIME_KEY must be 32 bytes")
+    else:
+        runtime_key = os.urandom(32)
+    masked_keystream = bytes(
+        k ^ runtime_key[i % 32] for i, k in enumerate(all_keystream))
+
+    # The stub lives in its own executable PT_LOAD segment appended at EOF.
+    # Keeping it out of .text means no existing vaddr moves, so DT_FINI,
+    # DT_INIT_ARRAY and relocations stay valid.
+    key_path_len = len(runtime_key_path.encode("utf-8")) + 1
+    stub_len = stubmod.stub_size(text_size, key_path_len=key_path_len)
+    plan = elf.plan_load_segment(stub_len)
+    stub_vaddr = plan['vaddr'] + plan['table_size']
     stub = stubmod.make_stub_with_keystream(
         text_size=text_size,
         original_entry=entry_offset_in_text,
-        keystream=all_keystream,
+        keystream=masked_keystream,
+        text_base_delta=text_addr - (stub_vaddr + 6),
+        key_path=runtime_key_path,
     )
 
-    new_text = encrypted_text + stub
-    stub_start_in_text = text_size
-
-    new_entry = text_addr + stub_start_in_text
-
-    elf.replace_text(new_text, add_stub_size=len(stub))
+    elf.replace_text(encrypted_text, add_stub_size=0)
+    new_entry = elf.add_load_segment(stub, plan)
     elf.set_entry_point(new_entry)
 
+    _write_key_file(runtime_key_path, runtime_key)
+
     if enable_microjit:
-        import os
         microjit_seed = int.from_bytes(os.urandom(4), 'little')
         if degradation_config:
             degradation_config['microjit_seed'] = microjit_seed
@@ -112,7 +141,7 @@ def encrypt_binary(input_path: str, output_path: str,
                                          len(stub), degradation_config,
                                          enable_exec_guard)
     elf.add_shadorenc_section(metadata)
-    elf.save(output_path)
+    elf.save(output_path, mode=_source_mode(input_path))
 
     result = {
         'num_blocks': num_blocks,
@@ -123,11 +152,31 @@ def encrypt_binary(input_path: str, output_path: str,
         'text_size': text_size,
         'stub_size': len(stub),
         'enable_microjit': enable_microjit,
+        'key_file': runtime_key_path,
+        'confidentiality': 'runtime key file; keystream masked in the stub',
     }
     if degradation_config:
         result['degradation'] = degradation_config
     result['enable_exec_guard'] = enable_exec_guard
     return result
+
+
+def _write_key_file(path: str, key: bytes) -> None:
+    """Write the 32-byte runtime key with 0600 permissions."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, key)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _source_mode(path: str) -> int:
+    """Permission bits to carry over to the encrypted output."""
+    try:
+        return os.stat(path).st_mode & 0o777
+    except OSError:
+        return 0o755
 
 
 def _split_blocks(data: bytes, block_size: int) -> list[bytes]:
@@ -197,26 +246,48 @@ def encrypt_binary_per_block(input_path: str, output_path: str,
     blocks = _split_blocks(text_data, block_size)
     num_blocks = len(blocks)
 
+    runtime_key_path = os.path.abspath(output_path) + ".key"
+    env_key = os.environ.get("NIXON_ENC_RUNTIME_KEY", "").strip()
+    if env_key:
+        try:
+            runtime_key = bytes.fromhex(env_key)
+        except ValueError as exc:
+            raise ValueError("NIXON_ENC_RUNTIME_KEY must be hex") from exc
+        if len(runtime_key) != 32:
+            raise ValueError("NIXON_ENC_RUNTIME_KEY must be 32 bytes")
+    else:
+        runtime_key = os.urandom(32)
+    key_path_len = len(runtime_key_path.encode("utf-8")) + 1
+
     final_text_parts = []
     for i, blk in enumerate(blocks):
         blk_key = aes.derive_block_key(seed, i, len(blk))
         nonce = hashlib.sha256(blk_key).digest()[:8]
         keystream = aes.aes256_ctr_keystream(blk_key, nonce, len(blk))
         encrypted = bytes(p ^ k for p, k in zip(blk, keystream))
+        masked = bytes(k ^ runtime_key[j % 32]
+                       for j, k in enumerate(keystream))
 
+        stub_len = stubmod.stub_size(len(encrypted),
+                                     key_path_len=key_path_len)
         stub = stubmod.make_stub_with_keystream(
             text_size=len(encrypted),
             original_entry=0,
-            keystream=keystream,
+            keystream=masked,
+            # The stub precedes its block: block base = stub_base + stub_len.
+            text_base_delta=stub_len - 6,
+            key_path=runtime_key_path,
         )
         final_text_parts.append(stub)
         final_text_parts.append(encrypted)
 
     new_text = b''.join(final_text_parts)
+    new_text += b'\x00' * ((len(text_data) - len(new_text)) % 0x1000)
     new_entry = text_addr
 
     elf.replace_text(new_text, add_stub_size=len(new_text) - len(text_data))
     elf.set_entry_point(new_entry)
+    _write_key_file(runtime_key_path, runtime_key)
 
     metadata = _build_shadorenc_metadata(block_size, num_blocks,
                                          len(text_data), entry_offset_in_text,
@@ -224,7 +295,7 @@ def encrypt_binary_per_block(input_path: str, output_path: str,
                                          degradation_config,
                                          enable_exec_guard=False)
     elf.add_shadorenc_section(metadata)
-    elf.save(output_path)
+    elf.save(output_path, mode=_source_mode(input_path))
 
     result = {
         'num_blocks': num_blocks,
@@ -234,6 +305,8 @@ def encrypt_binary_per_block(input_path: str, output_path: str,
         'original_entry': hex(text_addr + entry_offset_in_text),
         'text_size': len(text_data),
         'stub_total': len(new_text) - len(text_data),
+        'key_file': runtime_key_path,
+        'confidentiality': 'runtime key file; keystream masked in the stub',
     }
     if degradation_config:
         result['degradation'] = degradation_config

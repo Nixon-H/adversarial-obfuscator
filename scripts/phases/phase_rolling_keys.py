@@ -63,12 +63,14 @@ def phase_rolling_keys(payload_path=None):
         log("ROLLING_KEYS", f"Bound {len(bound)} test fragments with rolling keys")
 
     rolling_config = {
-        "chain_secret": chain_secret.hex(),
+        # Key material withheld from the sidecar (audit round 2): the JSON
+        # lands in build/ and would ship the whole chain.
+        "chain_secret": "<withheld>",
         "rolling_key_mode": True,
         "num_fragments": len(bound),
         "fragment_ids": [bf.fragment_id for bf in bound],
         "roll_counter": binder._roll_counter,
-        "rolling_key": binder._rolling_key.hex() if binder._rolling_key else None,
+        "rolling_key": "<withheld>",
     }
     config_path = os.path.join(BUILD_DIR, "rolling_keys_config.json")
     with open(config_path, "w", encoding='utf-8') as f:

@@ -92,7 +92,17 @@ def test_shr_is_emitted_not_dropped():
     )
     ir = compile_source(source)
     assert "shr" in ir
-    assert "lshr" in lower(source)
+    # Python >> is arithmetic on signed ints; lshr would be wrong for
+    # negative operands.
+    assert "ashr" in lower(source)
+
+
+def test_floordiv_lowers_to_the_floor_adjustment_sequence():
+    """Python // floors; a bare sdiv truncates toward zero."""
+    ll = lower("def f(a, b):\n    return a // b\n")
+    assert "sdiv" in ll
+    assert "srem" in ll
+    assert "select i1" in ll
 
 
 def test_comparisons_are_lowered():

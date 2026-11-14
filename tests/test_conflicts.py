@@ -116,10 +116,11 @@ class TestCheckFlags:
         assert conflicts[0].flag_a == "skip_obfuscate"
 
     def test_check_skip_irgen_fhe(self):
+        # REQUIRES means "A needs B": the violation is A set while B is not.
         detector = ConflictDetector([
             Conflict("skip_irgen", "fhe_vm", ConflictType.REQUIRES, Severity.ERROR, "desc", "fix"),
         ])
-        conflicts = detector.check_flags({"skip_irgen": True, "fhe_vm": True})
+        conflicts = detector.check_flags({"skip_irgen": True})
         assert len(conflicts) == 1
 
     def test_no_false_positive(self):
@@ -339,9 +340,9 @@ class TestKnownConflictMatrix:
 
     def test_requires_triggered_when_violated(self):
         detector = ConflictDetector([
-            Conflict("a", "b", ConflictType.REQUIRES, Severity.ERROR, "b requires a to be absent", "fix"),
+            Conflict("a", "b", ConflictType.REQUIRES, Severity.ERROR, "a requires b", "fix"),
         ])
-        c = detector.check_flags({"a": True, "b": True})
+        c = detector.check_flags({"a": True})
         assert len(c) == 1
         assert c[0].flag_a == "a"
         assert c[0].flag_b == "b"
@@ -365,6 +366,6 @@ class TestCLIArgCheck:
         detector = ConflictDetector([
             Conflict("skip_irgen", "fhe_vm", ConflictType.REQUIRES, Severity.ERROR, "desc", "fix"),
         ])
-        ns = argparse.Namespace(skip_irgen=True, fhe_vm=True, payload="test.py")
+        ns = argparse.Namespace(skip_irgen=True, fhe_vm=False, payload="test.py")
         conflicts = detector.check_cli_args(ns)
         assert len(conflicts) == 1

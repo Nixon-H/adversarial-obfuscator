@@ -140,7 +140,7 @@ class ObfuscationTransformer:
             _state = random.getstate()
             random.seed(self.seed)
             _patch = self._patch_secrets()
-            result, _ = apply_ast_mutation(source, options)
+            result, _ = apply_ast_mutation(source, options, strict=True)
             self._unpatch_secrets(_patch)
             random.setstate(_state)
             result = self._apply_residue(result, options)
@@ -149,7 +149,7 @@ class ObfuscationTransformer:
             except Exception:
                 pass
             return result
-        result, _ = apply_ast_mutation(source, options)
+        result, _ = apply_ast_mutation(source, options, strict=True)
         result = self._apply_residue(result, options)
         try:
             _caller_options['residue_map'] = options.get('residue_map', {})
@@ -539,7 +539,7 @@ def process_file_safe(args):
             with open(src, "rb") as f: raw_source = f.read()
             try:
                 decoded_source = raw_source.decode('utf-8')
-                mutated_source, _ = apply_ast_mutation(decoded_source, ast_opts)
+                mutated_source, _ = apply_ast_mutation(decoded_source, ast_opts, strict=True)
                 raw_source = mutated_source.encode('utf-8')
             except Exception: pass
             header = b"# NIXON_HEADER \n" 
@@ -562,7 +562,15 @@ def generate_report(base_name, build_info, all_outputs):
 def encrypt_payload(data, key, nonce, use_aes_ctr=True):
     if use_aes_ctr is None:
         use_aes_ctr = _check_aes_ctr()
-    if use_aes_ctr and _check_aes_ctr():
+    if use_aes_ctr:
+        if not _check_aes_ctr():
+            # The caller explicitly asked for the AES seal: a silent
+            # downgrade to the XOR stream would be a confidentiality
+            # regression nobody was told about. Fail the build instead.
+            raise SystemExit(
+                "AES seal requested but no AES backend is available; "
+                "install 'cryptography' (or pass use_aes_ctr=False to "
+                "choose the XOR stream deliberately)")
         return Nixon_Enc_AES_CTR(data, key, nonce)
     return Nixon_Enc_blob(data, key, nonce)
 
@@ -586,25 +594,27 @@ def _check_aes_ctr():
     return _AES_CTR_AVAILABLE
 
 def Nixon_Enc_AES_CTR(data, key, nonce):
+    """AES-256-CTR seal. The caller asked for AES by name: a missing
+    backend is a build failure, never a silent XOR downgrade."""
+    derived = hashlib.sha256(key + nonce).digest()
+    aes_key = derived[:32]
+    iv = hashlib.sha256(nonce + key).digest()[:16]
     try:
-        derived = hashlib.sha256(key + nonce).digest()
-        aes_key = derived[:32]
-        iv = hashlib.sha256(nonce + key).digest()[:16]
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
         cipher = Cipher(algorithms.AES(aes_key), modes.CTR(iv))
         encryptor = cipher.encryptor()
         return encryptor.update(bytes(data)) + encryptor.finalize()
     except ImportError:
-        try:
-            from Crypto.Cipher import AES
-            derived = hashlib.sha256(key + nonce).digest()
-            aes_key = derived[:32]
-            iv = hashlib.sha256(nonce + key).digest()[:16]
-            cipher = AES.new(aes_key, AES.MODE_CTR, nonce=b'', initial_value=int.from_bytes(iv, 'big'))
-            return cipher.encrypt(bytes(data))
-        except ImportError:
-            pass
-    return Nixon_Enc_blob(data, key, nonce)
+        pass
+    try:
+        from Crypto.Cipher import AES
+        cipher = AES.new(aes_key, AES.MODE_CTR, nonce=b'', initial_value=int.from_bytes(iv, 'big'))
+        return cipher.encrypt(bytes(data))
+    except ImportError:
+        raise SystemExit(
+            "AES seal requested but no AES backend is available; install "
+            "'cryptography' (or call Nixon_Enc_blob deliberately for the "
+            "XOR stream)")
 
 def Nixon_Enc_blob(data, key, nonce):
     out = bytearray(data); l = len(out); k_h = hashlib.sha256(key + nonce).digest()
@@ -1234,7 +1244,7 @@ def prepare_obfuscated_source(source_path, ast_opts=None):
     except Exception:
         pass
     print("    [+] Pre-obfuscating source for native build...")
-    protected_code, _ = apply_ast_mutation(source_code, options=ast_opts)
+    protected_code, _ = apply_ast_mutation(source_code, options=ast_opts, strict=True)
     return protected_code
 def build_local_cython(source_content, target_python=None):
     import tempfile
@@ -1443,16 +1453,12 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
                 _phase4_suffix += "_NX_SNAPSHOT_GATE = \"DISABLED\"\n"
         except SystemExit:
             raise
-        except Exception:
-            try:
-                _phase4_suffix += "_NX_SNAPSHOT_GATE = \"DISABLED\"\n"
-            except Exception:
-                pass
+        except Exception as _snap_exc:
+            # Fail closed: a default-on integrity gate that cannot be
+            # emitted must stop the build, not silently ship unprotected.
+            raise SystemExit("snapshot gate emission failed: %s" % (_snap_exc,))
     else:
-        try:
-            _phase4_suffix += "_NX_SNAPSHOT_GATE = \"DISABLED\"\n"
-        except Exception:
-            pass
+        _phase4_suffix += "_NX_SNAPSHOT_GATE = \"DISABLED\"\n"
     # Runtime integrity: stdlib function audit (bytecode compare).
     # Default ON unless stdlib_audit_off=True (--no-stdlib-audit);
     # runtime env NIXON_STDLIB_AUDIT_OFF also disables. Same
@@ -1483,16 +1489,11 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
                 _phase4_suffix += "_NX_STDLIB_GATE = \"DISABLED\"\n"
         except SystemExit:
             raise
-        except Exception:
-            try:
-                _phase4_suffix += "_NX_STDLIB_GATE = \"DISABLED\"\n"
-            except Exception:
-                pass
+        except Exception as _sa_exc:
+            # Fail closed: same reasoning as the snapshot gate.
+            raise SystemExit("stdlib gate emission failed: %s" % (_sa_exc,))
     else:
-        try:
-            _phase4_suffix += "_NX_STDLIB_GATE = \"DISABLED\"\n"
-        except Exception:
-            pass
+        _phase4_suffix += "_NX_STDLIB_GATE = \"DISABLED\"\n"
     # Kill ladder (V10 single failure path): every enforcement gate in the
     # emitted loader funnels through _nx_kill (wipe + silent exit 137).
     # Emitted ONCE, AFTER the integrity gates above (they call _nx_kill)
@@ -1500,9 +1501,16 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
     # import failure can never break builds.
     try:
         from obfuscator.kill_ladder import emit_kill_snippet as _kl_emit
-        _phase4_suffix += _kl_emit() + "\n"
-    except Exception:
-        pass
+        from obfuscator.core.sources import VARS as _VARS_kill
+        _phase4_suffix += _kl_emit(
+                        alert_fn=_VARS_kill["FUNC_TRIGGER_ALERT"]) + "\n"
+    except SystemExit:
+        raise
+    except Exception as _kl_exc:
+        # Fail closed: _nx_kill is the single failure path every gate
+        # above funnels into; shipping without it turns armed gates into
+        # runtime NameErrors.
+        raise SystemExit("kill-ladder emission failed: %s" % (_kl_exc,))
     # AUDIT GAPS #52/#75: MAC-bound trial deadline + clock-rollback gate.
     # Additive: only when trial_seconds is set; None/0 keeps current
     # behavior (plain _NX_TRIAL_SECONDS marker, no gate). The gate is a
@@ -1549,11 +1557,12 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
             _phase4_suffix += "_NX_TRIAL_GATE = \"DISABLED\"\n"
     except SystemExit:
         raise
-    except Exception:
-        try:
-            _phase4_suffix += "_NX_TRIAL_GATE = \"DISABLED\"\n"
-        except Exception:
-            pass
+    except Exception as _tb_exc:
+        if trial_seconds:
+            # The operator armed this gate; silently disabling it would
+            # ship an expiry-free artefact. Fail the build.
+            raise SystemExit("trial gate emission failed: %s" % (_tb_exc,))
+        _phase4_suffix += "_NX_TRIAL_GATE = \"DISABLED\"\n"
     # AUDIT GAP #71: runtime watermark refuse-to-run gate. Additive: only
     # when watermark is set; None/"" keeps current behavior (plain
     # _NX_WATERMARK_GATE marker = DISABLED, no gate). The gate is a
@@ -1595,11 +1604,12 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
             _phase4_suffix += "_NX_WATERMARK_GATE = \"DISABLED\"\n"
     except SystemExit:
         raise
-    except Exception:
-        try:
-            _phase4_suffix += "_NX_WATERMARK_GATE = \"DISABLED\"\n"
-        except Exception:
-            pass
+    except Exception as _wm_exc:
+        if watermark:
+            # The operator armed this gate; a silent downgrade would ship
+            # an unwatermarked artefact. Fail the build.
+            raise SystemExit("watermark gate emission failed: %s" % (_wm_exc,))
+        _phase4_suffix += "_NX_WATERMARK_GATE = \"DISABLED\"\n"
     # Batch-3 build-id salt (additive, safe default): when None, mint a
     # fresh random id so identical payload+key pairs still emit different
     # blobs/loaders per build. Pass a fixed string for deterministic tests.
@@ -2493,6 +2503,19 @@ def _licence_runtime_helpers(token_hash_hex: str, chain_enabled: bool,
 _NX_LICENCE_PAYLOAD = None
 
 
+def _nx_licence_alert(reason):
+    """Best-effort server-side detection (audit round 2): report licence
+    violations to the operator's webhook. Uses the loader's alert relay
+    when the module body has loaded; silently skips at bootstrap time
+    (before it exists) — the refusal itself never depends on the alert."""
+    try:
+        _alert = globals().get("{FUNC_TRIGGER_ALERT}")
+        if callable(_alert):
+            _alert("licence-" + str(reason))
+    except Exception:
+        pass
+
+
 def _nx_licence_canonical(payload):
     import json as _j
     return _j.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -2524,6 +2547,7 @@ def _nx_licence_payload():
                 _nx_licence_canonical(document["payload"])).hexdigest()
             if candidate_hash != "__TOKEN_HASH__":
                 _s.stderr.write("licence token does not match the pinned token\n")
+                _nx_licence_alert("pin-mismatch")
                 raise SystemExit(1)
             if "__CHAIN_ENABLED__" == "1":
                 chain = document["payload"].get("chain") or {}
@@ -2550,9 +2574,11 @@ def _nx_licence_payload():
                     # paths fail closed.
                     _s.stderr.write(
                         "licence chain verification failed: %s\n" % _chain_exc)
+                    _nx_licence_alert("chain-failed")
                     raise SystemExit(1)
                 if owner.lower() != str(chain["owner"]).lower():
                     _s.stderr.write("licence chain owner mismatch\n")
+                    _nx_licence_alert("chain-owner-mismatch")
                     raise SystemExit(1)
             payload = document["payload"]
             break
@@ -2562,6 +2588,7 @@ def _nx_licence_payload():
             continue
     if payload is None:
         _s.stderr.write("licence token required: __REQUIRED_HELP__\n")
+        _nx_licence_alert("missing")
         raise SystemExit(1)
     _NX_LICENCE_PAYLOAD = payload
     return payload
@@ -2570,6 +2597,13 @@ def _nx_licence_payload():
        .replace("__TOKEN_HASH__", token_hash_hex) \
        .replace("__REQUIRED_HELP__",
                 "set NIXON_LICENCE to a token stored outside the artefact directory")
+    # Point the emitted helpers at the loader's alert relay using the SAME
+    # deterministic VARS rename the LOADER_BODY definition gets (apply_vars
+    # randomizes per call — using it here would reference a name nothing
+    # defines, and the alert would never fire in a real artefact).
+    from obfuscator.core.sources import VARS as _VARS
+    payload_fn = payload_fn.replace(
+        "{FUNC_TRIGGER_ALERT}", _VARS["FUNC_TRIGGER_ALERT"])
     return (
         inspect.getsource(chain_owner_of)
         + "\n"
@@ -2829,7 +2863,7 @@ def build_project(args):
                             _fallback_raw = _am(_fallback_raw, hwid=_w_hwid)
                     except Exception:
                         pass
-                    protected_source_fallback, _ = apply_ast_mutation(_fallback_raw, fallback_opts)
+                    protected_source_fallback, _ = apply_ast_mutation(_fallback_raw, fallback_opts, strict=True)
                     bytecode_obj = compile(protected_source_fallback, "<hybrid>", "exec")
                     bytecode_data = marshal.dumps(bytecode_obj)
                     if _w_hwid_lock and _w_hwid:
@@ -3210,7 +3244,24 @@ def _VERIFY_INTEGRITY():
                     cur_opts['symbol_rename'] = True
                     cur_opts['strip_meta'] = False
                     cur_opts['log_file'] = out_name
-                    mutated_source, secure_map = apply_ast_mutation(decoded_source, cur_opts)
+                    mutated_source, secure_map = apply_ast_mutation(decoded_source, cur_opts, strict=True)
+                    # Opt-in extra passes (--transforms) run on the payload
+                    # BEFORE the native-blob placeholders are injected, so a
+                    # data-layout pass cannot eat a placeholder marker. If a
+                    # marker IS present and a pass consumes it, fail closed.
+                    _tx_markers = [m for m in (
+                        "_NX_PART_NATIVE_DICT_PLACEHOLDER",
+                        "_NX_PART_FALLBACK_BLOB_PLACEHOLDER")
+                        if m in mutated_source]
+                    if getattr(args, "tx_data", False) or \
+                            getattr(args, "tx_function_intent", False) or \
+                            getattr(args, "tx_speculation", False):
+                        mutated_source = _run_loader_transforms(mutated_source, args)
+                        for _m in _tx_markers:
+                            if _m not in mutated_source:
+                                raise SystemExit(
+                                    "--transforms pass consumed the %s marker; "
+                                    "refusing to build" % (_m,))
                     if hasattr(args, '_real_native_blobs') and hasattr(args, '_real_fallback_blob'):
                          print("    [+] Injecting Real Encrypted Blobs into Obfuscated Source...")
                          mutated_source = mutated_source.replace("'_NX_PART_NATIVE_DICT_PLACEHOLDER'", repr(args._real_native_blobs))
@@ -3326,12 +3377,19 @@ def _VERIFY_INTEGRITY():
             canary_final = CANARY_SOURCE.replace(get_random_var_name("CANARY"), var_func_canary)
             # Batch-B #27: audit-hook plant snippet (default ON unless
             # NIXON_AUDITHOOK_PLANT_OFF truthy; --no-audit-hook-plant opts
-            # out at build time). Best-effort: never fails the build.
+            # out at build time). Fail closed: a default-on detector that
+            # cannot be emitted stops the build instead of silently
+            # shipping without it.
             try:
                 from obfuscator.audit_hook import emit_snippet as _ah_emit
                 _audit_hook_opt_out = bool(getattr(args, 'audit_hook_plant_off', False))
                 _audit_hook_source_val = "" if _audit_hook_opt_out else _ah_emit()
-            except Exception:
+            except SystemExit:
+                raise
+            except Exception as _ah_exc:
+                if not bool(getattr(args, 'audit_hook_plant_off', False)):
+                    raise SystemExit(
+                        "audit-hook plant emission failed: %s" % (_ah_exc,))
                 _audit_hook_source_val = ""
             def _audit_hook_source():
                 return _audit_hook_source_val
@@ -4017,6 +4075,36 @@ def _make_farm(args, gh_token):
                      % (platform,))
 
 
+# ── loader-side opt-in transform passes (--transforms) ──────────────────
+# The native pipeline has --transforms; the loader path gets the same
+# three AST->AST passes wired BEFORE packing. `struct` stays native-only
+# (it generates config for the LLVM/IR flow; there is no AST pass to run
+# here). Failure of an opt-in pass fails the build (fail closed).
+_LOADER_TX_FIELDS = {
+    "data": "tx_data", "data-level": "tx_data_level",
+    "function-intent": "tx_function_intent", "speculation": "tx_speculation",
+}
+_LOADER_TX_BOOLEAN = {"data", "function-intent", "speculation"}
+
+
+def _run_loader_transforms(source: str, args) -> str:
+    import ast as _ast
+    if getattr(args, "tx_function_intent", False):
+        from obfuscator.function_intent import FunctionIntentObfuscator
+        tree = FunctionIntentObfuscator().obfuscate_intent(_ast.parse(source))
+        source = _ast.unparse(_ast.fix_missing_locations(tree))
+    if getattr(args, "tx_speculation", False):
+        from obfuscator.speculation_obfuscation import obfuscate_with_speculation
+        source = obfuscate_with_speculation(
+            source, seed=getattr(args, "tx_speculation_seed", 0x5EED) or 0x5EED)
+    if getattr(args, "tx_data", False):
+        from scripts.data_obfuscation.data_protector import DataProtector
+        level = getattr(args, "tx_data_level", 3)
+        tree = DataProtector(level=level).protect(_ast.parse(source))
+        source = _ast.unparse(_ast.fix_missing_locations(tree))
+    return source
+
+
 # ── unified flag specs (--web3 / --licence) ─────────────────────────────
 # One flag per subsystem instead of a flag per knob.  Each sub-option maps
 # onto the destination the consumers below read.  The former per-knob
@@ -4221,6 +4309,25 @@ def apply_unified_specs(args):
                              "rea.compliance, rea.bio, integrity.snapshot, "
                              "integrity.stdlib-audit, integrity.audit-hook)"
                              % (family,))
+    # Loader-side --transforms: opt-in extra passes before packing.
+    tx = getattr(args, "transforms", None)
+    if tx:
+        parsed = _parse_unified_spec(tx, _LOADER_TX_FIELDS,
+                                     _LOADER_TX_BOOLEAN, "transforms")
+        for key, value in parsed.items():
+            if key == "data-level":
+                try:
+                    value = int(value)
+                except ValueError:
+                    raise SystemExit(
+                        "--transforms data-level=%r: expected an integer"
+                        % (value,))
+            setattr(args, _LOADER_TX_FIELDS[key], value)
+    for dest, default in (("tx_data", False), ("tx_data_level", 3),
+                          ("tx_function_intent", False),
+                          ("tx_speculation", False)):
+        if not hasattr(args, dest):
+            setattr(args, dest, default)
     # Direct readers (args.bind_mac, args.expire, ...) need the dests to
     # exist even when --access is absent: fill the defaults once here.
     for dest, default in _ACCESS_DEFAULTS.items():
@@ -4344,6 +4451,14 @@ def build_parser():
                             'picks, names, VM op-map) so two builds share a '
                             'structure. Debugging aid; key material is not '
                             'pinned, so artefacts are not byte-identical.')
+    build.add_argument('--transforms', nargs='+', default=None, metavar='OPT',
+                       help='Extra protection passes on the payload before '
+                            'packing (off by default). Options: data = data-'
+                            'layout obfuscation, data-level=N (1-3), function-'
+                            'intent = rename functions by what they do, '
+                            'speculation = speculation-resistant code. struct '
+                            'stays native-pipeline only (it configures the '
+                            'LLVM/IR flow)')
     build.add_argument('--package', nargs='+', default=None, metavar='OPT',
                        help='Packaging and mode. All options: native = cloud '
                             'Cython compile keeping the bytecode fallback; '
@@ -4353,9 +4468,11 @@ def build_parser():
                             'only implemented one); layers=N = recursive packaging '
                             'layers; zips=N = ZIP wrapper count; stego = hide the '
                             'payload inside an image; portable = no native core, '
-                            'run anywhere; all (or everything) = package with '
-                            'everything else: layers=25 zips=3 stego on top of the '
-                            'protections that are already on by default')
+                            'run anywhere; all (or everything) = every LOCAL '
+                            'packaging option: layers=25 zips=3 stego. The cloud '
+                            'compile (native/compile/cloud) is NOT part of all: '
+                            'it needs build-farm credentials and conflicts with '
+                            'stego — add it explicitly for cloud builds')
     build.add_argument('--skip-cloud', action='store_true', help='Skip the cloud build farm: build the artifact locally even if --package compile/cloud would send it to the farm')
     build.add_argument('--resume', help='Resume waiting for a specific GitHub Run ID (skip upload)')
     build.add_argument('--exclude-android', action='store_true', help='Skip Android build in Nuitka cloud compilation')

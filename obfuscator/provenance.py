@@ -259,7 +259,8 @@ def _ensure_xor_decode_helper(tree: ast.Module) -> ast.Module:
         if isinstance(node, ast.FunctionDef) and node.name == "_nx_xor_decode_str":
             return tree
     helper = ast.parse(_NX_XOR_DECODE_HELPER_SRC)
-    tree.body = helper.body + tree.body
+    from obfuscator.core.ast_prologue import insert_module_prologue
+    insert_module_prologue(tree, helper.body)
     return tree
 
 
@@ -302,8 +303,8 @@ def encode_sensitive_strings(
         string_index += 1
 
     class StringEncoder(ast.NodeTransformer):
-        def visit_Module(self, node: ast.Module) -> ast.AST:
-            new_body: list[ast.AST] = []
+        def visit_Module(self, node: ast.Module) -> ast.Module:
+            decode_stmts: list[ast.AST] = []
             for entry in protocol_strings:
                 target_node = entry["node"]
                 s = entry["string"]
@@ -311,12 +312,16 @@ def encode_sensitive_strings(
                     fragments, frag_keys = encoded_map[s]
                     var_name = replacements.get(target_node, "")
                     if var_name:
-                        decode_stmts = _make_xor_decode_ast(
+                        decode_stmts.extend(_make_xor_decode_ast(
                             fragments, frag_keys, var_name
-                        )
-                        new_body.extend(decode_stmts)
-            new_body.extend(node.body)
-            node.body = new_body
+                        ))
+            # Decode statements define the runtime vars; they go after the
+            # module docstring and any __future__ imports (prepending them
+            # at body[0] made the module a SyntaxError), and generic_visit
+            # must run or visit_Constant never fires.
+            from obfuscator.core.ast_prologue import insert_module_prologue
+            insert_module_prologue(node, decode_stmts)
+            self.generic_visit(node)
             return node
 
         def visit_Constant(self, node: ast.Constant) -> ast.AST:

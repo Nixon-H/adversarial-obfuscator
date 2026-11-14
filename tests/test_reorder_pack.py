@@ -62,3 +62,20 @@ def test_determinism_same_seed_same_output():
     assert a == b
     c = pack_container(blobs, b"other-seed", chunk_size=64)
     assert (c["order"] != a["order"] or c["table"] != a["table"] or c["data"] != a["data"])
+
+
+def test_randbelow_handles_large_n():
+    """n > 65536 used to compute limit=0 and loop forever."""
+    from obfuscator.reorder_pack import _SeededRng
+    rng = _SeededRng(b"large-n")
+    for n in (65537, 100000, 1 << 20, 1 << 24):
+        for _ in range(20):
+            v = rng.randbelow(n)
+            assert 0 <= v < n
+
+
+def test_randbelow_still_covers_small_n():
+    from obfuscator.reorder_pack import _SeededRng
+    rng = _SeededRng(b"small-n")
+    seen = {rng.randbelow(7) for _ in range(200)}
+    assert seen == set(range(7))

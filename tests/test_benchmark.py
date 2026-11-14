@@ -376,7 +376,8 @@ class TestLLMEvaluator:
         evaluator = LLMEvaluator()
         result = evaluator.evaluate(OBFUSCATED_HEAVY, "nemotron-3-ultra-free")
         assert isinstance(result, dict)
-        assert all(0.0 <= v <= 1.0 for v in result.values())
+        assert all(0.0 <= v <= 1.0 for v in result.values()
+                   if isinstance(v, (int, float)) and not isinstance(v, bool))
 
     def test_evaluate_all_returns_all_models(self):
         evaluator = LLMEvaluator()
@@ -388,7 +389,13 @@ class TestLLMEvaluator:
         with pytest.raises(ValueError):
             evaluator.evaluate(OBFUSCATED_HEAVY, "nonexistent")
 
+    def test_static_fallback_is_marked(self):
+        evaluator = LLMEvaluator()
+        result = evaluator._estimate_from_static("x = 1\n", "m")
+        assert result["_source"] == "static_estimate"
+
     def test_longer_code_returns_valid_scores(self):
         evaluator = LLMEvaluator()
         result = evaluator.evaluate(OBFUSCATED_HEAVY, "nemotron-3-ultra-free")
-        assert all(0.0 <= v <= 1.0 for v in result.values())
+        assert all(0.0 <= v <= 1.0 for v in result.values()
+                   if isinstance(v, (int, float)) and not isinstance(v, bool))

@@ -39,14 +39,27 @@ class _SeededRng:
                 self._buf = self._buf[1:]
                 if b < limit:
                     return b % n
-        # Two-byte path for n > 256 (the single-byte loop can never
-        # terminate there: limit would be 0).
-        limit = 65536 - (65536 % n)
+        # Two-byte path for 256 < n <= 65536 (the single-byte loop can
+        # never terminate there: limit would be 0).
+        if n <= 65536:
+            limit = 65536 - (65536 % n)
+            while True:
+                while len(self._buf) < 2:
+                    self._refill()
+                v = (self._buf[0] << 8) | self._buf[1]
+                self._buf = self._buf[2:]
+                if v < limit:
+                    return v % n
+        # General path: k bytes where 256**k >= n.  The old two-byte
+        # path computed limit=0 for n > 65536 and looped forever.
+        k = max(2, (n.bit_length() + 7) // 8)
+        span = 1 << (8 * k)
+        limit = span - (span % n)
         while True:
-            while len(self._buf) < 2:
+            while len(self._buf) < k:
                 self._refill()
-            v = (self._buf[0] << 8) | self._buf[1]
-            self._buf = self._buf[2:]
+            v = int.from_bytes(self._buf[:k], "big")
+            self._buf = self._buf[k:]
             if v < limit:
                 return v % n
 

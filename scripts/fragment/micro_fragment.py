@@ -182,18 +182,28 @@ class MicroFragmentExecutor:
         6. Set fragment.executed = True on success.
         """
         key = _derive_sequence_key(self.master_key, fragment.index)
-        plaintext = _xor_encrypt(fragment.encrypted, key)
-        assert len(plaintext) == fragment.plaintext_len
-        code_str = plaintext.decode("utf-8")
-        wipe = bytearray(plaintext)
-        for i in range(len(wipe)):
-            wipe[i] = 0
+        plaintext = bytearray(_xor_encrypt(fragment.encrypted, key))
+        if len(plaintext) != fragment.plaintext_len:
+            # An assert here vanished under `python -O`, and a length
+            # mismatch means the key or the fragment is wrong.
+            return (False, f"fragment {fragment.index}: expected "
+                           f"{fragment.plaintext_len} bytes, got {len(plaintext)}")
+        try:
+            code_str = plaintext.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            return (False, f"fragment {fragment.index}: {exc}")
         try:
             exec(code_str, global_ns, local_ns)
             fragment.executed = True
             return (True, None)
         except Exception as e:
             return (False, str(e))
+        finally:
+            # Zero the decrypted buffer. The str handed to exec() is an
+            # immutable copy that Python does not expose for wiping, so this
+            # is the best the interpreter allows.
+            for i in range(len(plaintext)):
+                plaintext[i] = 0
 
     def execute_all(self, code: Optional[str] = None) -> dict:
         """

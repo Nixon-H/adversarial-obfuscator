@@ -46,19 +46,14 @@ import hashlib
 import struct
 
 
-_OPERAND_VALUE_SIZES = {
-    0: 1,  # IMM8
-    1: 2,  # IMM16
-    2: 4,  # IMM32
-    3: 8,  # IMM64
-    4: 1,  # REG
-    5: 1,  # REG_INDIRECT
-    6: 2,  # REL_OFFSET
-    7: 4,  # ABS_ADDR
-}
 
 
-_OPCODE_OPERAND_COUNTS: dict[int, int] = {
+# Bytes of operand data that follow each logical opcode on the wire. The
+# interpreter reads fixed widths per opcode, so a remapper has to skip
+# exactly that many bytes to stay in sync. CALL carries a 32-bit target and
+# RET carries nothing; treating them as "variable length" consumed the rest
+# of the stream and destroyed every instruction after the first call.
+_OPCODE_OPERAND_BYTES: dict[int, int] = {
     0: 0,   # NOP
     1: 2,   # ADD
     2: 2,   # SUB
@@ -73,27 +68,27 @@ _OPCODE_OPERAND_COUNTS: dict[int, int] = {
     11: 2,  # SHR
     12: 2,  # LOAD
     13: 2,  # STORE
-    14: 2,  # MOV
+    14: 3,  # MOV (reg, lo, hi)
     15: 2,  # LEA
-    16: 1,  # JMP
-    17: 1,  # JZ
-    18: 1,  # JNZ
-    19: 1,  # JG
-    20: 1,  # JL
-    21: 1,  # JGE
-    22: 1,  # JLE
-    23: -1, # CALL (variable)
-    24: -1, # RET  (variable)
+    16: 4,  # JMP
+    17: 4,  # JZ
+    18: 4,  # JNZ
+    19: 4,  # JG
+    20: 4,  # JL
+    21: 4,  # JGE
+    22: 4,  # JLE
+    23: 4,  # CALL
+    24: 0,  # RET
     25: 1,  # PUSH
     26: 1,  # POP
-    27: 1,  # ENTER
+    27: 2,  # ENTER
     28: 0,  # LEAVE
     29: 3,  # ENC_LOAD
     30: 3,  # ENC_STORE
     31: 3,  # ENC_ADD
     32: 3,  # ENC_MUL
     33: 3,  # FUSED_LOAD_ADD_STORE
-    34: 3,  # FUSED_CMP_JMP
+    34: 9,  # FUSED_CMP_JMP (reg, u32, u32)
 }
 
 
@@ -153,36 +148,6 @@ def generate_ephemeral_operand_map(
     return {i: shuffled[i] for i in range(num_operand_types)}
 
 
-def _read_operand_entry(
-    bytecode: bytes,
-    pos: int,
-    operand_map: dict[int, int] | None,
-    reverse: bool = False,
-) -> tuple[int, bytearray]:
-    """
-    Read and optionally remap a single operand entry from bytecode.
-
-    An operand entry consists of a type byte followed by value bytes
-    (size determined by _OPERAND_VALUE_SIZES). If operand_map is
-    provided, the type byte is remapped (or inverse-remapped if
-    reverse=True).
-
-    Returns (new_position, entry_bytes) where entry_bytes includes
-    the type byte and value bytes.
-    """
-    typ = bytecode[pos]
-    phys_typ = operand_map.get(typ, typ) if operand_map else typ
-    logical_typ = phys_typ if reverse else typ
-    val_size = _OPERAND_VALUE_SIZES.get(logical_typ, 1)
-    end = pos + 1 + val_size
-    if end > len(bytecode):
-        end = len(bytecode)
-        val_size = end - pos - 1
-    buf = bytearray([phys_typ & 0xFF])
-    buf.extend(bytecode[pos + 1:end])
-    return end, buf
-
-
 def remap_bytecode(
     bytecode: bytes,
     opcode_map: dict[int, int],
@@ -191,50 +156,31 @@ def remap_bytecode(
     reverse: bool = False,
 ) -> bytes:
     """
-    Remap bytecode opcodes and operands from logical to physical (or
-    physical to logical if reverse=True).
+    Remap bytecode opcodes from logical to physical (or back if reverse=True).
 
-    Iterates through the bytecode, mapping each opcode byte through
-    opcode_map, then reading and remapping each operand based on the
-    operand count from _OPCODE_OPERAND_COUNTS.
-
-    For variable-length instructions (count=-1, like CALL/RET), reads
-    operands until the end of the bytecode if operand_map is provided,
-    or copies the remainder verbatim if not.
+    Walks the stream using the fixed operand width of each opcode, so
+    instruction boundaries survive the rewrite. Operand bytes are copied
+    verbatim: the wire format carries no operand type tags, so there is
+    nothing to remap. ``operand_map`` is accepted for call-site
+    compatibility and ignored.
 
     Security note: This is used build-time to transform bytecode from
     logical encoding to physical encoding. The reverse transform is
     used by the runtime ISA derivation.
     """
+    del operand_map, reverse  # no operand tags on the wire
     buf = bytearray()
     i = 0
     while i < len(bytecode):
         raw_byte = bytecode[i]
-        mapped_byte = opcode_map.get(raw_byte, raw_byte)
-        buf.append(mapped_byte & 0xFF)
+        buf.append(opcode_map.get(raw_byte, raw_byte) & 0xFF)
         i += 1
 
-        logical_op = raw_byte if raw_byte in _OPCODE_OPERAND_COUNTS else mapped_byte
-        if logical_op not in _OPCODE_OPERAND_COUNTS:
-            logical_op = 0
-        num_operands = _OPCODE_OPERAND_COUNTS.get(logical_op, 0)
-
-        if num_operands >= 0:
-            for _ in range(num_operands):
-                if i >= len(bytecode):
-                    break
-                i, entry = _read_operand_entry(bytecode, i, operand_map, reverse)
-                buf.extend(entry)
-        else:
-            if operand_map is not None:
-                while i < len(bytecode):
-                    if i >= len(bytecode):
-                        break
-                    i, entry = _read_operand_entry(bytecode, i, operand_map, reverse)
-                    buf.extend(entry)
-            else:
-                buf.extend(bytecode[i:])
-                i = len(bytecode)
+        logical_op = raw_byte if raw_byte in _OPCODE_OPERAND_BYTES else opcode_map.get(raw_byte, 0)
+        width = _OPCODE_OPERAND_BYTES.get(logical_op, 0)
+        end = min(i + width, len(bytecode))
+        buf.extend(bytecode[i:end])
+        i = end
 
     return bytes(buf)
 

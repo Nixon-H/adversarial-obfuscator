@@ -187,18 +187,21 @@ def ephemeral_vm_pipeline(
 
     seed_for_dispatch = build_seed[0] if build_seed else None
     dispatch_table = generate_interpreter_dispatch_table(opcode_map, build_seed, seed=seed_for_dispatch)
-    interpreter_source = generate_ephemeral_interpreter_source(dispatch_table, opcode_map)
+    interpreter_source = generate_ephemeral_interpreter_source(
+        dispatch_table, opcode_map, dispatch_key=seed_for_dispatch or 0)
 
     return modified_ir, bytes(all_bytecode), interpreter_source, opcode_map, operand_map
 
 
-def generate_ephemeral_interpreter_source(dispatch_table: bytes, opcode_map: dict[int, int]) -> str:
+def generate_ephemeral_interpreter_source(dispatch_table: bytes, opcode_map: dict[int, int],
+                                          dispatch_key: int = 0) -> str:
     """
     Generate a C source file for the ephemeral VM interpreter.
 
     The dispatch table entries are XOR-obfuscated with a build-derived
-    key. The C interpreter must de-obfuscate at runtime by XORing with
-    the same key.
+    key; the generated code XORs each entry with ``dispatch_key`` before
+    dispatching. ``bytecode`` must already be decrypted by the host: the
+    C runtime has no AES backend, so it cannot undo ``encrypt_bytecode``.
 
     The emitted C code hard-codes VM_PROPERTIES constants and a subset
     of opcodes that are directly supported (arithmetic, jumps, CALL/RET,
@@ -225,8 +228,8 @@ def generate_ephemeral_interpreter_source(dispatch_table: bytes, opcode_map: dic
 #define VM_FLAG_SIGN  2
 #define VM_FLAG_CARRY 4
 
-/* NOTE: Dispatch table entries are XOR-obfuscated with a build-derived key. */
-/*       The C interpreter must de-obfuscate at runtime by XORing with the same key. */
+/* Dispatch table entries are XOR-obfuscated with a build-derived key. */
+#define VM_DISPATCH_KEY 0x{dispatch_key & 0xFF:02X}
 static const unsigned char VM_DISPATCH_TABLE[256] = {{{table_str}}};
 
 struct vm_state {{
@@ -306,7 +309,7 @@ int vm_execute(
         uint8_t phys_opcode = vm_read_byte(&vm, bc, bc_len);
         steps++;
 
-        switch (VM_DISPATCH_TABLE[phys_opcode]) {{
+        switch ((unsigned char)(VM_DISPATCH_TABLE[phys_opcode] ^ VM_DISPATCH_KEY)) {{
             case 0: break;
             case 1: {{
                 uint8_t d = vm_read_reg(&vm, bc, bc_len);

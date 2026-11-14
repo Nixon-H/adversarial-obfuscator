@@ -720,6 +720,10 @@ class IrCompiler:
             pass
         elif isinstance(stmt, ast.Try):
             self._compile_try(stmt)
+        elif isinstance(stmt, ast.Assert):
+            self._compile_assert(stmt)
+        elif isinstance(stmt, ast.Raise):
+            self._compile_raise(stmt)
         elif isinstance(stmt, ast.ClassDef):
             pass
 
@@ -775,6 +779,33 @@ class IrCompiler:
 
         for stmt in node.finalbody:
             self._compile_stmt(stmt)
+
+    def _compile_raise(self, node: ast.Raise):
+        """Compile ``raise`` as an unreachable path.
+
+        The IR has no exception mechanism.  Dropping the statement let a
+        failed licence/assert check fall through and continue, which is a
+        fail-open miscompile.  An ``unreachable`` terminator stops the path.
+        """
+        self.current_block.set_terminator("unreachable")
+
+    def _compile_assert(self, node: ast.Assert):
+        """Compile ``assert`` as a conditional trap.
+
+        The test is evaluated; a false result branches to an unreachable
+        block, so the assertion cannot silently disappear under the IR.
+        """
+        cond = self._compile_expr(node.test)
+        if cond.type.kind != 'i1':
+            cond = self.current_block.ne(
+                IrType.i32(), cond, IrValue.const_int(0)).result
+        trap_block = self.current_func.new_block()
+        cont_block = self.current_func.new_block()
+        self.current_block.set_terminator(
+            "br", operands=[cond, cont_block.label, trap_block.label])
+        self.current_block = trap_block
+        self.current_block.set_terminator("unreachable")
+        self.current_block = cont_block
 
     def _compile_func_def(self, node: ast.FunctionDef):
         """
@@ -985,9 +1016,11 @@ class IrCompiler:
         """
         header_block = self.current_func.new_block()
         body_block = self.current_func.new_block()
-        exit_block = self.current_func.new_block()
+        after_block = self.current_func.new_block()
+        else_block = self.current_func.new_block() if node.orelse else after_block
 
-        self.break_targets.append(exit_block.label)
+        # A break skips the loop's else clause, so it targets after_block.
+        self.break_targets.append(after_block.label)
         self.continue_targets.append(header_block.label)
 
         self.current_block.set_terminator("jmp", operands=[header_block.label])
@@ -996,7 +1029,7 @@ class IrCompiler:
         cond = self._compile_expr(node.test)
         if cond.type.kind != 'i1':
             cond = self.current_block.ne(IrType.i32(), cond, IrValue.const_int(0)).result
-        self.current_block.set_terminator("br", operands=[cond, body_block.label, exit_block.label])
+        self.current_block.set_terminator("br", operands=[cond, body_block.label, else_block.label])
 
         self.current_block = body_block
         for stmt in node.body:
@@ -1008,7 +1041,15 @@ class IrCompiler:
         self.break_targets.pop()
         self.continue_targets.pop()
 
-        self.current_block = exit_block
+        # `while ... else:` runs only on the condition-false exit.
+        if node.orelse:
+            self.current_block = else_block
+            for stmt in node.orelse:
+                self._compile_stmt(stmt)
+            if self.current_block.terminator is None:
+                self.current_block.set_terminator("jmp", operands=[after_block.label])
+
+        self.current_block = after_block
 
     def _compile_for(self, node: ast.For):
         """
@@ -1366,54 +1407,60 @@ class IrCompiler:
         Supports Eq, NotEq, Lt, LtE, Gt, GtE, In, NotIn, Is, IsNot.
         Chained comparisons (a < b < c) are supported by ANDing results.
         """
-        left = self._compile_expr(node.left)
-        for i, (op, comparator) in enumerate(zip(node.ops, node.comparators)):
+        prev = self._compile_expr(node.left)
+        acc = None
+        for op, comparator in zip(node.ops, node.comparators):
             right = self._compile_expr(comparator)
-            cmp_type = left.type if left.type.kind != 'ptr' else IrType.ptr()
+            cmp_type = prev.type if prev.type.kind != 'ptr' else IrType.ptr()
             # Two compile-time string constants are decidable here.  The
             # module guard (``__name__ == "__main__"``) is this shape:
             # __name__ compiles to the same literal, so without folding
             # the IR carried ``eq ptr "__main__", "__main__"`` and the
             # LLVM lowering rejected a string literal used as a value.
-            if (self._const_string(left) is not None
+            if (self._const_string(prev) is not None
                     and self._const_string(right) is not None):
-                same = self._const_string(left) == self._const_string(right)
+                same = self._const_string(prev) == self._const_string(right)
                 if isinstance(op, (ast.Eq, ast.Is)):
-                    left = IrValue.const_bool(same)
+                    result = IrValue.const_bool(same)
                 elif isinstance(op, (ast.NotEq, ast.IsNot)):
-                    left = IrValue.const_bool(not same)
+                    result = IrValue.const_bool(not same)
                 else:
-                    left = IrValue.const_bool(False)
-                continue
-            if isinstance(op, ast.Eq):
-                result = self.current_block.eq(cmp_type, left, right).result
+                    result = IrValue.const_bool(False)
+            elif isinstance(op, ast.Eq):
+                result = self.current_block.eq(cmp_type, prev, right).result
             elif isinstance(op, ast.NotEq):
-                result = self.current_block.ne(cmp_type, left, right).result
+                result = self.current_block.ne(cmp_type, prev, right).result
             elif isinstance(op, ast.Lt):
-                result = self.current_block.lt(cmp_type, left, right).result
+                result = self.current_block.lt(cmp_type, prev, right).result
             elif isinstance(op, ast.LtE):
-                result = self.current_block.le(cmp_type, left, right).result
+                result = self.current_block.le(cmp_type, prev, right).result
             elif isinstance(op, ast.Gt):
-                result = self.current_block.gt(cmp_type, left, right).result
+                result = self.current_block.gt(cmp_type, prev, right).result
             elif isinstance(op, ast.GtE):
-                result = self.current_block.ge(cmp_type, left, right).result
+                result = self.current_block.ge(cmp_type, prev, right).result
             elif isinstance(op, ast.In):
-                call = self.current_block.call("__builtin_in", [left, right], IrType.i1())
+                call = self.current_block.call("__builtin_in", [prev, right], IrType.i1())
                 result = call.result
             elif isinstance(op, ast.NotIn):
-                call = self.current_block.call("__builtin_in", [left, right], IrType.i1())
-                not_val = self.current_block.xor(IrType.i1(), call.result, IrValue.const_bool(True)).result
-                result = not_val
+                call = self.current_block.call("__builtin_in", [prev, right], IrType.i1())
+                result = self.current_block.xor(IrType.i1(), call.result, IrValue.const_bool(True)).result
             elif isinstance(op, ast.Is):
-                result = self.current_block.eq(IrType.ptr(), left, right).result
+                result = self.current_block.eq(IrType.ptr(), prev, right).result
             elif isinstance(op, ast.IsNot):
-                result = self.current_block.ne(IrType.ptr(), left, right).result
+                result = self.current_block.ne(IrType.ptr(), prev, right).result
             else:
                 result = IrValue.const_bool(False)
-            left = result
-        if left.type.kind != 'i1':
-            left = self.current_block.ne(IrType.i32(), left, IrValue.const_int(0)).result
-        return left
+            # Chained comparisons compare the PREVIOUS COMPARATOR (b in
+            # a < b < c), not the previous boolean result.  The old code
+            # compared the boolean against c and miscompiled every chain.
+            acc = result if acc is None else self.current_block.and_(
+                IrType.i1(), acc, result).result
+            prev = right
+        if acc is None:
+            acc = IrValue.const_bool(True)
+        if acc.type.kind != 'i1':
+            acc = self.current_block.ne(IrType.i32(), acc, IrValue.const_int(0)).result
+        return acc
 
     def _compile_boolop(self, node: ast.BoolOp) -> IrValue:
         """

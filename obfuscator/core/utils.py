@@ -691,12 +691,11 @@ def _artifact_sign_key(explicit_hex=None):
 def _verify_download_zip(zip_path, artifact_name, sign_key):
     """Verify-before-extract gate for one downloaded farm zip.
 
-    Returns True when sidecars were present (each verified — a mismatch
-    raises ``ValueError`` fail-closed and the zip is deleted so the
-    caller must not extract). No key + sidecars present → loud warning
-    + proceed. No key + no sidecars → auditable warning + proceed. Key
-    + no sidecars → info note (a farm that holds no key stages
-    unsigned binaries).
+    Returns True when extraction is allowed.  Raises ``ValueError`` when
+    it is not: a signature mismatch, unreadable sidecars, or signature
+    sidecars present with no key configured.  The no-sidecar cases are
+    an auditable downgrade (a farm that holds no key stages unsigned
+    binaries) and return True.
 
     The farm identity is pinned when one is configured: a sidecar
     minted by a *different* farm is a mismatch, not a pass.  That closes
@@ -710,8 +709,10 @@ def _verify_download_zip(zip_path, artifact_name, sign_key):
     try:
         from scripts import artifact_sign as _as
         _names = _as.zip_sidecar_names(zip_path)
-    except Exception:
-        return False
+    except Exception as _e:
+        raise ValueError(
+            "could not read signature sidecars for %r: %s (refusing extract)"
+            % (artifact_name, _e))
     _expected = {}
     _farm = os.environ.get("NIXON_FARM_ID", "").strip()
     if _farm:
@@ -733,21 +734,24 @@ def _verify_download_zip(zip_path, artifact_name, sign_key):
             return True
         _log.info("ARTIFACT-AUTH: no signature sidecars for %r "
                   "(the farm holds no signing key).", artifact_name)
-        return False
+        return True
     if _names:
         _log.warning("ARTIFACT-AUTH: %d signature sidecar(s) present for %r "
                      "but no signing key configured (NIXON_ARTIFACT_KEY_HEX / "
-                     "NIXON_SIGN_KEY / %s) — proceeding WITHOUT verification. "
-                     "Set a key to enforce.", len(_names), artifact_name,
-                     _as.ED25519_PUBLIC_KEY_ENV)
+                     "NIXON_SIGN_KEY / %s) — REFUSING extraction: an "
+                     "unverified artifact with signature sidecars must not "
+                     "be trusted. Set a key to enforce.", len(_names),
+                     artifact_name, _as.ED25519_PUBLIC_KEY_ENV)
         print("    [!] ARTIFACT-AUTH: signatures present for %s but no key "
-              "configured — proceeding UNVERIFIED (see log)." % artifact_name)
-    else:
-        _log.warning("ARTIFACT-AUTH: no signing key configured "
-                     "(NIXON_ARTIFACT_KEY_HEX / NIXON_SIGN_KEY) and no "
-                     "signatures present for %r — proceeding without "
-                     "verification (auditable downgrade).", artifact_name)
-    return bool(_names)
+              "configured — extraction REFUSED (see log)." % artifact_name)
+        raise ValueError(
+            "artifact %r carries signature sidecars but no verification key "
+            "is configured (refusing extract)" % (artifact_name,))
+    _log.warning("ARTIFACT-AUTH: no signing key configured "
+                 "(NIXON_ARTIFACT_KEY_HEX / NIXON_SIGN_KEY) and no "
+                 "signatures present for %r — proceeding without "
+                 "verification (auditable downgrade).", artifact_name)
+    return True
 class GitHubBuildFarm:
     def __init__(self,token, use_tor=False, tor_proxy=None):
         self.token=token
@@ -847,6 +851,11 @@ class GitHubBuildFarm:
             print(f"    [!] Sidecar step skipped (non-fatal): {_se}")
         return True
     def create_workflow(self, payload_filename):
+        import re as _re
+        import os as _os
+        payload_filename = _os.path.basename(payload_filename or "")
+        if not _re.match(r'^[a-zA-Z0-9_.-]+\.py$', payload_filename):
+            payload_filename = "payload.py"
         script_content = f"""
 from setuptools import setup, Extension
 from Cython.Build import cythonize
@@ -1070,7 +1079,9 @@ jobs:
             zip_resp.raise_for_status()
             zip_path=os.path.join(output_dir,f"{name}.zip")
             with open(zip_path,"wb")as f:f.write(zip_resp.content)
-            _verify_download_zip(zip_path, name, _sign_key)
+            if not _verify_download_zip(zip_path, name, _sign_key):
+                raise ValueError(
+                    "artifact verification refused for %r" % (name,))
             _extract_zip_confined(zip_path, output_dir)
             os.remove(zip_path)
             clean_name=name.replace("blob-","")
@@ -1218,6 +1229,9 @@ class GitHubNuitkaFarm:
         import re
         import sys
         if python_version is None:
+            python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+        if not re.match(r'^[0-9]+\.[0-9]+$', python_version):
+            UI.fail(f"Invalid python-version: {python_version}")
             python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
         if not re.match(r'^[a-zA-Z0-9_.-]+\.py$', payload_filename):
             UI.fail(f"Invalid payload filename: {payload_filename}")
@@ -1750,7 +1764,9 @@ jobs:
                             t.update(value=f"(Attempt {attempt+1}/3)")
                         zip_path = os.path.join(output_dir, f"{name}.zip")
                         self._smart_download(down_url, zip_path, t, size_mb, optimal_threads)
-                        _verify_download_zip(zip_path, name, _sign_key)
+                        if not _verify_download_zip(zip_path, name, _sign_key):
+                            raise ValueError(
+                                "artifact verification refused for %r" % (name,))
                         _extract_zip_confined(zip_path, output_dir)
                         os.remove(zip_path)
                         t.success()
@@ -1832,7 +1848,15 @@ def ensure_upx_installed():
                 pass
             return False
         if not _want:
-            print(f"    [i] UPX archive sha256 {_got} (set NIXON_UPX_SHA256 to enforce)")
+            # Download-and-exec without a pinned hash is exactly the
+            # supply chain the pin exists to stop (audit round 2).
+            print(f"    [!] UPX archive sha256 {_got} but no pin set; "
+                  "refusing download (set NIXON_UPX_SHA256)")
+            try:
+                os.remove(archive_path)
+            except OSError:
+                pass
+            return False
         if archive_path.endswith(".zip"):
             _extract_zip_confined(archive_path, local_tools_dir)
         elif archive_path.endswith(".tar.xz"):

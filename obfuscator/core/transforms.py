@@ -205,6 +205,10 @@ class SymbolRenamer(ast.NodeTransformer):
         # consistently. visit_Attribute honors the same set so renames
         # never desync defs from call sites.
         self.allow_internal_rename = set()
+        # Stack of parameter sets, one per enclosing function.  A
+        # `nonlocal` may only refer to a binding in an ENCLOSING function,
+        # so the check must not see a sibling function's parameters.
+        self._param_stack: list[set[str]] = []
         self.reserved = {
             'sum', 'min', 'max', 'abs', 'round', 'pow', 'divmod',
             'chr', 'ord', 'hex', 'oct', 'bin', 'ascii', 'repr',
@@ -406,10 +410,14 @@ class SymbolRenamer(ast.NodeTransformer):
         self._local_params = _accum
         _prev_fdepth = getattr(self, '_func_depth', 0)
         self._func_depth = _prev_fdepth + 1
-        self.generic_visit(node)
-        self._func_depth = _prev_fdepth
-        self._local_params = _prev_params
-        self.current_function = old_function
+        self._param_stack.append(set(_param_names))
+        try:
+            self.generic_visit(node)
+        finally:
+            self._param_stack.pop()
+            self._func_depth = _prev_fdepth
+            self._local_params = _prev_params
+            self.current_function = old_function
         return node
         # Default argument VALUES are ordinary expressions evaluated in the
         # enclosing scope and must be renamed with everything else. The names
@@ -625,9 +633,21 @@ class SymbolRenamer(ast.NodeTransformer):
         # `visit_Name` may already have renamed a USE inside the same function.
         # That ordering dependency is why this is a partial fix and why
         # `_next_gen` still fails in the gate.
+        # A nonlocal target is either (a) a parameter of an ENCLOSING
+        # function - parameters are never renamed, so the declaration must
+        # stay verbatim or the pair desynchronises ("no binding for
+        # nonlocal") - or (b) a renamed local, where the declaration must
+        # use the SAME new name the binding got (get_new_name caches it).
+        # Only the enclosing scopes count: a sibling function's parameter
+        # of the same name must not keep this declaration verbatim.
+        enclosing_params: set[str] = set()
+        stack = getattr(self, '_param_stack', [])
+        for _params in stack[:-1]:
+            enclosing_params |= _params
         kept = set()
         for n in node.names:
-            if hasattr(builtins, n) or n in self.reserved:
+            if (hasattr(builtins, n) or n in self.reserved
+                    or n in enclosing_params):
                 kept.add(n)
         node.names = [n if n in kept else self.get_new_name(n) for n in node.names]
         return node
@@ -717,6 +737,7 @@ class StringLiteralObfuscator(ast.NodeTransformer):
         # closed without it. Build-time read fails loud when absent.
         # Errors here must NOT fall back to weaker modes silently.
         self._kek_env = kek_env
+        requested = mode
         try:
             from obfuscator.string_crypto import (
                 LEGACY_MODE as _LEGACY, normalize_mode as _norm_mode)
@@ -728,11 +749,16 @@ class StringLiteralObfuscator(ast.NodeTransformer):
                 from obfuscator.string_crypto import make_session as _mk
                 self._session = _mk(string_key, kek_env=kek_env)
                 self._chacha_key = self._session["key"]
-            except Exception:
-                if kek_env is not None:
-                    raise
-                self.mode = "xor"
-                self._session = None
+            except SystemExit:
+                raise
+            except Exception as _cc_exc:
+                # The operator asked for ChaCha20 string sealing. A silent
+                # downgrade to XOR (weaker, inline key) is a confidentiality
+                # regression; fail the build and let them choose.
+                raise SystemExit(
+                    "chacha20 string sealing requested but session setup "
+                    "failed: %s" % (_cc_exc,))
+            del requested
         else:
             self._session = None
     def _generate_babel_name(self):
@@ -1588,6 +1614,9 @@ class BogusExceptionHandler(ast.NodeTransformer):
         if isinstance(node, ast.AsyncFunctionDef):
             return node
         if len(node.body) >= 2 and random.random() < 0.4:
+            # The decoy handler must re-raise: swallowing a real
+            # BlockingIOError changed function semantics. And `builtins`
+            # must be imported or matching the handler raises NameError.
             fake_except = ast.ExceptHandler(
                 type=ast.Attribute(
                     value=ast.Name(id='builtins', ctx=ast.Load()),
@@ -1600,16 +1629,28 @@ class BogusExceptionHandler(ast.NodeTransformer):
                         targets=[ast.Name(id='_nx_state_dummy', ctx=ast.Store())],
                         value=ast.Constant(value=random.randint(1, 99999))
                     ),
-                    ast.Pass()
+                    ast.Raise()
                 ]
             )
+            body_stmts = []
+            # Only a direct `import builtins` in this function's own body
+            # counts.  ast.walk() also saw a nested class's import, so the
+            # outer handler then referenced an unbound `builtins`.
+            if not any(
+                isinstance(n, ast.Import)
+                and any(al.name == "builtins" for al in n.names)
+                for n in node.body
+            ):
+                body_stmts.append(
+                    ast.Import(names=[ast.alias(name="builtins", asname=None)]))
             try_block = ast.Try(
                 body=node.body.copy(),
                 handlers=[fake_except],
                 orelse=[],
                 finalbody=[]
             )
-            node.body = [try_block]
+            body_stmts.append(try_block)
+            node.body = body_stmts
             self.wrap_count += 1
         return node
 class UnsafeCollector(ast.NodeVisitor):
@@ -2197,39 +2238,101 @@ def stego_wrap_output(final_script, output_path):
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(stego_code)
     return output_path
+def _is_main_guard(stmt):
+    """True for `if __name__ == "__main__":` (either operand order)."""
+    if not isinstance(stmt, ast.If):
+        return False
+    test = stmt.test
+    if not isinstance(test, ast.Compare) or len(test.ops) != 1:
+        return False
+    if not isinstance(test.ops[0], ast.Eq):
+        return False
+    sides = [test.left] + list(test.comparators)
+    names = [s for s in sides if isinstance(s, ast.Name) and s.id == '__name__']
+    consts = [s for s in sides if isinstance(s, ast.Constant) and s.value == '__main__']
+    return bool(names and consts)
+
+
 class CodeChecksumInjector(ast.NodeTransformer):
+    """Emit a runtime guard that detects post-import replacement of functions.
+
+    The guard baselines the code object of every function this module defines
+    and re-checks them on every call of any target.  It deliberately does NOT
+    hash source text: this transform runs before the string/identifier passes,
+    so a hash computed here describes a body that no longer exists in the
+    emitted file, and `inspect.getsource` would then disagree with it on every
+    single run -- the old implementation raised "integrity check failed" for
+    every function of every build that enabled it.  Whole-file static
+    integrity is the pipeline's job (the merkle/HMAC self-check); this covers
+    the runtime half, which that check cannot see.
+
+    The baseline scans `globals()` rather than naming the targets: a
+    module-level tuple of function objects is a bare `Name` load, which
+    `irgen` cannot represent, so emitting one broke every build that ran the
+    IR phase.
+    """
+
+    _HELPERS = ('_nx_verify', '_nx_baseline')
+
     def __init__(self):
         self.checksums = {}
         self.check_var = '_nx_chk'
     def visit_Module(self, node):
         self.generic_visit(node)
-        if self.checksums:
-            check_code = f'''
-import hashlib as _h
-{self.check_var} = {repr(self.checksums)}
+        # Only DIRECT children of the module body are guaranteed to be bound
+        # when the baseline runs, and only they are reachable through
+        # globals().  A def inside `if`/`try` may never execute; a method or a
+        # closure is not a module global at all.
+        targets = [n for n in node.body
+                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                   and n.name not in self._HELPERS]
+        if not targets:
+            return node
+        self.checksums = {n.name: True for n in targets}
+        for fn in targets:
+            # Cross-function check: a replaced function never runs its own
+            # guard, so every target verifies all the others before working.
+            body = fn.body
+            idx = 1 if (body and isinstance(body[0], ast.Expr)
+                        and isinstance(body[0].value, ast.Constant)
+                        and isinstance(body[0].value.value, str)) else 0
+            guard = ast.Expr(value=ast.Call(
+                func=ast.Name(id='_nx_verify', ctx=ast.Load()),
+                args=[], keywords=[]))
+            body.insert(idx, ast.copy_location(guard, body[idx] if idx < len(body) else fn))
+        check_code = f'''
+{self.check_var} = {{}}
+def _nx_baseline():
+    {self.check_var}.clear()
+    for _n, _f in list(globals().items()):
+        if (callable(_f) and hasattr(_f, "__code__")
+                and getattr(_f, "__module__", None) == __name__):
+            {self.check_var}[_n] = _f.__code__
 def _nx_verify():
-    import inspect
-    for fn, expected in {self.check_var}.items():
-        try:
-            f = globals().get(fn)
-            if f and callable(f):
-                src = inspect.getsource(f)
-                if _h.sha256(src.encode()).hexdigest()[:16] != expected:
-                    raise RuntimeError("Integrity check failed")
-        except Exception: pass
+    for _n, _prev in list({self.check_var}.items()):
+        _f = globals().get(_n)
+        if not callable(_f) or not hasattr(_f, "__code__"):
+            raise RuntimeError("checksum: missing function %s" % _n)
+        if _prev is not _f.__code__:
+            raise RuntimeError("checksum: integrity check failed for %s" % _n)
 '''
-            try:
-                check_tree = ast.parse(check_code)
-                node.body = check_tree.body + node.body
-            except Exception: pass
-        return node
-    def visit_FunctionDef(self, node):
-        self.generic_visit(node)
         try:
-            func_code = ast.unparse(node)
-            checksum = hashlib.sha256(func_code.encode()).hexdigest()[:16]
-            self.checksums[node.name] = checksum
-        except Exception: pass
+            helpers = ast.parse(check_code).body
+        except Exception:
+            return node
+        baseline = ast.Expr(value=ast.Call(
+            func=ast.Name(id='_nx_baseline', ctx=ast.Load()), args=[], keywords=[]))
+        # Baseline once every module-level rebinding has happened -- a
+        # `f = lru_cache(f)` after the def would otherwise look like tamper --
+        # but before the `__main__` block, so the work a script actually does
+        # is covered.
+        at = len(node.body)
+        for i, stmt in enumerate(node.body):
+            if _is_main_guard(stmt):
+                at = i
+                break
+        node.body[at:at] = [baseline]
+        node.body = helpers + node.body
         return node
 class DynamicCodeGenerator(ast.NodeTransformer):
     def __init__(self, use_rust_jit=False):

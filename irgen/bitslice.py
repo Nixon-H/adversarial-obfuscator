@@ -262,29 +262,34 @@ def _bitwise_sub_ir(block: IrBlock, a_bits: list, b_bits: list, ty: IrType, inst
     """
     IR-level bitwise subtraction via two's complement.
 
-    Returns only the first bit of the result (borrow=0 assumption).
+    Computes a + (~b + 1) and returns every result bit. Returning only the
+    low bit (as this used to) silently turned ``sub`` into a 1-bit operation.
     """
     word_size = len(a_bits)
     not_b = [_emit(block, 'xor', ty, [b, IrValue.const_int(1)], insts) for b in b_bits]
     one = [IrValue.const_int(1)] + [IrValue.const_int(0)] * (word_size - 1)
     neg_b = _bitwise_add_ir(block, not_b, one, ty, insts)
-    return _bitwise_add_ir(block, a_bits, neg_b, ty, insts)[0]
+    return _bitwise_add_ir(block, a_bits, neg_b, ty, insts)
 
 
 def _bitwise_mul_ir(block: IrBlock, a_bits: list, b_bits: list, ty: IrType, insts: list) -> list:
     """
     IR-level bitwise multiplication via shift-and-add.
 
-    For each set bit in b, adds a shifted copy of a to the accumulator.
+    For each bit i of b, adds (a << i) gated by b[i] to the accumulator.
+    The gate is what makes this a multiply: adding every shifted copy
+    unconditionally computes a * (2**n - 1), not a * b.
     """
     word_size = len(a_bits)
     result = [IrValue.const_int(0)] * word_size
     for i in range(word_size):
-        shifted = ([IrValue.const_int(0)] * i) + a_bits[:word_size - i]
-        while len(shifted) < word_size:
-            shifted.append(IrValue.const_int(0))
-        shifted = shifted[:word_size]
-        result = _bitwise_add_ir(block, result, shifted, ty, insts)
+        partial = []
+        for j in range(word_size):
+            if j < i:
+                partial.append(IrValue.const_int(0))
+            else:
+                partial.append(_emit(block, 'and', ty, [a_bits[j - i], b_bits[i]], insts))
+        result = _bitwise_add_ir(block, result, partial, ty, insts)
     return result
 
 
@@ -303,21 +308,34 @@ def _bitwise_or_ir(block: IrBlock, a_bits: list, b_bits: list, ty: IrType, insts
     return [_emit(block, 'or', ty, [a, b], insts) for a, b in zip(a_bits, b_bits)]
 
 
-def _bitwise_shl_ir(block: IrBlock, val_bits: list, shift_val: IrValue, word_size: int, ty: IrType, insts: list) -> list:
-    """IR-level left shift by a constant amount."""
+def _const_int(val: IrValue) -> Optional[int]:
+    """Return the integer a constant IrValue stands for, else None."""
     try:
-        shift = int(shift_val.name) % word_size
+        return int(val.name)
     except (ValueError, TypeError):
-        return val_bits
+        return None
+
+
+def _bitwise_shl_ir(block: IrBlock, val_bits: list, shift_val: IrValue, word_size: int, ty: IrType, insts: list) -> Optional[list]:
+    """IR-level left shift by a constant amount.
+
+    Returns None when the shift amount is not a constant: a variable shift
+    cannot be expressed as a fixed bit permutation, and returning the input
+    unchanged would silently turn ``shl`` into a no-op.
+    """
+    shift = _const_int(shift_val)
+    if shift is None:
+        return None
+    shift %= word_size
     return ([IrValue.const_int(0)] * shift + val_bits[:word_size - shift])[:word_size]
 
 
-def _bitwise_shr_ir(block: IrBlock, val_bits: list, shift_val: IrValue, word_size: int, ty: IrType, insts: list) -> list:
-    """IR-level right shift by a constant amount."""
-    try:
-        shift = int(shift_val.name) % word_size
-    except (ValueError, TypeError):
-        return val_bits
+def _bitwise_shr_ir(block: IrBlock, val_bits: list, shift_val: IrValue, word_size: int, ty: IrType, insts: list) -> Optional[list]:
+    """IR-level right shift by a constant amount (None for variable shifts)."""
+    shift = _const_int(shift_val)
+    if shift is None:
+        return None
+    shift %= word_size
     result = val_bits[shift:] + [IrValue.const_int(0)] * shift
     return result[:word_size]
 
@@ -347,16 +365,33 @@ def _bitwise_cmp_lt_ir(block: IrBlock, a_bits: list, b_bits: list, ty: IrType, i
     """
     IR-level signed less-than comparison.
 
-    Scans from MSB to LSB computing the comparison result.
-    Uses a ripple chain of (a & ~b) | (a == b) & previous.
+    Sign bits decide when they differ (negative < non-negative); otherwise
+    the magnitude bits are compared unsigned, MSB to LSB, latching the
+    first bit where b has the 1 while all higher bits are equal. Running
+    that chain through the sign bit as well would compare the
+    two's-complement patterns as unsigned, which is wrong for every pair
+    that straddles zero.
     """
     word_size = len(a_bits)
-    lt = IrValue.const_int(0)
-    for i in range(word_size - 1, -1, -1):
-        a_not_b = _emit(block, 'and', ty, [a_bits[i], _emit(block, 'xor', ty, [b_bits[i], IrValue.const_int(1)], insts)], insts)
-        a_eq_b = _emit(block, 'xor', ty, [_emit(block, 'xor', ty, [a_bits[i], b_bits[i]], insts), IrValue.const_int(1)], insts)
-        lt = _emit(block, 'or', ty, [a_not_b, _emit(block, 'and', ty, [a_eq_b, lt], insts)], insts)
-    return lt
+    sign_a = a_bits[word_size - 1]
+    sign_b = b_bits[word_size - 1]
+
+    # Two accumulators, MSB to LSB: ``eq_so_far`` says every higher bit is
+    # equal, ``lt_mag`` latches the first bit where b has the 1. Folding the
+    # two into one value loses the decision as soon as a lower bit differs.
+    lt_mag = IrValue.const_int(0)
+    eq_so_far = IrValue.const_int(1)
+    for i in range(word_size - 2, -1, -1):
+        b_not_a = _emit(block, 'and', ty, [b_bits[i], _emit(block, 'xor', ty, [a_bits[i], IrValue.const_int(1)], insts)], insts)
+        eq_i = _emit(block, 'xor', ty, [_emit(block, 'xor', ty, [a_bits[i], b_bits[i]], insts), IrValue.const_int(1)], insts)
+        lt_mag = _emit(block, 'or', ty, [lt_mag, _emit(block, 'and', ty, [eq_so_far, b_not_a], insts)], insts)
+        eq_so_far = _emit(block, 'and', ty, [eq_so_far, eq_i], insts)
+
+    signs_differ = _emit(block, 'xor', ty, [sign_a, sign_b], insts)
+    same_sign = _emit(block, 'xor', ty, [signs_differ, IrValue.const_int(1)], insts)
+    return _emit(block, 'or', ty,
+                 [_emit(block, 'and', ty, [signs_differ, sign_a], insts),
+                  _emit(block, 'and', ty, [same_sign, lt_mag], insts)], insts)
 
 
 def _bitwise_cmp_le_ir(block: IrBlock, a_bits: list, b_bits: list, ty: IrType, insts: list) -> IrValue:
@@ -416,6 +451,12 @@ def _transform_inst(block: IrBlock, inst: IrInstruction, compiler: BitSliceCompi
     ty = inst.ty or inst.result_type
     word_size = _type_size(ty)
 
+    if opcode in ('shl', 'shr') and _const_int(b) is None:
+        # Variable shift: no fixed bit permutation exists, so leave the
+        # instruction intact rather than emitting a wrong constant shift.
+        new_insts.append(inst)
+        return
+
     if opcode in ('add', 'sub', 'mul', 'and', 'or', 'xor', 'shl', 'shr'):
         a_bits = _extract_bits(block, a, word_size, ty, new_insts)
         b_bits = _extract_bits(block, b, word_size, ty, new_insts)
@@ -446,7 +487,6 @@ def _transform_inst(block: IrBlock, inst: IrInstruction, compiler: BitSliceCompi
     elif opcode in ('eq', 'ne', 'lt', 'le', 'gt', 'ge'):
         a_bits = _extract_bits(block, a, word_size, ty, new_insts)
         b_bits = _extract_bits(block, b, word_size, ty, new_insts)
-        IrType.i1()
 
         if opcode == 'eq':
             result_val = _bitwise_cmp_eq_ir(block, a_bits, b_bits, ty, new_insts)

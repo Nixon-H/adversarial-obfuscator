@@ -69,6 +69,8 @@ _AFFINE_HELPER_SRC = (
     "    _MOD = 0x10000000000000000\n"
     "    @staticmethod\n"
     "    def encode(x, A, b):\n"
+    "        if not isinstance(x, int):\n"
+    "            raise TypeError('affine encoding supports integer variables only')\n"
     "        return (A * x + b) & 0xFFFFFFFFFFFFFFFF\n"
     "    @staticmethod\n"
     "    def decode(x_enc, A, b):\n"
@@ -86,7 +88,8 @@ def _ensure_affine_helper(tree: ast.Module) -> ast.Module:
                 if isinstance(t, ast.Name) and t.id == "_affine_enc":
                     return tree
     helper = ast.parse(_AFFINE_HELPER_SRC)
-    tree.body = helper.body + tree.body
+    from obfuscator.core.ast_prologue import insert_module_prologue
+    insert_module_prologue(tree, helper.body)
     return tree
 
 
@@ -97,6 +100,19 @@ def encode_variables_affine(
     variables: list[str],
     seed: bytes,
 ) -> ast.Module:
+    # Affine encoding is linear: only += and -= preserve the invariant
+    # enc = A*x + b.  `x *= v`, `x //= v`, `x %= v`, `x **= v` and the
+    # bitwise AugAssigns are not linear in x, so encoding them silently
+    # produced wrong values (audit round 2).  Leave those variables
+    # plaintext instead of miscompiling them.
+    unsupported_aug: set[str] = set()
+    for node in ast.walk(ast_tree):
+        if (isinstance(node, ast.AugAssign)
+                and isinstance(node.target, ast.Name)
+                and not isinstance(node.op, (ast.Add, ast.Sub))):
+            unsupported_aug.add(node.target.id)
+    variables = [v for v in variables if v not in unsupported_aug]
+
     params: dict[str, tuple[int, int]] = {}
     for v in variables:
         A = _derive_u64(seed, f"A_{v}") | 1
@@ -130,6 +146,23 @@ def encode_variables_affine(
                     node.targets = [new_target]
                     node.value = new_rhs
                     return node
+            return self.generic_visit(node)
+
+        def visit_AugAssign(self, node: ast.AugAssign):
+            # x += v  ==  x_new = x + v; with x stored as enc = A*x + b the
+            # encoded form gains encode(v, A, b): enc += encode(v, A, b).
+            target = node.target
+            if isinstance(target, ast.Name) and target.id in params:
+                A, b = params[target.id]
+                enc_name = f"{target.id}_enc"
+                node.target = ast.Name(id=enc_name, ctx=ast.Store())
+                value = self.visit(node.value)
+                # enc = A*x + b; x += v  =>  enc += A*v (decode() masks).
+                # encode(v) here would add a spurious +b and corrupt x.
+                node.value = ast.BinOp(
+                    left=value, op=ast.Mult(),
+                    right=ast.Constant(value=A))
+                return node
             return self.generic_visit(node)
 
         def visit_Name(self, node: ast.Name) -> ast.Name:
@@ -429,7 +462,9 @@ def mba_encode_value(value: int, seed: bytes, context: str) -> ast.Expr:
 class AffineStateEncoder:
     def __init__(self, seed: bytes, num_registers: int = 16):
         self.num_registers = num_registers
-        self.A = [self._derive_u64(seed, f"A_{i}") for i in range(num_registers)]
+        # Odd: A must be invertible mod 2**64 or decode() is broken.
+        self.A = [(self._derive_u64(seed, f"A_{i}") | 1)
+                  for i in range(num_registers)]
         self.b = [self._derive_u64(seed, f"b_{i}") for i in range(num_registers)]
         self._inv_A: list[int] = []
 
@@ -521,13 +556,10 @@ def _auto_detect_sensitive_vars(ast_tree: ast.Module) -> list[str]:
     candidates: set[str] = set()
     sensitive_keywords = {"key", "secret", "token", "password", "hash", "encrypt", "decrypt", "private"}
 
+    # Function parameters are NOT candidates: encoding a parameter requires
+    # rewriting every call site, which this pass never does. Encoding a param
+    # without its call sites produced NameError on the first read.
     for node in ast.walk(ast_tree):
-        if isinstance(node, ast.FunctionDef):
-            for kw in sensitive_keywords:
-                if kw in node.name.lower():
-                    for arg in node.args.args:
-                        candidates.add(arg.arg)
-
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):

@@ -56,6 +56,32 @@ def test_affine_helper_emitted_once():
     assert len(helpers2) == 1
 
 
+def test_affine_leaves_non_linear_augassign_plaintext():
+    """`x *= v` is not linear; encoding it silently corrupted the value."""
+    for stmt, expected in (
+        ("x *= 3", 21),
+        ("x //= 2", 3),
+        ("x %= 4", 3),
+        ("x **= 2", 49),
+        ("x |= 8", 15),
+    ):
+        tree = ast.parse(f"x = 7\n{stmt}\nresult = x\n",
+                         feature_version=(3, 10))
+        out = encode_variables_affine(tree, ["x"], b"4242")
+        ns = _exec(ast.fix_missing_locations(out))
+        assert ns["result"] == expected, (stmt, ns["result"], expected)
+
+
+def test_affine_still_encodes_linear_augassign():
+    tree = ast.parse("x = 7\nx += 5\nx -= 2\nresult = x\n",
+                     feature_version=(3, 10))
+    out = encode_variables_affine(tree, ["x"], b"4242")
+    code = ast.unparse(ast.fix_missing_locations(out))
+    assert "x_enc" in code
+    ns = _exec(ast.fix_missing_locations(out))
+    assert ns["result"] == 10
+
+
 def test_mba_pipeline_preserves_semantics():
     tree = ast.parse(
         "key = 41\ny = key + 1\nz = y * 2\n", feature_version=(3, 10)

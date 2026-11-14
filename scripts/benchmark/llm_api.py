@@ -41,8 +41,8 @@ def _rotate_identity() -> str:
     random_pass = uuid.uuid4().hex[:8]
     _current_proxy_url = f"socks5://{random_user}:{random_pass}@127.0.0.1:9050"
     logging.getLogger("llm_api").info(
-        "Rotated Tor identity -> user=%s pass=%s proxy=%s",
-        random_user, "****", _current_proxy_url,
+        "Rotated Tor identity -> user=%s pass=%s (proxy credentials redacted)",
+        random_user, "****",
     )
     return _current_proxy_url
 
@@ -178,7 +178,10 @@ Code to evaluate:
         return self._estimate_from_static(text, "unknown")
 
     def _estimate_from_static(self, code: str, model: str) -> dict:
-        """Fallback when API calls fail: estimate from code complexity."""
+        """Fallback when API calls fail: estimate from code complexity.
+
+        Marked "static_estimate" so a caller can never mistake a network
+        failure for a model verdict (audit round 2)."""
         code_len = len(code)
         complexity = min(code_len / 5000.0, 1.0)
         base = {
@@ -191,6 +194,10 @@ Code to evaluate:
         }
         for k in base:
             base[k] = round(max(0.0, min(1.0, base[k])), 4)
+        # A caller must be able to tell a network failure from a model
+        # verdict.  The marker is a string key, so consumers that average
+        # the scores must skip non-numeric values (report.py does).
+        base["_source"] = "static_estimate"
         return base
 
     @staticmethod

@@ -5,8 +5,8 @@ from typing import Any, Dict, List, Tuple
 
 from scripts.gpu.gpu_execution import GPUExecutor, is_gpu_available
 
-DEFAULT_ENCRYPT_KEY = [0xA1B2C3D4E5F60708, 0x123456789ABCDEF0,
-                       0xFEDCBA9876543210, 0x0F1E2D3C4B5A6978]
+# Audit round 2: the hardcoded key constant was removed. Per-fragment
+# keys derive from the run seed (store_gpu_code) instead.
 
 CPU_OPERATIONS = {"control_flow", "branch", "jmp", "cmp", "loop", "data", "memory", "store", "load"}
 GPU_OPERATIONS = {"crypto", "encrypt", "decrypt", "key_derive", "hash", "sensitive", "parallel"}

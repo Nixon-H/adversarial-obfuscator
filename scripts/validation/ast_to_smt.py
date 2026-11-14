@@ -21,6 +21,14 @@ from __future__ import annotations
 import ast
 from scripts.z3_optional import z3
 
+
+class _SmtUnsupported(Exception):
+    """The expression has no faithful bit-vector SMT encoding.
+
+    Raising this (instead of mapping to a constant) lets the proof DECLINE:
+    an unprovable transformation must never come back as "equivalent".
+    """
+
 BITWIDTH = 64
 
 
@@ -171,9 +179,15 @@ class ASTToSMT:
         if then_output is not None and else_output is not None:
             self._output_var = z3.If(cond_bool, then_output, else_output)
         elif then_output is not None:
-            self._output_var = z3.If(cond_bool, then_output, z3.BitVecVal(0, BITWIDTH))
+            if prev_output is None:
+                raise _SmtUnsupported(
+                    "if without else has no prior output value")
+            self._output_var = z3.If(cond_bool, then_output, prev_output)
         elif else_output is not None:
-            self._output_var = else_output
+            if prev_output is None:
+                raise _SmtUnsupported(
+                    "if without then-output has no prior output value")
+            self._output_var = z3.If(cond_bool, prev_output, else_output)
         else:
             self._output_var = prev_output
 
@@ -183,13 +197,14 @@ class ASTToSMT:
 
     def _translate_expr(self, node: ast.AST) -> z3.BitVecRef:
         if isinstance(node, ast.Constant):
-            if node.value is None:
-                return z3.BitVecVal(0, BITWIDTH)
             if isinstance(node.value, bool):
                 return z3.BitVecVal(1 if node.value else 0, BITWIDTH)
-            if isinstance(node.value, (int, float)):
-                return z3.BitVecVal(int(node.value) & ((1 << BITWIDTH) - 1), BITWIDTH)
-            return z3.BitVecVal(0, BITWIDTH)
+            if isinstance(node.value, int):
+                return z3.BitVecVal(node.value & ((1 << BITWIDTH) - 1), BITWIDTH)
+            # None, str, bytes, float and complex have no faithful
+            # bit-vector encoding.  Mapping them to 0 proved false
+            # equivalences (e.g. "abc" == "xyz").
+            raise _SmtUnsupported("constant %r" % (node.value,))
         elif isinstance(node, ast.Name):
             return self._ensure_var(node.id)
         elif isinstance(node, ast.UnaryOp):
@@ -202,7 +217,9 @@ class ASTToSMT:
             return self._translate_ifexp(node)
         elif isinstance(node, ast.Call):
             return self._translate_call(node)
-        return z3.BitVecVal(0, BITWIDTH)
+        # An unsupported expression mapped to a constant silently proved
+        # false equivalences (audit round 2): the proof must DECLINE.
+        raise _SmtUnsupported(ast.dump(node)[:120])
 
     def _translate_unaryop(self, node: ast.UnaryOp) -> z3.BitVecRef:
         operand = self._translate_expr(node.operand)
@@ -226,11 +243,15 @@ class ASTToSMT:
         elif isinstance(node.op, ast.Mult):
             return lhs * rhs
         elif isinstance(node.op, ast.Div):
-            return z3.UDiv(lhs, rhs)
+            # Python / is float division: bit-vectors cannot model it.
+            raise _SmtUnsupported("true division /")
         elif isinstance(node.op, ast.FloorDiv):
-            return z3.UDiv(lhs, rhs)
+            # Python // floors toward -inf; both UDiv and SDiv truncate
+            # toward zero, so results differ for negative operands.
+            raise _SmtUnsupported("floor division //")
         elif isinstance(node.op, ast.Mod):
-            return _bvsmod(lhs, rhs)
+            # Python % is floored modulo; SRem/SMod differ for negatives.
+            raise _SmtUnsupported("floored modulo %")
         elif isinstance(node.op, ast.BitXor):
             return lhs ^ rhs
         elif isinstance(node.op, ast.BitAnd):
@@ -240,10 +261,12 @@ class ASTToSMT:
         elif isinstance(node.op, ast.LShift):
             return lhs << rhs
         elif isinstance(node.op, ast.RShift):
-            return z3.LShR(lhs, rhs)
+            # Python >> is arithmetic on signed ints; LShR is logical and
+            # differs for any negative value.
+            return lhs >> rhs
         elif isinstance(node.op, ast.Pow):
-            return z3.BitVecVal(1, BITWIDTH)
-        return lhs
+            raise _SmtUnsupported("power operator **")
+        raise _SmtUnsupported(type(node.op).__name__)
 
     def _translate_compare(self, node: ast.Compare) -> z3.BitVecRef:
         left = self._translate_expr(node.left)
@@ -261,12 +284,10 @@ class ASTToSMT:
                 cond = _bvsgt(left, right)
             elif isinstance(op, ast.GtE):
                 cond = _bvsge(left, right)
-            elif isinstance(op, ast.Is):
-                cond = (left == right)
-            elif isinstance(op, ast.IsNot):
-                cond = (left != right)
             else:
-                cond = (left == right)
+                # In/NotIn/Is/IsNot and anything else have no faithful
+                # bit-vector encoding; `==` was a false equivalence.
+                raise _SmtUnsupported(type(op).__name__)
             left = z3.If(cond, z3.BitVecVal(1, BITWIDTH), z3.BitVecVal(0, BITWIDTH))
         return left
 

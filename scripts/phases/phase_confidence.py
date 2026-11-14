@@ -148,19 +148,39 @@ def collect_metric_samples(args: Any) -> dict:
     return samples
 
 
+def compute_all_intervals_with_skips(
+    samples: dict,
+    confidence_level: float = 0.95,
+) -> tuple[dict, dict]:
+    """Return ``(intervals, skipped)``.
+
+    A single sample carries no variance: replicating it three times
+    manufactured a fake n=3 confidence interval.  Skipped metrics are
+    returned separately so the intervals dict stays homogeneous --
+    mixing a dict into it broke every consumer that expects
+    ``SecurityConfidenceInterval`` values.
+    """
+    intervals = {}
+    skipped = {}
+    for key, values in samples.items():
+        if len(values) < 2:
+            skipped[key] = "insufficient samples (%d)" % len(values)
+            continue
+        intervals[key] = compute_confidence_interval(values, confidence_level)
+    return intervals, skipped
+
+
 def compute_all_intervals(
     samples: dict,
     confidence_level: float = 0.95,
 ) -> dict:
-    intervals = {}
-    for key, values in samples.items():
-        if len(values) < 2:
-            values = values * 3
-        intervals[key] = compute_confidence_interval(values, confidence_level)
+    """Backward-compatible wrapper: intervals only."""
+    intervals, _skipped = compute_all_intervals_with_skips(
+        samples, confidence_level)
     return intervals
 
 
-def format_intervals_report(intervals: dict) -> str:
+def format_intervals_report(intervals: dict, skipped: dict | None = None) -> str:
     lines = []
     lines.append("")
     lines.append("=" * 60)
@@ -172,6 +192,11 @@ def format_intervals_report(intervals: dict) -> str:
         lines.append(f"  {label:30s}  {ci}")
         lines.append(f"  {' ':<30s}  Range: [{ci.lower:.1f}, {ci.upper:.1f}]  "
                       f"n={ci.sample_size}  {ci.distribution}")
+    if skipped:
+        lines.append("-" * 60)
+        lines.append("  SKIPPED (insufficient samples)")
+        for key in sorted(skipped):
+            lines.append(f"  {key.replace('_', ' ').title():30s}  {skipped[key]}")
     lines.append("=" * 60)
     lines.append("")
     return "\n".join(lines)
@@ -194,9 +219,10 @@ def phase_confidence(args: Any) -> dict:
 
     samples = collect_metric_samples(args)
 
-    intervals = compute_all_intervals(samples, confidence_level)
+    intervals, skipped = compute_all_intervals_with_skips(
+        samples, confidence_level)
 
-    report_text = format_intervals_report(intervals)
+    report_text = format_intervals_report(intervals, skipped)
     print(report_text)
 
     os.makedirs(build_dir, exist_ok=True)
@@ -204,7 +230,10 @@ def phase_confidence(args: Any) -> dict:
     atomic_write(
         report_path,
         json.dumps(
-            {k: v.to_dict() for k, v in intervals.items()},
+            {
+                "intervals": {k: v.to_dict() for k, v in intervals.items()},
+                "skipped": skipped,
+            },
             indent=2,
         ),
     )
@@ -212,5 +241,7 @@ def phase_confidence(args: Any) -> dict:
 
     for key, ci in intervals.items():
         log("CONFIDENCE", f"  {key}: {ci}  (n={ci.sample_size}, {ci.distribution})")
+    for key, reason in skipped.items():
+        log("CONFIDENCE", f"  {key}: SKIPPED ({reason})")
 
     return {k: v.to_dict() for k, v in intervals.items()}

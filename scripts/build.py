@@ -314,7 +314,7 @@ def validate_dependencies(opts=None) -> bool:
     # build that skips that stage rejected a build that could not have
     # used it -- and the security-artifact CI job runs exactly that.
     if getattr(opts, "skip_llvmgen", False):
-        print("SKIP: llc not required (--skip-llvmgen)")
+        print("SKIP: llc not required (--skip llvmgen)")
     elif not _check_exe("llc", "apt install llvm  (or: pacman -S llvm / brew install llvm)"):
         ok = False
 
@@ -384,7 +384,7 @@ def _apply_rea_shields(opts):
     maximum = level == "maximum"
     balanced = level == "balanced"
     stealth = level == "stealth"
-    poison = fam("poison")
+    poison = fam("poison") and not stealth
     opts.poison_level = (5 if maximum else 3 if balanced else 0) if poison else 0
     opts.provenance_poison = poison
     opts.provenance_replace = poison
@@ -666,21 +666,16 @@ def main():
         epilog="""
 Examples:
   python3 build.py --payload myscript.py
-  python3 build.py --payload myscript.py --skip-obfuscate --skip-relay
-  python3 build.py --payload myscript.py --skip-irgen --skip-llvmgen
-  python3 build.py --payload myscript.py --cross win,linux,linux-arm
+  python3 build.py --payload myscript.py --skip obfuscate,relay
+  python3 build.py --payload myscript.py --skip irgen,llvmgen
+  python3 build.py --payload myscript.py --package cross=win,linux,linux-arm
+  python3 build.py --payload myscript.py --transforms data speculation
+  python3 build.py --payload myscript.py --audit all
+  python3 build.py --payload myscript.py --research cfg-mutation
 
 For an encrypted packed artefact with a payload key (licence binding,
 customer salt), use the packed-loader build instead:
-  python3 -m obfuscator.core.pipeline build myscript.py --licence-token f
-  python3 build.py --payload myscript.py --phase2
-  python3 build.py --payload myscript.py --phase2-only vm,watermark
-  python3 build.py --payload myscript.py --classify
-  python3 build.py --payload myscript.py --adversarial-injection --adversarial-level 5
-  python3 build.py --payload myscript.py --adversarial-loop --deobfuscation-threshold 0.8
-  python3 build.py --payload myscript.py --phase2 --phase2-extras --adversarial-injection --microjit
-  python3 build.py --payload myscript.py --oram --phase2-extras
-  python3 build.py --payload myscript.py --rop
+  python3 -m obfuscator.core.pipeline build myscript.py --licence token=f
 
 The ROP target functions are a config key, not a flag: set
   shadow_compiler.llvmgen.rop.target_functions
@@ -1020,7 +1015,7 @@ in config/default.json.
 
 
     # Dependency validation runs after parsing so it can honour the skip
-    # flags: --skip-llvmgen never invokes llc, so requiring it there made
+    # flags: --skip llvmgen never invokes llc, so requiring it there made
     # a legitimate build fail (and made --help fail on a box without
     # llc).  See the security-artifact CI job.
     if not validate_dependencies(opts):
@@ -1821,7 +1816,7 @@ in config/default.json.
         if not opts.skip_irgen:
             phase_watermark_embedding(ir_output, phase2_cfg)
         else:
-            log("SKIP", "Watermark embedding skipped (requires IR; --skip-irgen set)")
+            log("SKIP", "Watermark embedding skipped (requires IR; --skip irgen set)")
     else:
         log("SKIP", "Watermark embedding skipped (not enabled)")
 
@@ -1963,7 +1958,7 @@ in config/default.json.
         if _ef_bin is not None:
             phase_entropy_flatten(_ef_bin, _ef_bin, _ef_config)
         else:
-            log("ERROR", "Entropy flatten enabled in config but no ELF binary available (obj_output/enc_output missing); ensure --skip-llvmgen and --skip-encrypt are not both set")
+            log("ERROR", "Entropy flatten enabled in config but no ELF binary available (obj_output/enc_output missing); ensure --skip llvmgen and --skip encrypt are not both set")
     # =========================================================================
     # Stage 5.6: MicroJIT — Polymorphic Reassembly
     # =========================================================================
@@ -2275,7 +2270,7 @@ in config/default.json.
     if not opts.skip_extras:
         phase_optional_extras(phase2_cfg)
     else:
-        log("SKIP", "Optional extras skipped by --skip-extras")
+        log("SKIP", "Optional extras skipped by --skip extras")
 
     # =========================================================================
     # Adversarial Loop: deobfuscation agent + compiler mutation
@@ -2292,7 +2287,7 @@ in config/default.json.
     if opts.cfg_mutation and not opts.skip_irgen:
         phase_cfg_mutation(ir_output, opts.cfg_mutation_variants)
     elif opts.cfg_mutation and opts.skip_irgen:
-        log("SKIP", "CFG mutation skipped (requires IR; --skip-irgen set)")
+        log("SKIP", "CFG mutation skipped (requires IR; --skip irgen set)")
     else:
         log("SKIP", "CFG mutation not enabled (use --cfg-mutation)")
 

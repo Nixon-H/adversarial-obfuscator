@@ -63,6 +63,15 @@ class RepDiversifier(ast.NodeTransformer):
         self.stats = {"ints": 0, "strings": 0, "exprs": 0, "frags": 0}
 
     # -- R1: int literal forms -------------------------------------------
+    def visit_JoinedStr(self, node):
+        # A rewritten literal inside JoinedStr is invalid and crashes
+        # ast.unparse, so string forms are skipped inside f-strings.
+        self._joined_depth = getattr(self, "_joined_depth", 0) + 1
+        try:
+            return self.generic_visit(node)
+        finally:
+            self._joined_depth -= 1
+
     def visit_Constant(self, node):
         self.generic_visit(node)
         if (self.int_forms and isinstance(node.value, int)
@@ -74,7 +83,8 @@ class RepDiversifier(ast.NodeTransformer):
                     return ast.copy_location(new, node)
                 node.value = new
         if (self.str_forms and isinstance(node.value, str)
-                and not self._in_docstring_expr):
+                and not self._in_docstring_expr
+                and getattr(self, "_joined_depth", 0) == 0):
             new = self._str_form(node.value)
             if new is not None:
                 self.stats["strings"] += 1

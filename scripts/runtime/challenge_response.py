@@ -81,16 +81,22 @@ class ChallengeResponse:
     fresh random entropy. Self-destruct triggers after max_failures.
     """
 
-    def __init__(self, timeout: float = 5.0, max_failures: int = 3):
+    def __init__(self, timeout: float = 5.0, max_failures: int = 3,
+                 shared_secret: bytes | None = None):
         """
         Initialize the protocol handler.
 
         Args:
             timeout: Deadline for challenge validity in seconds.
             max_failures: Consecutive failures before self-destruct.
+            shared_secret: Optional pre-shared key.  When set, both peers
+                derive the same per-peer secret from it; without it the
+                per-instance random salt makes cross-party verification
+                impossible (the demo's original limitation).
         """
         self.timeout = timeout
         self.max_failures = max_failures
+        self._shared_secret = shared_secret
         self._secrets: dict[str, bytes] = {}
         self._failed_attestations: dict[str, int] = {}
         self._self_destructed = False
@@ -99,18 +105,35 @@ class ChallengeResponse:
         """
         Derive or retrieve a per-peer shared secret.
 
-        Secret = SHA-256(peer_id || 32 random bytes). Derived once
-        and cached. The random salt ensures forward secrecy: past
-        secrets cannot be recomputed after restart.
+        With ``shared_secret``: SHA-256(shared_secret || peer_id), so two
+        instances holding the same pre-shared key agree.  Without it:
+        SHA-256(peer_id || 32 random bytes), which is unique per instance
+        and therefore only useful for local testing.
 
         Security note: bytes are immutable, so the secret cannot be
         explicitly zeroed. Caller should minimize retention.
         """
         if peer_id not in self._secrets:
-            self._secrets[peer_id] = hashlib.sha256(
-                peer_id.encode() + os.urandom(32)
-            ).digest()
+            if self._shared_secret is not None:
+                self._secrets[peer_id] = hashlib.sha256(
+                    self._shared_secret + peer_id.encode()).digest()
+            else:
+                self._secrets[peer_id] = hashlib.sha256(
+                    peer_id.encode() + os.urandom(32)
+                ).digest()
         return self._secrets[peer_id]
+
+    def _record_failure(self, responder_id: str) -> None:
+        """Count a failed attestation and lock once the peer crosses the limit.
+
+        The threshold used to be checked on the success path, so a peer that
+        failed three times and then answered correctly still tripped the
+        lock, and the lock itself disabled attestation for every peer.
+        """
+        count = self._failed_attestations.get(responder_id, 0) + 1
+        self._failed_attestations[responder_id] = count
+        if count >= self.max_failures:
+            self._self_destructed = True
 
     def create_challenge(self, responder_id: str) -> Optional[Challenge]:
         """
@@ -167,23 +190,20 @@ class ChallengeResponse:
         secret = self._get_secret(responder_id)
 
         if time.time() > challenge.deadline:
-            self._failed_attestations[responder_id] = self._failed_attestations.get(responder_id, 0) + 1
+            self._record_failure(responder_id)
             return Response(responder_id, b"", time.time(), False)
 
         challenge_data = challenge.challenge_data[:-32]
         challenge_sig = challenge.challenge_data[-32:]
 
         expected_sig = hashlib.sha256(secret + challenge_data).digest()
-        if challenge_sig != expected_sig:
-            self._failed_attestations[responder_id] = self._failed_attestations.get(responder_id, 0) + 1
+        if not hmac.compare_digest(challenge_sig, expected_sig):
+            self._record_failure(responder_id)
             return Response(responder_id, b"", time.time(), False)
 
         response_nonce = os.urandom(16)
         response_data = challenge_data + response_nonce
         response_sig = hashlib.sha256(secret + response_data + b"OK").digest()
-
-        if self._failed_attestations.get(responder_id, 0) >= self.max_failures:
-            self._self_destructed = True
 
         return Response(
             responder_id=responder_id,
@@ -202,9 +222,7 @@ class ChallengeResponse:
         3. Response.success flag is True.
         4. SHA-256(secret || response_data || "OK") matches the signature.
 
-        Security note: This uses constant-time comparison only implicitly
-        through hashlib. If timing attacks are a concern, replace with
-        hmac.compare_digest on the final comparison.
+        Security note: the signature check uses hmac.compare_digest.
         """
         if self._self_destructed:
             return False

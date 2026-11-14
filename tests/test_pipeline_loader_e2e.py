@@ -22,11 +22,12 @@ import pytest
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-# 900s, matching the other build-fixture budgets: the e2e module fixture
-# builds the full pipeline artefact, which measures 340-550s idle and was
-# killed at 300s under a loaded suite (returncode -9, all three tests in
-# this file errored at setup). The budget was the problem, not the build.
-_BUILD_TIMEOUT = 900
+# 900s matched the idle build time, but under a loaded suite (two full
+# runs in parallel, tmpfs pressure) each loader build measured 10-35 min
+# of CPU and all three tests in this file errored at setup with
+# TimeoutExpired (2026-11-14). The budget was the problem, not the build.
+# 2400s matches the leashes used by test_loader_cli_flags.py.
+_BUILD_TIMEOUT = 2400
 
 
 def _run_pipeline_build(source_path, cwd):

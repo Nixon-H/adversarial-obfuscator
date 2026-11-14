@@ -96,9 +96,8 @@ class LLMFingerprinter:
                 tree.body.append(fp_check)
         else:
             if hasattr(tree, "body") and isinstance(tree.body, list):
-                tree.body.insert(0, fp_check)
-                tree.body.insert(0, sentinel_assign)
-                tree.body.insert(0, fp_assign)
+                from obfuscator.core.ast_prologue import insert_module_prologue
+                insert_module_prologue(tree, [fp_assign, sentinel_assign, fp_check])
 
         ast.fix_missing_locations(tree)
         return tree

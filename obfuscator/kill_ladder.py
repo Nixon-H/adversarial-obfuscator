@@ -189,8 +189,8 @@ def nx_kill(reason, key_holders=None, dry_run=False):
     os._exit(KILL_CODE)
 
 
-def emit_kill_snippet():
-    # type: () -> str
+def emit_kill_snippet(alert_fn: str | None = None):
+    # type: (...) -> str
     """Return the emittable ``_nx_kill`` snippet source. Must compile().
 
     Defines ``_nx_kill(reason, holders=None)`` with the same semantics
@@ -199,9 +199,30 @@ def emit_kill_snippet():
     its own ``import os`` aliased ``_nx_os`` so it composes with any
     gate snippet regardless of that snippet's import aliases. Silent
     by default; ``NIXON_LADDER_DEBUG=1`` writes the reason to fd 2.
+
+    ``alert_fn``: when given, the emitted kill FIRST best-effort reports
+    the reason through this (already-renamed) loader alert relay — the
+    operator's webhook learns about every armed-gate kill (audit round 2:
+    kills died silently, no server-side detection). The report is bounded
+    by the relay's own 3 s timeout and can never prevent the wipe+exit
+    that follows.
     """
     src = (
         "def _nx_kill(_reason=\"\", _holders=None):\n"
+        "    import os as _nx_os\n")
+    if alert_fn:
+        # Server-side detection (audit round 2): report BEFORE the wipe —
+        # after _exit(137) nothing can send. Best-effort: the relay has its
+        # own 3 s timeout; every failure here is swallowed and the
+        # wipe+exit below still runs.
+        src += (
+            "    try:\n"
+            "        _nx_alert = globals().get(%r)\n"
+            "        if callable(_nx_alert):\n"
+            "            _nx_alert('kill:' + str(_reason))\n"
+            "    except Exception:\n"
+            "        pass\n" % (alert_fn,))
+    src += (
         "    import os as _nx_os\n"
         "    try:\n"
         "        _nx_seen = []\n"

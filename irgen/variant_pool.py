@@ -29,6 +29,7 @@ Dependencies:
 from __future__ import annotations
 import argparse
 import ast
+import builtins
 import hashlib
 import json
 import os
@@ -368,13 +369,34 @@ def _inline_expressions(node: ast.AST, seed: bytes) -> ast.AST:
 
 def _scramble_variable_names(source: str, seed: bytes) -> str:
     """
-    Rename all user-defined variables with deterministic BLAKE2b-derived names.
+    Rename user-defined variables with deterministic BLAKE2b-derived names.
 
-    Built-in names starting with '__' are preserved. Each variable
-    gets a unique 'v_<hex>' name derived from the seed and original name.
+    Only names the code actually binds are renamed: parameters, assignment
+    targets and loop variables. Builtins, imported names and function names
+    keep their spelling, and parameters are renamed at their ``arg`` node as
+    well as at every use, so the function still binds what its body reads.
     """
     tree = ast.parse(source)
+    builtin_names = set(dir(builtins))
+
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                bound.add((alias.asname or alias.name).split('.')[0])
+
     var_map: dict[str, str] = {}
+    for name in sorted(bound - builtin_names):
+        if name.startswith("__"):
+            continue
+        h = _blake2b(seed + name.encode(), 4)
+        var_map[name] = f"v_{int.from_bytes(h, 'little'):08x}"
 
     class VarRenamer(ast.NodeTransformer):
         def visit_Name(self, node: ast.Name) -> ast.Name:
@@ -382,17 +404,10 @@ def _scramble_variable_names(source: str, seed: bytes) -> str:
                 node.id = var_map[node.id]
             return node
 
-        def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        def visit_arg(self, node: ast.arg) -> ast.arg:
+            if node.arg in var_map:
+                node.arg = var_map[node.arg]
             return node
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and node.id not in var_map:
-            if node.id.startswith("__"):
-                continue
-            h = _blake2b(seed + node.id.encode(), 4)
-            suffix = hex(int.from_bytes(h, "little"))[2:]
-            new_name = f"v_{suffix}"
-            var_map[node.id] = new_name
 
     tree = VarRenamer().visit(tree)
     return ast.unparse(tree)
