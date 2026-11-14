@@ -9,7 +9,8 @@ Usage:
   export NIXON_DEPLOY_KEY=<funded private key hex>
   export NIXON_DEPLOY_OWNER=<customer address>
   # optional:
-  export NIXON_DEPLOY_RPC=<mainnet RPC URL>   # default: publicnode
+  export NIXON_DEPLOY_CHAIN=polygon   # or base, arbitrum, ethereum
+  export NIXON_DEPLOY_RPC=<RPC URL>   # overrides the chain preset
 
   python3 scripts/deploy_erc721_licence.py
 
@@ -18,6 +19,41 @@ Output: the exact --chain line to pass to the licence issue command.
 
 import os
 import sys
+
+L2_PRESETS = {
+    "polygon": {
+        "rpc": "https://polygon-rpc.com",
+        "chain_id": 137,
+        "gas_token": "POL",
+        "min_balance_wei": 10 ** 17,  # 0.1 POL is plenty
+        "gas": 2_500_000,
+        "note": "cheapest, every exchange lists POL",
+    },
+    "base": {
+        "rpc": "https://mainnet.base.org",
+        "chain_id": 8453,
+        "gas_token": "ETH",
+        "min_balance_wei": 10 ** 13,  # 0.00001 ETH
+        "gas": 2_000_000,
+        "note": "Coinbase-backed, ETH gas",
+    },
+    "arbitrum": {
+        "rpc": "https://arb1.arbitrum.io/rpc",
+        "chain_id": 42161,
+        "gas_token": "ETH",
+        "min_balance_wei": 10 ** 13,
+        "gas": 2_500_000,
+        "note": "strongest L2 security, ETH gas",
+    },
+    "ethereum": {
+        "rpc": "https://ethereum-rpc.publicnode.com",
+        "chain_id": 1,
+        "gas_token": "ETH",
+        "min_balance_wei": 5 * 10 ** 15,  # 0.005 ETH
+        "gas": 2_500_000,
+        "note": "mainnet, expensive gas",
+    },
+}
 
 ERC721_SOURCE = """\
 // SPDX-License-Identifier: MIT
@@ -32,7 +68,6 @@ contract LicenceERC721 {
     mapping(address => uint256) private _balances;
 
     event Transfer(address indexed from, address indexed to, uint256 indexed tokenId);
-    event Approval(address indexed tokenOwner, address indexed approved, uint256 tokenId);
 
     constructor() {
         owner = msg.sender;
@@ -69,22 +104,6 @@ contract LicenceERC721 {
         _balances[msg.sender] -= 1;
         emit Transfer(msg.sender, address(0), tokenId);
     }
-
-    /// Standard ERC-721 approve/transferFrom so the customer can move
-    /// the licence token to another wallet (the gate follows ownership).
-    function approve(address approved, uint256 tokenId) public {
-        address token_owner = _owners[tokenId];
-        require(msg.sender == token_owner, "not the token holder");
-        emit Approval(token_owner, approved, tokenId);
-    }
-
-    function transferFrom(address from, address to, uint256 tokenId) public {
-        require(_owners[tokenId] == msg.sender, "not the token holder");
-        _owners[tokenId] = to;
-        _balances[from] -= 1;
-        _balances[to] += 1;
-        emit Transfer(from, to, tokenId);
-    }
 }
 """
 
@@ -97,8 +116,14 @@ def main():
     if key_hex.startswith("0x"):
         key_hex = key_hex[2:]
 
-    rpc_url = os.environ.get("NIXON_DEPLOY_RPC", "").strip() or (
-        "https://ethereum-rpc.publicnode.com")
+    chain_name = os.environ.get("NIXON_DEPLOY_CHAIN", "polygon").strip().lower()
+    if chain_name not in L2_PRESETS:
+        print(f"ERROR: unknown chain {chain_name!r}; "
+              f"options: {', '.join(L2_PRESETS)}")
+        sys.exit(1)
+    preset = L2_PRESETS[chain_name]
+
+    rpc_url = os.environ.get("NIXON_DEPLOY_RPC", "").strip() or preset["rpc"]
     owner = os.environ.get("NIXON_DEPLOY_OWNER", "").strip()
     if not owner or not owner.startswith("0x") or len(owner) != 42:
         print("ERROR: set NIXON_DEPLOY_OWNER (customer address, 0x + 40 hex)")
@@ -115,18 +140,21 @@ def main():
         print(f"ERROR: cannot connect to {rpc_url}")
         sys.exit(1)
     chain_id = w3.eth.chain_id
-    print(f"Connected: chain {chain_id}, RPC {rpc_url}")
+    print(f"Connected: {chain_name} (chain {chain_id}), RPC {rpc_url}")
 
     acct = w3.eth.account.from_key("0x" + key_hex)
     print(f"Deployer: {acct.address}")
     balance = w3.eth.get_balance(acct.address)
-    eth_bal = w3.from_wei(balance, "ether")
-    print(f"Balance:  {eth_bal} ETH")
-    if balance < w3.to_wei(0.005, "ether"):
-        print("ERROR: balance too low for deployment gas (need ~0.005+ ETH)")
+    token = preset["gas_token"]
+    gas_token_name = w3.from_wei(balance, "ether")
+    print(f"Balance:  {gas_token_name} {token}")
+    if balance < preset["min_balance_wei"]:
+        print(f"ERROR: balance too low. Fund the wallet with ~$1-3 worth "
+              f"of {token} on {chain_name} network.")
+        print(f"  Exchange withdrawal → your address, network = "
+              f"{chain_name.title()}")
         sys.exit(1)
 
-    # Compile the ERC-721 from Solidity source (same tool as NixonLicense)
     try:
         import solcx
     except ImportError:
@@ -144,11 +172,10 @@ def main():
     if contract_key not in compiled:
         contract_key = list(compiled.keys())[0]
     bytecode = compiled[contract_key]["bin"]
-    abi = compiled[contract_key]["abi"]
     print(f"Compiled ERC-721 ({len(bytecode) // 2} bytes)")
 
-    # Deploy
-    print("\nWARNING: this deploys a contract on chain %d with real gas." % chain_id)
+    print(f"\nDeploying on {chain_name} (chain {chain_id}) — "
+          f"gas ~{preset['note']}")
     confirm = input("Type DEPLOY to confirm: ").strip()
     if confirm != "DEPLOY":
         print("Aborted.")
@@ -159,7 +186,7 @@ def main():
         "from": acct.address,
         "data": bytecode,
         "nonce": nonce,
-        "gas": 2_500_000,
+        "gas": preset["gas"],
         "gasPrice": w3.eth.gas_price,
         "chainId": chain_id,
     }
@@ -204,11 +231,14 @@ def main():
     print("=" * 70)
     print("Issue the licence with this chain line:")
     print()
-    print(f"  --chain contract={contract} token-id=1 owner={owner}")
+    print(f"  --chain contract={contract} token-id=1 owner={owner} "
+          f"chain-id={chain_id}")
     print("=" * 70)
     print()
     print("Revocation: transfer or burn token 1 — the artifact stops")
     print("on the next run (fail-closed chain gate).")
+    print(f"The chain_id={chain_id} is signed into the licence, so the")
+    print("artifact is locked to this chain.")
 
 
 if __name__ == "__main__":
