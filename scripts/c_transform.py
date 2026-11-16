@@ -323,6 +323,82 @@ def shuffle_locals(source: str, seed: bytes,
     return new_source, count
 
 
+# ── 5. function outlining (dead computation blocks inside functions) ────
+
+#: Self-contained C computation blocks that look like real work.
+_DEAD_BLOCKS = [
+    """{{
+        unsigned _nx_out_{n} = 0x{init:x};
+        for (int _i = 0; _i < {n2}; _i++) {{
+            _nx_out_{n} = (_nx_out_{n} * 31 + (unsigned)_i) & 0x7FFFFFFF;
+            _nx_out_{n} ^= _nx_out_{n} >> 5;
+        }}
+        (void)_nx_out_{n};
+    }}""",
+    """{{
+        char _nx_buf_{n}[32];
+        int _nx_len_{n} = 0;
+        unsigned _nx_h_{n} = {init};
+        for (int _i = 0; _i < {n2}; _i++) {{
+            _nx_buf_{n}[_nx_len_{n}++] = (char)((_nx_h_{n} >> (_i % 8)) & 0xFF);
+            _nx_h_{n} = _nx_h_{n} * 6364136223846793005LL + 1;
+        }}
+        (void)_nx_len_{n};
+    }}""",
+    """{{
+        long _nx_acc_{n} = {init}L;
+        long _nx_tmp_{n} = 0;
+        for (int _i = 0; _i < {n2}; _i++) {{
+            _nx_tmp_{n} = (_nx_acc_{n} ^ (_nx_acc_{n} >> 3)) + _i;
+            _nx_acc_{n} = (_nx_acc_{n} + _nx_tmp_{n}) & 0x00FFFFFF;
+        }}
+        (void)_nx_tmp_{n};
+    }}""",
+]
+
+
+def insert_dead_blocks(source: str, seed: bytes,
+                       rng: random.Random,
+                       rate: float = 0.3) -> Tuple[str, int]:
+    """Insert self-contained computation blocks inside large function bodies.
+
+    These blocks look like real work but compute nothing that feeds into the
+    payload.  They make function boundaries and real block boundaries harder
+    to distinguish, which is the "function outlining" / "interprocedural
+    obfuscation" goal.
+    """
+    digest = hashlib.sha256(seed).digest()
+    lines = source.splitlines(keepends=True)
+    inserted = 0
+    out = []
+    depth = 0
+    block_idx = 0
+    for line in lines:
+        stripped = line.strip()
+        opens = stripped.count("{") - stripped.count("}")
+        closes = -opens if opens < 0 else 0
+        depth += stripped.count("{") - stripped.count("}")
+        out.append(line)
+        # Insert dead blocks inside function bodies (depth 1 or 2), not at
+        # global scope (depth 0) or inside nested blocks (depth > 2).
+        if 1 <= depth <= 2 and stripped.endswith("{") and \
+                rng.random() < rate and block_idx < len(_DEAD_BLOCKS):
+            init = int.from_bytes(digest[block_idx * 4:block_idx * 4 + 4], "big")
+            n = block_idx + 1
+            block = _DEAD_BLOCKS[block_idx % len(_DEAD_BLOCKS)].format(
+                n=n, n2=n * 3 + 5, init=init)
+            indent = "    " * depth
+            out.append("\n" + indent + "/* build-time computation block */\n")
+            for bl in block.splitlines():
+                out.append(indent + bl.strip() + "\n")
+            out.append("\n")
+            block_idx += 1
+            inserted += 1
+    if inserted == 0:
+        return source, 0
+    return "".join(out), inserted
+
+
 # ── the pipeline ──────────────────────────────────────────────────────────
 
 @dataclass
@@ -334,6 +410,7 @@ class CTransformResult:
     opaque_inserted: int = 0
     junk_injected: int = 0
     locals_shuffled: int = 0
+    dead_blocks: int = 0
     transforms_applied: List[str] = field(default_factory=list)
 
 
@@ -341,7 +418,8 @@ def transform_c(source: str, seed: bytes, *,
                 do_encrypt_strings: bool = True,
                 do_opaque_predicates: bool = True,
                 do_junk_functions: bool = True,
-                do_shuffle_locals: bool = True) -> CTransformResult:
+                do_shuffle_locals: bool = True,
+                do_dead_blocks: bool = True) -> CTransformResult:
     """Apply the C transformation layer.  Polymorphic per (source, seed).
 
     Each transform is applied in a randomised order (where safe) and the
@@ -361,7 +439,7 @@ def transform_c(source: str, seed: bytes, *,
             result.source, seed, rng)
         if result.strings_encrypted:
             applied.append("string-encryption(%d)" % result.strings_encrypted)
-    for step in ("junk", "shuffle", "opaque"):
+    for step in ("junk", "shuffle", "opaque", "dead_blocks"):
         if step == "junk" and do_junk_functions:
             result.source, result.junk_injected = inject_junk_functions(
                 result.source, seed + b"junk", rng)
@@ -377,6 +455,11 @@ def transform_c(source: str, seed: bytes, *,
                 result.source, seed + b"opaque", rng)
             if result.opaque_inserted:
                 applied.append("opaque-predicates(%d)" % result.opaque_inserted)
+        elif step == "dead_blocks" and do_dead_blocks:
+            result.source, result.dead_blocks = insert_dead_blocks(
+                result.source, seed + b"dead", rng)
+            if result.dead_blocks:
+                applied.append("dead-blocks(%d)" % result.dead_blocks)
     return result
 
 
