@@ -2299,13 +2299,19 @@ def _load_native():
         except Exception:
             return False
     if not blob_key or "PLACEHOLDER" in str(NATIVE_BLOBS):
-        if _nx_ci_bypass_ok():
+        # A sectioned build has no native blob by design: the sections ARE
+        # the payload.  It must therefore run the fallback unconditionally,
+        # not only under the CI bypass -- otherwise the section pack and the
+        # moving-decryption walker are emitted into the artefact and never
+        # executed, which is exactly the "emitted but never called" defect
+        # this project has hit before.
+        if _NX_SECTION_PACK or _nx_ci_bypass_ok():
             _exec_fallback()
             return sys.modules[__name__]
         return None
     blobs = NATIVE_BLOBS
     if blob_key not in blobs or not blobs[blob_key]:
-        if _nx_ci_bypass_ok():
+        if _NX_SECTION_PACK or _nx_ci_bypass_ok():
             _exec_fallback()
             return sys.modules[__name__]
         return None
@@ -4547,6 +4553,32 @@ def _VERIFY_INTEGRITY():
     print("[*] SUCCESS: Dual Output Generated")
     build_info = {'features': {'hw_locked': hw_enable, 'expiration': args.expire if args.expire else "None", 'network_auth': bool(args.net_url), 'vm_inception': True, 'native_vm': bool(native_blob), 'memory_encryption': True, 'integrity_hmac': True}, 'metrics': {'build_time_sec': round(time.time() - start_time, 4), 'Nixon_Enc_strings': get_legacy_count()}}
     generate_report(base_out_path, build_info, generated_outputs)
+    # Post-build mini-attack (Tier 2 #4): score the artefact that was just
+    # produced and append the cells to the campaign data, so the layer
+    # selector's next recommendation includes this build.  Never fails the
+    # build: a scoring error is recorded as an error cell.
+    try:
+        if not getattr(args, "no_post_build_attack", False):
+            from obfuscator.post_build_attack import score_artifact
+            _pba_art = None
+            for _rec in generated_outputs:
+                _fn = _rec.get("filename") if isinstance(_rec, dict) else None
+                if _fn and _fn.endswith(".py") and "_dbg" not in _fn:
+                    _pba_art = _fn
+            if _pba_art and os.path.exists(_pba_art):
+                _pba_out = os.path.join(
+                    os.path.dirname(os.path.abspath(base_out_path)),
+                    "post_build_campaign.json")
+                _pba = score_artifact(_pba_art, out=_pba_out)
+                _cell = _pba["cells"][0]
+                print("    [+] Post-build attack: recall=%.2f cracked=%s "
+                      "(names=%d)" % (_cell["recall"], _cell["cracked"],
+                                      len(_cell["names_recovered"])))
+                if _cell["names_recovered"]:
+                    print("        [!] leaked names: %s"
+                          % (", ".join(_cell["names_recovered"][:6]),))
+    except Exception:
+        pass
     try:
         _tmp_loader = getattr(args, '_tmp_hybrid_loader', None)
         if _tmp_loader and os.path.exists(_tmp_loader):
