@@ -1443,14 +1443,50 @@ def build_local_cython(source_content, target_python=None):
         with open(src_path, "w", encoding="utf-8") as f:
             f.write(source_content)
         print(f"    [>] Local Build Directory: {build_dir}")
-        setup_content = """
-from setuptools import setup, Extension
-from Cython.Build import cythonize
-setup(
-    ext_modules=cythonize("payload.py", compiler_directives={'language_level': "3", 'always_allow_keywords': True}),
-    script_args=["build_ext", "--inplace"]
-)
-"""
+        # Two-step native build (Tier: custom C transformation layer):
+        # 1. cython generates the .c file
+        # 2. the C transformation layer encrypts strings, injects opaque
+        #    predicates, junk functions and shuffles locals
+        # 3. gcc compiles the TRANSFORMED .c
+        # This is the "between Cython and native" layer the architecture
+        # calls for: the analyst must reverse the transformed C, not the
+        # Cython-generated C.
+        cython_cmd = [python_exec if False else sys.executable, "-m", "cython",
+                      "-3", "payload.py"]
+        cython_cmd = [sys.executable, "-m", "cython", "-3", "payload.py"]
+        cython_result = subprocess.run(cython_cmd, cwd=build_dir,
+                                       capture_output=True, text=True,
+                                       timeout=600)
+        if cython_result.returncode != 0:
+            print(f" [!] Cython C generation failed:\n{cython_result.stderr[-500:]}")
+            return None, None
+        c_path = os.path.join(build_dir, "payload.c")
+        if not os.path.exists(c_path):
+            print(" [!] Cython did not produce payload.c")
+            return None, None
+        # Transform the generated C (polymorphic per build).
+        try:
+            from scripts.c_transform import transform_file as _c_tf
+            _c_seed = os.urandom(32)
+            _ct = _c_tf(c_path, _c_seed)
+            print(f"    [+] C transform: {_ct.transforms_applied}")
+        except Exception as _ct_exc:
+            print(f"    [!] C transform skipped: {_ct_exc}")
+        py_inc = sysconfig.get_paths().get("include", "")
+        gcc_cmd = [
+            sys.executable, "-c",
+            "import sysconfig, subprocess, sys; "
+            "inc = sysconfig.get_paths()['include']; "
+            "subprocess.check_call(['gcc', '-shared', '-O3', '-flto', "
+            "'-fvisibility=hidden', '-std=c99', '-I', inc, "
+            "'-I', '.', '-o', 'payload_module.so', 'payload.c'])",
+        ]
+        gcc_result = subprocess.run(gcc_cmd, cwd=build_dir,
+                                    capture_output=True, text=True,
+                                    timeout=600)
+        if gcc_result.returncode != 0:
+            print(f" [!] gcc compile of transformed C failed:\n{gcc_result.stderr[-500:]}")
+            return None, None
         setup_path = os.path.join(build_dir, "setup.py")
         with open(setup_path, "w", encoding="utf-8") as f:
             f.write(setup_content)            
