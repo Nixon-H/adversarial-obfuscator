@@ -73,7 +73,19 @@ fn main() {
                 std::process::exit(1);
             }
         };
-        let service = std::sync::Arc::new(orbital_relay::remote::RemoteService::new(secret));
+        let service = std::sync::Arc::new(
+            match &cli.remote_bundle {
+                Some(path) => {
+                    eprintln!(
+                        "remote worker bundle: {}",
+                        path
+                    );
+                    orbital_relay::remote::RemoteService::new(secret)
+                        .with_worker_bundle(path.clone())
+                }
+                None => orbital_relay::remote::RemoteService::new(secret),
+            },
+        );
         eprintln!(
             "remote service listening on {} ({} handler(s) registered)",
             cli.remote_bind,

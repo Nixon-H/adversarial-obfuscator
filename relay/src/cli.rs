@@ -36,6 +36,12 @@ pub struct Cli {
     /// TLS terminator if you need that.
     #[arg(long, action = clap::ArgAction::SetTrue)]
     pub allow_remote: bool,
+
+    /// Path to the operator's Python bundle (the implementations that never
+    /// ship).  Requests for functions the Rust side does not register are
+    /// forwarded here.
+    #[arg(long)]
+    pub remote_bundle: Option<String>,
 }
 
 #[cfg(test)]

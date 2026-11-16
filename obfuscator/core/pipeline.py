@@ -2165,6 +2165,23 @@ def _exec_fallback():
             # mis-keyed pack fails closed (the walker returns None).
             _stream = globals().get("_nx_section_stream")
             if _stream is not None:
+                # Runtime marker: proves from OUTSIDE that this artefact took
+                # the moving-decryption path.  Written before the decrypt so
+                # it survives a later kill, and only when the caller asked
+                # for it (NIXON_PATH_MARKER names the file), so a normal run
+                # leaves no trace.
+                try:
+                    # Self-contained import: the obfuscator renames the
+                    # loader's module-level aliases, so referencing one here
+                    # raised NameError and the marker was silently skipped
+                    # (which is why the path could not be observed).
+                    import os as _nx_mark_os
+                    _nx_mark = _nx_mark_os.environ.get("NIXON_PATH_MARKER")
+                    if _nx_mark:
+                        with open(_nx_mark, "a", encoding="utf-8") as _nx_mfh:
+                            _nx_mfh.write("section-stream\n")
+                except Exception:
+                    pass
                 raw = _stream(_NX_SECTION_PACK, _NX_EFF_KEY)
                 if raw is None:
                     try:
@@ -3216,10 +3233,32 @@ def build_project(args):
                 # The split needs a fallback payload to split, and there
                 # is no fallback at all in --native-only mode.  Say so
                 # instead of silently shipping the single blob.
-                if "_NX_SECTION_PACK = ''" in hybrid_loader_src:
+                _armed = "_NX_SECTION_PACK = ''" not in hybrid_loader_src
+                if not _armed:
                     UI.warn("Section split was requested but could not be "
                             "armed (no fallback payload, or --native-only); "
                             "the single blob is used instead.")
+                else:
+                    # Build-time proof that the MOVING path is wired, not
+                    # just emitted.  A sectioned artefact whose loader lacks
+                    # the stream helper or its call site would run the
+                    # whole-payload join -- the exact "emitted but never
+                    # called" defect this project has hit twice.  Fail the
+                    # build rather than ship it.
+                    _missing = []
+                    if "def _nx_section_stream" not in hybrid_loader_src:
+                        _missing.append("_nx_section_stream definition")
+                    if "_stream(_NX_SECTION_PACK" not in hybrid_loader_src:
+                        _missing.append("_stream(_NX_SECTION_PACK) call")
+                    if "_NX_SECTION_PACK or _nx_ci_bypass_ok()" not in hybrid_loader_src:
+                        _missing.append("fallback gate opens on the section pack")
+                    if _missing:
+                        raise SystemExit(
+                            "section split is armed but the moving-decryption "
+                            "path is not wired: %s" % (", ".join(_missing),))
+                    UI._out(" %sℹ Moving decryption: stream helper emitted and "
+                            "called (runtime marker: NIXON_PATH_MARKER)%s"
+                            % (UI.CYAN, UI.RESET))
             args._real_native_blobs = real_blobs_dict
             args._real_fallback_blob = real_fallback_str
             # Secure temp (no predictable CWD artifact): system temp dir,
@@ -3233,15 +3272,30 @@ def build_project(args):
             args._tmp_hybrid_loader = loader_path
             with open(loader_path, 'w', encoding='utf-8') as f:
                 f.write(hybrid_loader_src)
+            # Keep the SOURCE, not just the path: the temp file is deleted
+            # before the artefact move step, and the sectioned build needs
+            # this text to write the final artefact.
+            args._hybrid_loader_src = hybrid_loader_src
             t.success(value="Universal Fallback Generated")
         UI.item("Hybrid Context", loader_path, "READY")
+        # Remember the payload the user named: the artefact must be named
+        # after it, not after this temp loader.
+        args._original_source = source
         args.source = loader_path
         source = loader_path 
     start_time = time.time()
-    base_out_name = f"{os.path.basename(source).split('.')[0]}_Nixon-Enc.py"
+    # Name the artefact after the ORIGINAL payload, not the temp loader: the
+    # sectioned path swaps `source` to the hybrid loader's temp file, and
+    # deriving the name from it produced `hybrid_loader_xxxx_protected.py`
+    # instead of `<payload>_protected.py` -- so callers and tests could not
+    # find the artefact they had just built.
+    _orig_stem = os.path.splitext(os.path.basename(
+        getattr(args, "_original_source", source)))[0]
+    base_out_name = f"{_orig_stem}_Nixon-Enc.py"
     # Intermediates (the packed variants, the report) belong next to the
     # source, not in whatever directory the CLI happened to be run from.
-    out_dir = os.path.dirname(os.path.abspath(source))
+    out_dir = os.path.dirname(os.path.abspath(
+        getattr(args, "_original_source", source)))
     base_out_path = os.path.join(out_dir, base_out_name)
     if not getattr(args, 'native', False): 
          UI.section("PHASE 2: COMPILATION & OBFUSCATION")
@@ -3539,12 +3593,50 @@ def _VERIFY_INTEGRITY():
     # Set once the native blobs have been XOR'd against the loader's key; the
     # loop below runs per variant and must not pack them twice.
     _native_blobs_packed = False
+    # When the section split is armed, the HYBRID LOADER is the deliverable:
+    # it carries the section pack and the moving-decryption walker.  It used
+    # to be generated into a temp file and deleted, while the artefact stayed
+    # the plain obfuscated payload -- so the section code never shipped and
+    # the runtime marker proved the stream path never ran.  Ship the loader.
+    _hybrid_src = None
+    try:
+        _hl_path = getattr(args, "_tmp_hybrid_loader", None)
+        if _hl_path and os.path.exists(_hl_path):
+            with open(_hl_path, encoding="utf-8") as _hl_fh:
+                _candidate = _hl_fh.read()
+            if "_NX_SECTION_PACK = ''" not in _candidate and \
+                    "_stream(_NX_SECTION_PACK" in _candidate:
+                _hybrid_src = _candidate
+                UI._out(" %sℹ Sectioned build: shipping the hybrid loader "
+                        "(section pack + moving decryption)%s"
+                        % (UI.CYAN, UI.RESET))
+    except Exception:
+        _hybrid_src = None
     for i, (suffix, is_debug) in enumerate(variants):
         prefix = "│   └─" if i == len(variants) - 1 else "│   ├─"
         out_name = os.path.splitext(base_out_path)[0] + f"_{suffix}.py"
         t = UI.Task(f"[ {suffix.upper()} ]", f"Generating {suffix} Version...", prefix=prefix)
         t.__enter__()
         generated_files_map[suffix] = out_name
+        if _hybrid_src is not None:
+            # The hybrid loader IS the artefact for a sectioned build: write
+            # it verbatim (the Debug variant gets the same text; the loader's
+            # own gates decide behaviour at run time).  Write it under the
+            # `_protected` name the artifact-move step (and the tests) look
+            # for -- writing `_Debug.py` beside the source left nothing for
+            # the move to pick up.
+            _hy_out = os.path.join(
+                os.path.dirname(os.path.abspath(base_out_path)),
+                "%s_protected%s.py"
+                % (os.path.splitext(os.path.basename(
+                    getattr(args, "_original_source", base_out_path)))[0],
+                   "_dbg" if is_debug else ""))
+            with open(_hy_out, "w", encoding="utf-8") as _hy_fh:
+                _hy_fh.write(_hybrid_src)
+            generated_files_map[suffix] = _hy_out
+            t.success(value="Hybrid loader (sectioned)")
+            t.__exit__(None, None, None)
+            continue
         build_dir = tempfile.mkdtemp()
         swizzle_key = os.urandom(16)
         secure_map_str = "{}"
@@ -5588,6 +5680,29 @@ def main():
             UI._out(" │")
             UI._out(" └── Launchers         : Smart-Trust & Defender Whitelisting [READY]")
             UI._out("")
+            # A sectioned build ships the HYBRID LOADER as the artefact.  It
+            # is written here, after the packer has run, so the recursive
+            # packaging step cannot consume or rename it -- the earlier
+            # attempt wrote it before packing and the packer turned
+            # `hello_protected.py` into `hello_protected_Packed.py`, leaving
+            # nothing for the move step (and the tests) to find.
+            try:
+                _hl_src2 = getattr(args, "_hybrid_loader_src", None)
+                if _hl_src2 and "_NX_SECTION_PACK = ''" not in _hl_src2 and \
+                        "_stream(_NX_SECTION_PACK" in _hl_src2:
+                    _stem2 = os.path.splitext(os.path.basename(
+                        getattr(args, "_original_source", args.source)))[0]
+                    for _sfx2, _dbg2 in (("Debug", True), ("Silent", False)):
+                        _dest2 = os.path.join(
+                            dist_dir, "%s_protected%s.py"
+                            % (_stem2, "_dbg" if _dbg2 else ""))
+                        with open(_dest2, "w", encoding="utf-8") as _dfh2:
+                            _dfh2.write(_hl_src2)
+                    UI._out(" %sℹ Sectioned artefact: hybrid loader written "
+                            "to %s (section pack + moving decryption)%s"
+                            % (UI.CYAN, dist_dir, UI.RESET))
+            except Exception:
+                pass
             UI._out(f" {UI.CYAN}ℹ Artifacts moved to: {dist_dir}{UI.RESET}")
             # Clean-staging audit.  The 2026-11-14 benchmark lost the entire
             # symbol table to a .renamelog left beside the payload, and ~850 MB

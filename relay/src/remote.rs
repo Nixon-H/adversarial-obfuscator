@@ -50,7 +50,7 @@ pub struct RemoteRequest {
 }
 
 /// One response.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RemoteResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<serde_json::Value>,
@@ -260,11 +260,28 @@ pub struct RemoteService {
     secret: Vec<u8>,
     handlers: HashMap<String, Handler>,
     seen: Mutex<HashMap<String, f64>>,
+    /// Operator-side Python bundle.  A request for a function the Rust side
+    /// does not register is forwarded there: the bundle holds the real
+    /// implementations that never ship to the client.
+    worker_bundle: Option<String>,
 }
 
 impl RemoteService {
     pub fn new(secret: Vec<u8>) -> Self {
-        Self { secret, handlers: HashMap::new(), seen: Mutex::new(HashMap::new()) }
+        Self {
+            secret,
+            handlers: HashMap::new(),
+            seen: Mutex::new(HashMap::new()),
+            worker_bundle: None,
+        }
+    }
+
+    /// Point the service at an operator bundle (see
+    /// `obfuscator.remote_exec.write_remote_bundle`).  Requests for unknown
+    /// functions are forwarded to it via a Python subprocess.
+    pub fn with_worker_bundle(mut self, path: impl Into<String>) -> Self {
+        self.worker_bundle = Some(path.into());
+        self
     }
 
     /// How many implementations this service holds.
@@ -316,10 +333,74 @@ impl RemoteService {
                 Ok(value) => RemoteResponse::ok(value),
                 Err(message) => RemoteResponse::err(message),
             },
-            None => RemoteResponse::err(format!(
-                "unknown remote function '{}'",
-                request.function
+            // No Rust handler: forward to the operator's Python bundle if
+            // one is configured.  That bundle holds the implementations
+            // that never ship, so this IS the Level-5 path -- the algorithm
+            // exists only on the service side.
+            None => match &self.worker_bundle {
+                Some(bundle) => self.forward_to_worker(bundle, request),
+                None => RemoteResponse::err(format!(
+                    "unknown remote function '{}'",
+                    request.function
+                )),
+            },
+        }
+    }
+
+    /// Forward a verified request to the operator's Python bundle.
+    ///
+    /// The bundle is executed as `python3 <bundle> --call <function>` with
+    /// the request on stdin; it writes a JSON response to stdout.  A
+    /// non-zero exit or invalid JSON is an error response, never a panic.
+    fn forward_to_worker(
+        &self,
+        bundle: &str,
+        request: &RemoteRequest,
+    ) -> RemoteResponse {
+        use std::process::Stdio;
+        let payload = serde_json::to_string(&serde_json::json!({
+            "function": request.function,
+            "args": request.args,
+            "nonce": request.nonce,
+            "timestamp": request.timestamp,
+            "signature": request.signature,
+        }))
+        .unwrap_or_default();
+        let python = std::env::var("NIXON_REMOTE_PYTHON")
+            .unwrap_or_else(|_| "python3".to_string());
+        let child = std::process::Command::new(python)
+            .arg(bundle)
+            .arg("--call")
+            .arg(&request.function)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn();
+        let mut child = match child {
+            Ok(child) => child,
+            Err(err) => {
+                return RemoteResponse::err(format!("worker spawn failed: {}", err))
+            }
+        };
+        if let Some(stdin) = child.stdin.as_mut() {
+            let _ = stdin.write_all(payload.as_bytes());
+        }
+        match child.wait_with_output() {
+            Ok(output) if output.status.success() => {
+                match serde_json::from_slice::<RemoteResponse>(&output.stdout) {
+                    Ok(response) => response,
+                    Err(err) => RemoteResponse::err(format!(
+                        "worker response was not JSON: {}",
+                        err
+                    )),
+                }
+            }
+            Ok(output) => RemoteResponse::err(format!(
+                "worker exited with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).chars().take(200).collect::<String>()
             )),
+            Err(err) => RemoteResponse::err(format!("worker failed: {}", err)),
         }
     }
 
