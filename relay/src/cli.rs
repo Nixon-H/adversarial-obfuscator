@@ -18,6 +18,24 @@ pub struct Cli {
 
     #[arg(long, default_value_t = true)]
     pub antidebug: bool,
+
+    /// Serve remote functions (Tier 4 #8, Level-5 split execution).
+    ///
+    /// The client artefact carries a stub for every `@remote` function; this
+    /// process holds the implementation.  The shared secret is read from
+    /// NIXON_REMOTE_SECRET (never from argv, never from a file in the repo).
+    #[arg(long)]
+    pub serve_remote: bool,
+
+    /// Bind address for --serve-remote (default 127.0.0.1:8787).
+    #[arg(long, default_value = "127.0.0.1:8787")]
+    pub remote_bind: String,
+
+    /// Allow binding a non-loopback address.  The endpoint speaks plain
+    /// HTTP, so this exposes the arguments to the network; put it behind a
+    /// TLS terminator if you need that.
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    pub allow_remote: bool,
 }
 
 #[cfg(test)]

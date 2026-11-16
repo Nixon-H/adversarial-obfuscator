@@ -63,6 +63,33 @@ fn main() {
         orbital_relay::antidbg::run_checks();
     }
 
+    // Tier 4 #8: the remote-function service.  This path does not launch a
+    // payload; it holds the implementations the client stubs call.
+    if cli.serve_remote {
+        let secret = match orbital_relay::remote::secret_from_env() {
+            Ok(value) => value,
+            Err(message) => {
+                eprintln!("Error: {message}");
+                std::process::exit(1);
+            }
+        };
+        let service = std::sync::Arc::new(orbital_relay::remote::RemoteService::new(secret));
+        eprintln!(
+            "remote service listening on {} ({} handler(s) registered)",
+            cli.remote_bind,
+            service.handler_count()
+        );
+        if let Err(message) = orbital_relay::remote::serve(
+            std::sync::Arc::clone(&service),
+            &cli.remote_bind,
+            cli.allow_remote,
+        ) {
+            eprintln!("Error: {message}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     let payload_path = cli.payload.clone().unwrap_or_default();
     if let Err(e) = orbital_relay::payload::launch_payload(&payload_path) {
         eprintln!("Error: {e:#}");
