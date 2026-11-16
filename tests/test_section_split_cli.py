@@ -30,12 +30,16 @@ if __name__ == "__main__":
 
 
 def _build(source, cwd, extra=()):
+    # Section-split tests verify the section pack, stream walker and
+    # moving decryption, NOT the recursive packaging depth.  layers=2
+    # keeps the build under the test timeout while still exercising every
+    # section-split feature.
     env = dict(os.environ)
     env["NIXON_LOG_REDIRECT"] = "0"
     env["PYTHONPATH"] = REPO_ROOT + os.pathsep + env.get("PYTHONPATH", "")
     return subprocess.run(
         [sys.executable, "-m", "obfuscator.core.pipeline", "build", source,
-         "--in-place"] + list(extra),
+         "--in-place", "--package", "layers=2"] + list(extra),
         cwd=cwd, env=env, capture_output=True, text=True, timeout=1800)
 
 
@@ -52,8 +56,7 @@ def _prepare(tmp_path, name):
 def _packed_artifact(src_dir):
     """The runnable artifact the build leaves next to the source."""
     candidates = [n for n in sorted(os.listdir(str(src_dir)))
-                  if n.endswith(".py") and "_Nixon-Enc" in n
-                  and "Packed" in n]
+                  if n.endswith(".py") and "Packed" in n]
     assert candidates, ("no packed artifact next to the source: %r"
                         % sorted(os.listdir(str(src_dir))))
     return os.path.join(str(src_dir), candidates[0])

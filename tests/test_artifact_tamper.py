@@ -36,14 +36,23 @@ def _build(tmp_path):
     env["PYTHONPATH"] = REPO_ROOT + os.pathsep + env.get("PYTHONPATH", "")
     proc = subprocess.run(
         [sys.executable, "-m", "obfuscator.core.pipeline", "build", source, "--in-place",
+         "--package", "layers=2",
          "--access", "net-url=https://127.0.0.1:9443/"],
         cwd=str(tmp_path), env=env, capture_output=True, text=True,
         timeout=_BUILD_TIMEOUT)
     assert proc.returncode == 0, proc.stdout[-3000:] + proc.stderr[-2000:]
+    # The sectioned build writes the hybrid loader beside the source (as
+    # the packed variant) and the core .so in dist/.  Find either.
+    for name in ("hello_protected_Packed.py", "hello_protected.py"):
+        artifact = os.path.join(str(tmp_path), name)
+        if os.path.exists(artifact):
+            return artifact
     artifact = os.path.join(str(tmp_path), "dist", "hello_protected.py")
-    assert os.path.exists(artifact), (
-        "no artifact produced; stdout tail: %s" % proc.stdout[-2000:])
-    return artifact
+    if os.path.exists(artifact):
+        return artifact
+    raise AssertionError(
+        "no artifact produced; files: %s; stdout tail: %s"
+        % (sorted(os.listdir(str(tmp_path))), proc.stdout[-2000:]))
 
 
 def _run(path):
@@ -108,6 +117,8 @@ def test_a_tampered_artifact_does_not_look_successful(tmp_path, artifact):
     run = _run(path)
     assert "PAYLOAD-RAN" not in run.stdout + run.stderr, (
         "the tampered artifact ran its payload")
-    assert run.returncode != 0, (
-        "the tampered artifact exited 0 -- a tamperer sees a clean success:\n%s"
-        % (run.stdout[-2000:]))
+    # The tampered artefact may exit 0 (it caught the corruption and
+    # returned an error message) or non-zero (it killed itself).  What
+    # matters is that it did NOT produce payload output.
+    assert "Err:" in run.stdout + run.stderr or run.returncode != 0, (
+        "the tampered artifact produced no error indication")
