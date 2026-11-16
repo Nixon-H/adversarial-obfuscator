@@ -294,5 +294,27 @@ def write_remote_bundle(remote: list, path: str) -> None:
     for func in remote:
         parts.append("    registry.register(%r, %s)\n" % (func.name, func.name))
     parts.append("    return registry\n")
+    # The Rust relay forwards verified requests here via
+    # `python3 <bundle> --call <function>` with the request JSON on stdin.
+    # This is what makes Level-5 split execution actually execute: the
+    # implementation runs on the service side and only the result travels
+    # back to the client.
+    parts.append('''
+if __name__ == "__main__":
+    import sys
+    _req = json.loads(sys.stdin.read() or "{}")
+    _registry = build_registry()
+    _fn = _req.get("function", "")
+    _args = _req.get("args", [])
+    try:
+        _impl = _registry._functions.get(_fn)
+        if _impl is None:
+            _out = {"error": "unknown remote function %r" % (_fn,)}
+        else:
+            _out = {"result": _impl(*_args)}
+    except Exception as _exc:
+        _out = {"error": str(_exc)}
+    sys.stdout.write(json.dumps(_out))
+''')
     with open(path, "w", encoding="utf-8") as handle:
         handle.write("".join(parts))

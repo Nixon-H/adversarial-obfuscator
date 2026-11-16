@@ -21,7 +21,10 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 # 900s, matching the other build-fixture budgets: the pipeline build measures
 # 340-550s idle and was killed at 600s while a second suite ran (returncode
 # -9, both tests in this file errored at setup).
-_BUILD_TIMEOUT = 900
+# Raised from 900: a default build is 100 packaging layers plus section
+# sealing and the moving-decryption walker, and on a loaded host it exceeded
+# 900 s (measured 901 s).  The leash was catching a slow build, not a hang.
+_BUILD_TIMEOUT = 2400
 
 
 def _build(tmp_path):
