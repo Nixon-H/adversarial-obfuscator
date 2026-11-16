@@ -32,7 +32,7 @@ def _build(tmp_path):
     env["NIXON_LOG_REDIRECT"] = "0"
     env["PYTHONPATH"] = REPO_ROOT + os.pathsep + env.get("PYTHONPATH", "")
     proc = subprocess.run(
-        [sys.executable, "-m", "obfuscator.core.pipeline", "build", source,
+        [sys.executable, "-m", "obfuscator.core.pipeline", "build", source, "--in-place",
          "--access", "net-url=https://127.0.0.1:9443/"],
         cwd=str(tmp_path), env=env, capture_output=True, text=True,
         timeout=_BUILD_TIMEOUT)

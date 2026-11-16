@@ -119,3 +119,48 @@ def test_real_loader_builder_emits_the_walker_by_default():
     assert "sink" in src
     assert "import json" in src
     compile(src, "<moving>", "exec")
+
+
+def test_each_section_uses_its_own_key():
+    """Tier 1.1: a section's key is derived from its POSITION.
+
+    With one shared key, recovering any single section's key unlocked all of
+    them -- the opposite of moving decryption.  Each section now derives its
+    own key from (master, index, nonce), so the per-section key material is
+    independent.
+    """
+    import hashlib
+
+    from obfuscator.section_split import _section_key, split_sealed
+
+    master = bytes(range(32))
+    pack = split_sealed(b"payload" * 500, sections=4, key=master)
+    assert pack.get("per_section") is True
+
+    keys = []
+    for sec in pack["sections"]:
+        nonce = bytes.fromhex(sec["nonce"])
+        keys.append(_section_key(master, int(sec["i"]), nonce))
+    assert len(set(keys)) == len(keys), "sections share a key"
+    assert all(k != master for k in keys)
+    for sec, key in zip(pack["sections"], keys):
+        nonce = bytes.fromhex(sec["nonce"])
+        assert sec["salt"] == hashlib.sha256(key + nonce).hexdigest()[:16]
+
+
+def test_per_section_pack_still_round_trips():
+    """The join and the moving walker both honour the per-section keys."""
+    import base64
+    import json
+
+    from obfuscator.section_split import pack_json, stream_join
+
+    payload = bytes(range(256)) * 20
+    js, key = pack_json(payload, sections=4)
+    pack = json.loads(js)
+    assert bytes(stream_join(pack, key)) == payload
+
+    seen = []
+    assert _walk()(base64.b85encode(js).decode(), key,
+                   lambda b: seen.append(b)) is True
+    assert b"".join(seen) == payload

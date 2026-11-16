@@ -35,7 +35,7 @@ def _build(tmp_path):
     env["NIXON_LOG_REDIRECT"] = "0"
     env["PYTHONPATH"] = ROOT + os.pathsep + env.get("PYTHONPATH", "")
     proc = subprocess.run(
-        [sys.executable, "-m", "obfuscator.core.pipeline", "build", source,
+        [sys.executable, "-m", "obfuscator.core.pipeline", "build", source, "--in-place",
          "--access", "net-url=https://127.0.0.1:9443/"],
         # 900s, matching the other build-fixture budgets. The build measures
         # ~700s on a loaded runner, so 600 killed it rather than catching a

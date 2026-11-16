@@ -61,14 +61,30 @@ def _keystream(key: bytes, nonce: bytes, ln: int) -> bytes:
     return bytes(out[:ln])
 
 
+def _section_key(master: bytes, index: int, nonce: bytes) -> bytes:
+    """Per-position section key.
+
+    Tier 1.1 asks for a key derived from the section's POSITION (and, at the
+    call site, the licence material and hardware, which are already mixed
+    into ``master``).  Using one key for every section meant that recovering
+    the key of any single section unlocked all of them -- the opposite of
+    what moving decryption is for.  Deriving per position plus the section
+    nonce makes each section's key independent.
+    """
+    return hashlib.sha256(
+        b"nx-section-key:" + bytes(master) + index.to_bytes(4, "big") + nonce
+    ).digest()
+
+
 def split_sealed(payload: bytes, *, sections: int = DEFAULT_SECTIONS,
                  key: Optional[bytes] = None) -> dict:
     """Split payload into N sealed sections. Returns pack dict.
 
-    pack = {sections: [...], count, total, key_hint}: key_hint is the hex
-    of sha256(key)[:8] so the loader can confirm it derived the same
-    session key (the key itself travels via the existing BLOB_KEY path —
-    never inside the pack).
+    pack = {sections: [...], count, total, key_hint, per_section}: key_hint
+    is the hex of sha256(key)[:8] so the loader can confirm it derived the
+    same session key (the key itself travels via the existing BLOB_KEY path
+    -- never inside the pack).  ``per_section`` marks a pack whose sections
+    each use their own derived key.
     """
     if sections < 1:
         raise ValueError("sections must be >= 1")
@@ -83,16 +99,19 @@ def split_sealed(payload: bytes, *, sections: int = DEFAULT_SECTIONS,
     for i in range(n):
         part = data[i * chunk:(i + 1) * chunk]
         nonce = os.urandom(16)
+        # Each section is sealed under its OWN key, derived from the master
+        # key, the section index and the section nonce.
+        skey = _section_key(key, i, nonce)
         # Keyed tag, not a bare sha256: an unkeyed digest detects corruption
         # but is not a MAC, so anyone able to touch the ciphertext could
         # recompute it.  HMAC with the section key needs no new crypto and
         # keeps the same 32-byte-prefix layout.
-        _tag = hmac.new(bytes(key) + nonce, part, hashlib.sha256).digest()
+        _tag = hmac.new(skey + nonce, part, hashlib.sha256).digest()
         tagged = _tag + part
-        enc = bytes(a ^ b for a, b in zip(tagged, _keystream(key, nonce, len(tagged))))
+        enc = bytes(a ^ b for a, b in zip(tagged, _keystream(skey, nonce, len(tagged))))
         out_sections.append({
             "i": i,
-            "salt": hashlib.sha256(key + nonce).hexdigest()[:16],
+            "salt": hashlib.sha256(skey + nonce).hexdigest()[:16],
             "nonce": nonce.hex(),
             "data": enc.hex(),
         })
@@ -101,6 +120,7 @@ def split_sealed(payload: bytes, *, sections: int = DEFAULT_SECTIONS,
         "count": n,
         "total": len(data),
         "key_hint": hashlib.sha256(key).hexdigest()[:16],
+        "per_section": True,
     }
 
 
@@ -121,15 +141,19 @@ def stream_join(pack: dict, key: bytes) -> bytearray:
     if [s["i"] for s in ordered] != list(range(pack["count"])):
         raise ValueError("section index mismatch")
     joined = bytearray()
+    per_section = bool(pack.get("per_section"))
     for sec in ordered:
         nonce = bytes.fromhex(sec["nonce"])
         enc = bytes.fromhex(sec["data"])
-        tagged = bytes(a ^ b for a, b in zip(enc, _keystream(bytes(key), nonce, len(enc))))
+        # Per-position key when the pack says so; the legacy single-key path
+        # stays for packs built before the change.
+        skey = _section_key(bytes(key), int(sec["i"]), nonce) if per_section else bytes(key)
+        tagged = bytes(a ^ b for a, b in zip(enc, _keystream(skey, nonce, len(enc))))
         if len(tagged) < 32:
             raise ValueError("section truncated")
         tag, part = tagged[:32], tagged[32:]
         if not hmac.compare_digest(
-                hmac.new(bytes(key) + nonce, part, hashlib.sha256).digest(), tag):
+                hmac.new(skey + nonce, part, hashlib.sha256).digest(), tag):
             raise ValueError(f"section {sec['i']} integrity failure")
         joined.extend(part)
     if len(joined) != pack["total"]:
@@ -514,20 +538,29 @@ LOADER_JOIN_SOURCE = '''def {FUNC}(pack_b85, key):
         if [s["i"] for s in ordered] != list(range(pack["count"])):
             raise ValueError("section index mismatch")
         out = bytearray()
+        _per_section = bool(pack.get("per_section"))
         for sec in ordered:
             nonce = bytes.fromhex(sec["nonce"])
             enc = bytes.fromhex(sec["data"])
+            # Per-position key: sha256("nx-section-key:" + master + index +
+            # nonce).  Must match split_sealed exactly.
+            if _per_section:
+                skey = _nx_sh.sha256(
+                    b"nx-section-key:" + bytes(key)
+                    + int(sec["i"]).to_bytes(4, "big") + nonce).digest()
+            else:
+                skey = bytes(key)
             ks = bytearray()
             c = 0
             while len(ks) < len(enc):
-                ks.extend(_nx_sh.sha256(bytes(key) + nonce + c.to_bytes(8, "big")).digest())
+                ks.extend(_nx_sh.sha256(skey + nonce + c.to_bytes(8, "big")).digest())
                 c += 1
             tagged = bytes(a ^ b for a, b in zip(enc, bytes(ks[:len(enc)])))
             if len(tagged) < 32:
                 raise ValueError("section truncated")
             tag, part = tagged[:32], tagged[32:]
             if not _nx_hm.compare_digest(
-                    _nx_hm.new(bytes(key) + nonce, part, _nx_sh.sha256).digest(), tag):
+                    _nx_hm.new(skey + nonce, part, _nx_sh.sha256).digest(), tag):
                 raise ValueError("section integrity failure")
             out.extend(part)
         if len(out) != pack["total"]:
@@ -581,13 +614,20 @@ LOADER_MOVING_SOURCE = '''def {FUNC}(pack_b85, key, sink):
         if [s["i"] for s in ordered] != list(range(pack["count"])):
             return False
         total = 0
+        _per_section = bool(pack.get("per_section"))
         for entry in ordered:
             nonce = bytes.fromhex(entry["nonce"])
             enc = bytes.fromhex(entry["data"])
+            if _per_section:
+                skey = _nx_mh.sha256(
+                    b"nx-section-key:" + bytes(key)
+                    + int(entry["i"]).to_bytes(4, "big") + nonce).digest()
+            else:
+                skey = bytes(key)
             ks = bytearray()
             c = 0
             while len(ks) < len(enc):
-                ks.extend(_nx_mh.sha256(bytes(key) + nonce + c.to_bytes(8, "big")).digest())
+                ks.extend(_nx_mh.sha256(skey + nonce + c.to_bytes(8, "big")).digest())
                 c += 1
             tagged = bytearray(a ^ b for a, b in zip(enc, bytes(ks[:len(enc)])))
             for i in range(len(ks)):
@@ -596,7 +636,7 @@ LOADER_MOVING_SOURCE = '''def {FUNC}(pack_b85, key, sink):
                 return False
             tag, part = bytes(tagged[:32]), bytes(tagged[32:])
             if not _nx_mhm.compare_digest(
-                    _nx_mhm.new(bytes(key) + nonce, part, _nx_mh.sha256).digest(), tag):
+                    _nx_mhm.new(skey + nonce, part, _nx_mh.sha256).digest(), tag):
                 return False
             buf = bytearray(part)
             try:
@@ -654,13 +694,20 @@ LOADER_STREAM_SOURCE = '''def {FUNC}(pack_b85, key):
         dec = None
         out = bytearray()
         total = 0
+        _per_section = bool(pack.get("per_section"))
         for idx, entry in enumerate(ordered):
             nonce = bytes.fromhex(entry["nonce"])
             enc = bytes.fromhex(entry["data"])
+            if _per_section:
+                skey = _nx_sh.sha256(
+                    b"nx-section-key:" + bytes(key)
+                    + int(entry["i"]).to_bytes(4, "big") + nonce).digest()
+            else:
+                skey = bytes(key)
             ks = bytearray()
             c = 0
             while len(ks) < len(enc):
-                ks.extend(_nx_sh.sha256(bytes(key) + nonce + c.to_bytes(8, "big")).digest())
+                ks.extend(_nx_sh.sha256(skey + nonce + c.to_bytes(8, "big")).digest())
                 c += 1
             tagged = bytearray(a ^ b for a, b in zip(enc, bytes(ks[:len(enc)])))
             for i in range(len(ks)):
@@ -669,7 +716,7 @@ LOADER_STREAM_SOURCE = '''def {FUNC}(pack_b85, key):
                 return None
             tag, part = bytes(tagged[:32]), bytes(tagged[32:])
             if not _nx_shm.compare_digest(
-                    _nx_shm.new(bytes(key) + nonce, part, _nx_sh.sha256).digest(), tag):
+                    _nx_shm.new(skey + nonce, part, _nx_sh.sha256).digest(), tag):
                 return None
             buf = bytearray(part)
             try:
