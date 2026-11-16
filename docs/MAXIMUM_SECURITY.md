@@ -548,6 +548,30 @@ Stated plainly: the key file sits on the runtime host, so whoever controls
 that host can read it. This is a distribution control — the binary alone is
 inert — not protection against someone who can legitimately run it.
 
+### 5.4b Runtime overhead (measured 2026-11-16)
+
+The bench matrix listed this metric from the start and never filled it.
+Measured with `ai_layer_bench.py --runtime-artifact ... --runtime-source ...
+--runtime-runs 3` (median of three runs, both sides in a subprocess):
+
+| Side | Median wall clock |
+|---|---|
+| Baseline (the payload's own `.py`) | **17.6 ms** |
+| Max-profile loader artefact | **9,612 ms** |
+| **Overhead** | **546×** |
+
+Read this honestly: the loader stack costs roughly **9.6 seconds of startup**
+on a trivial payload. That is the price of the full gate set — integrity
+checks, Merkle/HMAC verification, the section walk, anti-analysis probes,
+and the packaging onion. It is a real cost, not a measurement artefact (the
+median of three runs; the min/max spread is in the results JSON).
+
+Practical consequence: the max profile is appropriate for long-running
+payloads and CLI tools where a one-off ~10 s startup is acceptable. It is
+**not** appropriate for anything latency-sensitive (a CLI invoked in a
+loop, a hook, a plugin). For those, use a reduced profile and accept the
+weaker posture — that trade-off is now measured rather than assumed.
+
 ### 5.5 Why not "all flags"
 
 - Six flags write metadata no runtime reads.
