@@ -2491,6 +2491,32 @@ if __name__ == "__main__":
     try:
         _phase4_suffix += "_NX_SECTION_PACK = %r\n" % (_section_pack_val,)
         _phase4_suffix += _section_snippet
+        # Honeypayload (Tier 2 #5): a second, plausible payload sealed under a
+        # key derived from the BUILD ID ONLY -- never from the licence.  It is
+        # emitted alongside the real pack so a static analyst finds two
+        # complete-looking payloads and cannot tell which is the deliverable
+        # without doing strictly more work than recovering the real one.
+        # Recovering the decoy teaches nothing about the licence-bound key
+        # chain, and the real payload is never replaced.
+        try:
+            from obfuscator.honeypayload import (
+                build_honey_pack as _hp_build,
+                decoy_is_plausible as _hp_ok,
+            )
+            # Seed from the sealed pack itself: it is unique per build and
+            # available here.  The decoy key is derived from the build id
+            # only (never the licence), so recovering the decoy teaches
+            # nothing about the licence-bound key chain.
+            _hp_seed = hashlib.sha256(
+                str(_section_pack_val).encode("utf-8")).digest()
+            _hp = _hp_build(_hp_seed, _hp_seed[:16].hex())
+            if _hp_ok(_hp["source"]):
+                _phase4_suffix += "_NX_HONEY_PACK = %r\n" % (_hp["pack_b85"],)
+                _phase4_suffix += "_NX_HONEY_HINT = %r\n" % (_hp["key_hint"],)
+        except Exception:
+            # A decoy that cannot be built is not a build failure: it is an
+            # optional layer, and shipping a broken one would be worse.
+            pass
     except Exception:
         pass
     if licence_env_only:
@@ -4560,8 +4586,9 @@ def _make_farm(args, gh_token):
 _LOADER_TX_FIELDS = {
     "data": "tx_data", "data-level": "tx_data_level",
     "function-intent": "tx_function_intent", "speculation": "tx_speculation",
+    "remote": "tx_remote", "remote-bundle": "tx_remote_bundle",
 }
-_LOADER_TX_BOOLEAN = {"data", "function-intent", "speculation"}
+_LOADER_TX_BOOLEAN = {"data", "function-intent", "speculation", "remote"}
 
 
 def _run_loader_transforms(source: str, args) -> str:
@@ -4579,6 +4606,24 @@ def _run_loader_transforms(source: str, args) -> str:
         level = getattr(args, "tx_data_level", 3)
         tree = DataProtector(level=level).protect(_ast.parse(source))
         source = _ast.unparse(_ast.fix_missing_locations(tree))
+    # Level-5 split execution (Tier 4): every `@remote` function's body is
+    # replaced by a stub and the implementation is written to an operator
+    # bundle that never ships.  Opt-in per function (the decorator), so a
+    # build with no marked function is byte-identical.
+    if getattr(args, "tx_remote", False):
+        from obfuscator.remote_exec import split_module, write_remote_bundle
+        source, _remote_funcs = split_module(source)
+        if _remote_funcs:
+            _bundle = getattr(args, "tx_remote_bundle", "") or ""
+            if _bundle:
+                try:
+                    write_remote_bundle(_remote_funcs, _bundle)
+                    print("    [+] Remote bundle written: %s (%d function(s))"
+                          % (_bundle, len(_remote_funcs)))
+                except Exception as _rb_exc:
+                    print("    [!] Remote bundle not written: %s" % (_rb_exc,))
+            print("    [+] Split execution: %d function(s) removed from the "
+                  "artefact" % (len(_remote_funcs),))
     return source
 
 
