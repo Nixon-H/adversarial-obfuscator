@@ -8,8 +8,13 @@ Public API:
     - ELFParser(data): main parser class
       - find_section(name) -> (index, section_dict)
       - get_text_section() -> (index, section_dict)
+      - get_rodata_section() -> (index, section_dict) | (None, None)
+      - get_rodata_sections() -> [(index, section_dict), ...]
+      - replace_rodata_span(start_addr, new_data) -> None
+      - page_range(section) -> (start, end)
       - get_entry_offset_in_text() -> int
       - replace_text(new_text_data, add_stub_size) -> None
+      - replace_rodata(new_data) -> None
       - set_entry_point(new_entry) -> None
       - add_shadorenc_section(metadata) -> None
       - save(path, mode=None) -> None
@@ -215,6 +220,73 @@ class ELFParser:
         if sec is None:
             raise ValueError("No .text section found")
         return idx, sec
+
+    def get_rodata_section(self):
+        """Return ``(index, section)`` for ``.rodata``, or ``(None, None)``.
+
+        Unlike ``.text`` a missing ``.rodata`` is not an error: stripped or
+        merged layouts legitimately have none, and callers treat absence as
+        "nothing to encrypt".
+        """
+        return self.find_section(b'.rodata')
+
+    def get_rodata_sections(self):
+        """Return every ``.rodata*`` section as ``(index, section)`` pairs.
+
+        Toolchains split read-only data across ``.rodata``,
+        ``.rodata.str1.1``, ``.rodata.cst8`` and friends, so matching the
+        bare name would leave most string literals in cleartext.
+        """
+        found = []
+        for i, sec in enumerate(self.sections):
+            name = self.section_name(sec)
+            if name.startswith(b'.rodata') and sec['size'] > 0:
+                found.append((i, sec))
+        return found
+
+    def replace_rodata_span(self, start_addr, new_data):
+        """Overwrite ``len(new_data)`` bytes starting at ``start_addr``.
+
+        ``start_addr`` must be the vaddr of a ``.rodata*`` section; the span
+        may run across several adjacent sections.  Length is preserved, so
+        no offset, vaddr or relocation moves.
+        """
+        for idx, sec in self.get_rodata_sections():
+            if sec['addr'] <= start_addr < sec['addr'] + sec['size']:
+                file_off = sec['offset'] + (start_addr - sec['addr'])
+                if file_off + len(new_data) > len(self.data):
+                    raise ValueError("rodata span extends beyond the file")
+                self.data = (self.data[:file_off] + new_data
+                             + self.data[file_off + len(new_data):])
+                return
+        raise ValueError(f"no .rodata* section contains {start_addr:#x}")
+
+    def page_range(self, section):
+        """Return the ``(start, end)`` page-aligned span a section occupies."""
+        page = 0x1000
+        start = section['addr'] & ~(page - 1)
+        end = (section['addr'] + section['size'] + page - 1) & ~(page - 1)
+        return start, end
+
+    def replace_rodata(self, new_data: bytes):
+        """Overwrite ``.rodata`` in place.
+
+        The length must match: ``.rodata`` is referenced by absolute
+        relocations and by ``.data.rel.ro`` pointers, so growing or
+        shrinking it would move every following section.  In-place
+        substitution keeps every offset, vaddr and relocation valid.
+        """
+        idx, sec = self.get_rodata_section()
+        if sec is None:
+            raise ValueError("No .rodata section found")
+        if len(new_data) != sec['size']:
+            raise ValueError(
+                f"replace_rodata needs {sec['size']} bytes, got {len(new_data)}")
+        offset = sec['offset']
+        self.data = (self.data[:offset] + new_data
+                     + self.data[offset + len(new_data):])
+        self._set_shdr_field(idx, 'offset', offset)
+        self._set_shdr_field(idx, 'size', len(new_data))
 
     def get_entry_offset_in_text(self):
         _, text_sec = self.get_text_section()

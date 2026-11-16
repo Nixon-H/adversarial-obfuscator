@@ -14,6 +14,16 @@ Usage:
 
   python3 scripts/deploy_erc721_licence.py
 
+Variable formats:
+  NIXON_DEPLOY_KEY    64 hex characters (32 bytes), leading 0x optional
+                      — the EVM private key of the funded wallet
+                      (Trust Wallet: account details -> Show Private Key;
+                      MetaMask: account details -> Show private key).
+                      Not the 12/24-word seed phrase.
+  NIXON_DEPLOY_OWNER  0x + 40 hex characters (42 total, mixed case OK)
+                      — the address token 1 is minted to; copy it from
+                      the account's Receive screen.
+
 Output: the exact --chain line to pass to the licence issue command.
 """
 
@@ -232,7 +242,7 @@ def main():
     print("Issue the licence with this chain line:")
     print()
     print(f"  --chain contract={contract} token-id=1 owner={owner} "
-          f"chain-id={chain_id}")
+          f"chain-id={chain_id} rpc={rpc_url}")
     print("=" * 70)
     print()
     print("Revocation: transfer or burn token 1 — the artifact stops")

@@ -80,6 +80,12 @@ class Licence:
     # does not match the ciphertext, so the signature is what stops
     # re-issuing, not what stops decryption.
     key_material: Optional[str] = None
+    # The artefact digest the ISSUER signed.  The build writes this value
+    # into the artefact and the runtime compares its own self-hash against
+    # it.  Because the expected value lives in the Ed25519-signed token and
+    # not in the artefact, a patched artefact cannot re-stamp itself: the
+    # attacker would have to forge the issuer's signature.
+    artifact_digest: Optional[str] = None
 
     def to_payload(self) -> dict:
         payload = {
@@ -100,6 +106,8 @@ class Licence:
             payload["chain"] = self.chain
         if self.key_material:
             payload["key_material"] = self.key_material
+        if self.artifact_digest:
+            payload["artifact_digest"] = self.artifact_digest
         return payload
 
     @classmethod
@@ -116,6 +124,7 @@ class Licence:
                 notes=payload.get("notes"),
                 chain=payload.get("chain"),
                 key_material=payload.get("key_material"),
+                artifact_digest=payload.get("artifact_digest"),
             )
         except (KeyError, TypeError, ValueError) as e:
             raise LicenceError(f"malformed licence payload: {e}") from e
@@ -406,6 +415,20 @@ def _parse_features(text: Optional[str]) -> tuple:
     return tuple(sorted({f.strip() for f in text.split(",") if f.strip()}))
 
 
+def _read_digest_arg(value: Optional[str]) -> Optional[str]:
+    """Accept a literal digest or `@path` (read the digest from a file)."""
+    if not value:
+        return None
+    v = value.strip()
+    if v.startswith("@"):
+        with open(v[1:], encoding="utf-8") as fh:
+            v = fh.read().strip()
+    if v and (len(v) != 64 or any(c not in "0123456789abcdef" for c in v.lower())):
+        raise LicenceError(
+            "--artifact-digest must be a 64-hex sha256 digest (got %r)" % (v[:20],))
+    return v.lower() or None
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="python3 -m obfuscator.licensing",
@@ -433,6 +456,13 @@ def main(argv=None) -> int:
             "[explorer=https://...]"
         ),
     )
+    p_issue.add_argument(
+        "--artifact-digest", default=None,
+        help=("pin the artefact's self-hash into the SIGNED token. The build "
+              "writes this value into the artefact and the runtime compares "
+              "its own self-hash against it, so a patched artefact cannot "
+              "re-stamp itself without the issuer's key. Use "
+              "`issue --artifact-digest @file` to read the digest from a file."))
     p_issue.add_argument("--out", default=None, help="write the token here")
 
     p_verify = sub.add_parser("verify", help="check a token")
@@ -461,6 +491,7 @@ def main(argv=None) -> int:
                 watermark=opts.watermark,
                 notes=opts.notes,
                 chain=parse_chain_spec(opts.chain) if opts.chain else None,
+                artifact_digest=_read_digest_arg(opts.artifact_digest),
             )
             token = issue(licence, private_key)
             if opts.out:

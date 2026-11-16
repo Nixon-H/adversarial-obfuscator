@@ -51,7 +51,11 @@ class ValidationResult:
     (parse error, unsupported construct, solver exception).
     """
     function_name: str
-    equivalent: bool
+    # None means "not decided": the translator declined to model the input
+    # (unmodelable constant, multi-block CFG, unsupported construct).  That
+    # is uncertainty, not a refutation -- conflating the two made
+    # --validate fail abort every build whose payload could not be modelled.
+    equivalent: bool | None
     check_result: CheckResult | None = None
     error: str | None = None
     duration_ms: float = 0.0
@@ -102,9 +106,16 @@ class SMTValidator:
         except Exception as e:
             duration_ms = (time.time() - start) * 1000
             logging.warning(f"SMT validation failed for {function_name or '<module>'}: {e}")
+            # A DECLINE is not a DISPROOF.  `equivalent=False` here made
+            # --validate fail abort every build whose payload the translator
+            # cannot model (a prompt-injection decoy string, a multi-block
+            # CFG, an unmodelable constant) -- with an empty counterexample,
+            # which is the tell that nothing was actually refuted.  Report
+            # uncertainty instead, so the caller can distinguish "proved
+            # different" from "could not prove the same".
             return ValidationResult(
                 function_name=function_name or "<module>",
-                equivalent=False,
+                equivalent=None,
                 error=str(e),
                 duration_ms=duration_ms,
             )

@@ -54,6 +54,13 @@ class FunctionIntentObfuscator(ast.NodeTransformer):
         self._rng = _random.Random(seed) if seed is not None else _random.Random()
         self._name_map: dict[str, str] = {}
         self._call_sites: dict[str, list[ast.Call]] = {}
+        # id() of the FunctionDef nodes that are direct children of the
+        # module body -- the only ones this transform may rename.
+        self._module_funcs: set[int] = set()
+        # Parameter names of the functions currently being visited. A
+        # parameter shadows a module-level name, so `def f(f)` must not
+        # have its parameter rewritten to the renamed global.
+        self._shadow: list[set[str]] = []
 
     def _rng_hex(self) -> str:
         import secrets as _secrets
@@ -61,11 +68,25 @@ class FunctionIntentObfuscator(ast.NodeTransformer):
 
     def obfuscate_intent(self, tree: ast.AST) -> ast.AST:
         self._name_map.clear()
-        funcs = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        # Only MODULE-LEVEL functions may be renamed. A method is reached
+        # through attribute access (`obj.m()`), which this transform never
+        # rewrites, so renaming the def alone left every call site on the
+        # old spelling and the payload died at import with
+        # "AttributeError: 'X' object has no attribute 'm'". Dunder methods
+        # are protocol hooks (`__init__`, `__eq__`, `__enter__`, ...) and
+        # keep their spelling for the same reason.
+        funcs = [n for n in getattr(tree, "body", [])
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        self._module_funcs = {id(n) for n in funcs}
         # Collision-free: two functions mapping to the same misleading name
-        # silently redirected every caller to the wrong function.
-        taken = {f.name for f in funcs}
+        # silently redirected every caller to the wrong function. The taken
+        # set spans the whole tree so a new name never shadows a method or a
+        # nested def either.
+        taken = {f.name for f in ast.walk(tree)
+                 if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
         for func in funcs:
+            if func.name.startswith("__") and func.name.endswith("__"):
+                continue
             candidate = self._pick_misleading_name(func.name)
             while candidate in taken or candidate == func.name:
                 candidate += "_" + self._rng_hex()
@@ -79,7 +100,37 @@ class FunctionIntentObfuscator(ast.NodeTransformer):
                 self._call_sites.setdefault(node.func.id, []).append(node)
         self.visit(tree)
         ast.fix_missing_locations(tree)
+        # Cython resolves names at COMPILE time, so a module-level call that
+        # appears before the callee's `def` is rejected with
+        # "undeclared name not builtin" -- even though Python runs it fine,
+        # because the call happens after the module finished loading.  The
+        # `--package all` native build died on exactly this
+        # (`NameError: name '_nx_op_4cbd757e' is not defined` at import).
+        # Hoisting every module-level function definition above the other
+        # statements is semantics-preserving (all module-level functions are
+        # bound before any other statement runs) and makes the module
+        # compilable.
+        self._hoist_function_defs(tree)
         return tree
+
+    @staticmethod
+    def _hoist_function_defs(tree: ast.AST) -> None:
+        """Move module-level function defs to the front of the module body."""
+        body = getattr(tree, "body", None)
+        if not body:
+            return
+        defs = [s for s in body
+                if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        if not defs:
+            return
+        rest = [s for s in body if s not in defs]
+        # A leading docstring must stay first (it becomes __doc__).
+        if (rest and isinstance(rest[0], ast.Expr)
+                and isinstance(getattr(rest[0], "value", None), ast.Constant)
+                and isinstance(rest[0].value.value, str)):
+            tree.body = [rest[0]] + defs + rest[1:]
+        else:
+            tree.body = defs + rest
 
     def _pick_misleading_name(self, original: str) -> str:
         lower = original.lower()
@@ -88,29 +139,49 @@ class FunctionIntentObfuscator(ast.NodeTransformer):
                 return self._rng.choice(replacements)
         return f"_nx_op_{secrets.token_hex(4)}"
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
-        self.generic_visit(node)
-        orig_name = node.name
-        new_name = self._name_map.get(node.name, node.name)
-        node.name = new_name
+    @staticmethod
+    def _param_names(node) -> set[str]:
+        args = node.args
+        names = {a.arg for a in list(args.posonlyargs) + list(args.args)
+                 + list(args.kwonlyargs)}
+        if args.vararg is not None:
+            names.add(args.vararg.arg)
+        if args.kwarg is not None:
+            names.add(args.kwarg.arg)
+        return names
 
+    def _visit_func(self, node):
+        orig_name = node.name
+        self._shadow.append(self._param_names(node))
+        try:
+            self.generic_visit(node)
+        finally:
+            self._shadow.pop()
+        # Rename only direct module children: see obfuscate_intent().
+        if id(node) in self._module_funcs:
+            node.name = self._name_map.get(orig_name, orig_name)
         node = self._swap_parameters(node, orig_name)
         node = self._wrap_body(node)
         node = self._add_fake_docstring(node)
         return node
 
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        return self._visit_func(node)
+
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AsyncFunctionDef:
-        self.generic_visit(node)
-        orig_name = node.name
-        new_name = self._name_map.get(node.name, node.name)
-        node.name = new_name
-        node = self._swap_parameters(node, orig_name)
-        node = self._wrap_body(node)
-        node = self._add_fake_docstring(node)
+        return self._visit_func(node)
+
+    def visit_Lambda(self, node: ast.Lambda) -> ast.Lambda:
+        self._shadow.append(self._param_names(node))
+        try:
+            self.generic_visit(node)
+        finally:
+            self._shadow.pop()
         return node
 
     def visit_Name(self, node: ast.Name) -> ast.Name:
-        if node.id in self._name_map:
+        if node.id in self._name_map and not any(
+                node.id in scope for scope in self._shadow):
             node.id = self._name_map[node.id]
         return node
 

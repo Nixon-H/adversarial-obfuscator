@@ -338,6 +338,85 @@ class ExceptionFlowTransformer(ast.NodeTransformer):
         node.body = [init_assign, result_init, loop_init, while_loop]
         self.transform_count += 1
         return node
+
+
+def find_name_echoing_strings(tree):
+    """Return ``[(definition_name, string_value, kind)]`` for literals that
+    spell out a definition name.
+
+    A payload that labels its own output -- ``print("evens:", list(evens(9)))``
+    -- gives the rename layer's whole benefit back to anyone who runs the
+    artifact.  The literal is sealed at rest like every other string, so a
+    static read of the artifact shows nothing; it decrypts to the original
+    name at run time, and the attacker reads the name straight off stdout.
+    Measured on the 2026-11-14 bench: the token-holding analyst recovered 4/12
+    names this way, one of them exact.
+
+    ``kind`` is ``"exact"`` when the literal contains the whole name, and
+    ``"stem"`` when a word in the literal is a prefix of the name (or the name
+    a prefix of it) at four characters or more -- ``"walrus:"`` against
+    ``walrus_count``.  A stem hit is a hint rather than a disclosure, but it
+    narrows the guess enough to be worth reporting.
+
+    The obfuscator cannot rewrite these safely -- a printed label and a
+    protocol field are the same AST node -- so the build reports them and
+    leaves the call to the payload's author.
+    """
+    names = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    if not names:
+        return []
+    # Index the names once. A whole-word occurrence of a name in a literal is
+    # exactly a maximal identifier-character run equal to that name, so the
+    # per-literal work is a token scan plus set lookups rather than a
+    # comparison against every definition in the payload.
+    by_lower = {}
+    for name in names:
+        if len(name) >= 4:
+            by_lower.setdefault(name.lower(), set()).add(name)
+    prefix_to_names = {}
+    for lname, originals in by_lower.items():
+        for cut in range(4, len(lname) + 1):
+            prefix_to_names.setdefault(lname[:cut], set()).update(originals)
+    hits = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+            continue
+        words = []
+        token = []
+        for ch in node.value:
+            if ch.isalnum() or ch == "_":
+                token.append(ch)
+            elif token:
+                words.append("".join(token))
+                token = []
+        if token:
+            words.append("".join(token))
+        seen = set()
+        for word in words:
+            if word in names and (word, "exact") not in seen:
+                seen.add((word, "exact"))
+                hits.append((word, node.value, "exact"))
+            if len(word) < 4:
+                continue
+            low = word.lower()
+            # A name is a prefix of this word: try every prefix of the word.
+            for cut in range(4, len(low) + 1):
+                for name in by_lower.get(low[:cut], ()):
+                    if (name, "stem") not in seen and (name, "exact") not in seen:
+                        seen.add((name, "stem"))
+                        hits.append((name, node.value, "stem"))
+            # This word is a prefix of a name.
+            for name in prefix_to_names.get(low, ()):
+                if (name, "stem") not in seen and (name, "exact") not in seen:
+                    seen.add((name, "stem"))
+                    hits.append((name, node.value, "stem"))
+    return hits
+
+
 def apply_ast_mutation(source_code, options=None, strict=False):
     # Deep transforms (nested unparse, recursive flattening) need a raised
     # recursion limit, but importing this module must not raise it: on Windows
@@ -381,6 +460,24 @@ def _apply_ast_mutation_inner(source_code, options=None, strict=False):
             return max_d
         if get_depth(tree) > 750:
              UI.warn("Extreme AST depth detected. This may cause instability.")
+        # Advisory only: a defect in the detector must never reach the broad
+        # except below, which would silently return un-obfuscated source.
+        try:
+            _echoes = find_name_echoing_strings(tree)
+        except Exception:
+            _echoes = []
+        if _echoes:
+            _exact = sorted({n for n, _, k in _echoes if k == "exact"})
+            _stem = sorted({n for n, _, k in _echoes if k == "stem"} - set(_exact))
+            _parts = []
+            if _exact:
+                _parts.append("exact: " + ", ".join(_exact[:6]))
+            if _stem:
+                _parts.append("stem hints: " + ", ".join(_stem[:6]))
+            UI.warn(
+                "payload prints its own identifier names (%s) -- these survive "
+                "renaming and are readable from the artifact's stdout"
+                % "; ".join(_parts))
         protected_functions = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef):
@@ -1095,13 +1192,13 @@ _VARS_MAP = {
     "METHOD_CHECK_RESOURCES": "CHK_HW",
     "METHOD_CHECK_USERNAMES": "CHK_USER",
     "METHOD_FULL_SANDBOX_CHECK": "FULL_SBX",
-    "VAR_ANTI_SANDBOX_CLS": "VAR_A_SBX",
     "PAYLOAD": "DATA", "NONCE": "NONCE", "PART_A": "KEY_A", "PART_B": "KEY_B",
     "S0_A": "S0_A", "S0_B": "S0_B", "RECIPE_IN": "LAYERS_IN", "RECIPE_OUT": "LAYERS_OUT",
     "CIPHER_CLS": "XOR_STREAM", "LOADER_CLS": "MEM_LDR", "VM_CLS": "TITAN_VM",
     "HW_LOCK": "HW_ID", "EXP_DATE": "EXP", "STR_TABLE": "STR_TBL", "CHECKSUM": "SIG",
     "ENC_BLOB": "E_BLB", "EK_A": "EK_A", "EK_B": "EK_B", "FUNC_TBL_INIT": "T_INIT", "FUNC_EXTRACT_WIPE": "EX_WP",
     "NET_URL": "URL", "HMAC_SIG": "HMAC", "NATIVE_BLOB": "NATIVE_LIB",
+    "KEYED_ANCHOR": "K_ANCHOR",
     "TOTAL_PARTS": "PARTS", "FUNC_STR_DEC": "S", "FUNC_CHECK": "CHK",
     "FUNC_ROT": "ROT", "FUNC_REV": "REV", "FUNC_KEY": "KGEN", "FUNC_BOOT": "BOOT",
     "FUNC_DEC_REC": "D_REC", "FUNC_WIPE": "WIPE", "FUNC_VM": "VM",
@@ -1119,6 +1216,7 @@ _VARS_MAP = {
     "FUNC_DERIVE_INTEGRITY": "K_INT", "FUNC_DERIVE_ENV": "K_ENV",
     "FUNC_UNLOCK_VM": "K_VM", "FUNC_MASK": "MASK", "FUNC_FRIDA": "ANTI_FRIDA",
     "VAR_CANARY_URL": "WEBHOOK", "VAR_FUNC_CANARY": "TRIG", "FUNC_API_HASH": "API",
+    "TOR_CLIENT_CLS": "TOR_CL",
     "FUNC_ANTMAN": "ANTMAN", "FUNC_RDTSC": "TIME", "FUNC_DOH": "DOH",
     "FUNC_MERKLE_BUILD": "M_BUILD", "FUNC_MERKLE_VERIFY": "M_VERIFY", "FUNC_TRIGGER_ALERT": "ALERT",
     "METHOD_INTEGRITY": "INT_CHK", "METHOD_RUN": "RUN", "METHOD_ANTI_DBG": "A_DBG", "METHOD_ANTI_DUMP": "A_DUMP",
@@ -2152,7 +2250,7 @@ class {ENV_KEYING_CLS}:
             if _nixon_プラットフォーム플랫폼.system() == "Linux":
                 for dev in ["/dev/sda", "/dev/nvme0n1", "/dev/vda"]:
                     try:
-                        result = _nixon_サブプロセス서브프로세스.run(["udevadm", "info", "--query=property", "--name=" + dev], 
+                        result = _nixon_サブプロセス서브.run(["udevadm", "info", "--query=property", "--name=" + dev], 
                             capture_output=True, text=True, timeout=2)
                         for line in result.stdout.split("\\n"):
                             if "ID_SERIAL=" in line:
@@ -2163,12 +2261,12 @@ class {ENV_KEYING_CLS}:
     def _get_gpu(self):
         try:
             if _nixon_プラットフォーム플랫폼.system() == "Linux":
-                result = _nixon_サブプロセス서브프로세스.run(["lspci"], capture_output=True, text=True, timeout=2)
+                result = _nixon_サブプロセス서브.run(["lspci"], capture_output=True, text=True, timeout=2)
                 for line in result.stdout.split("\\n"):
                     if "VGA" in line or "3D" in line:
                         return _nixon_ハッシュ해시.sha256(line.encode()).hexdigest()[:16]
             elif _nixon_プラットフォーム플랫폼.system() == "Windows":
-                result = _nixon_サブプロセス서브프로세스.run(["wmic", "path", "win32_VideoController", "get", "name"], 
+                result = _nixon_サブプロセス서브.run(["wmic", "path", "win32_VideoController", "get", "name"], 
                     capture_output=True, text=True, timeout=2)
                 return _nixon_ハッシュ해시.sha256(result.stdout.encode()).hexdigest()[:16]
         except: pass
@@ -2190,7 +2288,7 @@ class {ENV_KEYING_CLS}:
     def _get_boot_uuid(self):
         try:
             if _nixon_プラットフォーム플랫폼.system() == "Linux":
-                result = _nixon_サブプロセス서브프로세스.run(["findmnt", "-n", "-o", "UUID", "/"], 
+                result = _nixon_サブプロセス서브.run(["findmnt", "-n", "-o", "UUID", "/"], 
                     capture_output=True, text=True, timeout=2)
                 return result.stdout.strip()[:36]
         except: pass
@@ -2469,7 +2567,7 @@ class {INTEGRITY_MON_CLS}:
                 for name, func in registered_funcs.items():
                     self.{METHOD_VERIFY_FUNC}(name, func)
                 _nixon_時間시간.sleep(self._interval)
-        self._thread = _nixon_スレッド쓰레드.Thread(target=monitor_loop, daemon=True)
+        self._thread = _nixon_スレッディング스레딩.Thread(target=monitor_loop, daemon=True)
         self._thread.start()
     def {METHOD_STOP_MONITOR}(self):
         self._running = False
@@ -2528,7 +2626,7 @@ class {ANTI_EMULATOR_CLS}:
                         if flag in content:
                             return True
                 try:
-                    result = _nixon_サブプロセス서브프로세스.run(["systemd-detect-virt"], 
+                    result = _nixon_サブプロセス서브.run(["systemd-detect-virt"], 
                         capture_output=True, text=True, timeout=2)
                     if result.stdout.strip() not in ["none", ""]:
                         return True
@@ -2806,7 +2904,7 @@ class {HW_PERF_CLS}:
         cpu_bucket = cpu_score // 10000
         mem_bucket = mem_score // 100000
         hash_bucket = hash_score // 10000
-        combined = f"{cpu_bucket}-{mem_bucket}-{hash_bucket}"
+        combined = f"{{cpu_bucket}}-{{mem_bucket}}-{{hash_bucket}}"
         self._fingerprint_cache = _nixon_ハッシュ해시.sha256(combined.encode()).hexdigest()[:16]
         return self._fingerprint_cache
     def {METHOD_VERIFY_SIMILAR}(self, stored_fingerprint, tolerance=2):
@@ -3602,11 +3700,14 @@ class {GHOST_FUNC_CLS}:
 SELF_MORPH_GRAPH_SOURCE = r'''
 class {SELF_MORPH_CLS}:
     _dispatch = dict()
+    _order = list()
     _call_count = 0
     _mutation_seed = 0
     @staticmethod
     def register(fid, func):
         {SELF_MORPH_CLS}._dispatch[fid] = func
+        if fid not in {SELF_MORPH_CLS}._order:
+            {SELF_MORPH_CLS}._order.append(fid)
     @staticmethod
     def {METHOD_MORPH_DISPATCH}(fid, *args, **kwargs):
         func = {SELF_MORPH_CLS}._dispatch.get(fid)
@@ -3614,14 +3715,20 @@ class {SELF_MORPH_CLS}:
             return None
         {SELF_MORPH_CLS}._call_count += 1
         result = func(*args, **kwargs)
+        # Mutate the ORDER, never the mapping.  The previous version swapped
+        # two entries of _dispatch, which silently re-pointed a state id at a
+        # different stage function -- a real behaviour change, and the reason
+        # nothing ever called this: wiring it would have broken the state
+        # machine.  Permuting _order keeps every lookup correct while still
+        # giving the table a genuine per-call mutation.
         {SELF_MORPH_CLS}._mutation_seed = ({SELF_MORPH_CLS}._mutation_seed * 6364136223846793005 + 1) & 0xFFFFFFFFFFFFFFFF
-        keys = list({SELF_MORPH_CLS}._dispatch.keys())
-        if len(keys) > 1:
-            idx_a = {SELF_MORPH_CLS}._mutation_seed % len(keys)
-            idx_b = ({SELF_MORPH_CLS}._mutation_seed >> 16) % len(keys)
+        _n = len({SELF_MORPH_CLS}._order)
+        if _n > 1:
+            idx_a = {SELF_MORPH_CLS}._mutation_seed % _n
+            idx_b = ({SELF_MORPH_CLS}._mutation_seed >> 16) % _n
             if idx_a != idx_b:
-                ka, kb = keys[idx_a], keys[idx_b]
-                {SELF_MORPH_CLS}._dispatch[ka], {SELF_MORPH_CLS}._dispatch[kb] = {SELF_MORPH_CLS}._dispatch[kb], {SELF_MORPH_CLS}._dispatch[ka]
+                _o = {SELF_MORPH_CLS}._order
+                _o[idx_a], _o[idx_b] = _o[idx_b], _o[idx_a]
         return result
     @staticmethod
     def resolve(fid):
@@ -3801,7 +3908,7 @@ def _nx_emergency_key_recovery(recovery_code=None):
         if recovery_code:
             parts = str(recovery_code).split("-")
             if len(parts) == 7 and all(len(p) == 4 for p in parts):
-                return _nixon_ハッシュ解시.sha256(recovery_code.encode()).digest()
+                return _nixon_ハッシュ해시.sha256(recovery_code.encode()).digest()
         {FUNC_TRIGGER_ALERT}("smart_decoy_recovery")
     except: pass
     return None
@@ -4188,11 +4295,11 @@ class {CUSTOM_VM_CLS}:
     def _init_opcode_map(seed=None):
         opcodes = list(range(256))
         if seed:
-            rng = random.Random(int.from_bytes(seed[:4], 'big') if isinstance(seed, bytes) else seed)
+            rng = _nixon_ランダム랜덤.Random(int.from_bytes(seed[:4], 'big') if isinstance(seed, bytes) else seed)
             rng.shuffle(opcodes)
         else:
             for i in range(255, 0, -1):
-                j = _struct_randbelow(i + 1)
+                j = _nixon_ランダム랜덤.randrange(i + 1)
                 opcodes[i], opcodes[j] = opcodes[j], opcodes[i]
         {CUSTOM_VM_CLS}._opcode_map = dict()
         {CUSTOM_VM_CLS}._inverse_map = dict()
@@ -4508,11 +4615,11 @@ class {ROLLING_ISA_CLS}:
         opcodes = list(range(256))
         if isinstance(seed, bytes) and seed:
             rng_seed = int.from_bytes(seed[:4], 'big')
-            rng = random.Random(rng_seed)
+            rng = _nixon_ランダム랜덤.Random(rng_seed)
             rng.shuffle(opcodes)
         else:
             for i in range(255, 0, -1):
-                j = _struct_randbelow(i + 1)
+                j = _nixon_ランダム랜덤.randrange(i + 1)
                 opcodes[i], opcodes[j] = opcodes[j], opcodes[i]
         {ROLLING_ISA_CLS}._base_map = dict()
         for i in range(16):
@@ -4611,7 +4718,7 @@ class {WHITEBOX_ENHANCED_CLS}:
         for r in range(num_rounds):
             round_key = key_expanded[r * 4:(r + 1) * 4]
             tbox = list(range(256))
-            rng = random.Random(int.from_bytes(round_key, 'big') + r * 0x9E3779B9)
+            rng = _nixon_ランダム랜덤.Random(int.from_bytes(round_key, 'big') + r * 0x9E3779B9)
             rng.shuffle(tbox)
             inv_tbox = [0] * 256
             for i in range(256):
@@ -4730,7 +4837,7 @@ class {CODE_BLOAT_CLS}:
         {CODE_BLOAT_CLS}._bloat_seed = seed or _nixon_オペレーション운영.urandom(16)
     @staticmethod
     def {METHOD_CB_GENERATE}(count=50):
-        rng = random.Random(int.from_bytes({CODE_BLOAT_CLS}._bloat_seed or _nixon_オペレーション운영.urandom(8), 'big'))
+        rng = _nixon_ランダム랜덤.Random(int.from_bytes({CODE_BLOAT_CLS}._bloat_seed or _nixon_オペレーション운영.urandom(8), 'big'))
         def _mk(idx, sd):
             pfx = ['_nx_calc_', '_nx_auth_', '_nx_parse_', '_nx_crypto_', '_nx_vault_']
             t = idx % 5
@@ -4914,12 +5021,12 @@ class {ATTRITION_CLS}:
                         if not {VAR_STRICT_DETECTIONS}: _nixon_時間시간.sleep(0.01)
                 else:
                     while not {ATTRITION_CLS}._stop_entropy:
-                        _ = _nixon_時間時間.perf_counter_ns()
+                        _ = _nixon_時間시간.perf_counter_ns()
                         # Unthrottled spinning starves interpreter shutdown on a
                         # slow or ARM host: the payload printed its correct output
                         # and then hung until the tracer killed it. Throttled by
                         # default, unthrottled under --strict-detections.
-                        if not {VAR_STRICT_DETECTIONS}: _nixon_時間時間.sleep(0.01)
+                        if not {VAR_STRICT_DETECTIONS}: _nixon_時間시간.sleep(0.01)
             except: pass
         for _ in range(4):
             _nixon_スレッディング스레딩.Thread(target=_spam_rdtsc, daemon=True).start()
@@ -5579,6 +5686,10 @@ def generate_decoy_code():
     checks = [_nixon_プラットフォーム플랫폼.system() != "TempleOS", _nixon_オペレーション운영.path.exists("/etc") or _nixon_オペレーション운영.path.exists("C:\\\\"), _nixon_時間시간.time() > 0]
     return all(checks)''')
     VARS['DECOY_FUNCS'] = [name1, name2, name3]
+    # The state machine calls {DECOY_FUNC}() with no arguments; name3 is the
+    # only zero-arg decoy.  Without this it referenced a name that was never
+    # defined and the call died in its bare except.
+    VARS['DECOY_FUNC'] = name3
     return "\n".join(decoys)
 def generate_dead_code_paths():
     locals().update(VARS)
@@ -5914,6 +6025,40 @@ TRIPLE_REDUNDANCY_SOURCE = r'''class {FAULT_CLS}:
         except Exception: pass
         __rs.exit(666)'''
 
+# The state machine gates on three classes whose sources are only emitted
+# when the matching option is configured.  The gate block has to follow the
+# same condition: emitted unconditionally it referenced a class that was not
+# there and died in its bare except, so the blockchain-licence, key-shard and
+# geofence gates were dead in every build that did not configure them.
+BLOCKCHAIN_GATE_CODE = r'''        try:
+            import uuid as _uuid_lic
+            _lic = {VAR_BLOCKCHAIN_LIC_CLS}("{blockchain_contract}", "{blockchain_rpc}")
+            _hw_id_for_chain = _nx_mac()
+            if not _lic.{METHOD_CHECK_LICENSE}(_hw_id_for_chain) and not {VAR_IS_DEBUG}:
+                {FUNC_LOG}("[WARN] Blockchain license check failed")
+                ctx['h'] = {FUNC_NEXT_H}(ctx['h'], "NO_TOKEN")
+                _nx_strict_fail("no-token")
+        except: pass
+'''
+KEY_SHARD_GATE_CODE = r'''        try:
+            _shard_urls = {key_shard_urls}
+            _shard_threshold = max(2, len(_shard_urls) // 2 + 1) if _shard_urls else 3
+            _sharding = {VAR_KEY_SHARD_CLS}(threshold=_shard_threshold, total_shards=len(_shard_urls) if _shard_urls else 5)
+            if _shard_urls and len(_shard_urls) >= _shard_threshold:
+                _remote_key_part = _sharding.{METHOD_FETCH_SHARDS}(_shard_urls)
+                if _remote_key_part:
+                    ctx['remote_key'] = _remote_key_part
+                    ctx['h'] = {FUNC_NEXT_H}(ctx['h'], _remote_key_part[:8])
+        except: pass
+'''
+GEOFENCE_GATE_CODE = r'''        try:
+            _geo = {VAR_GEOFENCE_CLS}({allowed_countries}, {allowed_regions}, {blocked_countries}, {blocked_regions})
+            if not _geo.{METHOD_CHECK_ALLOWED}() and not {VAR_IS_DEBUG}:
+                {FUNC_LOG}("[WARN] Geographic restriction failed")
+                ctx['h'] = {FUNC_NEXT_H}(ctx['h'], "GEO_BLOCK")
+                _nx_strict_fail("geo-block")
+        except: pass
+'''
 LOADER_HEAD = r'''# -*- coding: utf-8 -*-
 # Silence deprecation warnings the loader would otherwise emit on Python <=3.11:
 # its MetaPathFinder has no find_spec, so the import machinery falls back to the
@@ -6118,7 +6263,7 @@ def {FUNC_STR_DEC}(idx):
         try: return _dec.decode('utf-8')
         except: return _dec.decode('latin-1')
     except: return ""
-_打印輸出한글ไทย=print;_字符串టెక్స్ట్=str;_整数數字หมาย=int;_浮點小数ทศนิ=float;_布爾真假ค่าจ=bool;_列表清單รายก=list;_字典辭典พจนา=dict;_集合集體เซ็ต=set;_元組組合ทูเพ=tuple;_長度數量ความย=len;_範圍區間ช่วง=range;_枚舉列舉แจกแ=enumerate;_壓縮打包ซิป=zip;_映射對應แผนท=map;_過濾篩選กรอง=filter;_排序整理เรียง=sorted;_反轉倒序กลับ=reversed;_最小极值ต่ำสุ=min;_最大極值สูงสุ=max;_總和加總ผลรว=sum;_絕對值절대값=abs;_四捨五入반올림=round;_幂函次方ยกกำ=pow;_字符符號อักขร=chr;_序號碼值ค่าเล=ord;_十六進位เลขฐ=hex;_八進制ฐานแป=oct;_二進位ไบนา=bin;_表示顯示การแ=repr;_類型種類ประเภ=type;_實例檢查ตรวจส=isinstance;_子類檢查ตรวจร=issubclass;_可呼叫เรียก=callable;_有屬性มีคุณ=hasattr;_取屬性ดึงคุ=getattr;_設屬性ตั้งค=setattr;_刪屬性ลบคุณ=delattr;_開啟打開เปิดไ=open;_輸入接收รับข้=input;_求值計算คำนวณ=eval;_執行運行ดำเนิ=exec;_編譯轉換คอมไพ=compile;_全域變數ตัวแป=globals;_區域變數ท้องถ=locals;_屬性詞典คุณสม=vars;_目錄列表ไดเรก=dir;_識別碼รหัสป=id;_雜湊散列แฮช=hash;_物件對象วัตถุ=object;_父類超類ซูเปอ=super;_位元組ไบต์=bytes;_位元陣列อาร์เ=bytearray;_格式格式รูปแบ=format;_迭代器ตัววน=iter;_下一個ถัดไป=next;_任意有任มีใดๆ=any;_全部所有ทั้งหม=all;_例外異常ข้อยก=Exception;_值錯誤ค่าผิด=ValueError;_類型錯誤ชนิดผ=TypeError;_鍵錯誤คีย์ผ=KeyError;_索引錯誤ดัชนี=IndexError;_屬性錯誤คุณสม=AttributeError;_運行錯誤รันไท=RuntimeError;_停止迭代หยุดว=StopIteration
+_打印輸出한글ไทย=print;_字符串టెక్స్ట్=str;_整数數字หมาย=int;_浮點小数ทศนิ=float;_布爾真假ค่าจ=bool;_列表清單รายก=list;_字典辭典พจนา=dict;_集合集體เซ็ต=set;_元組組合ทูเพ=tuple;_長度數量ความย=len;_範圍區間ช่วง=range;_枚舉列舉แจกแ=enumerate;_壓縮打包ซิป=zip;_映射對應แผนท=map;_過濾篩選กรอง=filter;_排序整理เรียง=sorted;_反轉倒序กลับ=reversed;_最小极值ต่ำสุ=min;_最大極值สูงสุ=max;_總和加總ผลรว=sum;_絕對值절대값=abs;_四捨五入반올림=round;_幂函次方ยกกำ=pow;_字符符號อักขร=chr;_序號碼值ค่าเล=ord;_十六進位เลขฐ=hex;_八進制ฐานแป=oct;_二進位ไบนา=bin;_表示顯示การแ=repr;_類型種類ประเภ=type;_實例檢查ตรวจส=isinstance;_子類檢查ตรวจร=issubclass;_可呼叫เรียก=callable;_有屬性มีคุณ=hasattr;_取屬性ดึงคุ=getattr;_設屬性ตั้งค=setattr;_刪屬性ลบคุณ=delattr;_開啟打開เปิดไ=open;_輸入接收รับข้=input;_求值計算คำนวณ=eval;_執行運行ดำเนิ=exec;_編譯轉換คอมไพ=compile;_全域變數ตัวแป=(lambda: globals());_區域變數ท้องถ=locals;_屬性詞典คุณสม=vars;_目錄列表ไดเรก=dir;_識別碼รหัสป=id;_雜湊散列แฮช=hash;_物件對象วัตถุ=object;_父類超類ซูเปอ=super;_位元組ไบต์=bytes;_位元陣列อาร์เ=bytearray;_格式格式รูปแบ=format;_迭代器ตัววน=iter;_下一個ถัดไป=next;_任意有任มีใดๆ=any;_全部所有ทั้งหม=all;_例外異常ข้อยก=Exception;_值錯誤ค่าผิด=ValueError;_類型錯誤ชนิดผ=TypeError;_鍵錯誤คีย์ผ=KeyError;_索引錯誤ดัชนี=IndexError;_屬性錯誤คุณสม=AttributeError;_運行錯誤รันไท=RuntimeError;_停止迭代หยุดว=StopIteration
 _REQUIRED_VERSION = {required_python_version}
 # Batch-3 CI scope: the SKIP bypass only applies when the CI gate var is
 # ALSO set (NIXON_CI or NIXON_ALLOW_SKIP); prod artifacts hold the gate
@@ -6167,8 +6312,11 @@ _NX_ATTR_MAP.update({ATTR_MAP})
 {FUNC_LOG}("[DEBUG] Decryptor loaded...")
 FORCE_NATIVE_MODE = {force_native}
 {VAR_CHECKSUM} = "{dummy_checksum}"; _SIG_ANCHOR_ = "__SIG_ANCHOR__"
-{VAR_HMAC_SIG} = "{dummy_hmac}"; _HMAC_ANCHOR_ = "__HMAC_ANCHOR__"
-_HMAC_KEY_ = b"{HMAC_SECRET_HEX}".decode()
+{VAR_HMAC_SIG} = "{dummy_hmac}"; _HMAC_ANCHOR_ = "__HMAC_ANCHOR__"; {VAR_KEYED_ANCHOR} = "{dummy_keyed}"
+# Explicit encoding: Cython 3.2 crashes in OptimizeBuiltinCalls on a
+# bytes literal with a no-argument .decode(), which made the whole
+# payload uncompilable to native.
+_HMAC_KEY_ = b"{HMAC_SECRET_HEX}".decode("utf-8")
 {VAR_NONCE} = {nonce}
 {VAR_PART_A} = {key_part_a}
 {VAR_PART_B} = {key_part_b}
@@ -6260,6 +6408,21 @@ VM_SEED_VAL = {vm_seed_val}
 {oram_source}
 {semantic_synth_source}
 {triple_redundancy_source}
+# The state machine below gates on these nine classes.  Their sources were
+# built into build_context but never placed in this template, so every gate
+# referenced a name that did not exist and died in its bare except -- the
+# sandbox, emulator, frame-debugger, opaque-predicate, hardware-fingerprint,
+# blockchain-licence, key-shard, geofence and integrity-monitor checks were
+# all silently dead in every build.
+{anti_emulator_source}
+{frame_anti_debug_source}
+{opaque_const_source}
+{hw_perf_fingerprint_source}
+{blockchain_license_source}
+{tor_client_source}
+{key_shard_source}
+{geofence_source}
+{integrity_monitor_source}
 {FUNC_LOG}("[DEBUG] Classes loaded...")
 # [THE 1% RULE] Verify Master Key via FHE/ORAM pipeline (Hardware Accelerated)
 try:
@@ -6319,12 +6482,57 @@ def _check_interpreter_integrity_reason():
                     pass
             except Exception as _e:
                 return "win-probe-%s" % type(_e).__name__
-        for _name in ("exec", "eval", "compile"):
+        for _name in ("exec", "eval", "compile", "__import__", "open"):
             _actual = getattr(_nixon_ビルトイン빌트인, _name, None)
             if _actual is None:
                 return "builtins-missing-%s" % _name
             if type(_actual).__name__ != "builtin_function_or_method":
                 return "builtins-hooked-%s" % _name
+        # Runtime-capture attacks hook the loader's own stdlib dependencies
+        # instead of builtins: the 2026-11-14 bench wrapped
+        # zipfile.ZipFile.__init__/read via a sitecustomize shim and dumped
+        # the decrypted members while the builtins type-check saw nothing.
+        # Verify the critical entry points' code objects still come from the
+        # real stdlib files.
+        try:
+            _zipfile = __import__("zipfile")
+            # zipfile is a module (zipfile.py) up to 3.12 and a package
+            # (zipfile/__init__.py) from 3.13 — accept both layouts.
+            _zf_ok = ("zipfile.py",
+                      "zipfile" + _nixon_オペレーション운영.sep + "__init__.py")
+            _zf_init = getattr(getattr(_zipfile, "ZipFile", None), "__init__", None)
+            _zf_code = getattr(_zf_init, "__code__", None)
+            if _zf_code is None or not str(_zf_code.co_filename).endswith(_zf_ok):
+                return "zipfile-hooked-init"
+            _zf_read = getattr(getattr(_zipfile, "ZipFile", None), "read", None)
+            _zr_code = getattr(_zf_read, "__code__", None)
+            if _zr_code is None or not str(_zr_code.co_filename).endswith(_zf_ok):
+                return "zipfile-hooked-read"
+            _zf_origin = str(getattr(getattr(_zipfile, "__spec__", None), "origin", "") or "")
+            if _zf_origin and not _zf_origin.endswith(_zf_ok):
+                return "zipfile-module-replaced"
+        except Exception as _e:
+            return "zipfile-probe-%s" % type(_e).__name__
+        # Out-of-process hooks are injected before the loader runs through a
+        # sitecustomize/usercustomize shim on PYTHONPATH. A distro-shipped
+        # startup hook (stdlib or /etc/python) is normal; one loaded from a
+        # writable data path is a capture harness.
+        for _sc in ("sitecustomize", "usercustomize"):
+            _sc_mod = _nixon_システム시스템.modules.get(_sc)
+            if _sc_mod is None:
+                continue
+            _sc_file = _nixon_オペレーション운영.path.abspath(
+                str(getattr(_sc_mod, "__file__", "") or ""))
+            if not _sc_file:
+                return "startup-hook-%s" % _sc
+            if not (_sc_file.startswith(
+                        _nixon_オペレーション운영.path.abspath(_nixon_システム시스템.base_prefix))
+                    or _sc_file.startswith(
+                        _nixon_オペレーション운영.path.abspath(_nixon_システム시스템.prefix))
+                    or _sc_file.startswith("/usr/lib/python")
+                    or _sc_file.startswith("/usr/local/lib/python")
+                    or _sc_file.startswith("/etc/python")):
+                return "startup-hook-external-%s" % _sc
         return None
     except Exception as _e:
         return "probe-exception-%s" % type(_e).__name__
@@ -6467,8 +6675,17 @@ def {FUNC_SELF}():
         # like everything else.
         _nx_er = {VAR_CHECKSUM}
         _nx_eh = {VAR_HMAC_SIG}
+        # The licence-token pin is a build INPUT, not payload code, so it is
+        # excluded from the self-hash exactly like the two anchors.  Without
+        # this the issuer-signed artefact digest was circular: adding the
+        # digest to the token changed the pin, which changed the artefact,
+        # which changed the digest -- the two-pass flow could never
+        # converge.  The build applies the identical filter.
+        _nx_tok = "__TOKEN_HASH__"
         filtered_lines = [l for l in lines
-                          if _nx_er.encode() not in l and _nx_eh.encode() not in l]
+                          if _nx_er.encode() not in l
+                          and _nx_eh.encode() not in l
+                          and (not _nx_tok or _nx_tok.encode() not in l)]
         content = b"".join(filtered_lines)
         chunk_size = 1024
         chunks = [content[i:i+chunk_size] for i in range(0, len(content), chunk_size)]
@@ -6482,6 +6699,61 @@ def {FUNC_SELF}():
         if sig != _nx_eh:
             _nx_self_fail("hmac expected=%s got=%s bytes=%d"
                           % (str(_nx_eh)[:16], str(sig)[:16], len(content)))
+        # Keyed anchor.  The HMAC above is keyed with _HMAC_KEY_, which ships
+        # inside this file -- so an attacker who edits the artifact can simply
+        # recompute it (that is exactly how the position-2 bypass worked).
+        # This anchor is keyed with the licence's key_material, which is NOT
+        # in the artifact: it arrives with the external token.  A patched
+        # artifact therefore cannot re-stamp itself without the token.
+        # An EMPTY or all-zero anchor means the build was not licence-bound:
+        # the build leaves the template's 64-zero placeholder in place when
+        # there is no key_material to key the anchor with. The check is
+        # skipped rather than failed so unlicensed builds keep working.
+        if {VAR_KEYED_ANCHOR} and {VAR_KEYED_ANCHOR}.strip("0"):
+            _nx_km = None
+            try:
+                _nx_lp = globals().get("_nx_licence_payload")
+                if callable(_nx_lp):
+                    _nx_km = (_nx_lp() or dict()).get("key_material")
+            except Exception:
+                _nx_km = None
+            if not _nx_km:
+                _nx_self_fail("keyed anchor present but no licence key_material")
+            _nx_ka = _nx_self_mac.new(bytes.fromhex(_nx_km), content,
+                                      _nx_self_sha.sha256).hexdigest()
+            if not constant_time_compare(_nx_ka.encode(),
+                                         {VAR_KEYED_ANCHOR}.encode()):
+                _nx_self_fail("keyed anchor expected=%s got=%s"
+                              % ({VAR_KEYED_ANCHOR}[:16], _nx_ka[:16]))
+            # Issuer-signed artefact digest.  The expected value lives in
+            # the Ed25519-signed token, NOT in this file, so an attacker who
+            # patches the artefact cannot re-stamp it: they would have to
+            # forge the issuer's signature.  This is the check the keyed
+            # anchor cannot provide on its own (the key_material is in the
+            # token, so a token holder can recompute the anchor).
+            _nx_ad = None
+            try:
+                _nx_lp2 = globals().get("_nx_licence_payload")
+                if callable(_nx_lp2):
+                    _nx_ad = (_nx_lp2() or dict()).get("artifact_digest")
+            except Exception:
+                _nx_ad = None
+            if _nx_ad:
+                # The digest covers ONLY the payload region (the sealed blob
+                # lines), which does not depend on the licence.  Hashing the
+                # whole file was circular: the artefact embeds the token pin
+                # and the licence mask, so signing the digest into the token
+                # changed the artefact and the digest.  The payload region is
+                # what an attacker would patch.
+                _nx_digest_lines = [
+                    l for l in content.splitlines(keepends=True)
+                    if b"FALLBACK_BLOB = " in l or b"_NX_SECTION_PACK = " in l]
+                _nx_self_digest = _nx_self_sha.sha256(
+                    b"".join(_nx_digest_lines)).hexdigest()
+                if not constant_time_compare(_nx_self_digest.encode(),
+                                             str(_nx_ad).lower().encode()):
+                    _nx_self_fail("artefact digest mismatch: signed=%s got=%s"
+                                  % (str(_nx_ad)[:16], _nx_self_digest[:16]))
         return _nx_self_sha.sha256(content).digest()
     except SystemExit:
         raise
@@ -6554,7 +6826,7 @@ def {FUNC_HEAP_WALK}():
         for obj in _nixon_ガベージ가비지.get_objects():
             count += 1
             if count > 5000: break
-            if isinstance(obj, types.ModuleType):
+            if isinstance(obj, type(_nixon_オペレーション운영)):
                 name = getattr(obj, "__name__", "")
                 for b in bad_sigs:
                     if b in name: return True
@@ -6590,6 +6862,13 @@ def {FUNC_HW_BIND}():
                 libc.munmap(p, 4096)
     except: pass
     try:
+        # Bound before the platform dispatch: the Windows and Darwin branches
+        # below use it too, and importing it only inside the Linux/Android
+        # branch left those two raising NameError into the bare except -- so
+        # their hardware ids were silently never collected. Cython rejects
+        # the same shape outright ("local variable referenced before
+        # assignment"), which is how this surfaced.
+        import _nixon_サブプロセス서브
         if _nixon_プラットフォーム플랫폼.system() == "Linux":
             ids.append(str(_nixon_オペレーション운영.stat("/").st_ino))
             try:
@@ -6600,7 +6879,6 @@ def {FUNC_HW_BIND}():
             except: pass
             try:
                 if _nixon_オペレーション운영.path.exists("/system/build.prop"):
-                    import _nixon_サブプロセス서브
                     s = _nixon_サブプロセス서브.check_output(["getprop", "ro.serialno"], timeout=5).decode().strip()
                     if s: ids.append(s)
             except: pass
@@ -6698,7 +6976,7 @@ def {FUNC_NET}():
             if attempt == max_retries - 1:
                 {FUNC_LOG}("[FATAL] Network auth failed after retries") 
                 {FUNC_TRIGGER_ALERT}("Network Auth Failed Final")
-            _nixon_時間時間.sleep(2 ** attempt)
+            _nixon_時間시간.sleep(2 ** attempt)
     return b"\x00"*32
 def {FUNC_RES}():
     s = 0
@@ -6924,25 +7202,8 @@ def {FUNC_BOOT}():
             _hw_perf = {VAR_HW_PERF_CLS}()
             ctx['hw_fingerprint'] = _hw_perf.{METHOD_GET_FINGERPRINT}()
         except: pass
-        try:
-            import uuid as _uuid_lic
-            _lic = {VAR_BLOCKCHAIN_LIC_CLS}("{blockchain_contract}", "{blockchain_rpc}")
-            _hw_id_for_chain = _nx_mac()
-            if not _lic.{METHOD_CHECK_LICENSE}(_hw_id_for_chain) and not {VAR_IS_DEBUG}:
-                {FUNC_LOG}("[WARN] Blockchain license check failed")
-                ctx['h'] = {FUNC_NEXT_H}(ctx['h'], "NO_TOKEN")
-                _nx_strict_fail("no-token")
-        except: pass
-        try:
-            _shard_urls = {key_shard_urls}
-            _shard_threshold = max(2, len(_shard_urls) // 2 + 1) if _shard_urls else 3
-            _sharding = {VAR_KEY_SHARD_CLS}(threshold=_shard_threshold, total_shards=len(_shard_urls) if _shard_urls else 5)
-            if _shard_urls and len(_shard_urls) >= _shard_threshold:
-                _remote_key_part = _sharding.{METHOD_FETCH_SHARDS}(_shard_urls)
-                if _remote_key_part:
-                    ctx['remote_key'] = _remote_key_part
-                    ctx['h'] = {FUNC_NEXT_H}(ctx['h'], _remote_key_part[:8])
-        except: pass
+{blockchain_gate_code}
+{key_shard_gate_code}
         try:
             # --expire was parsed and embedded but never enforced: the date
             # sat in VAR_EXP_DATE unread. An expired artefact now follows the
@@ -6953,13 +7214,7 @@ def {FUNC_BOOT}():
                 ctx['h'] = {FUNC_NEXT_H}(ctx['h'], "EXPIRED")
                 _nx_strict_fail("expired")
         except: pass
-        try:
-            _geo = {VAR_GEOFENCE_CLS}({allowed_countries}, {allowed_regions}, {blocked_countries}, {blocked_regions})
-            if not _geo.{METHOD_CHECK_ALLOWED}() and not {VAR_IS_DEBUG}:
-                {FUNC_LOG}("[WARN] Geographic restriction failed")
-                ctx['h'] = {FUNC_NEXT_H}(ctx['h'], "GEO_BLOCK")
-                _nx_strict_fail("geo-block")
-        except: pass
+{geofence_gate_code}
         try:
             _int_mon = {VAR_INTEGRITY_MON_CLS}()
             _int_mon.{METHOD_REGISTER_FUNC}("boot", {FUNC_BOOT})
@@ -7088,24 +7343,55 @@ def {FUNC_BOOT}():
                             try: _nixon_オペレーション운영.unlink(t + ".corrupted")
                             except: pass
                 except: pass
+            # The native attempt is a PRE-step, not an either/or.  It used to
+            # be `if native: ... else: <python path>`, so any failure inside
+            # the native branch (a blob that will not dlopen, a module whose
+            # init symbol does not match) left the payload unrun and the
+            # loader exited 137 with no output.  Falling through to the
+            # Python path keeps the artefact runnable; the native path is
+            # still preferred whenever it works.
+            _nx_native_done = False
             if FORCE_NATIVE_MODE and isinstance({VAR_NATIVE_BLOB}, dict) and any({VAR_NATIVE_BLOB}.values()):
                 {FUNC_LOG}("[DEBUG] Loading Native Module (Multi-Arch)...")
                 try:
                     h = {VAR_NATIVE_BLOB}_Loader.{METHOD_LOAD}({VAR_NATIVE_BLOB})
                     if h:
                         {FUNC_LOG}("[SUCCESS] Native module loaded from memory.")
-                        ldr = ctx["ldr"]
-                        if "__main__.nixon" in ldr.z.namelist():
-                            enc_data = ldr.z.read("__main__.nixon")
-                            key = bytes.fromhex('{INNER_KEY_HEX}')
+                        # Two shapes reach this point and both must run the
+                        # payload exactly once:
+                        #   * a NativeVM extension (build_native_vm) -- the
+                        #     payload is a sealed marshal blob it decrypts and
+                        #     execs itself;
+                        #   * a compiled payload module (compile_payload_to_cython)
+                        #     -- importing it already ran the module body, so
+                        #     there is nothing left to exec.
+                        # The old code assumed the first shape unconditionally,
+                        # so a compiled-payload blob raised AttributeError on
+                        # `h.NativeVM`, the bare except swallowed it, and the
+                        # loader fell through to the Python path with the
+                        # native module already imported. FORCE_NATIVE_MODE
+                        # therefore never actually executed native code.
+                        _nx_vm_cls = getattr(h, "NativeVM", None)
+                        if _nx_vm_cls is not None:
+                            ldr = ctx["ldr"]
+                            if "__main__.nixon" in ldr.z.namelist():
+                                enc_data = ldr.z.read("__main__.nixon")
+                                key = bytes.fromhex('{INNER_KEY_HEX}')
+                                globals()["_nx_payload_ran"] = True
+                                _nx_vm_cls({{}}, 0).exec_secure(enc_data, key)
+                                return S_EXIT
+                            {FUNC_LOG}("[WARN] Native VM present but no sealed payload in the archive.")
+                        else:
+                            # Compiled payload module: the import ran it.
                             globals()["_nx_payload_ran"] = True
-                            h.NativeVM({{}}, 0).exec_secure(enc_data, key)
+                            _nx_native_done = True
+                            {FUNC_LOG}("[SUCCESS] Native payload executed at import.")
                             return S_EXIT
                     else:
                         {FUNC_LOG}("[WARN] Failed to load native module or OS not supported.")
                 except Exception as e:
                     {FUNC_LOG}(f"[FATAL] Native Load Error: {{e}}")
-            else:
+            if not _nx_native_done:
                 {FUNC_LOG}("[DEBUG] Loading Python payload...")
                 ldr = ctx["ldr"]
                 entry_point = None
@@ -7114,10 +7400,22 @@ def {FUNC_BOOT}():
                     if name in ldr.z.namelist():
                         entry_point = name
                         break
-                if not entry_point:
+                # A native build's archive carries the SEALED payload
+                # (__main__.nixon) instead of Python source, so there is no
+                # __main__.py to exec.  The old code then grabbed the FIRST
+                # .py it found in the archive -- which in a native build is
+                # some helper, not the payload -- and exec'd that.  The
+                # result was a struct.error from a module that was never
+                # meant to be the entry point.  Prefer the sealed payload,
+                # which is the real one, and only guess as a last resort.
+                _nx_sealed = None
+                if not entry_point and "__main__.nixon" in ldr.z.namelist():
+                    _nx_sealed = "__main__.nixon"
+                if not entry_point and _nx_sealed is None:
                     for name in ldr.z.namelist():
                         if name.endswith(".pyc") or name.endswith(".py"):
                             entry_point = name
+                            {FUNC_LOG}(f"[WARN] No __main__ entry; falling back to {{name}}")
                             break
                 if entry_point:
                     enc_data = ldr.z.read(entry_point)
@@ -7125,10 +7423,41 @@ def {FUNC_BOOT}():
                     module = _nixon_インポート임포트.util.module_from_spec(spec)
                     module.__name__ = "__main__"
                     _nixon_システム시스템.modules["__main__"] = module
-                    globals()["_nx_payload_ran"] = True
                     ldr.exec_module(module)
+                    # A native build's __main__ is the hybrid loader, not the
+                    # payload: running it just re-attempts the native load
+                    # that already failed, so the artefact exited having done
+                    # nothing.  Ask it for its Python fallback -- the same
+                    # bytecode blob it would have run itself -- so a failed
+                    # native load degrades to the Python payload instead of
+                    # silently producing no output.  A non-native build's
+                    # __main__ is the payload and has no _exec_fallback, so
+                    # this is a no-op there.
+                    _nx_fb = getattr(module, "_exec_fallback", None)
+                    if callable(_nx_fb):
+                        {FUNC_LOG}("[WARN] Native unavailable; running the payload's Python fallback.")
+                        _nx_fb()
+                    globals()["_nx_payload_ran"] = True
                 else:
-                    raise Exception("Entry point not found")
+                    # Run the sealed payload: XOR with the inner key,
+                    # unmarshal, exec.  That is exactly what
+                    # NativeVM.exec_secure does, inlined because the Python
+                    # VM class has no exec_secure.  Without this branch a
+                    # failed native load left the artefact raising "Entry
+                    # point not found" with no output at all.
+                    if _nx_sealed:
+                        {FUNC_LOG}("[WARN] Native unavailable; running the sealed payload through the Python VM.")
+                        _nx_enc = ldr.z.read(_nx_sealed)
+                        _nx_key = bytes.fromhex('{INNER_KEY_HEX}')
+                        _nx_plain = bytes(
+                            _b ^ _nx_key[_i % len(_nx_key)]
+                            for _i, _b in enumerate(_nx_enc))
+                        globals()["_nx_payload_ran"] = True
+                        exec(_nixon_マーシャル마샬.loads(_nx_plain), globals())
+                    else:
+                        raise Exception(
+                            "Entry point not found: the archive holds neither "
+                            "Python source nor a sealed payload")
             {FUNC_WIPE}(bytearray(ctx["zip"]))
             ctx["dec"] = b""
             ctx["dec_padded"] = b""
@@ -7147,6 +7476,14 @@ def {FUNC_BOOT}():
         S_DEC1: {FUNC_STATE_DEC1}, S_VM: {FUNC_STATE_VM}, S_PAD: {FUNC_STATE_PAD},
         S_LOAD: {FUNC_STATE_LOAD}, S_EXEC: {FUNC_STATE_EXEC}
     }}
+    # Give the runtime-morph table a real consumer.  It was emitted into
+    # every artefact and never registered into or called, so the "runtime
+    # metamorphism" flag was metadata only.  Registering the stage functions
+    # here and dispatching through it below makes the per-call permutation
+    # actually happen at run time; the lookup stays keyed, so the state
+    # machine takes exactly the same path it did before.
+    for _nx_fid, _nx_fn in dispatcher.items():
+        {SELF_MORPH_CLS}.register(_nx_fid, _nx_fn)
     curr = S_INIT
     while curr != S_EXIT:
         try:
@@ -7156,7 +7493,10 @@ def {FUNC_BOOT}():
             _ = 1 // 0 
         except ZeroDivisionError:
             try:
-                curr = dispatcher[curr]()
+                _nx_step = {SELF_MORPH_CLS}.{METHOD_MORPH_DISPATCH}(curr)
+                if _nx_step is None:
+                    _nx_step = dispatcher[curr]()
+                curr = _nx_step
             except Exception as e:
                 if {VAR_IS_DEBUG}:
                     {FUNC_LOG}(f"[FATAL] State Machine Crash: {{e}}")

@@ -32,6 +32,25 @@ class _SmtUnsupported(Exception):
 BITWIDTH = 64
 
 
+def _as_bool(expr):
+    """Coerce a Z3 expression to Bool so z3.And accepts it.
+
+    The AST translator models values as BitVecs, but the assert lists that
+    feed z3.And can receive a BitVec (an `a and b` select, a widened
+    comparison, a call stub).  z3.And accepts Bool only, and passing a
+    BitVec raised
+      "Sort mismatch at argument #1 for function
+       (declare-fun and (Bool Bool) Bool) supplied sort is (_ BitVec 64)",
+    which --validate fail reported as a build failure.  A BitVec is truthy
+    iff non-zero.
+    """
+    if z3.is_bool(expr):
+        return expr
+    if z3.is_bv(expr):
+        return expr != z3.BitVecVal(0, expr.size())
+    return z3.BoolVal(bool(expr))
+
+
 def _bv(name):
     """Create a BitVec variable with the given name."""
     return z3.BitVec(name, BITWIDTH)
@@ -113,7 +132,7 @@ class ASTToSMT:
             result = self._translate_stmt(stmt)
             if result is not None:
                 asserts.append(result)
-        return z3.And(*asserts) if asserts else z3.BoolVal(True)
+        return z3.And(*[_as_bool(_x) for _x in asserts]) if asserts else z3.BoolVal(True)
 
     def _translate_stmt(self, stmt: ast.AST):
         if isinstance(stmt, ast.Assign):
@@ -137,7 +156,7 @@ class ASTToSMT:
             result = self._translate_stmt(stmt)
             if result is not None:
                 body_asserts.append(result)
-        return z3.And(*body_asserts) if body_asserts else z3.BoolVal(True)
+        return z3.And(*[_as_bool(_x) for _x in body_asserts]) if body_asserts else z3.BoolVal(True)
 
     def _translate_assign(self, node: ast.Assign) -> z3.BoolRef | None:
         val = self._translate_expr(node.value)
@@ -146,7 +165,7 @@ class ASTToSMT:
             if isinstance(t, ast.Name):
                 var = self._ensure_var(t.id)
                 targets.append(var == val)
-        return z3.And(*targets) if targets else None
+        return z3.And(*[_as_bool(_x) for _x in targets]) if targets else None
 
     def _translate_return(self, node: ast.Return):
         if node.value is not None:
@@ -191,8 +210,8 @@ class ASTToSMT:
         else:
             self._output_var = prev_output
 
-        then_expr = z3.And(*then_asserts) if then_asserts else z3.BoolVal(True)
-        else_expr = z3.And(*else_asserts) if else_asserts else z3.BoolVal(True)
+        then_expr = z3.And(*[_as_bool(_x) for _x in then_asserts]) if then_asserts else z3.BoolVal(True)
+        else_expr = z3.And(*[_as_bool(_x) for _x in else_asserts]) if else_asserts else z3.BoolVal(True)
         return z3.If(cond_bool, then_expr, else_expr)
 
     def _translate_expr(self, node: ast.AST) -> z3.BitVecRef:
@@ -215,6 +234,18 @@ class ASTToSMT:
             return self._translate_compare(node)
         elif isinstance(node, ast.IfExp):
             return self._translate_ifexp(node)
+        elif isinstance(node, ast.BoolOp):
+            # `a and b` / `a or b` have no BoolOp handler, so the node fell
+            # through to the decline below -- but only when it reached the
+            # translator directly.  When a BoolOp appeared inside an assert
+            # list, its operands (BitVecs) reached z3.And and raised
+            #   "Sort mismatch ... (declare-fun and (Bool Bool) Bool)
+            #    supplied sort is (_ BitVec 64)"
+            # which --validate fail reported as a FAILURE with an empty
+            # counterexample and aborted the build.  Model it as a bit-vector
+            # select: Python's `and` yields one of its operands, so the
+            # result is a BitVec, keeping the sort consistent.
+            return self._translate_boolop(node)
         elif isinstance(node, ast.Call):
             return self._translate_call(node)
         # An unsupported expression mapped to a constant silently proved
@@ -297,6 +328,22 @@ class ASTToSMT:
         true_val = self._translate_expr(node.body)
         false_val = self._translate_expr(node.orelse)
         return z3.If(cond_bool, true_val, false_val)
+
+    def _translate_boolop(self, node: ast.BoolOp) -> z3.BitVecRef:
+        """Model `a and b` / `a or b` as a bit-vector select.
+
+        Python's `and`/`or` return one of their OPERANDS, not a bool, so the
+        faithful BitVec encoding is a select on the first operand's
+        truthiness.  This keeps the sort a BitVec, which is what the
+        surrounding assert lists and `z3.And` sites expect after coercion.
+        """
+        is_and = isinstance(node.op, ast.And)
+        result = self._translate_expr(node.values[0])
+        for value_node in node.values[1:]:
+            rhs = self._translate_expr(value_node)
+            cond = result != z3.BitVecVal(0, BITWIDTH)
+            result = z3.If(cond, rhs, result) if is_and else z3.If(cond, result, rhs)
+        return result
 
     def _translate_call(self, node: ast.Call) -> z3.BitVecRef:
         call_id = len(self.z3_vars)

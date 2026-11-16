@@ -149,10 +149,37 @@ class IrValue:
 
     @staticmethod
     def const_str(value: str) -> 'IrValue':
-        """Create a string constant (name is the escaped string)."""
+        """Create a string constant (name is the escaped string).
+
+        Every control character must be escaped, not just ``\\n`` and
+        ``\\t``: a literal containing ``\\r`` (or any other C0 control
+        character) was emitted raw, so the IR line ended in the middle of
+        the literal and the parser saw the remainder (``")``) as a bogus
+        instruction -- which the lowering then refused, killing the native
+        stage on any payload whose decoys contained such a string.
+        """
         v = IrValue(IrType.ptr())
-        escaped = value.replace("\\", "\\\\").replace("\n", "\\n").replace("\t", "\\t").replace('"', '\\"')
-        v.name = f'"{escaped}"'
+        out = []
+        for ch in value:
+            if ch == "\\":
+                out.append("\\\\")
+            elif ch == '"':
+                out.append('\\"')
+            elif ch == "\n":
+                out.append("\\n")
+            elif ch == "\t":
+                out.append("\\t")
+            elif ch == "\r":
+                out.append("\\r")
+            elif ch == "\x0b":
+                out.append("\\v")
+            elif ch == "\x0c":
+                out.append("\\f")
+            elif ord(ch) < 0x20 or ord(ch) == 0x7f:
+                out.append("\\x%02x" % ord(ch))
+            else:
+                out.append(ch)
+        v.name = '"' + "".join(out) + '"'
         return v
 
     def is_constant(self) -> bool:
@@ -628,6 +655,28 @@ class IrCompiler:
             self.current_block = self.current_func.new_block("entry")
             self.current_func.entry_block = self.current_block
 
+    def _alloca_in_entry(self, type_: IrType) -> IrInstruction:
+        """Allocate a local in the function's ENTRY block.
+
+        A local's slot must dominate every use.  Emitting the ``alloca``
+        into whatever block happened to perform the first assignment put
+        the slot inside a branch, so a later read in a sibling block had no
+        dominating definition and llc rejected the module with
+        "Instruction does not dominate all uses" -- which killed the native
+        stage on any payload with a conditional first assignment.  Entry
+        block allocation is the standard fix (and what a real SSA
+        construction does for address-taken locals).
+        """
+        entry = getattr(self.current_func, "entry_block", None) if self.current_func else None
+        if entry is None:
+            return self.current_block.alloca(type_)
+        saved = self.current_block
+        try:
+            self.current_block = entry
+            return entry.alloca(type_)
+        finally:
+            self.current_block = saved
+
     def compile(self, tree: ast.AST) -> IrModule:
         """Compile an AST into an IR module."""
         self._compile_module(tree)
@@ -657,6 +706,24 @@ class IrCompiler:
         func_defs = [s for s in node.body if isinstance(s, ast.FunctionDef)]
         other_stmts = [s for s in node.body if not isinstance(s, ast.FunctionDef)
                        and not isinstance(s, (ast.Import, ast.ImportFrom, ast.ClassDef))]
+
+        # ClassDef statements are skipped by the loop below, so a class name
+        # was never registered anywhere.  A module-level alias such as
+        # `_nx_oram = _nx_oram_base` then loaded a bare Name that the strict
+        # check reported as unresolvable:
+        #   UnresolvedNameError: the IR cannot represent these names:
+        #   _nx_oram_base
+        # which killed every --package all build.  Pre-scan the whole tree so
+        # the names are known regardless of statement order.
+        opaque = getattr(self, "_opaque_class_names", None)
+        if opaque is None:
+            opaque = self._opaque_class_names = set()
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.ClassDef):
+                opaque.add(sub.name)
+                for base in sub.bases:
+                    if isinstance(base, ast.Name):
+                        opaque.add(base.id)
 
         for stmt in func_defs:
             self._compile_stmt(stmt)
@@ -725,7 +792,32 @@ class IrCompiler:
         elif isinstance(stmt, ast.Raise):
             self._compile_raise(stmt)
         elif isinstance(stmt, ast.ClassDef):
-            pass
+            # The IR has no class model, so a class body is not lowered.  It
+            # must still be REGISTERED as a known name: the inlined ORAM
+            # module defines `class _nx_oram_base` and `class _nx_oram`, and
+            # the strict mode's unresolved-name check flagged the base-class
+            # reference because the definition was skipped without being
+            # recorded.  That raised
+            #   UnresolvedNameError: the IR cannot represent these names:
+            #   _nx_oram_base
+            # and killed every --package all build.  Registering the name
+            # (and its bases) keeps the strict check meaningful for genuinely
+            # undefined names while not tripping on modelled-as-opaque ones.
+            # Register the class name as a KNOWN OPAQUE value.  The IR has no
+            # class model, so the body is not lowered -- but the name is a
+            # real binding, and a module-level alias like
+            # `_nx_oram = _nx_oram_base` loads it as a bare Name.  Without
+            # this the strict check reported
+            #   UnresolvedNameError: the IR cannot represent these names:
+            #   _nx_oram_base
+            # and killed every --package all build.
+            opaque = getattr(self, "_opaque_class_names", None)
+            if opaque is None:
+                opaque = self._opaque_class_names = set()
+            opaque.add(stmt.name)
+            for base in stmt.bases:
+                if isinstance(base, ast.Name):
+                    opaque.add(base.id)
 
     def _compile_sequence_literal(self, ctor: str, elements: list) -> IrValue:
         """Compile a list/tuple literal as a call to its constructor.
@@ -905,7 +997,7 @@ class IrCompiler:
                     alloca_inst, _ = self.symbols[target.id]
                     self._store_value(val, alloca_inst.result)
                 else:
-                    alloca_inst = self.current_block.alloca(IrType.i32())
+                    alloca_inst = self._alloca_in_entry(IrType.i32())
                     self._store_value(val, alloca_inst.result)
                     self.symbols[target.id] = (alloca_inst, IrType.i32())
             elif isinstance(target, ast.Subscript):
@@ -925,7 +1017,7 @@ class IrCompiler:
         """
         if isinstance(node.target, ast.Name):
             if node.target.id not in self.symbols:
-                alloca_inst = self.current_block.alloca(IrType.i32())
+                alloca_inst = self._alloca_in_entry(IrType.i32())
                 self.current_block.store(IrType.i32(), IrValue.const_int(0), alloca_inst.result)
                 self.symbols[node.target.id] = (alloca_inst, IrType.i32())
             alloca_inst, var_type = self.symbols[node.target.id]
@@ -1323,6 +1415,14 @@ class IrCompiler:
             gname = self.module.add_global(f"__nx_builtin_{node.id}", "i32", "0")
             handle = IrValue(IrType.ptr(), name="@" + gname)
             return self.current_block.load(IrType.i32(), handle).result
+        # A class name: the IR has no class model, so the value is opaque,
+        # but it IS bound.  A module-level alias (`_nx_oram = _nx_oram_base`)
+        # loads it as a bare Name; treating that as unresolved failed the
+        # strict check on every --package all build.
+        if node.id in getattr(self, "_opaque_class_names", set()):
+            gname = self.module.add_global(f"__nx_class_{node.id}", "i32", "0")
+            handle = IrValue(IrType.ptr(), name="@" + gname)
+            return self.current_block.load(IrType.i32(), handle).result
         # The IR cannot represent this name.  Record it: in strict mode
         # the build fails instead of shipping a zero.
         if node.id not in self.unresolved:
@@ -1362,6 +1462,20 @@ class IrCompiler:
         """Compile a binary expression node."""
         lhs = self._compile_expr(node.left)
         rhs = self._compile_expr(node.right)
+        # String concatenation with a literal.  `"https://x/" + endpoint`
+        # used to emit `add i32 "https://x/", %v`: LLVM has no bare string
+        # value, so the lowering rejected the module and the native stage
+        # died on every payload that contained such a decoy.  `+` on a
+        # string is concatenation, and the runtime helper for it already
+        # exists (`__builtin_concat`, used by f-strings).
+        if isinstance(node.op, ast.Add) and (
+                isinstance(node.left, ast.Constant)
+                and isinstance(node.left.value, str)
+                or isinstance(node.right, ast.Constant)
+                and isinstance(node.right.value, str)):
+            call = self.current_block.call(
+                "__builtin_concat", [lhs, rhs], IrType.i32())
+            return call.result
         # A float operand makes the whole operation a floating-point
         # one.  Without the promotion the operation kept the integer
         # type of the other side and carried a float constant in an
@@ -1426,10 +1540,47 @@ class IrCompiler:
                     result = IrValue.const_bool(not same)
                 else:
                     result = IrValue.const_bool(False)
+            elif (isinstance(op, (ast.Eq, ast.NotEq))
+                    and (self._const_string(prev) is not None
+                         or self._const_string(right) is not None)):
+                # Exactly one side is a literal, so the comparison cannot be
+                # folded and cannot be an `eq` either: LLVM has no bare
+                # string value, and this IR models a string as an i32 handle,
+                # so pointer comparison would always be false.  Emit the
+                # runtime comparison helper instead -- the same shape
+                # `__builtin_concat` already uses for string concatenation.
+                call = self.current_block.call(
+                    "__builtin_str_eq", [prev, right], IrType.i1())
+                if isinstance(op, ast.Eq):
+                    result = call.result
+                else:
+                    result = self.current_block.xor(
+                        IrType.i1(), call.result,
+                        IrValue.const_bool(True)).result
             elif isinstance(op, ast.Eq):
                 result = self.current_block.eq(cmp_type, prev, right).result
             elif isinstance(op, ast.NotEq):
                 result = self.current_block.ne(cmp_type, prev, right).result
+            elif (isinstance(op, (ast.Lt, ast.LtE, ast.Gt, ast.GtE))
+                    and (self._const_string(prev) is not None
+                         or self._const_string(right) is not None)):
+                # Same trap as Eq/NotEq above, for the ORDERING operators:
+                # a bare string literal is not an LLVM value and this IR
+                # models a string as an i32 handle, so emitting
+                # `icmp slt i32 "abc", ...` made llc reject the module and
+                # the whole native stage died.  Route through the runtime
+                # comparison helper, exactly as Eq/NotEq already do.
+                call = self.current_block.call(
+                    "__builtin_str_cmp", [prev, right], IrType.i32())
+                zero = IrValue.const_int(0)
+                if isinstance(op, ast.Lt):
+                    result = self.current_block.lt(IrType.i32(), call.result, zero).result
+                elif isinstance(op, ast.LtE):
+                    result = self.current_block.le(IrType.i32(), call.result, zero).result
+                elif isinstance(op, ast.Gt):
+                    result = self.current_block.gt(IrType.i32(), call.result, zero).result
+                else:
+                    result = self.current_block.ge(IrType.i32(), call.result, zero).result
             elif isinstance(op, ast.Lt):
                 result = self.current_block.lt(cmp_type, prev, right).result
             elif isinstance(op, ast.LtE):
@@ -1445,9 +1596,12 @@ class IrCompiler:
                 call = self.current_block.call("__builtin_in", [prev, right], IrType.i1())
                 result = self.current_block.xor(IrType.i1(), call.result, IrValue.const_bool(True)).result
             elif isinstance(op, ast.Is):
-                result = self.current_block.eq(IrType.ptr(), prev, right).result
+                # `is` compares identity, but the operands are whatever the
+                # IR models them as -- forcing ptr here emitted
+                # `icmp eq ptr %i32handle, ...`, which llc rejects.
+                result = self.current_block.eq(cmp_type, prev, right).result
             elif isinstance(op, ast.IsNot):
-                result = self.current_block.ne(IrType.ptr(), prev, right).result
+                result = self.current_block.ne(cmp_type, prev, right).result
             else:
                 result = IrValue.const_bool(False)
             # Chained comparisons compare the PREVIOUS COMPARATOR (b in

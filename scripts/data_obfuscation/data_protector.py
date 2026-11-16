@@ -41,6 +41,312 @@ def _oram_inline_stmts():
     return keep
 
 
+# Builtins that always return an int.  Used by the ORAM pass to decide
+# whether an assignment can be stored through struct.pack('<q', ...).
+_INT_RETURNING_CALLS = frozenset({"int", "len", "ord", "hash", "id"})
+
+_INT_BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.FloorDiv, ast.Mod, ast.Pow,
+               ast.LShift, ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor)
+
+
+def _is_int_expr(node, int_names=frozenset()) -> bool:
+    """True when ``node`` is provably an int at run time.
+
+    ``int_names`` are the names already proven int-valued in this scope, so
+    ``counter = counter + 1`` counts as int once ``counter`` does.
+
+    Conservative on purpose.  The ORAM pass stores a virtualized value as
+    ``struct.pack('<q', value)``, which raises "required argument is not an
+    integer" for anything that is not an int.  An expression this function
+    cannot prove is left alone, so the assignment stays an ordinary local
+    instead of producing an artefact that dies at import.
+    """
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, int) and not isinstance(node.value, bool)
+    if isinstance(node, ast.Name):
+        return node.id in int_names
+    if isinstance(node, ast.BinOp):
+        return (isinstance(node.op, _INT_BINOPS)
+                and _is_int_expr(node.left, int_names)
+                and _is_int_expr(node.right, int_names))
+    if isinstance(node, ast.UnaryOp):
+        return (isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert))
+                and _is_int_expr(node.operand, int_names))
+    if isinstance(node, ast.Call):
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in _INT_RETURNING_CALLS:
+            return True
+    return False
+
+
+_BITWISE_BINOPS = (ast.BitAnd, ast.BitOr, ast.BitXor, ast.LShift, ast.RShift)
+
+
+def _arg_int_only(func, name: str) -> bool:
+    """True when every read of argument ``name`` is a bitwise operand.
+
+    ``&``, ``|``, ``^``, ``<<`` and ``>>`` only accept ints (sets aside), so
+    a function that uses its argument exclusively that way can only be
+    called with ints.  That makes it safe to store the argument through
+    struct.pack('<q', ...) at function entry, which is what gives the ORAM
+    pass something to read back.  Before this, arguments were added to the
+    slot table but never written, so every read returned 0 -- the ORAM was
+    injected and never used.
+    """
+    parents = {}
+    for node in ast.walk(func):
+        for child in ast.iter_child_nodes(node):
+            parents[id(child)] = node
+    used = False
+    for node in ast.walk(func):
+        if not (isinstance(node, ast.Name) and node.id == name
+                and isinstance(node.ctx, ast.Load)):
+            continue
+        parent = parents.get(id(node))
+        if isinstance(parent, ast.BinOp) and isinstance(parent.op, _BITWISE_BINOPS):
+            used = True
+            continue
+        if isinstance(parent, ast.UnaryOp) and isinstance(parent.op, ast.Invert):
+            used = True
+            continue
+        return False
+    return used
+
+
+def _int_safe_names(func, candidates) -> set:
+    """Return the subset of ``candidates`` that is int-valued throughout.
+
+    Two conditions, both required:
+
+    * the name is assigned at the TOP LEVEL of ``func``'s body -- that is
+      the only place the write path rewrites, so a name bound elsewhere
+      (a module-level constant, a loop variable, a ``with ... as``) has no
+      slot to read back.  ``NATIVE_BLOBS`` is the case that bit: it is
+      spelled with "iv" in "native", so the keyword scan flagged it, and
+      the read path rewrote it to an ORAM slot that was never written --
+      the loader then compared against 0 instead of the blob table.
+    * every assignment to it anywhere in ``func`` is provably int.
+
+    Fixed point: start with every candidate, drop any name that fails
+    either condition given the names still standing, and repeat until
+    nothing more drops.
+    """
+    top_level = set()
+    for stmt in func.body:
+        if isinstance(stmt, ast.Assign):
+            for t in stmt.targets:
+                if isinstance(t, ast.Name):
+                    top_level.add(t.id)
+        elif isinstance(stmt, (ast.AugAssign, ast.AnnAssign)):
+            if isinstance(stmt.target, ast.Name):
+                top_level.add(stmt.target.id)
+    arg_names = {a.arg for a in func.args.args}
+    int_only_args = {n for n in (set(candidates) & arg_names)
+                     if _arg_int_only(func, n)}
+    alive = (set(candidates) & top_level) | int_only_args
+    while True:
+        dropped = set()
+        for name in alive:
+            for stmt in ast.walk(func):
+                if isinstance(stmt, ast.Assign):
+                    if not any(isinstance(t, ast.Name) and t.id == name
+                               for t in stmt.targets):
+                        continue
+                    if not _is_int_expr(stmt.value, alive):
+                        dropped.add(name)
+                        break
+                elif isinstance(stmt, ast.AugAssign):
+                    if not (isinstance(stmt.target, ast.Name)
+                            and stmt.target.id == name):
+                        continue
+                    if not _is_int_expr(stmt.value, alive):
+                        dropped.add(name)
+                        break
+                elif isinstance(stmt, ast.AnnAssign):
+                    if not (isinstance(stmt.target, ast.Name)
+                            and stmt.target.id == name):
+                        continue
+                    if stmt.value is not None and not _is_int_expr(stmt.value, alive):
+                        dropped.add(name)
+                        break
+        if not dropped:
+            return alive
+        alive -= dropped
+
+
+def _oram_write_call(slot: int, value, oram_name: str) -> ast.Call:
+    """``<oram>.write(slot, struct.pack('<q', value).ljust(32, b'\\x00'))``."""
+    return ast.Call(
+        func=ast.Attribute(
+            value=ast.Name(id=oram_name, ctx=ast.Load()),
+            attr="write",
+            ctx=ast.Load(),
+        ),
+        args=[
+            ast.Constant(value=slot),
+            ast.Call(
+                func=ast.Attribute(
+                    value=ast.Call(
+                        func=ast.Attribute(
+                            value=ast.Name(id="struct", ctx=ast.Load()),
+                            attr="pack",
+                            ctx=ast.Load(),
+                        ),
+                        args=[ast.Constant(value="<q"), value],
+                        keywords=[],
+                    ),
+                    attr="ljust",
+                    ctx=ast.Load(),
+                ),
+                args=[ast.Constant(value=32), ast.Constant(value=b"\x00")],
+                keywords=[],
+            ),
+        ],
+        keywords=[],
+    )
+
+
+def _oram_read_expr(slot: int, oram_name: str) -> ast.expr:
+    """``struct.unpack('<q', <oram>.read(slot)[:8])[0]`` -- the int read path.
+
+    The write path pads the packed int to the 32-byte slot width, so the
+    read has to slice the first 8 bytes back out.  Without the slice
+    struct.unpack raised "unpack requires a buffer of 8 bytes" on every
+    read, which made the whole int path unusable.
+    """
+    return ast.Subscript(
+        value=ast.Call(
+            func=ast.Attribute(
+                value=ast.Name(id="struct", ctx=ast.Load()),
+                attr="unpack",
+                ctx=ast.Load(),
+            ),
+            args=[
+                ast.Constant(value="<q"),
+                ast.Subscript(
+                    # read() returns None for a slot that was never written;
+                    # `or b"\x00" * 8` keeps the unpack from raising on it.
+                    value=ast.BoolOp(
+                        op=ast.Or(),
+                        values=[
+                            ast.Call(
+                                func=ast.Attribute(
+                                    value=ast.Name(id=oram_name, ctx=ast.Load()),
+                                    attr="read",
+                                    ctx=ast.Load(),
+                                ),
+                                args=[ast.Constant(value=slot)],
+                                keywords=[],
+                            ),
+                            ast.BinOp(
+                                left=ast.Constant(value=b"\x00"),
+                                op=ast.Mult(),
+                                right=ast.Constant(value=8),
+                            ),
+                        ],
+                    ),
+                    slice=ast.Slice(
+                        lower=ast.Constant(value=0),
+                        upper=ast.Constant(value=8),
+                        step=None,
+                    ),
+                    ctx=ast.Load(),
+                ),
+            ],
+            keywords=[],
+        ),
+        slice=ast.Constant(value=0),
+        ctx=ast.Load(),
+    )
+
+
+def _oram_read_substitute(node, var_slots, oram_name):
+    """Replace reads of virtualized names inside ``node`` with slot reads.
+
+    The write path stores ``struct.pack('<q', rhs)`` and then the binding is
+    gone, so a self-referential update -- ``counter = counter + 1`` -- must
+    read the slot instead of the (now undefined) name.  Without this the
+    emitted function raised NameError on its first update.
+    """
+    class _Sub(ast.NodeTransformer):
+        def visit_Name(self, n):
+            if isinstance(n.ctx, ast.Load) and n.id in var_slots:
+                return ast.copy_location(
+                    _oram_read_expr(var_slots[n.id], oram_name), n)
+            return n
+
+    return _Sub().visit(copy.deepcopy(node))
+
+
+class _StorageRewriter(ast.NodeTransformer):
+    """Rewrite every read/write of a virtualized name to its storage slot.
+
+    Generic on purpose. The previous hand-written rewriter covered only
+    Name / BinOp / UnaryOp / Subscript / Call-arguments / Compare, so a read
+    in any other position kept the original spelling while the binding had
+    moved into the virtual store. The first one to bite was a bare call
+    target -- `bump = make_counter(); bump()` became
+    `_vs_1[_vmap_1[0]] = make_counter(); bump()` -- and the module died with
+    NameError at import. Attribute receivers, boolops, f-strings,
+    comprehensions, `for` targets and `with ... as` bindings had the same
+    hole.
+
+    Nested scopes are left untouched: they bind their own names, and any
+    name they capture from this frame was filtered out of the candidate set
+    before this rewriter ran.
+    """
+
+    def __init__(self, var_to_vaddr, virt_read, virt_write):
+        self.var_to_vaddr = var_to_vaddr
+        self.virt_read = virt_read
+        self.virt_write = virt_write
+
+    def visit_FunctionDef(self, node):
+        return node
+
+    def visit_AsyncFunctionDef(self, node):
+        return node
+
+    def visit_Lambda(self, node):
+        return node
+
+    def visit_ClassDef(self, node):
+        return node
+
+    def visit_Name(self, node):
+        if isinstance(node.ctx, ast.Load) and node.id in self.var_to_vaddr:
+            return ast.copy_location(self.virt_read(node.id), node)
+        return node
+
+    def visit_Assign(self, node):
+        self.generic_visit(node)
+        if len(node.targets) == 1:
+            target = node.targets[0]
+            if isinstance(target, ast.Name) and target.id in self.var_to_vaddr:
+                return ast.copy_location(
+                    self.virt_write(target.id, node.value), node)
+        return node
+
+    def visit_AnnAssign(self, node):
+        self.generic_visit(node)
+        if (isinstance(node.target, ast.Name)
+                and node.target.id in self.var_to_vaddr
+                and node.value is not None):
+            return ast.copy_location(
+                self.virt_write(node.target.id, node.value), node)
+        return node
+
+    def visit_AugAssign(self, node):
+        self.generic_visit(node)
+        target = node.target
+        if isinstance(target, ast.Name) and target.id in self.var_to_vaddr:
+            combined = ast.BinOp(
+                left=self.virt_read(target.id), op=node.op, right=node.value)
+            return ast.copy_location(
+                self.virt_write(target.id, combined), node)
+        return node
+
+
 class DataProtector:
     """Applies data-oriented obfuscation to a Python AST.
 
@@ -323,12 +629,45 @@ class DataProtector:
             def __init__(self, parent: "DataProtector"):
                 self.parent = parent
                 self._runtime_key = parent._rng.randint(0, 0xFFFFFFFFFFFFFFFF)
+                # Names bound to a dict literal in the CURRENT scope.  Only
+                # those dicts have encrypted keys (see _mutate_dict_literal),
+                # so only those may have their string subscript keys
+                # rewritten.  A dict that arrives from json.loads() or any
+                # other external producer keeps plaintext keys, and
+                # rewriting the lookup turned every access into a KeyError
+                # (the section-split join read pack['sections'] from a JSON
+                # pack and failed closed on every host).
+                self._dict_names: set[str] = set()
+
+            def _enter_scope(self, node: ast.AST) -> ast.AST:
+                saved = self._dict_names
+                self._dict_names = set()
+                self.generic_visit(node)
+                self._dict_names = saved
+                return node
+
+            def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+                return self._enter_scope(node)
+
+            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
+                return self._enter_scope(node)
+
+            def _is_local_dict(self, value: ast.AST) -> bool:
+                if isinstance(value, ast.Dict):
+                    return True
+                return (isinstance(value, ast.Name)
+                        and value.id in self._dict_names)
 
             def visit_Assign(self, node: ast.Assign) -> ast.Assign | list[ast.stmt]:
                 if not (isinstance(node.value, ast.Dict) or
                         (isinstance(node.value, ast.Call) and
                          isinstance(node.value.func, ast.Name) and
                          node.value.func.id == "dict")):
+                    # A name rebound to a non-dict no longer owns a local
+                    # dict, so its subscripts must keep plaintext keys.
+                    for t in node.targets:
+                        if isinstance(t, ast.Name):
+                            self._dict_names.discard(t.id)
                     return self.generic_visit(node)
 
                 if isinstance(node.value, ast.Dict):
@@ -345,6 +684,9 @@ class DataProtector:
                         break
 
                 if target_id:
+                    # This name now owns a dict whose keys are encrypted
+                    # below, so its string subscripts must be encrypted too.
+                    self._dict_names.add(target_id)
                     decoy_keys = self.parent._generate_decoy_keys()
                     for dk in decoy_keys:
                         stmts.append(
@@ -374,7 +716,8 @@ class DataProtector:
 
             def visit_Subscript(self, node: ast.Subscript) -> ast.AST:
                 if (isinstance(node.slice, ast.Constant) and
-                        isinstance(node.slice.value, str)):
+                        isinstance(node.slice.value, str) and
+                        self._is_local_dict(node.value)):
                     enc_key = self.parent._encode_dict_key(
                         node.slice.value, self._runtime_key
                     )
@@ -461,6 +804,55 @@ class DataProtector:
                 if _captured:
                     vars_found = [v for v in vars_found if v not in _captured]
 
+                # Same reasoning for a plain closure READ: a nested scope that
+                # reads this binding cannot see a slot that lives in the outer
+                # frame, so moving the binding there turns the read into a
+                # NameError. Leave any name a nested scope touches alone.
+                _nested_reads = set()
+                for _child in ast.walk(node):
+                    if _child is node:
+                        continue
+                    if isinstance(_child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                           ast.Lambda, ast.ClassDef)):
+                        for _n in ast.walk(_child):
+                            if isinstance(_n, ast.Name) and isinstance(_n.ctx, ast.Load):
+                                _nested_reads.add(_n.id)
+                if _nested_reads:
+                    vars_found = [v for v in vars_found if v not in _nested_reads]
+
+                # A name bound anywhere other than a plain top-level
+                # assignment -- a `for` target, `with ... as`, `except ... as`,
+                # a walrus, a `del` -- has a second write path this pass does
+                # not rewrite, so the slot and the real local would diverge:
+                # `total = 0; for total in range(4): pass; return total`
+                # returned 0 instead of 3. Leave those names alone.
+                _handled_targets = set()
+                for _stmt in node.body:
+                    if isinstance(_stmt, ast.Assign):
+                        for _t in _stmt.targets:
+                            if isinstance(_t, ast.Name):
+                                _handled_targets.add(id(_t))
+                    elif isinstance(_stmt, (ast.AugAssign, ast.AnnAssign)):
+                        if isinstance(_stmt.target, ast.Name):
+                            _handled_targets.add(id(_stmt.target))
+                _other_stores = set()
+                for _n in ast.walk(node):
+                    if (isinstance(_n, ast.Name)
+                            and isinstance(_n.ctx, (ast.Store, ast.Del))
+                            and id(_n) not in _handled_targets):
+                        _other_stores.add(_n.id)
+                    # These bind a name held as a plain string, so the Store
+                    # scan above cannot see them: `except E as e` rebinds `e`
+                    # and Python deletes it at the end of the handler.
+                    elif isinstance(_n, ast.ExceptHandler) and _n.name:
+                        _other_stores.add(_n.name)
+                    elif isinstance(_n, (ast.MatchAs, ast.MatchStar)) and _n.name:
+                        _other_stores.add(_n.name)
+                    elif isinstance(_n, ast.MatchMapping) and _n.rest:
+                        _other_stores.add(_n.rest)
+                if _other_stores:
+                    vars_found = [v for v in vars_found if v not in _other_stores]
+
                 if not vars_found:
                     return node
 
@@ -472,8 +864,6 @@ class DataProtector:
                 vstore_name = self.parent._make_rand_name("_vs")
                 vmap_name = self.parent._make_rand_name("_vmap")
 
-                new_body: list[ast.stmt] = []
-
                 vstore_init = ast.Assign(
                     targets=[ast.Name(id=vstore_name, ctx=ast.Store())],
                     value=ast.List(
@@ -481,8 +871,6 @@ class DataProtector:
                         ctx=ast.Load(),
                     ),
                 )
-                new_body.append(vstore_init)
-
                 vmap_init = ast.Assign(
                     targets=[ast.Name(id=vmap_name, ctx=ast.Store())],
                     value=ast.List(
@@ -490,7 +878,6 @@ class DataProtector:
                         ctx=ast.Load(),
                     ),
                 )
-                new_body.append(vmap_init)
 
                 var_to_vaddr = {}
                 for v, addr in zip(vars_found, vaddr_map):
@@ -525,121 +912,11 @@ class DataProtector:
                         value=rhs,
                     )
 
-                for stmt in node.body:
-                    if isinstance(stmt, ast.Assign):
-                        handled = False
-                        for t in stmt.targets:
-                            if isinstance(t, ast.Name) and t.id in var_to_vaddr:
-                                new_rhs = self._rewrite_expr(
-                                    stmt.value, var_to_vaddr, _virt_read,
-                                )
-                                new_body.append(_virt_write(t.id, new_rhs))
-                                handled = True
-                                break
-                        if not handled:
-                            new_body.append(stmt)
-
-                    elif isinstance(stmt, ast.Return):
-                        stmt.value = self._rewrite_expr(
-                            stmt.value, var_to_vaddr, _virt_read,
-                        )
-                        new_body.append(stmt)
-
-                    elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
-                        call = stmt.value
-                        call.args = [
-                            self._rewrite_expr(a, var_to_vaddr, _virt_read)
-                            for a in call.args
-                        ]
-                        new_body.append(stmt)
-
-                    elif isinstance(stmt, ast.If):
-                        transformed = self._rewrite_if(
-                            stmt, var_to_vaddr, _virt_read, _virt_write,
-                        )
-                        new_body.append(transformed)
-
-                    else:
-                        new_body.append(stmt)
-
-                node.body = new_body
+                rewriter = _StorageRewriter(var_to_vaddr, _virt_read, _virt_write)
+                node.body = [vstore_init, vmap_init] + [
+                    rewriter.visit(stmt) for stmt in node.body
+                ]
                 return node
-
-            def _rewrite_expr(
-                self, expr: ast.AST, var_to_vaddr: dict, virt_read,
-            ) -> ast.AST:
-                if isinstance(expr, ast.Name) and expr.id in var_to_vaddr:
-                    return virt_read(expr.id)
-                if isinstance(expr, ast.BinOp):
-                    return ast.BinOp(
-                        left=self._rewrite_expr(expr.left, var_to_vaddr, virt_read),
-                        op=expr.op,
-                        right=self._rewrite_expr(expr.right, var_to_vaddr, virt_read),
-                    )
-                if isinstance(expr, ast.UnaryOp):
-                    return ast.UnaryOp(
-                        op=expr.op,
-                        operand=self._rewrite_expr(expr.operand, var_to_vaddr, virt_read),
-                    )
-                if isinstance(expr, ast.Subscript):
-                    if isinstance(expr.value, ast.Name) and expr.value.id in var_to_vaddr:
-                        expr.value = virt_read(expr.value.id)
-                    else:
-                        expr.value = self._rewrite_expr(
-                            expr.value, var_to_vaddr, virt_read,
-                        )
-                    if isinstance(expr.slice, ast.AST):
-                        expr.slice = self._rewrite_expr(
-                            expr.slice, var_to_vaddr, virt_read,
-                        )
-                    return expr
-                if isinstance(expr, ast.Call):
-                    expr.args = [
-                        self._rewrite_expr(a, var_to_vaddr, virt_read)
-                        for a in expr.args
-                    ]
-                    return expr
-                if isinstance(expr, ast.Compare):
-                    expr.left = self._rewrite_expr(expr.left, var_to_vaddr, virt_read)
-                    expr.comparators = [
-                        self._rewrite_expr(c, var_to_vaddr, virt_read)
-                        for c in expr.comparators
-                    ]
-                    return expr
-                return expr
-
-            def _rewrite_if(
-                self, stmt: ast.If, var_to_vaddr: dict, virt_read, virt_write,
-            ) -> ast.If:
-                stmt.test = self._rewrite_expr(stmt.test, var_to_vaddr, virt_read)
-                stmt.body = [
-                    self._rewrite_if(b, var_to_vaddr, virt_read, virt_write) if isinstance(b, ast.If)
-                    else self._rewrite_stmt(b, var_to_vaddr, virt_read, virt_write)
-                    for b in stmt.body
-                ]
-                stmt.orelse = [
-                    self._rewrite_if(b, var_to_vaddr, virt_read, virt_write) if isinstance(b, ast.If)
-                    else self._rewrite_stmt(b, var_to_vaddr, virt_read, virt_write)
-                    for b in stmt.orelse
-                ]
-                return stmt
-
-            def _rewrite_stmt(
-                self, stmt: ast.stmt, var_to_vaddr: dict, virt_read, virt_write,
-            ) -> ast.stmt:
-                if isinstance(stmt, ast.Assign):
-                    for t in stmt.targets:
-                        if isinstance(t, ast.Name) and t.id in var_to_vaddr:
-                            new_rhs = self._rewrite_expr(
-                                stmt.value, var_to_vaddr, virt_read,
-                            )
-                            return virt_write(t.id, new_rhs)
-                if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
-                    stmt.value.args = [
-                        virt_read(a.id) if isinstance(a, ast.Name) and a.id in var_to_vaddr else a
-                        for a in stmt.value.args
-                    ]
-                return stmt
 
         return StorageVirtualizer(self).visit(tree)
 
@@ -666,6 +943,19 @@ class DataProtector:
                         for s in ast.walk(stmt)
                         if isinstance(s, ast.Name)
                     )
+                ]
+                # struct.pack('<q', ...) only accepts an int.  This pass
+                # used to virtualize EVERY sensitive name, so an assignment
+                # whose right-hand side was bytes (a key) or None (a
+                # sentinel) emitted struct.pack('<q', b'...') and the
+                # artefact died at import with "required argument is not an
+                # integer" -- the failure that killed the native build's
+                # Python fallback.  Keep only names whose every assignment
+                # is provably int-valued; the rest stay ordinary locals,
+                # exactly as they were before this pass existed.
+                func_sensitive = [
+                    v for v in func_sensitive
+                    if v in _int_safe_names(node, func_sensitive)
                 ]
                 if not func_sensitive:
                     return node
@@ -697,7 +987,8 @@ class DataProtector:
                         for t in stmt.targets:
                             if isinstance(t, ast.Name) and t.id in var_slots:
                                 slot = var_slots[t.id]
-                                rhs = stmt.value
+                                rhs = _oram_read_substitute(
+                                    stmt.value, var_slots, self._oram_name)
                                 write_call = ast.Call(
                                     func=ast.Attribute(
                                         value=ast.Name(id=self._oram_name, ctx=ast.Load()),
@@ -740,35 +1031,33 @@ class DataProtector:
                         for i, arg in enumerate(call.args):
                             if isinstance(arg, ast.Name) and arg.id in var_slots:
                                 slot = var_slots[arg.id]
-                                new_arg = ast.Subscript(
-                                    value=ast.Call(
-                                        func=ast.Attribute(
-                                            value=ast.Name(id="struct", ctx=ast.Load()),
-                                            attr="unpack",
-                                            ctx=ast.Load(),
-                                        ),
-                                        args=[
-                                            ast.Constant(value="<q"),
-                                            ast.Call(
-                                                func=ast.Attribute(
-                                                    value=ast.Name(id=self._oram_name, ctx=ast.Load()),
-                                                    attr="read",
-                                                    ctx=ast.Load(),
-                                                ),
-                                                args=[ast.Constant(value=slot)],
-                                                keywords=[],
-                                            ),
-                                        ],
-                                        keywords=[],
-                                    ),
-                                    slice=ast.Constant(value=0),
-                                    ctx=ast.Load(),
-                                )
+                                new_arg = _oram_read_expr(
+                                    slot, self._oram_name)
                                 call.args[i] = new_arg
                         body.append(stmt)
                     else:
                         body.append(stmt)
 
+                # Complete the read path.  The loop above only rewrote
+                # reads in call-argument position, so `return counter` or
+                # `abs(counter)` still referenced a name whose binding had
+                # moved into the slot -- NameError on first use.  Rewrite
+                # every remaining read of a virtualized name.
+                body = [_oram_read_substitute(st, var_slots, self._oram_name)
+                        for st in body]
+                # Arguments have no assignment to rewrite, so bind them into
+                # their slots at entry.  Built AFTER the substitution pass on
+                # purpose: the value here is the argument itself, and running
+                # it through the rewriter turned it into a read of the slot
+                # it was about to fill.
+                arg_names = {a.arg for a in node.args.args}
+                arg_writes = [
+                    ast.Expr(value=_oram_write_call(
+                        var_slots[sv], ast.Name(id=sv, ctx=ast.Load()),
+                        self._oram_name))
+                    for sv in func_sensitive if sv in arg_names
+                ]
+                body = [oram_init] + arg_writes + body[1:]
                 node.body = body
                 return node
 

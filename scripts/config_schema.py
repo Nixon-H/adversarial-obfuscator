@@ -105,7 +105,10 @@ def _BOOL_SEC(default):
 # (argparse choices) and llvmgen/passes.py:717-721 (apply dispatch).
 # Anything else is silently ignored by apply_all -> fail-open, hence
 # security-critical: reject unknown entries fail-closed.
-OLLVM_KNOWN_PASSES = ("bcf", "bogus", "fla", "flatten", "sub", "substitute")
+OLLVM_KNOWN_PASSES = ("bcf", "bogus", "fla", "flatten", "sub", "substitute",
+                      "replay", "replay_poison", "transient",
+                      "crypto_cfg", "crypto_checkpoint",
+                      "speculative", "spec_traps")
 
 # Valid TEE types, verified against scripts/build.py --tee-type choices.
 TEE_KNOWN_TYPES = ("software", "sgx", "sev", "apple")
@@ -157,13 +160,14 @@ SCHEMA = {
         "list", [], True, elem="str"),
     # --- LLVM codegen ----------------------------------------------------
     "shadow_compiler.llvmgen.ollvm_passes": _F(
-        "list", ["bcf", "fla", "sub"], True, elem="str",
+        "list", ["bcf", "fla", "sub", "replay", "speculative"], True, elem="str",
         choices=OLLVM_KNOWN_PASSES),
     "shadow_compiler.llvmgen.enable_integrity": _BOOL_SEC(True),
     "shadow_compiler.llvmgen.rop.enabled": _BOOL_SEC(True),
     "shadow_compiler.llvmgen.rop.target_functions": _F(
         "list", [], True, elem="str"),
     # --- encryption ------------------------------------------------------
+    "shadow_compiler.encrypt.rodata.enabled": _BOOL_SEC(True),
     "shadow_compiler.encrypt.cipher": _F("str", "aes-256-ctr", True,
                                          required=True,
                                          choices=CIPHER_KNOWN),

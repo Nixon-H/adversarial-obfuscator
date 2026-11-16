@@ -2,7 +2,12 @@
 # Version: 0.1.0
 
 CXX      := g++
-CXXFLAGS := -O2 -fPIC -shared -std=c++17
+# -O3 + LTO + hidden visibility. The three exported entry points
+# (CompileToMarshal, FreeMarshalBuffer, the whitebox wrappers) carry an
+# explicit __attribute__((visibility("default"))), so hiding everything else
+# costs nothing at the ABI and removes the internal symbol table an analyst
+# would otherwise read straight out of the .so.
+CXXFLAGS := -O3 -fPIC -shared -std=c++17 -flto -fvisibility=hidden -fvisibility-inlines-hidden -fno-semantic-interposition
 PYINCLUDES := $(shell python3-config --includes)
 PYLDFLAGS  := $(shell python3-config --ldflags --embed 2>/dev/null || python3-config --ldflags)
 CARGO     := cargo

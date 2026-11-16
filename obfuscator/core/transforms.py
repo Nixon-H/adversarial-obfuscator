@@ -1,6 +1,29 @@
 import sys, os, zipfile, base64, io, shutil, tempfile, random, hashlib, lzma, struct, time, json, argparse, uuid, re, inspect, platform, subprocess, marshal, hmac, secrets, ctypes, importlib.util, atexit, warnings, zlib, codecs, string, builtins, math, dis, multiprocessing, types, traceback, gc, ast, socket, threading, concurrent.futures, logging  # noqa: F401 (this line binds a name used by an embedded template)
 from .utils import get_random_var_name
 
+
+def _new_rename_key():
+    """Per-build secret for name derivation.
+
+    Renamed identifiers must be stable *within* a build (several passes and
+    both renamers have to agree on the same spelling) but must not be
+    recoverable *from* the build. A bare hash of the original name satisfies
+    the first property and fails the second: `_nx_` + md5(name)[:6] is a
+    lookup table anyone can invert with a word list, which is how a captured
+    payload gave up 10 of 12 original names in the 2026-11-14 bench.
+
+    Keying the derivation keeps determinism and removes the inversion. The
+    key comes from `secrets`, which `ObfuscationPipeline._patch_secrets`
+    rebinds to the build RNG, so a `--seed` build stays reproducible.
+    """
+    return secrets.token_bytes(32)
+
+
+def _keyed_name_tag(key, name, length=6):
+    """Stable, non-invertible tag for `name` under this build's `key`."""
+    return hmac.new(key, name.encode("utf-8"), hashlib.sha256).hexdigest()[:length]
+
+
 class TypeHintStripper(ast.NodeTransformer):
     def _clear_args(self, args):
         try:
@@ -188,6 +211,9 @@ class SymbolRenamer(ast.NodeTransformer):
         self.mapping = mapping if mapping is not None else {}
         self.reverse_mapping = {}
         self._renamed_values = set()
+        # Per-build key for the deterministic branches below. See
+        # _new_rename_key: a bare hash of the original name is invertible.
+        self._rename_key = _new_rename_key()
         self.protected_functions = set()
         self.current_function = None
         self._rename_log = []
@@ -333,7 +359,7 @@ class SymbolRenamer(ast.NodeTransformer):
             return old_name
         if hasattr(self, 'dynamic_unbounds') and old_name in self.dynamic_unbounds:
             if old_name not in self.mapping:
-                self.mapping[old_name] = "_nx_" + __import__('hashlib').md5(old_name.encode()).hexdigest()[:6]
+                self.mapping[old_name] = "_nx_" + _keyed_name_tag(self._rename_key, old_name)
                 self.reverse_mapping[old_name] = self.mapping[old_name]
                 self._renamed_values.add(self.mapping[old_name])
                 self._rename_log.append((old_name, self.mapping[old_name]))
@@ -1813,6 +1839,10 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
     }
     def __init__(self):
         self.encoded_map = {}
+        # Per-build key: the encoded spelling must be stable within a build
+        # but must not be a bare hash of the original name. See
+        # _new_rename_key.
+        self._rename_key = _new_rename_key()
         self.reserved = {
             'sum', 'min', 'max', 'abs', 'round', 'pow', 'divmod',
             'chr', 'ord', 'hex', 'oct', 'bin', 'ascii', 'repr',
@@ -1955,7 +1985,10 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
             return name
         if name in self.encoded_map: 
             return self.encoded_map[name]
-        h = hashlib.md5(name.encode()).hexdigest()        
+        # Keyed, not a bare hash: md5(name) made the encoded spelling a
+        # lookup table over candidate names. Truncated to 32 hex chars so
+        # the generated identifier keeps its previous length.
+        h = hmac.new(self._rename_key, name.encode("utf-8"), hashlib.sha256).hexdigest()[:32]        
         if self._use_safe_mode:
             new_name = ""
             use_cyrillic = (int(h[0], 16) % 2 == 0)
@@ -2305,11 +2338,24 @@ class CodeChecksumInjector(ast.NodeTransformer):
 def _nx_baseline():
     {self.check_var}.clear()
     for _n, _f in list(globals().items()):
+        # Only str keys are module-level names.  The payload also parks
+        # non-str keys in globals() (the string table and the bytecode
+        # bridge both do), and a bytes key can never be looked up again by
+        # name -- tracking one made _nx_verify raise "missing function
+        # b'...'" on the first call of every guarded function, which is how
+        # the whole payload died at import.
+        if not isinstance(_n, str):
+            continue
         if (callable(_f) and hasattr(_f, "__code__")
                 and getattr(_f, "__module__", None) == __name__):
             {self.check_var}[_n] = _f.__code__
 def _nx_verify():
     for _n, _prev in list({self.check_var}.items()):
+        # Same reason as _nx_baseline: a non-str key is not a name, so it can
+        # never be looked up again and must not be reported as a missing
+        # function.
+        if not isinstance(_n, str):
+            continue
         _f = globals().get(_n)
         if not callable(_f) or not hasattr(_f, "__code__"):
             raise RuntimeError("checksum: missing function %s" % _n)

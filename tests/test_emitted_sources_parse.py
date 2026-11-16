@@ -31,10 +31,21 @@ from obfuscator.core.sources import apply_vars
 #: literals, numeric formats).  They are neutralised before parsing.
 _DUMMY = "_nx_dummy_"
 
+#: Placeholders that expand to whole statements rather than an identifier.
+#: They sit at column 0 in the template and the build renders them empty when
+#: the gate is disabled, so the test does the same -- substituting an
+#: identifier there would leave a bare name at column 0 in the middle of an
+#: indented block and the parse would fail on the test's own scaffolding.
+_BLOCK_PLACEHOLDERS = (
+    "blockchain_gate_code", "key_shard_gate_code", "geofence_gate_code",
+)
+
 
 def _render(text):
     """Substitute every {placeholder} with a dummy identifier."""
     text = apply_vars(text)
+    for _name in _BLOCK_PLACEHOLDERS:
+        text = text.replace("{%s}" % _name, "")
     # str.format-style escapes first, then any remaining {name}.
     text = text.replace("{{", "{").replace("}}", "}")
     text = re.sub(r"\{[^{}]*\}", _DUMMY, text)

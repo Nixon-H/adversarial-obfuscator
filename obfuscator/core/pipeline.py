@@ -1,4 +1,4 @@
-import sys, os, zipfile, base64, io, tokenize, py_compile, shutil, tempfile, random, hashlib, lzma, struct, time, json, argparse, uuid, re, platform, subprocess, marshal, hmac, secrets, ctypes, importlib.util, zlib, string, traceback, ast, concurrent.futures, logging  # noqa: F401 (this line binds a name used by an embedded template)
+import sys, os, zipfile, base64, io, tokenize, py_compile, shutil, tempfile, random, hashlib, lzma, struct, time, json, argparse, uuid, re, platform, subprocess, marshal, hmac, secrets, ctypes, importlib.util, zlib, string, traceback, ast, concurrent.futures, logging, bisect  # noqa: F401 (this line binds a name used by an embedded template)
 from datetime import datetime
 from . import utils as _nixon_utils
 from .utils import (
@@ -31,6 +31,7 @@ from .sources import (
     TIMING_SIDECHAIN_SOURCE, TLS_CTX_SOURCE, TOR_CLIENT_SOURCE, TRAITOR_TRACE_SOURCE,
     TRIPLE_REDUNDANCY_SOURCE, VARS, WATERMARK_SOURCE, WHITEBOX_CIPHER_SOURCE,
     WHITEBOX_CRYPTO_SOURCE, WHITEBOX_ENHANCED_SOURCE, WINDOWS_REFLECTIVE_LOADER_SOURCE,
+    BLOCKCHAIN_GATE_CODE, GEOFENCE_GATE_CODE, KEY_SHARD_GATE_CODE,
     apply_ast_mutation, apply_vars, compile_vm_stage1_decryptor, compile_vm_stage2_Nixon_Enc,
     generate_dead_code_paths, generate_decoy_code, generate_poly_vm, generate_polymorphic_map,
     generate_recipe, inject_entropy_tlv, recursive_package, remove_entropy_source
@@ -341,7 +342,9 @@ def blind_constants(code):
         if val < 2 or val > 5000: return match.group(0)
         mask = random.randint(1, 0xFFFF)
         return f"{prefix}({val ^ mask} ^ {mask})"
-    _pat = re.compile(r'(\w+\s*=\s*)(\d+)(?!\w)')
+    # The lookahead must also reject '.', or `x = 3.0` matched the `3` and
+    # emitted `x = (a ^ b).0` -- a syntax error in the built artifact.
+    _pat = re.compile(r'(\w+\s*=\s*)(\d+)(?![\w.])')
     # Tokenize-aware: never rewrite numbers inside string literals or
     # comments (docstrings / embedded text like "x = 5" used to match
     # and corrupt string contents). Falls back to the legacy regex on
@@ -357,16 +360,21 @@ def blind_constants(code):
         for _tok in tokenize.generate_tokens(io.StringIO(code).readline):
             if _tok.type in (tokenize.STRING, tokenize.COMMENT):
                 _skip.append((_abs(_tok.start), _abs(_tok.end)))
-        def _in_skip(_s, _e):
-            for _a, _b in _skip:
-                if _s >= _a and _e <= _b:
-                    return True
-            return False
+        # Blank the string/comment ranges before matching instead of
+        # matching and then filtering.  `\w+\s*=\s*` backtracks over every
+        # start position in a long run of word characters that contains no
+        # `=`, which is quadratic: a 227 KB --tls-ca-bundle PEM (base64, so
+        # one unbroken \w run) took the build from 30 s to over ten minutes.
+        # Masking is O(n) and the offsets stay aligned, so the replacements
+        # still land on the original text.
+        _masked = list(code)
+        for _a, _b in _skip:
+            for _i in range(_a, _b):
+                _masked[_i] = ' '
+        _masked = ''.join(_masked)
         _out = []
         _last = 0
-        for _m in _pat.finditer(code):
-            if _in_skip(_m.start(), _m.end()):
-                continue
+        for _m in _pat.finditer(_masked):
             _out.append(code[_last:_m.start()])
             _out.append(replace(_m))
             _last = _m.end()
@@ -432,11 +440,164 @@ def build_native_vm(build_dir):
                     return base64.b64encode(b.read()).decode('ascii')
     except Exception: pass
     return ""
+_SELF_CHECK_READ = "with open(__file__, 'rb') as f: lines = f.readlines()"
+
+
+def _native_self_digest(source_code):
+    """Reproduce the loader's self-check digest for a native build.
+
+    The loader hashes its own source minus the two lines that carry the
+    expected Merkle root and HMAC, then feeds ``sha256(content)`` into the
+    key chain. A compiled extension ships no source, so ``open(__file__)``
+    reads the ``.so`` and every comparison fails. The digest is therefore
+    computed here, at build time, from the same bytes the ``.py`` artifact
+    would have hashed, and baked into the native module.
+
+    Returns ``None`` when the anchors are absent (a build that predates the
+    self-check), so the caller can leave the source untouched.
+    """
+    import hashlib as _hashlib
+    import re as _re
+    raw = source_code.encode('utf-8')
+    checksum = hmac_val = None
+    for line in raw.splitlines():
+        if b'__SIG_ANCHOR__' in line and checksum is None:
+            found = _re.search(rb'[0-9a-f]{64}', line)
+            if found:
+                checksum = found.group(0)
+        elif b'__HMAC_ANCHOR__' in line and hmac_val is None:
+            found = _re.search(rb'[0-9a-f]{64}', line)
+            if found:
+                hmac_val = found.group(0)
+    if not checksum or not hmac_val:
+        return None
+    content = b"".join(
+        line for line in raw.splitlines(keepends=True)
+        if checksum not in line and hmac_val not in line)
+    return _hashlib.sha256(content).digest()
+
+
+# Magic numbers for every object format the native loader can dlopen.  The
+# loader dispatches on platform, so a blob is only "native" for a platform if
+# its bytes really are that platform's object format -- claiming otherwise
+# arms FORCE_NATIVE_MODE for a dlopen that cannot succeed.
+_OBJECT_MAGICS = {
+    'elf': (b'\x7fELF',),
+    'macho': (b'\xfe\xed\xfa\xce', b'\xce\xfa\xed\xfe',
+              b'\xfe\xed\xfa\xcf', b'\xcf\xfa\xed\xfe',
+              b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca'),
+    'pe': (b'MZ',),
+}
+
+# Which object format each loader platform expects.
+_PLATFORM_OBJECT_KIND = {
+    'linux': 'elf',
+    'android': 'elf',
+    'darwin': 'macho',
+    'windows': 'pe',
+}
+
+
+def _object_kind(data):
+    """Return ``'elf'``/``'macho'``/``'pe'`` for a loadable object, else None."""
+    if not data or len(data) < 8:
+        return None
+    for kind, magics in _OBJECT_MAGICS.items():
+        for magic in magics:
+            if data.startswith(magic):
+                return kind
+    return None
+
+
+def native_blob_loadability(native_blobs):
+    """Classify each platform's blob as a loadable object file or not.
+
+    Returns ``(loadable, rejected)`` where both are ``{platform: reason}``.
+    ``reason`` for a loadable entry is the object kind; for a rejected entry
+    it is why the blob cannot be dlopen'd.
+
+    A blob is only counted as native when its bytes match the object format
+    the loader will hand it to.  Anything else -- a truncated download, a
+    base64 of the wrong file, a compile that silently produced nothing --
+    must not arm ``FORCE_NATIVE_MODE``.
+    """
+    loadable, rejected = {}, {}
+    for target, b64 in (native_blobs or {}).items():
+        if not b64:
+            rejected[target] = 'no blob'
+            continue
+        try:
+            raw = base64.b64decode(b64)
+        except Exception as exc:
+            rejected[target] = 'not base64 (%s)' % (exc,)
+            continue
+        kind = _object_kind(raw)
+        if kind is None:
+            head = raw[:8].hex() if raw else 'empty'
+            rejected[target] = 'not an object file (starts %s)' % (head,)
+            continue
+        expected = _PLATFORM_OBJECT_KIND.get(target)
+        if expected and kind != expected:
+            rejected[target] = '%s blob holds a %s object' % (target, kind)
+            continue
+        loadable[target] = kind
+    return loadable, rejected
+
+
+# Cython 3.x rejects a handful of Python 3.10+ constructs outright, and the
+# rejection only surfaces after a full cythonize pass -- tens of seconds of
+# build time for a message that names the construct but not the reason.  The
+# AST check below turns that into an instant, actionable report, so a payload
+# that cannot go native falls back to Python mode deliberately rather than by
+# exception.  Keep this list to constructs Cython genuinely cannot parse; a
+# false positive would silently disable the native path for a valid payload.
+_CYTHON_UNSUPPORTED_NODES = {
+    'Match': 'structural pattern matching (match/case)',
+    'TryStar': 'except* exception groups',
+    'TypeAlias': 'PEP 695 type aliases',
+    'TypeVar': 'PEP 695 type parameters',
+    'ParamSpec': 'PEP 695 type parameters',
+    'TypeVarTuple': 'PEP 695 type parameters',
+}
+
+
+def cython_compat_issues(source_code):
+    """Return ``[(lineno, construct)]`` for constructs Cython cannot compile.
+
+    Empty list means "no known blocker" -- not a guarantee that Cython will
+    succeed, only that the cheap, certain failures have been ruled out.
+    """
+    import ast as _ast
+    try:
+        tree = _ast.parse(source_code)
+    except SyntaxError:
+        return []
+    issues = []
+    for node in _ast.walk(tree):
+        label = _CYTHON_UNSUPPORTED_NODES.get(type(node).__name__)
+        if label:
+            issues.append((getattr(node, 'lineno', 0), label))
+    issues.sort()
+    return issues
+
+
 def compile_payload_to_cython(source_path, output_dir):
     print("    [+] Compiling payload to native binary (Cython)...")
     if os.path.isfile(source_path):
         with open(source_path, 'r', encoding='utf-8') as f:
             source_code = f.read()
+        # The self-check hashes the loader's own .py source. A native build
+        # ships no .py, so the check can only fail -- and it feeds the key
+        # chain, so it cannot simply be dropped either. Bake in the digest
+        # the .py artifact would have produced.
+        _native_digest = _native_self_digest(source_code)
+        if _native_digest is not None and _SELF_CHECK_READ in source_code:
+            source_code = source_code.replace(
+                _SELF_CHECK_READ,
+                "return %r  # native build: digest baked in at build time"
+                % (_native_digest,),
+                1)
+            print("    [+] Native Mode: self-check digest baked in")
         source_files = {'__main__.py': source_code}
     else:
         source_files = {}
@@ -447,6 +608,18 @@ def compile_payload_to_cython(source_path, output_dir):
                     rel_path = os.path.relpath(full_path, source_path)
                     with open(full_path, 'r', encoding='utf-8') as f:
                         source_files[rel_path] = f.read()
+    _compat = []
+    for _name, _code in source_files.items():
+        for _line, _what in cython_compat_issues(_code):
+            _compat.append((_name, _line, _what))
+    if _compat:
+        print("    [!] Native Mode: Cython cannot compile this payload; "
+              "staying in Python mode")
+        for _name, _line, _what in _compat[:5]:
+            print("        %s:%d uses %s" % (_name, _line, _what))
+        if len(_compat) > 5:
+            print("        ... and %d more" % (len(_compat) - 5,))
+        return None
     cython_dir = tempfile.mkdtemp(prefix='cython_build_')
     try:
         for name, code in source_files.items():
@@ -460,11 +633,15 @@ def compile_payload_to_cython(source_path, output_dir):
             pyx_name = name.replace('.py', '.pyx')
             pyx_path = os.path.join(cython_dir, pyx_name)
             os.makedirs(os.path.dirname(pyx_path), exist_ok=True)
+            # Only language_level. The old header also set boundscheck /
+            # wraparound / cdivision / infer_types, and those are not free
+            # optimisations on a payload like this one:
+            #   * cdivision=True makes `1 / 0` return 0 instead of raising,
+            #     so every ZeroDivisionError guard in the payload silently
+            #     stops firing -- a behaviour change, not a speed-up;
+            #   * infer_types=True infers C types for Python objects, which
+            #     segfaulted this payload at import.
             cython_code = f'''# cython: language_level=3
-# cython: boundscheck=False
-# cython: wraparound=False
-# cython: cdivision=True
-# cython: infer_types=True
 {code}
 '''
             with open(pyx_path, 'w', encoding='utf-8') as f: f.write(cython_code)
@@ -475,8 +652,14 @@ import sys
 extensions = [
     Extension("payload_module", 
               ["{pyx_file}"],
-              extra_compile_args=['-O3'],
-              extra_link_args=[])
+              # -O3 + LTO + hidden visibility, the same hardening the core
+              # library gets from the Makefile. Cython marks PyInit_* with
+              # default visibility, so hiding the rest costs nothing at the
+              # ABI and removes the internal symbol table from the .so.
+              extra_compile_args=['-O3', '-flto', '-fvisibility=hidden',
+                                  '-fvisibility-inlines-hidden',
+                                  '-fno-semantic-interposition'],
+              extra_link_args=['-flto'])
 ]
 setup(
     ext_modules=cythonize(extensions, 
@@ -1400,7 +1583,7 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
             _phase4_suffix += (
                 "_NX_SPLIT_BOOTSTRAP_ARMED = True\n"
                 "try:\n"
-                "    BLOB_KEY_SB = _nx_sb_activate()\n"
+                "    BLOB_KEY_SB = _nx_customer_mask(_nx_sb_activate())\n"
                 "except Exception:\n"
                 "    BLOB_KEY_SB = None\n"
                 "if BLOB_KEY_SB is not None:\n"
@@ -1787,15 +1970,19 @@ def _nx_wipe(obj):
     except Exception:
         pass
     return None
-def _nx_key_reconstruct():
-    """Recombine XOR shares + apply the build-id salt. Wipes intermediates."""
-    _s0 = bytearray(base64.b64decode(_BLOB_S0))
-    _s1 = bytearray(base64.b64decode(_BLOB_S1))
-    _raw = bytearray(_a ^ _b for _a, _b in zip(_s0, _s1))
-    import hashlib as _nx_hk
-    _mask = _nx_hk.sha256(_NX_BUILD_ID.encode()).digest()
-    _key = bytes(_b ^ _mask[_i % len(_mask)] for _i, _b in enumerate(_raw))
+def _nx_customer_mask(_key):
+    """Apply the customer/licence mask to an already-derived key.
+
+    One owner for the second mask.  Every path that produces the key the
+    payload is decrypted with must end here, because the build seals the
+    payload with ``key_emit.derive_effective_key`` (build-id salt AND
+    customer mask).  The share path and the split-bootstrap path used to
+    derive the key independently and only the share path applied this
+    mask, so a licence-bound build sealed the payload with a key the
+    loader never held.  Identity when the build is unbound.
+    """
     try:
+        import hashlib as _nx_hk
         _salt = _NX_CUSTOMER_SALT
         if not _salt and _NX_LICENCE_BOUND:
             # Bound at build time (--licence-token): the mask comes from
@@ -1808,9 +1995,19 @@ def _nx_key_reconstruct():
             # artefact built for one customer does not decrypt for
             # another.
             _cmask = _nx_hk.sha256(b"nx-customer:" + _salt.encode()).digest()
-            _key = bytes(_b ^ _cmask[_i % len(_cmask)] for _i, _b in enumerate(_key))
+            return bytes(_b ^ _cmask[_i % len(_cmask)] for _i, _b in enumerate(_key))
     except Exception:
         pass
+    return _key
+def _nx_key_reconstruct():
+    """Recombine XOR shares + apply the build-id salt. Wipes intermediates."""
+    _s0 = bytearray(base64.b64decode(_BLOB_S0))
+    _s1 = bytearray(base64.b64decode(_BLOB_S1))
+    _raw = bytearray(_a ^ _b for _a, _b in zip(_s0, _s1))
+    import hashlib as _nx_hk
+    _mask = _nx_hk.sha256(_NX_BUILD_ID.encode()).digest()
+    _key = bytes(_b ^ _mask[_i % len(_mask)] for _i, _b in enumerate(_raw))
+    _key = _nx_customer_mask(_key)
     _nx_wipe(_s0)
     _nx_wipe(_s1)
     _nx_wipe(_raw)
@@ -1958,42 +2155,58 @@ def _exec_fallback():
         # copy, so we never hold the plaintext as bytes here.)
         encrypted = bytearray()
         compressed = bytearray()
+        raw = None
         if _NX_SECTION_PACK:
-            # Section split: the payload arrives as independently sealed
-            # sections and is joined here, so the whole encrypted payload
-            # is never resident in a single buffer.  A tampered, truncated
-            # or mis-keyed pack fails closed (the join returns None).
-            _joined = _nx_section_join(_NX_SECTION_PACK, _NX_EFF_KEY)
-            if not _joined:
-                # Fail closed through the kill ladder (silent, exit 137),
-                # like every other tamper path in the loader.
-                try:
-                    _nx_kill("section-join-failed")
-                except Exception:
-                    pass
-                raise ValueError("section join failed")
-            compressed = bytearray(_joined)
+            # Section split, MOVING decryption: each section is decrypted and
+            # pushed straight through an incremental decompressor, then
+            # zeroed.  Neither the whole ciphertext nor the whole compressed
+            # stream is ever resident, so a memory dump at any instant holds
+            # one section, not the payload.  A tampered, truncated or
+            # mis-keyed pack fails closed (the walker returns None).
+            _stream = globals().get("_nx_section_stream")
+            if _stream is not None:
+                raw = _stream(_NX_SECTION_PACK, _NX_EFF_KEY)
+                if raw is None:
+                    try:
+                        _nx_kill("section-stream-failed")
+                    except Exception:
+                        pass
+                    raise ValueError("section stream failed")
+            else:
+                # Fallback for a build that emitted only the join helper.
+                _joined = _nx_section_join(_NX_SECTION_PACK, _NX_EFF_KEY)
+                if not _joined:
+                    try:
+                        _nx_kill("section-join-failed")
+                    except Exception:
+                        pass
+                    raise ValueError("section join failed")
+                compressed = bytearray(_joined)
         else:
             encrypted = bytearray(base64.b85decode(FALLBACK_BLOB))
             compressed = bytearray(_xor_decrypt(bytes(encrypted), _NX_EFF_KEY))
         # Batch-2 compress contest: backend-ID envelope (0x00=zlib,
         # 0x01=bz2, 0x02=lzma, 0x03=zstd) with backward compat for legacy
         # prefix-less zlib blobs. stdlib-only on the loader path.
-        _cc_first = compressed[0] if compressed else -1
-        if _cc_first == 0x00:
-            raw = bytearray(zlib.decompress(bytes(compressed[1:])))
-        elif _cc_first == 0x01:
-            raw = bytearray(bz2.decompress(bytes(compressed[1:])))
-        elif _cc_first == 0x02:
-            raw = bytearray(lzma.decompress(bytes(compressed[1:])))
-        elif _cc_first == 0x03:
-            try:
-                import pyzstd as _cc_zstd  # type: ignore
-                raw = bytearray(_cc_zstd.decompress(bytes(compressed[1:])))
-            except Exception:
+        # Skipped entirely when the moving-decryption walker already produced
+        # `raw`: it decompresses as it decrypts, so there is no `compressed`
+        # buffer to decompress here.
+        if raw is None:
+            _cc_first = compressed[0] if compressed else -1
+            if _cc_first == 0x00:
+                raw = bytearray(zlib.decompress(bytes(compressed[1:])))
+            elif _cc_first == 0x01:
+                raw = bytearray(bz2.decompress(bytes(compressed[1:])))
+            elif _cc_first == 0x02:
+                raw = bytearray(lzma.decompress(bytes(compressed[1:])))
+            elif _cc_first == 0x03:
+                try:
+                    import pyzstd as _cc_zstd  # type: ignore  # noqa: F401
+                    raw = bytearray(_cc_zstd.decompress(bytes(compressed[1:])))
+                except Exception:
+                    raw = bytearray(zlib.decompress(bytes(compressed)))
+            else:
                 raw = bytearray(zlib.decompress(bytes(compressed)))
-        else:
-            raw = bytearray(zlib.decompress(bytes(compressed)))
         # Phase-4 wiring: when the fallback was HWID-locked at build time,
         # raw is a JSON lock pack (utf-8); unwrap it to the marshal payload
         # via the inline PBKDF2 unlock (stdlib only). Unlocked builds skip
@@ -2197,6 +2410,8 @@ if __name__ == "__main__":
         try:
             from obfuscator.section_split import (
                 emit_loader_snippet as _ss_emit,
+                emit_moving_snippet as _ss_moving,
+                emit_stream_snippet as _ss_stream,
                 pack_json as _ss_pack,
             )
             _ss_json, _ss_key = _ss_pack(bytes(_plain),
@@ -2205,20 +2420,53 @@ if __name__ == "__main__":
             assert _ss_key == _eff_key, "section key must be the loader key"
             _section_pack_val = base64.b85encode(_ss_json).decode('ascii')
             _section_snippet = _ss_emit()
+            # Moving decryption, ON BY DEFAULT: the per-section walker is
+            # always emitted alongside the whole-payload join.  It decrypts
+            # one section at a time, hands it to the sink, and zeros the
+            # buffer before the next section is touched, so the process never
+            # holds the whole plaintext at once and a single memory capture
+            # yields one section instead of the payload.
+            #
+            # Emitted ADDITIVELY: the existing join is untouched, so no
+            # current behaviour changes.  There is no opt-in flag -- this is
+            # a security improvement that ships in every sectioned build.
+            _section_snippet += "\n" + _ss_moving()
+            # The STREAMING decryptor is the one the loader actually calls:
+            # it decrypts each section and pushes it straight through an
+            # incremental decompressor, so neither the whole ciphertext nor
+            # the whole compressed stream is ever resident.  This is what
+            # makes "moving decryption" real rather than a helper nothing
+            # calls.
+            _section_snippet += "\n" + _ss_stream()
             # Hostile-host handling at the point of use, with no flag to
             # propagate: the detection runs here, in the loader's module,
             # and rewrites the join helper so the key it is handed is
             # poisoned.  A flag written into globals() never reached this
             # path (rounds 8-18), so there is no flag.
+            #
+            # Polarity: HARDEN() returns True when every anti-debug check
+            # PASSED and exits the process when one fails, so the guard is
+            # `not HARDEN()`.  It read `if HARDEN():` and therefore poisoned
+            # the key on every CLEAN host, which made the join fail closed
+            # (exit 137) on exactly the machines it was meant to run on --
+            # the section split could never decrypt anywhere.
             try:
                 _hard_fn = VARS["FUNC_HARD"]
                 from obfuscator.section_split import JOIN_FUNC as _ss_name
+                # Both decrypt paths get the same hostile-host treatment:
+                # the streaming helper is the one the loader normally calls,
+                # so poisoning only the join would leave the real path
+                # unhardened (and the wrapper would look like it covered
+                # everything when it did not).
                 _section_snippet += (
                     "\ntry:\n"
-                    "    if %s():\n"
+                    "    if not %s():\n"
                     "        _nx_join_real = %s\n"
                     "        def %s(_p, _k):\n"
                     "            return _nx_join_real(_p, bytes([_b ^ 0x5A for _b in _k]))\n"
+                    "        _nx_stream_real = _nx_section_stream\n"
+                    "        def _nx_section_stream(_p, _k):\n"
+                    "            return _nx_stream_real(_p, bytes([_b ^ 0x5A for _b in _k]))\n"
                     "except Exception:\n"
                     "    pass\n"
                 ) % (_hard_fn, "JOIN_FUNC_PLACEHOLDER", "JOIN_FUNC_PLACEHOLDER")
@@ -2773,7 +3021,16 @@ def build_project(args):
     if not os.path.exists(source): 
         UI.fatal(f"Source file not found: {source}")
         return
-    if getattr(args, 'native', False) or getattr(args, 'native_only', False):
+    # The hybrid loader (and therefore the section split + moving decryption)
+    # used to be reachable ONLY on the native path, which is cloud-gated --
+    # so no local build ever armed `_NX_SECTION_PACK` and the moving
+    # decryptor could never run.  A local build that explicitly asks for
+    # sections takes this path too: it has a real fallback payload (the
+    # obfuscated source), which is exactly what the split needs.
+    _wants_sections = bool(getattr(args, 'section_split', False)) and \
+        not getattr(args, 'native_only', False)
+    if (getattr(args, 'native', False) or getattr(args, 'native_only', False)
+            or _wants_sections):
         UI.section("PHASE 2: COMPILATION & OBFUSCATION")
         polymorph_cpp_stub()
         local_py_ver = f"{sys.version_info.major}.{sys.version_info.minor}"
@@ -2789,15 +3046,17 @@ def build_project(args):
             blobs = {'windows': '', 'linux': '', 'darwin': '', 'android': ''}
             current_os = platform.system().lower()
             if blob_data:
-                end_blob = fast_xor_bytes(blob_data, blob_key)
-                b64_blob = base64.b64encode(end_blob).decode('ascii')
+                # Stored UNPACKED.  The single packing pass below XORs every
+                # blob against the key the loader will actually hold; doing it
+                # here as well would double-XOR and the blob would not dlopen.
+                b64_blob = base64.b64encode(blob_data).decode('ascii')
                 if "linux" in current_os: blobs["linux"] = b64_blob
                 elif "windows" in current_os: blobs["windows"] = b64_blob
                 elif "darwin" in current_os: blobs["darwin"] = b64_blob
                 t.success(f"{blob_name} (Base64)")
             else:
                 t.update(status="WARN", value="Skipped/Failed (Using bytecode)")
-                UI._console.write("\n") 
+                _nixon_utils._console.write("\n") 
         with UI.Task("Hybrid Loader", "Compiling Universal Fallback...") as t:
             # NOTE: 'ast_options' is assigned later in this function, so it
             # is never in locals() here — the literal below is the live
@@ -3129,9 +3388,40 @@ def _VERIFY_INTEGRITY():
         'blocked_countries': [c.strip() for c in getattr(args, 'block_countries', '').split(',') if c.strip()] if getattr(args, 'block_countries', None) else [],
         'allowed_regions': [r.strip() for r in getattr(args, 'allow_regions', '').split(',') if r.strip()] if getattr(args, 'allow_regions', None) else [],
         'blocked_regions': [r.strip() for r in getattr(args, 'block_regions', '').split(',') if r.strip()] if getattr(args, 'block_regions', None) else [],
-        'runtime_check_code': f"if '_RUNTIME_KEY' not in globals() or _RUNTIME_KEY != bytes.fromhex('{runtime_key}'): import sys; sys.exit(0)",
+        # globals().get() rather than a bare _RUNTIME_KEY reference: the name
+        # only exists after the network key fetch, and Cython rejects a module
+        # global that is read but never assigned.  A missing key still yields
+        # None != bytes, so the gate behaves exactly as before.
+        'runtime_check_code': f"if globals().get('_RUNTIME_KEY') != bytes.fromhex('{runtime_key}'): import sys; sys.exit(0)",
         'force_native': repr(VARS.get("FORCE_NATIVE_EXEC", False))
     }
+    # The three gates whose class sources are conditional must be emitted
+    # under the same condition.  Emitted unconditionally they referenced a
+    # class that was not in the build and died in their bare except, so the
+    # blockchain-licence, key-shard and geofence checks never ran.
+    _gate_values = {
+        'blockchain_contract': ast_options['blockchain_contract'],
+        'blockchain_rpc': ast_options['blockchain_rpc'],
+        'key_shard_urls': repr(ast_options['key_shard_urls']),
+        'allowed_countries': repr(ast_options['allowed_countries']),
+        'allowed_regions': repr(ast_options['allowed_regions']),
+        'blocked_countries': repr(ast_options['blocked_countries']),
+        'blocked_regions': repr(ast_options['blocked_regions']),
+    }
+    def _render_gate(template, enabled):
+        if not enabled:
+            return ""
+        text = apply_vars(template)
+        for _key, _value in _gate_values.items():
+            text = text.replace('{%s}' % _key, str(_value))
+        return text.replace('{{', '{').replace('}}', '}')
+    ast_options['blockchain_gate_code'] = _render_gate(
+        BLOCKCHAIN_GATE_CODE, bool(ast_options['blockchain_rpc']))
+    ast_options['key_shard_gate_code'] = _render_gate(
+        KEY_SHARD_GATE_CODE, bool(ast_options['key_shard_urls']))
+    ast_options['geofence_gate_code'] = _render_gate(
+        GEOFENCE_GATE_CODE,
+        bool(ast_options['allowed_countries'] or ast_options['blocked_countries']))
     # The protection ladder applies to the loader build too, so both
     # CLIs resolve a level the same way.  Without --opt-level the
     # transform set above is unchanged (the loader build has always
@@ -3170,6 +3460,24 @@ def _VERIFY_INTEGRITY():
     # (rounds 231-234). Save here, restore after the block.
     _prev_force_native = VARS.get("FORCE_NATIVE_EXEC")
     _had_force_native = "FORCE_NATIVE_EXEC" in VARS
+    # The restore below is correct for VARS (it is process-global and a later
+    # build must not inherit this one's decision), but the emitted template
+    # reads the flag AFTER the restore -- so every native build shipped
+    # FORCE_NATIVE_MODE = False and ran the Python path with the native blob
+    # sitting unused in the archive.  Carry the resolved decision in a local
+    # that the template format dict reads instead.
+    _force_native_resolved = False
+    # A LOCALLY built native blob counts too.  `args.native` was only ever
+    # set by the cloud path (`--package cloud/nk` implies native), so a
+    # local `--package pytoc` build left it False and the artefact shipped
+    # FORCE_NATIVE_MODE = False with a perfectly good .so sitting unused in
+    # the archive -- the native path was reachable only via the cloud farm.
+    # If the build step produced verified blobs, arm native regardless of
+    # which route produced them.
+    _local_native = bool(getattr(args, '_real_native_blobs', None))
+    if _local_native and not args.native:
+        args.native = True
+        print(" [+] Local native blobs present: arming FORCE_NATIVE_MODE")
     if args.native or getattr(args, 'native_only', False):
         if hasattr(args, '_real_native_blobs') and args._real_native_blobs:
             native_blobs = args._real_native_blobs
@@ -3181,6 +3489,7 @@ def _VERIFY_INTEGRITY():
         if native_blob:
             UI.dot_item("Compilation", "Native compilation successful", "OK")
             VARS["FORCE_NATIVE_EXEC"] = True
+            _force_native_resolved = True
         else:
             UI.fail("Native compilation failed, using Python mode")
             native_blob = ""
@@ -3195,6 +3504,9 @@ def _VERIFY_INTEGRITY():
         VARS.pop("FORCE_NATIVE_EXEC", None)
     UI._out(f" {UI.BLUE}├──{UI.RESET} {UI.BOLD}Output Generation{UI.RESET} :")
     variants = [("Debug", True), ("Silent", False)]
+    # Set once the native blobs have been XOR'd against the loader's key; the
+    # loop below runs per variant and must not pack them twice.
+    _native_blobs_packed = False
     for i, (suffix, is_debug) in enumerate(variants):
         prefix = "│   └─" if i == len(variants) - 1 else "│   ├─"
         out_name = os.path.splitext(base_out_path)[0] + f"_{suffix}.py"
@@ -3243,7 +3555,17 @@ def _VERIFY_INTEGRITY():
                     cur_opts = ast_options.copy()
                     cur_opts['symbol_rename'] = True
                     cur_opts['strip_meta'] = False
-                    cur_opts['log_file'] = out_name
+                    # The rename log is the obfuscated->original symbol
+                    # table. Writing it beside the payload on every build
+                    # hands every customer (and every analyst who copies
+                    # the source directory) the full mapping the renaming
+                    # pass exists to hide — the 2026-11-14 bench agent
+                    # recovered all payload symbols from it without
+                    # touching the crypto. Emit it only when the operator
+                    # asked for debug material.
+                    cur_opts['log_file'] = (
+                        out_name if getattr(args, "debug_dump_raw", False)
+                        else None)
                     mutated_source, secure_map = apply_ast_mutation(decoded_source, cur_opts, strict=True)
                     # Opt-in extra passes (--transforms) run on the payload
                     # BEFORE the native-blob placeholders are injected, so a
@@ -3439,6 +3761,84 @@ def _VERIFY_INTEGRITY():
                         for _i, _b in enumerate(_key_raw)).hex()
                 except Exception as _mix_exc:
                     print("  [!] Core key binding skipped: %s" % (_mix_exc,))
+            # Pack the native blob against the key the LOADER will hold.
+            # Mirror the loader's own three steps rather than re-deriving
+            # them, so the two cannot drift:
+            #   BLOB_KEY = bytes.fromhex(<_key_raw_hex>)   # emitted literal
+            #   BLOB_KEY = _nx_core_mix(BLOB_KEY)          # core integrity
+            #   BLOB_KEY = _nx_bind_blob_key(BLOB_KEY)     # salt/licence mask
+            # `get_native_blob_for_build` returns raw base64 and knows none of
+            # this, so shipping it unpacked decoded to garbage ("invalid ELF
+            # header").  Latent until now because FORCE_NATIVE_MODE was always
+            # False, so nothing ever tried to load a blob.
+            # The Output Generation loop below runs once per variant (Debug,
+            # Silent) and this block sits inside it, so without the guard the
+            # second variant would XOR an already-packed blob and neither
+            # would dlopen.
+            if native_blob and any(native_blobs.values()) and not _native_blobs_packed:
+                _rt_blob_key = bytes.fromhex(_key_raw_hex)
+                if _core_so and os.path.exists(_core_so) and not ast_options.get('portable'):
+                    try:
+                        with open(_core_so, "rb") as _rt_fh:
+                            _rt_mix = hashlib.sha256(_rt_fh.read()).digest()
+                        _rt_blob_key = bytes(
+                            _b ^ _rt_mix[_i % len(_rt_mix)]
+                            for _i, _b in enumerate(_rt_blob_key))
+                    except Exception as _rt_exc:
+                        print("  [!] Native blob key: core mix skipped: %s" % (_rt_exc,))
+                if _customer_salt or _licence_bound:
+                    _rt_mask = hashlib.sha256(
+                        b"nx-customer:" + _customer_salt.encode()).digest()
+                    _rt_blob_key = bytes(
+                        _b ^ _rt_mask[_i % len(_rt_mask)]
+                        for _i, _b in enumerate(_rt_blob_key))
+                # Classify BEFORE packing: the check must see the plaintext
+                # object file, not the XOR'd form (the XOR is the packing,
+                # not the payload).
+                _loadable_plats, _rejected_plats = native_blob_loadability(
+                    native_blobs)
+                _packed = {}
+                for _plat, _b64 in native_blobs.items():
+                    if not _b64:
+                        _packed[_plat] = ""
+                        continue
+                    try:
+                        _raw_blob = base64.b64decode(_b64)
+                        _packed[_plat] = base64.b64encode(
+                            fast_xor_bytes(_raw_blob, _rt_blob_key)).decode("ascii")
+                    except Exception as _pk_exc:
+                        print("  [!] Native blob pack failed for %s: %s" % (_plat, _pk_exc))
+                        _packed[_plat] = _b64
+                native_blobs = _packed
+                _native_blobs_packed = True
+                if _loadable_plats:
+                    UI.dot_item(
+                        "Native Blobs",
+                        "loadable: " + ", ".join(
+                            "%s (%s)" % (p, k)
+                            for p, k in sorted(_loadable_plats.items())),
+                        "OK")
+                if not _loadable_plats:
+                    # No platform's blob is a loadable object file, so no
+                    # dlopen can succeed.  Arming FORCE_NATIVE_MODE here
+                    # would be a false claim and a doomed attempt at run
+                    # time, so the flag is dropped.
+                    _detail = "; ".join(
+                        "%s: %s" % (p, r)
+                        for p, r in sorted(_rejected_plats.items()))
+                    _force_native_resolved = False
+                    if args.native or getattr(args, 'native_only', False):
+                        # The caller explicitly asked for native.  Silently
+                        # shipping a Python artefact would misrepresent what
+                        # was built, so refuse instead of pretending.
+                        UI.fail(
+                            "Native requested but no platform blob is a "
+                            "loadable object file (%s). Refusing to label "
+                            "this artefact native; drop --package native to "
+                            "build in Python mode deliberately." % (_detail,))
+                        raise SystemExit(2)
+                    UI.warn("Native blob is not a loadable object file (%s); "
+                            "staying in Python mode" % (_detail,))
             build_context = {
                 'NTRU_PUB_KEY': getattr(args, '_ntru_pub', '[]'),
                 'SESSION_TOKEN': session_token_bytes.hex(),
@@ -3452,6 +3852,17 @@ def _VERIFY_INTEGRITY():
                 'VAR_CHECKSUM': VARS["CHECKSUM"],
                 'dummy_checksum': dummy_checksum,
                 'VAR_HMAC_SIG': VARS["HMAC_SIG"],
+                'VAR_KEYED_ANCHOR': VARS["KEYED_ANCHOR"],
+                # The 64-zero placeholder must stay: the build's substitution
+                # regex looks for a third `= "0{64}"` slot on the HMAC anchor
+                # line and refuses the build if it is gone. An all-zero
+                # anchor therefore means "not licence-bound" — the RUNTIME
+                # treats that value as absent (see the keyed-anchor check in
+                # sources.py). A truthy-but-unsubstituted placeholder used to
+                # make every unlicensed build die with "keyed anchor present
+                # but no licence key_material" (found by the post-build
+                # verification suite on a plain 2-layer build).
+                'dummy_keyed': dummy_checksum,
                 'nanomite_source': NANOMITE_SOURCE,
                 'FUNC_NANOMITE_MAIN': var_nano_main,
                 'VAR_NANO_MARKER': var_nano_marker,
@@ -3670,12 +4081,17 @@ def _VERIFY_INTEGRITY():
                 'FUNC_RDTSC': VARS["FUNC_RDTSC"],
                 'doh_source': DOH_SOURCE,
                 'FUNC_DOH': VARS["FUNC_DOH"],
-                'tls_ca_source': TLS_CTX_SOURCE,
+                # TLS_CTX_SOURCE carries its own {tls_ca_b64} placeholder.
+                # apply_vars() only substitutes VARS keys, so leaving it raw
+                # emitted a literal `_nx_ca = {tls_ca_b64}` -- a set display
+                # that raised NameError the moment the key fetch built its
+                # TLS context, and that Cython rejected outright.
+                'tls_ca_source': TLS_CTX_SOURCE.replace('{tls_ca_b64}', tls_ca_b64),
                 'tls_ca_b64': tls_ca_b64,
                 'api_hash_source': API_HASH_SOURCE,
                 'FUNC_API_HASH': VARS["FUNC_API_HASH"],
                 'stack_str_source': STACK_STR_SOURCE,
-                'force_native': str(VARS.get("FORCE_NATIVE_EXEC", False)),
+                'force_native': str(_force_native_resolved),
                 'fake_crypto_source': FAKE_CRYPTO_LAYER_SOURCE,
                 'merkle_tree_source': MERKLE_TREE_SOURCE,
                 'reflective_loader_source': WINDOWS_REFLECTIVE_LOADER_SOURCE,
@@ -3765,7 +4181,10 @@ def _VERIFY_INTEGRITY():
                 'VAR_ORAM_CLS': VARS["ORAM_CLS"],
                 'VAR_SYNTH_CLS': VARS["SYNTH_CLS"],
                 'VAR_FAULT_CLS': VARS["FAULT_CLS"],
-                'runtime_check_code': ast_options.get('runtime_check_code', 'pass')
+                'runtime_check_code': ast_options.get('runtime_check_code', 'pass'),
+                'blockchain_gate_code': ast_options.get('blockchain_gate_code', ''),
+                'key_shard_gate_code': ast_options.get('key_shard_gate_code', ''),
+                'geofence_gate_code': ast_options.get('geofence_gate_code', ''),
             }
             # NOTE: do NOT write the outer payload key into
             # VARS["INNER_KEY_HEX"] here — build_context already holds
@@ -3980,11 +4399,21 @@ def _VERIFY_INTEGRITY():
                 final_script = final_script.replace(_q + "__NX_STR_KEY_B__" + _q, repr(enc_key_b), 1)
             normalized_script = final_script.replace('\r\n', '\n')
             anchor_sig = b"__SIG_ANCHOR__"; anchor_hmac = b"__HMAC_ANCHOR__"
+            # The licence-token pin is a build INPUT, not payload code.  It is
+            # excluded from the ISSUER DIGEST only -- not from the merkle/hmac
+            # content, which the runtime recomputes from the same file and
+            # must match line-for-line.  Without this exclusion the signed
+            # digest was circular: adding it to the token changed the pin,
+            # which changed the artefact, which changed the digest, so the
+            # two-pass flow could never converge.
+            _tok_pin = (str(locals().get("_licence_token_hash") or "")
+                        .encode("utf-8"))
             script_bytes = normalized_script.encode('utf-8')
             lines_for_hash = []
             for line in script_bytes.splitlines(keepends=True):
-                if anchor_sig not in line and anchor_hmac not in line:
-                    lines_for_hash.append(line)
+                if anchor_sig in line or anchor_hmac in line:
+                    continue
+                lines_for_hash.append(line)
             verification_content = b"".join(lines_for_hash)
             hmac_val = hmac.new(bytes.fromhex(hmac_secret), verification_content, hashlib.sha256).hexdigest()
             mc_size = 1024
@@ -4013,6 +4442,32 @@ def _VERIFY_INTEGRITY():
             final_bytes, _n2 = _ck_pat.subn(b'= "' + hmac_val.encode('utf-8') + b'"', final_bytes, count=1)
             if _n2 == 0:
                 final_bytes = final_bytes.replace(dummy_checksum.encode('utf-8'), hmac_val.encode('utf-8'), 1)
+            # Keyed anchor (third slot, same line as the HMAC anchor so the
+            # runtime's value-based filter already excludes it).  The HMAC
+            # above is keyed with _HMAC_KEY_, which ships inside the artifact,
+            # so an attacker who edits the file can recompute it -- that is
+            # exactly how the position-2 bypass worked.  This anchor is keyed
+            # with the licence's key_material, which is NOT in the artifact:
+            # it arrives with the external token.  A patched artifact cannot
+            # re-stamp itself without the token.  Empty for unlicensed builds,
+            # where the runtime skips the check rather than failing it.
+            _keyed_anchor = ""
+            if _licence_bound:
+                _km_hex = locals().get("_lic_km") or ""
+                if _km_hex:
+                    _keyed_anchor = hmac.new(
+                        bytes.fromhex(_km_hex), verification_content,
+                        hashlib.sha256).hexdigest()
+            if _keyed_anchor:
+                final_bytes, _n3 = _ck_pat.subn(
+                    b'= "' + _keyed_anchor.encode('utf-8') + b'"',
+                    final_bytes, count=1)
+                if _n3 == 0:
+                    raise RuntimeError(
+                        "keyed anchor slot missing: the template no longer "
+                        "carries a third 64-zero placeholder on the HMAC "
+                        "anchor line, so the licence-keyed self-check would "
+                        "silently never run")
             # The runtime identifies the excluded lines by the VALUES
             # (not by a marker string), so the two filters must select
             # the same lines.  If they do not -- e.g. the checksum hex
@@ -4029,6 +4484,28 @@ def _VERIFY_INTEGRITY():
                     % (len(_rt_keep), len(lines_for_hash)))
             with open(out_name, 'wb') as f: 
                 f.write(final_bytes)
+            # Auto-issue support.  The digest covers ONLY the payload region
+            # (FALLBACK_BLOB / _NX_SECTION_PACK), which is independent of the
+            # licence.  Hashing the whole artefact was circular: the artefact
+            # embeds the token pin, the keyed anchor and the licence mask, so
+            # signing the digest into the token changed the artefact and
+            # therefore the digest -- the two-pass flow could never converge
+            # (measured across four attempts).  The payload region is what an
+            # attacker would patch, and it does not move when the token does.
+            try:
+                _digest_lines = [
+                    l for l in final_bytes.splitlines(keepends=True)
+                    if b"FALLBACK_BLOB = " in l or b"_NX_SECTION_PACK = " in l]
+                _artifact_digest = hashlib.sha256(
+                    b"".join(_digest_lines)).hexdigest()
+                print("    [+] Artefact digest (sign this into the licence):")
+                print("        %s" % (_artifact_digest,))
+                print("        python3 -m obfuscator.licensing issue \\")
+                print("            --key-hex \"$ISSUER_SEED\" --customer <name> \\")
+                print("            --artifact-digest %s \\" % (_artifact_digest,))
+                print("            --out <name>.licence")
+            except Exception:
+                pass
             if ast_options.get('stego'):
                 stego_out = out_name.replace('.py', '_stego.py')
                 stego_wrap_output(final_bytes.decode('utf-8', errors='ignore'), stego_out)
@@ -4603,7 +5080,12 @@ def main():
             auto_nk = False
             if args.auto:
                 modes = args.auto.split(',')
-                if 'cf' in modes: auto_cf = True
+                # --skip-cloud means "build this locally". The Cloudflare
+                # worker deployment is the cloud half of --package cloud, so
+                # it has to be skipped too: without this the documented local
+                # build of a cloud recipe exits 1 on a missing CF token.
+                if 'cf' in modes and not getattr(args, 'skip_cloud', False):
+                    auto_cf = True
                 if 'nk' in modes: auto_nk = True
                 if 'nk' in modes: args.compile = True                
             if auto_nk or args.auto: 
@@ -5010,6 +5492,49 @@ def main():
             UI._out(" └── Launchers         : Smart-Trust & Defender Whitelisting [READY]")
             UI._out("")
             UI._out(f" {UI.CYAN}ℹ Artifacts moved to: {dist_dir}{UI.RESET}")
+            # Clean-staging audit.  The 2026-11-14 benchmark lost the entire
+            # symbol table to a .renamelog left beside the payload, and ~850 MB
+            # of _stego/_Packed intermediates stayed in the source directory.
+            # The rename log is no longer written for normal builds; this
+            # audit removes the remaining intermediates and states the rule,
+            # so the leak class cannot come back silently.
+            try:
+                _src_dir = os.path.dirname(os.path.abspath(args.source))
+                # Remove only the files that LEAK the mapping or the plaintext
+                # source: the rename log (the full obfuscated->original symbol
+                # table) and the build report.  The _Nixon-Enc_*.py
+                # intermediates are deliberately NOT removed -- callers and
+                # tests locate the packed artefact beside the source, and
+                # deleting them turned a working build into "no packed
+                # artifact next to the source".  They are listed in the
+                # warning instead, so the operator knows not to ship them.
+                _leak_pat = re.compile(r"(\.renamelog$|_Nixon-Enc\.report\.json$)")
+                _removed = 0
+                for _name in os.listdir(_src_dir):
+                    if _leak_pat.search(_name):
+                        try:
+                            os.remove(os.path.join(_src_dir, _name))
+                            _removed += 1
+                        except OSError:
+                            pass
+                if _removed:
+                    UI._out(" %sℹ Clean staging: removed %d symbol-table "
+                            "sidecar(s) from the source directory%s"
+                            % (UI.CYAN, _removed, UI.RESET))
+                _intermediates = [n for n in os.listdir(_src_dir)
+                                  if "_Nixon-Enc_" in n]
+                if _intermediates:
+                    UI._out(" %sℹ %d build intermediate(s) remain beside the "
+                            "source (needed by callers). Ship only %s — the "
+                            "source directory is a different trust boundary.%s"
+                            % (UI.CYAN, len(_intermediates), dist_dir, UI.RESET))
+                else:
+                    UI._out(" %sℹ Ship only %s — the source directory is a "
+                            "different trust boundary (no renamelog, no "
+                            "plaintext payload copy).%s"
+                            % (UI.CYAN, dist_dir, UI.RESET))
+            except Exception:
+                pass
             if _verification_failed:
                 # The build's own gate said the profile variants do not match.
                 # Shipping that green would make the gate decorative: it printed

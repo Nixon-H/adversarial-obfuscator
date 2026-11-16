@@ -4,3 +4,7 @@ archive/artifacts/invariant_engine_report.json filter=lfs diff=lfs merge=lfs -te
 # rewrite their line endings: a checkout with CRLF changed every byte offset and
 # the self-check refused to run (found by the Windows CI leg, exit 137).
 tests/fixtures/portable/*.py -text
+/tests/fixtures/portable/constructs_source_Nixon-Enc_Debug_Packed_Stego.py filter=lfs diff=lfs merge=lfs -text
+/tests/fixtures/portable/constructs_source_Nixon-Enc_Debug_stego.py filter=lfs diff=lfs merge=lfs -text
+/tests/fixtures/portable/constructs_source_Nixon-Enc_Silent_Packed_Stego.py filter=lfs diff=lfs merge=lfs -text
+/tests/fixtures/portable/constructs_source_Nixon-Enc_Silent_stego.py filter=lfs diff=lfs merge=lfs -text

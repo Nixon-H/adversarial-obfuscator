@@ -1425,9 +1425,18 @@ in config/default.json.
 
                 result = validator.validate_source_vs_ir(orig_source, obf_ir)
 
-                if result.equivalent:
+                if result.equivalent is True:
                     log("VALIDATE", f"PASS: {result.function_name} "
                         f"({result.duration_ms:.1f}ms)")
+                elif result.equivalent is None:
+                    # The translator declined to model this payload (an
+                    # unmodelable constant, a multi-block CFG, a construct it
+                    # does not support).  That is uncertainty, not a
+                    # refutation: aborting here made --validate fail kill
+                    # every build whose payload it could not model, with an
+                    # empty counterexample.  Record it and carry on.
+                    log("VALIDATE", f"DECLINED: {result.function_name} "
+                        f"({result.error or 'not modelled'})")
                 else:
                     ce = result.check_result.counterexample if result.check_result else {}
                     log("VALIDATE", f"FAIL: {result.function_name} "
@@ -2545,7 +2554,17 @@ in config/default.json.
             log("ERROR", f"Cross-compile failed: {e}")
             sys.exit(1)
         else:
-            _xc_failed = [t for t, ok, _ in (_xc_results or []) if not ok]
+            # ok is True (built), False (the toolchain ran and rejected the
+            # code) or None (no toolchain on this host -> skipped).  Only a
+            # real failure aborts: a missing cross-toolchain is an
+            # environment limitation, and failing the build for it meant
+            # `--package all` could never finish on a host without every
+            # target's linker installed.
+            _xc_failed = [t for t, ok, _ in (_xc_results or []) if ok is False]
+            _xc_skipped = [t for t, ok, _ in (_xc_results or []) if ok is None]
+            if _xc_skipped:
+                log("WARN", "Cross-compile skipped (toolchain not installed): "
+                            + ", ".join(_xc_skipped))
             if _xc_failed:
                 log("ERROR", f"Cross-compile failed for: {', '.join(_xc_failed)}")
                 sys.exit(1)

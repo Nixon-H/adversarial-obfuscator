@@ -40,7 +40,9 @@
       "ollvm_passes": [
         "bcf",
         "fla",
-        "sub"
+        "sub",
+        "replay",
+        "speculative"
       ],
       "enable_integrity": true,
       "rop": {
@@ -51,6 +53,9 @@
     "encrypt": {
       "cipher": "aes-256-ctr",
       "block_size": 64,
+      "rodata": {
+        "enabled": true
+      },
       "entropy_flatten": {
         "enabled": true,
         "tolerance": 0.3,
