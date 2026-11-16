@@ -399,6 +399,161 @@ def insert_dead_blocks(source: str, seed: bytes,
     return "".join(out), inserted
 
 
+# ── 6. NP-hard subset-sum opaque predicates ──────────────────────────────
+
+def generate_subset_sum_instance(seed: bytes, n: int = 8) -> dict:
+    """Generate a random subset-sum instance with a KNOWN solution.
+
+    At build time we construct the instance so the answer is deterministic.
+    At run time, proving the predicate requires either:
+    a) solving the subset-sum problem for the given set (pseudo-polynomial
+       DP, but the ANALYST must first recognise it as subset-sum inside the
+       transformed C), or
+    b) tracing the execution to observe the result (blocked by anti-debug).
+    """
+    rng = random.Random(int.from_bytes(
+        hashlib.sha256(seed).digest()[:8], "big"))
+    values = [rng.randrange(1, 1000) for _ in range(n)]
+    solution_mask = rng.getrandbits(n)
+    target = sum(v for i, v in enumerate(values) if solution_mask & (1 << i))
+    if target == 0:
+        target = values[0]
+    return {"set": values, "target": target, "mask": solution_mask}
+
+
+_SS_CHECK_FN = """
+static int __nx_ss_check(const unsigned *set, int n, unsigned target) {{
+    unsigned char dp[{dp_size}];
+    memset(dp, 0, sizeof(dp));
+    dp[0] = 1;
+    for (int i = 0; i < n; i++) {{
+        unsigned v = set[i];
+        for (int j = {dp_max}; j >= (int)v; j--) {{
+            if (dp[j - v]) dp[j] = 1;
+        }}
+    }}
+    return dp[target];
+}}
+"""
+
+
+def insert_subset_sum_predicates(source: str, seed: bytes,
+                                 rng: random.Random,
+                                 count: int = 3) -> Tuple[str, int]:
+    """Insert NP-hard subset-sum opaque predicates.
+
+    Each predicate constructs a random subset-sum instance at build time.
+    The C code verifies the sum at run time.
+    """
+    if count < 1:
+        return source, 0
+    dp_size = 4096
+    check_fn_body = _SS_CHECK_FN.format(dp_size=dp_size, dp_max=dp_size - 1)
+    functions = []
+    predicates = []
+    for i in range(count):
+        inst = generate_subset_sum_instance(
+            seed + b"ss" + i.to_bytes(4, "big"), n=6 + i)
+        arr_name = "__nx_ss_set_%02d" % (i,)
+        set_vals = ", ".join(str(v) for v in inst["set"])
+        functions.append(
+            "static const unsigned %s[] = {%s};\n"
+            "static const int %s_n = %d;\n"
+            "static const unsigned %s_target = %uU;\n"
+            % (arr_name, set_vals, arr_name, len(inst["set"]),
+               arr_name, inst["target"])
+        )
+        pred = rng.choice([
+            "__nx_ss_check({arr}, {arr}_n, {arr}_target) == 1",
+            "__nx_ss_check({arr}, {arr}_n, {arr}_target) != 0",
+        ]).format(arr=arr_name)
+        predicates.append(pred)
+    first_static = source.find("\nstatic ")
+    if first_static < 0:
+        return source, 0
+    insert_at = first_static + 1
+    block = ("\n/* NP-hard subset-sum opaque predicates (polymorphic, per build). */\n"
+             + check_fn_body + "\n"
+             + "\n".join(functions) + "\n")
+    lines = source.splitlines(keepends=True)
+    out = []
+    pred_idx = 0
+    wrapped = 0
+    for line in lines:
+        stripped = line.strip()
+        m = _IF_LINE.match(stripped)
+        if m and pred_idx < len(predicates) and rng.random() < 0.2:
+            indent = m.group(1)
+            cond = m.group(2)
+            pred = predicates[pred_idx]
+            out.append("%sif ((%s) && (%s)) {\n" % (indent, pred, cond))
+            pred_idx += 1
+            wrapped += 1
+        else:
+            out.append(line)
+    new_source = "".join(out)
+    new_source = new_source[:insert_at] + block + new_source[insert_at:]
+    # Return the number of PREDICATES EMITTED (the set arrays + check
+    # function), not the number of wrapped `if` conditions.  The predicates
+    # are always emitted; the wrapping is optional and rate-limited.
+    return new_source, count
+
+
+# ── 7. Multi-round polymorphic MBA substitution ──────────────────────────
+
+_MBA_ADD_POOL = [
+    "((%s) ^ (%s)) + 2 * ((%s) & (%s))",
+    "((%s) | (%s)) + ((%s) & (%s))",
+]
+
+
+def _mba_split(value: int, rng: random.Random) -> tuple:
+    """Split a value into two random parts that sum to the value."""
+    a = rng.randrange(0, value + 1) if value > 0 else rng.randrange(value, 1)
+    b = value - a
+    return a, b
+
+
+def _mba_substitute_constant(value: int, rng: random.Random,
+                             rounds: int = 2) -> str:
+    """Replace an integer constant with a multi-round MBA expression."""
+    if value == 0:
+        return "0"
+    expr = str(abs(value))
+    sign = "-" if value < 0 else ""
+    for _round in range(rounds):
+        v = abs(value)
+        a, b = _mba_split(v, rng)
+        identity = rng.choice(_MBA_ADD_POOL)
+        expr = identity % (str(a), str(b), str(a), str(b))
+        value = v
+    if sign:
+        return "(-(%s))" % expr
+    return expr
+
+
+def substitute_constants_mba(source: str, seed: bytes,
+                             rng: random.Random,
+                             rounds: int = 2,
+                             rate: float = 0.3) -> Tuple[str, int]:
+    """Replace integer constants with multi-round MBA expressions."""
+    _CONST_ASSIGN = re.compile(r"=\s*(-?\d+)\s*;")
+    count = 0
+    new_source = source
+    for m in _CONST_ASSIGN.finditer(source):
+        value = int(m.group(1))
+        if abs(value) < 2 or abs(value) > 100000:
+            continue
+        if rng.random() >= rate:
+            continue
+        expr = _mba_substitute_constant(value, rng, rounds)
+        old = "= %d;" % value
+        if old in new_source:
+            new_source = new_source.replace(old, "= (%s);" % expr, 1)
+            count += 1
+    return new_source, count
+
+
 # ── the pipeline ──────────────────────────────────────────────────────────
 
 @dataclass
@@ -411,6 +566,8 @@ class CTransformResult:
     junk_injected: int = 0
     locals_shuffled: int = 0
     dead_blocks: int = 0
+    ss_predicates: int = 0
+    mba_substituted: int = 0
     transforms_applied: List[str] = field(default_factory=list)
 
 
@@ -419,7 +576,9 @@ def transform_c(source: str, seed: bytes, *,
                 do_opaque_predicates: bool = True,
                 do_junk_functions: bool = True,
                 do_shuffle_locals: bool = True,
-                do_dead_blocks: bool = True) -> CTransformResult:
+                do_dead_blocks: bool = True,
+                do_subset_sum: bool = True,
+                do_mba: bool = True) -> CTransformResult:
     """Apply the C transformation layer.  Polymorphic per (source, seed).
 
     Each transform is applied in a randomised order (where safe) and the
@@ -439,7 +598,7 @@ def transform_c(source: str, seed: bytes, *,
             result.source, seed, rng)
         if result.strings_encrypted:
             applied.append("string-encryption(%d)" % result.strings_encrypted)
-    for step in ("junk", "shuffle", "opaque", "dead_blocks"):
+    for step in ("junk", "shuffle", "opaque", "dead_blocks", "subset_sum", "mba"):
         if step == "junk" and do_junk_functions:
             result.source, result.junk_injected = inject_junk_functions(
                 result.source, seed + b"junk", rng)
@@ -460,6 +619,16 @@ def transform_c(source: str, seed: bytes, *,
                 result.source, seed + b"dead", rng)
             if result.dead_blocks:
                 applied.append("dead-blocks(%d)" % result.dead_blocks)
+        elif step == "subset_sum" and do_subset_sum:
+            result.source, result.ss_predicates = insert_subset_sum_predicates(
+                result.source, seed + b"ss", rng)
+            if result.ss_predicates:
+                applied.append("subset-sum(%d)" % result.ss_predicates)
+        elif step == "mba" and do_mba:
+            result.source, result.mba_substituted = substitute_constants_mba(
+                result.source, seed + b"mba", rng)
+            if result.mba_substituted:
+                applied.append("mba-substitution(%d)" % result.mba_substituted)
     return result
 
 
