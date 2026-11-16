@@ -274,8 +274,7 @@ def _alert_harness(chain_enabled=True, monkeypatch=None):
     helpers = _licence_runtime_helpers("ab" * 64, chain_enabled=chain_enabled,
                                        env_only=True)
     alert_name = VARS["FUNC_TRIGGER_ALERT"]
-    ns = {"__name__": "t", "_nixon_ハッシュ解": hashlib_mod,
-          "_nixon_ハッシュ해시": hashlib_mod,
+    ns = {"__name__": "t", "_nixon_ハッシュ해시": hashlib_mod,
           "_nixon_ジェイソン제이슨": json_mod,
           "_nixon_ウラルユーアールエル유알엘": urlreq,
           "_nixon_時間시간": time_mod,
@@ -308,17 +307,20 @@ def test_licence_gate_reports_missing_token_to_webhook(tmp_path, monkeypatch):
     assert "licence-missing" in fired
 
 
-def test_alert_is_best_effort_without_the_relay():
+def test_alert_is_best_effort_without_the_relay(monkeypatch):
     """At bootstrap the relay is not defined yet: the gate still fails
     closed, silently skipping the alert."""
     from obfuscator.core.pipeline import _licence_runtime_helpers
     import hashlib as hashlib_mod
     helpers = _licence_runtime_helpers("ab" * 64, chain_enabled=True,
                                        env_only=True)
-    ns = {"__name__": "t", "_nixon_ハッシュ解": hashlib_mod,
-          "_nixon_ジェイソン제이슨": json}
+    ns = {"__name__": "t", "_nixon_ハッシュ해시": hashlib_mod,
+          "_nixon_ジェイソン제イ슨": json}
     exec(compile(helpers, "<h>", "exec"), ns)
-    os.environ["NIXON_LICENCE"] = "/nonexistent/licence"
+    # monkeypatch, not bare os.environ — a leaked NIXON_LICENCE made every
+    # later test in the process (e.g. the licence-binding harness check)
+    # see a token it must not see.
+    monkeypatch.setenv("NIXON_LICENCE", "/nonexistent/licence")
     with pytest.raises(SystemExit):
         ns["_nx_licence_payload"]()
 
@@ -553,3 +555,308 @@ def test_optimizer_prerequisite_check_is_not_inverted():
                          "expected_overhead": 1.0,
                          "expected_size_multiplier": 1.0})()
     assert opt._validate(bad) is False  # prereq missing -> invalid
+
+
+# ── 2026-11-14 REA bench fixes: the interpreter-integrity gate missed the
+# runtime-capture vector (sitecustomize shim wrapping zipfile.ZipFile while
+# builtins stayed clean). The gate now checks the loader's own stdlib
+# dependencies and external startup hooks. ──────────────────────────────
+
+def _integrity_reason(monkeypatch, *, zipfile_mod=None, sitecustomize=None,
+                      usercustomize=None, builtins_overrides=None):
+    """Exec INTEGRITY_CHECK_SOURCE with the WARN path (no exit) and return
+    the reason the gate produced (None = clean)."""
+    import builtins as _b
+    import os as _os
+    import sys as _sys
+    from obfuscator.core.sources import INTEGRITY_CHECK_SOURCE
+
+    src = INTEGRITY_CHECK_SOURCE.replace("{VAR_STRICT_ON}", "False")
+    if builtins_overrides:
+        for k, v in builtins_overrides.items():
+            monkeypatch.setattr(_b, k, v, raising=False)
+
+    # The loader template mixes alias spellings (kanji- and hangul-tailed
+    # variants of the same module alias); bind every _nixon_ identifier the
+    # template references to the right module by its shape.
+    import re as _re
+    ns = {"__name__": "t"}
+    for tok in set(_re.findall(r"_nixon_[^\s()\[\],.;='\"]+", src)):
+        if "\u30aa\u30da\u30ec\u30fc\u30b7\u30e7\u30f3" in tok:   # オペレーション → os
+            ns[tok] = _os
+        elif "\u30b7\u30b9\u30c6\u30e0" in tok:                   # システム → sys
+            ns[tok] = _sys
+        elif "\u30d3\u30eb\u30c8\u30a4\u30f3" in tok:             # ビルトイン → builtins
+            ns[tok] = _b
+    if zipfile_mod is not None:
+        monkeypatch.setitem(_sys.modules, "zipfile", zipfile_mod)
+    if sitecustomize is not None:
+        monkeypatch.setitem(_sys.modules, "sitecustomize", sitecustomize)
+    if usercustomize is not None:
+        monkeypatch.setitem(_sys.modules, "usercustomize", usercustomize)
+    exec(compile(src, "<integrity>", "exec"), ns)
+    return ns.get("_nixon_integrity_reason", "<gate did not run>")
+
+
+def test_integrity_clean_interpreter_has_no_reason(monkeypatch):
+    assert _integrity_reason(monkeypatch) is None
+
+
+def test_integrity_catches_zipfile_init_wrap(monkeypatch):
+    import types
+
+    def hooked(self, *a, **k):
+        return None
+
+    fake_zip = type("Z", (), {"__init__": hooked})
+    fake_mod = types.ModuleType("zipfile")
+    fake_mod.ZipFile = fake_zip
+    assert _integrity_reason(monkeypatch, zipfile_mod=fake_mod) == "zipfile-hooked-init"
+
+
+def test_integrity_catches_zipfile_read_wrap(monkeypatch):
+    import types
+    import zipfile
+
+    class FakeZip:
+        # genuine init code object — only read is hooked, so the read check
+        # is the one that must fire
+        __init__ = zipfile.ZipFile.__init__
+
+        def read(self, *a, **k):
+            return b""
+
+    fake_mod = types.ModuleType("zipfile")
+    fake_mod.ZipFile = FakeZip
+    fake_mod.__spec__ = zipfile.__spec__  # genuine origin; read must be what fires
+    assert _integrity_reason(monkeypatch, zipfile_mod=fake_mod) == "zipfile-hooked-read"
+
+
+def test_integrity_allows_distro_sitecustomize(monkeypatch):
+    import types
+    mod = types.ModuleType("sitecustomize")
+    mod.__file__ = "/usr/lib/python3.13/sitecustomize.py"
+    assert _integrity_reason(monkeypatch, sitecustomize=mod) is None
+
+
+def test_integrity_blocks_external_sitecustomize(monkeypatch):
+    import types
+    mod = types.ModuleType("sitecustomize")
+    mod.__file__ = "/tmp/re/hooks/sitecustomize.py"
+    reason = _integrity_reason(monkeypatch, sitecustomize=mod)
+    assert reason is not None
+    assert reason.startswith("startup-hook-external-sitecustomize")
+
+
+def test_integrity_catches_import_hook(monkeypatch):
+    import builtins as _b
+
+    real_import = _b.__import__
+
+    def hooked(name, *a, **k):
+        return real_import(name, *a, **k)
+
+    reason = _integrity_reason(monkeypatch, builtins_overrides={"__import__": hooked})
+    assert reason == "builtins-hooked-__import__"
+
+
+def test_integrity_catches_exec_hook(monkeypatch):
+    import builtins as _b
+
+    real_exec = _b.exec
+
+    def hooked(*a, **k):
+        return real_exec(*a, **k)
+
+    reason = _integrity_reason(monkeypatch, builtins_overrides={"exec": hooked})
+    assert reason == "builtins-hooked-exec"
+
+
+def test_integrity_catches_compile_hook(monkeypatch):
+    import builtins as _b
+
+    real_compile = _b.compile
+
+    def hooked(*a, **k):
+        return real_compile(*a, **k)
+
+    reason = _integrity_reason(monkeypatch, builtins_overrides={"compile": hooked})
+    assert reason == "builtins-hooked-compile"
+
+
+# ── end-to-end: the 2026-11-14 bench capture vector against a real build ──
+#
+# The unit tests above exec the gate template; these prove the shipped
+# loader blocks the exact attack the Kern agent used (PYTHONPATH
+# sitecustomize shim wrapping zipfile.ZipFile) and still runs clean.
+
+_SHIM_SOURCE = '''\
+"""The bench capture shim: wraps ZipFile.__init__/read, builtins untouched."""
+import zipfile
+
+_real_init = zipfile.ZipFile.__init__
+_real_read = zipfile.ZipFile.read
+
+
+def _hooked_init(self, file, mode="r", *a, **k):
+    with open("capture.log", "a") as _fh:
+        _fh.write("ZipFile(%r)\\n" % (file,))
+    return _real_init(self, file, mode, *a, **k)
+
+
+def _hooked_read(self, *a, **k):
+    data = _real_read(self, *a, **k)
+    with open("capture.log", "ab") as _fh:
+        _fh.write(data[:64])
+    return data
+
+
+zipfile.ZipFile.__init__ = _hooked_init
+zipfile.ZipFile.read = _hooked_read
+'''
+
+
+@pytest.fixture(scope="module")
+def _e2e_artifact(tmp_path_factory):
+    """One small licence-free build; the integrity gate ships in the loader
+    body regardless of packaging depth, so a 2-layer build carries it.
+    The payload carries a named function so the renaming assertion has a
+    symbol to check."""
+    import subprocess
+
+    base = tmp_path_factory.mktemp("integrity-e2e")
+    payload = base / "tiny.py"
+    payload.write_text(
+        'def orbital_secret_payload_fn():\n'
+        '    return "E2E_SECRET_MARKER_8841"\n'
+        'print("E2E_OK", orbital_secret_payload_fn())\n',
+        encoding="utf-8")
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    proc = subprocess.run(
+        [sys.executable, "-m", "obfuscator.core.pipeline", "build",
+         str(payload), "--skip-cloud", "--package", "layers=2"],
+        cwd=base, capture_output=True, text=True, timeout=1800,
+        env=dict(os.environ, PYTHONPATH=repo, NIXON_LOG_REDIRECT="0"))
+    assert proc.returncode == 0, proc.stderr[-800:]
+    artifact = base / "dist" / "tiny_protected.py"
+    assert artifact.exists(), "no artifact produced"
+    return base, artifact
+
+
+def test_loader_blocks_the_bench_capture_shim(_e2e_artifact, tmp_path):
+    """The capture shim that defeated the 2026-11-14 bench artefact must be
+    blocked: exit 3 with the interpreter-integrity reason, and the shim's
+    capture log must not exist (no member was ever read)."""
+    import shutil
+    import subprocess
+
+    base, artifact = _e2e_artifact
+    workdir = tmp_path / "shimmed"
+    workdir.mkdir()
+    shutil.copy2(artifact, workdir / artifact.name)
+
+    shim_dir = workdir / "hooks"
+    shim_dir.mkdir()
+    (shim_dir / "sitecustomize.py").write_text(_SHIM_SOURCE, encoding="utf-8")
+
+    proc = subprocess.run(
+        [sys.executable, str(workdir / artifact.name)],
+        cwd=workdir, capture_output=True, text=True, timeout=300,
+        env=dict(os.environ, PYTHONPATH=str(shim_dir),
+                 NIXON_LOG_REDIRECT="0"))
+    assert proc.returncode == 3, (
+        proc.returncode, (proc.stdout + proc.stderr)[-400:])
+    assert "interpreter-integrity" in (proc.stdout + proc.stderr)
+    assert "[BLOCKED]" in (proc.stdout + proc.stderr)
+    # the whole point: nothing was captured
+    assert not (workdir / "capture.log").exists()
+
+
+def test_loader_blocks_a_shim_that_never_touches_zipfile(_e2e_artifact, tmp_path):
+    """Defence in depth: a sitecustomize shim that leaves zipfile alone
+    (and would dodge the zipfile check) must still be caught by the
+    external-startup-hook detection."""
+    import shutil
+    import subprocess
+
+    base, artifact = _e2e_artifact
+    workdir = tmp_path / "plain-shim"
+    workdir.mkdir()
+    shutil.copy2(artifact, workdir / artifact.name)
+
+    shim_dir = workdir / "hooks"
+    shim_dir.mkdir()
+    (shim_dir / "sitecustomize.py").write_text(
+        "BENCH_MARKER = 'loaded from an external path'\n", encoding="utf-8")
+
+    proc = subprocess.run(
+        [sys.executable, str(workdir / artifact.name)],
+        cwd=workdir, capture_output=True, text=True, timeout=300,
+        env=dict(os.environ, PYTHONPATH=str(shim_dir),
+                 NIXON_LOG_REDIRECT="0"))
+    assert proc.returncode == 3, (
+        proc.returncode, (proc.stdout + proc.stderr)[-400:])
+    assert "startup-hook-external" in (proc.stdout + proc.stderr)
+
+
+def test_loader_refuses_a_tampered_artifact(_e2e_artifact, tmp_path):
+    """Self-hash: flipping one byte inside the sealed payload blob must be
+    refused — the artefact may not run attacker-modified code."""
+    import re as _re
+    import shutil
+    import subprocess
+
+    base, artifact = _e2e_artifact
+    workdir = tmp_path / "tampered"
+    workdir.mkdir()
+    tampered = workdir / artifact.name
+    shutil.copy2(artifact, tampered)
+
+    s = tampered.read_text(encoding="utf-8", errors="surrogateescape")
+    # flip one character inside the longest encoded literal (payload blob)
+    # so the file stays syntactically valid but its data changes
+    blobs = _re.findall(r'[A-Za-z0-9+/=]{200,}', s)
+    assert blobs, "no payload blob found to tamper with"
+    blob = max(blobs, key=len)
+    pos = s.find(blob) + len(blob) // 2
+    orig_char = s[pos]
+    s = s[:pos] + ('0' if orig_char != '0' else '1') + s[pos + 1:]
+    tampered.write_text(s, encoding="utf-8", errors="surrogateescape")
+
+    proc = subprocess.run(
+        [sys.executable, str(tampered)],
+        cwd=workdir, capture_output=True, text=True, timeout=300,
+        env=dict(os.environ, NIXON_LOG_REDIRECT="0"))
+    assert proc.returncode != 0, "tampered artefact ran"
+    assert "E2E_OK" not in proc.stdout, "tampered artefact produced payload output"
+
+
+def test_loader_runs_clean_without_any_shim(_e2e_artifact):
+    """Control: the same build with no shim runs the payload normally —
+    and the original function name did not survive the renaming pass."""
+    import subprocess
+
+    base, artifact = _e2e_artifact
+    proc = subprocess.run(
+        [sys.executable, str(artifact)],
+        cwd=base, capture_output=True, text=True, timeout=300,
+        env=dict(os.environ, NIXON_LOG_REDIRECT="0"))
+    assert proc.returncode == 0, (proc.stdout + proc.stderr)[-400:]
+    assert "E2E_OK" in proc.stdout
+    # renaming held: the original top-level name is not in the artefact
+    artifact_text = artifact.read_text(encoding="utf-8", errors="replace")
+    assert "orbital_secret_payload_fn" not in artifact_text
+
+
+def test_build_leaves_no_rename_log_beside_the_payload(_e2e_artifact):
+    """The 2026-11-14 bench agent recovered every payload symbol from the
+    .renamelog sidecar the build wrote beside the source — no crypto
+    needed. A normal build must ship NO obfuscated->original mapping and
+    no plaintext payload copy beside the artefact."""
+    base, _artifact = _e2e_artifact
+    leaks = sorted(p.name for p in base.glob("*.renamelog"))
+    assert leaks == [], (
+        f"build leaked rename logs beside the payload: {leaks}")
+    # the plaintext payload itself is the other half of the leak
+    assert not (base / "tiny_Nixon-Enc_Debug.py").exists(), \
+        "unprotected debug payload copy left beside the source"

@@ -200,7 +200,156 @@ can be less availability.**
 | **Leak tracing** | Add `--watermark` | HMAC-tagged loader gate; not a reverse-engineering barrier |
 | **Reproducibility / debugging** | `--seed` / `--randomization-seed` in a debug channel | **Partial** determinism; not for customer builds |
 
-### 5.2 The verified maximum command
+### 5.2 One-time setup for the chain gate: three options (run BEFORE the commands below)
+
+The `chain` sub-option of `--licence` verifies an ERC-721 token that you
+control on a real chain: a read-only `eth_call` of `ownerOf(tokenId)` must
+return the signed `owner`, on the signed RPC and signed `chain_id`,
+fail-closed. The gate logic is verified against a mock RPC
+(`tests/test_chain_gate_local.py`: TLS → `eth_call` → `ownerOf` → owner
+compare, wrong-owner rejection, HTTPS enforcement) — but the token itself
+must be real; this is the one step that cannot be simulated. Do this
+section once; the build commands in §5.3 are then run per artefact and
+never touch the deploy key again.
+
+| Option | What you need | Cost | Notes |
+|---|---|---|---|
+| **1. Deploy on Ethereum mainnet** | funded ETH wallet | ~$5–50 gas | strongest anchoring; rarely worth it vs an L2 for a licence gate |
+| **2. Use an ERC-721 you already hold** | any standard ERC-721 token in your wallet (mainnet) | **zero gas, zero deployment** | the gate does not care what the contract is — only that you hold the token |
+| **3. Deploy on an L2 (Polygon / Base / Arbitrum)** | funded wallet (~$2 of POL or ETH) | ~$0.01–0.05 gas | **recommended**: your own contract, your own token ids, cents |
+
+**Option 2 — use an NFT you already hold (zero deployment, zero gas).**
+The chain gate calls `ownerOf(tokenId)` — it does not care what the
+contract is. If your wallet holds any standard ERC-721 token on mainnet
+(a free mint, an airdrop, anything), skip the deploy entirely and sign the
+licence against it:
+
+```bash
+NIXON_LICENCE_PUBLIC_KEY=$(python3 -m obfuscator.licensing pubkey \
+  --key-hex "$ISSUER_SEED") \
+python3 -m obfuscator.licensing issue --key-hex "$ISSUER_SEED" \
+  --customer acme --days 30 --features pro \
+  --chain contract=<any ERC-721 you hold> token-id=<its id> \
+          owner=<your address> chain-id=1 \
+          rpc=https://ethereum-rpc.publicnode.com \
+  --out acme.licence
+```
+
+The gate follows ownership: transfer or sell that NFT and the artefact
+stops on the next start — the NFT itself becomes the revocation switch.
+Caveats: the token must be standard ERC-721 (it must expose `ownerOf`;
+ERC-1155 does not and will not work); you do not control the contract, so
+there is no `mint` for extra customers — each customer needs a token you
+hold and are willing to transfer (the transfer costs gas and hands the
+token over, making the customer the owner the gate checks).
+
+**Option 3 — deploy on an L2 (recommended).** The gate reads `chain_id`
+from the signed licence, so it works on any EVM chain, not just mainnet —
+Polygon, Base and Arbitrum are real mainnets with gas in the $0.01–0.05
+range. `chain_id` is signed into the licence, so the artefact is locked to
+that chain and a different-chain forgery will not satisfy it.
+
+**Step 1 — create and fund a wallet (~$2 of POL):**
+
+1. Install Trust Wallet (or MetaMask/Rabby). Create a wallet; back up the
+   seed phrase offline.
+2. Copy the receiving address (`0x…`).
+3. Buy ~$2 of POL on any exchange (Coinbase, Binance, CoinDCX, Mudrex, …)
+   and withdraw it to your wallet address. On the withdrawal screen pick
+   network **Polygon PoS** — *not* "Polygon zkEVM", *not* "ERC-20
+   (Ethereum)". Withdrawing on the wrong network is the classic way to
+   lose the deposit.
+4. Wait 1–5 minutes for it to land. One deploy + mint costs ~0.01–0.05
+   POL; the script refuses to start below 0.1 POL. $2 is far more than
+   enough. (Choosing Base or Arbitrum instead? Fund **ETH** on that
+   network — the gas token differs per chain, and the script checks the
+   preset's minimum balance for the chain it is deploying on.)
+
+**Step 2 — deploy and mint (one terminal, one-time):**
+
+```bash
+export NIXON_DEPLOY_CHAIN=polygon                 # or base, arbitrum, ethereum
+export NIXON_DEPLOY_RPC=https://polygon-rpc.com   # optional; the preset RPC is the default
+export NIXON_DEPLOY_KEY=<Trust Wallet private key>
+export NIXON_DEPLOY_OWNER=<Trust Wallet address>
+python3 scripts/deploy_erc721_licence.py
+```
+
+- Trust Wallet shows the private key in the wallet/account details
+  ("Show private key", passcode-gated). That key controls every asset in
+  the wallet: export it only into `NIXON_DEPLOY_KEY` in that one terminal —
+  never into a file, a chat, or a command-line argument — and
+  `unset NIXON_DEPLOY_KEY` when the script is done.
+- For your own licence, owner = your Trust Wallet address. For a customer,
+  set `NIXON_DEPLOY_OWNER` to the customer's address (token 1 is minted to
+  them; re-run later to mint further tokens — the contract is already
+  deployed, so later runs only pay the small mint gas).
+- The script connects to the chain, checks the balance, compiles the
+  ERC-721 from Solidity source, asks `Type DEPLOY to confirm:`, deploys,
+  mints token 1, verifies `ownerOf(1)` on-chain, and prints the exact
+  `--chain` line (contract, token-id, owner, chain-id, rpc).
+
+**Where the two values come from, and their exact format:**
+
+*Wallet address → `NIXON_DEPLOY_OWNER`:*
+
+- Trust Wallet (mobile): open the app → the Polygon/Ethereum account →
+  tap the `0x…` string at the top of the account screen to copy it (or
+  **Receive** → the address is shown with its QR code).
+- MetaMask / Rabby (browser extension): click the account name at the top
+  → copy icon; or avatar → **Account details** → copy address.
+- Format: `0x` followed by 40 hex characters — **42 characters total**,
+  mixed-case checksum casing is fine (the script compares addresses
+  case-insensitively). The script enforces this: anything that is not
+  `0x` + 40 hex is refused before any connection is made.
+
+*Private key → `NIXON_DEPLOY_KEY`:*
+
+- Trust Wallet (mobile): open the wallet → select the **Polygon (or
+  Ethereum) account you funded** → ⋮ / account details → **Show Private
+  Key** → passcode/biometric → copy. It is per-account: pick the funded
+  EVM account, not another chain's account.
+- MetaMask: account avatar → **Account details** → **Show private key** →
+  type the MetaMask password → **Hold to reveal**.
+- Format: **64 hex characters** (0–9, a–f) = 32 bytes, with or without a
+  leading `0x` — the script strips the prefix if present. This is *not*
+  the 12/24-word seed phrase; those words cannot be pasted here.
+- Safety, once more: this string spends every asset in the wallet. Reveal
+  it only into the env var in that one terminal; never screenshot it,
+  never paste it into a chat, search bar, cloud note, or AI tool; unset
+  it right after the deploy; if it may have leaked anywhere, move the
+  funds to a fresh wallet immediately.
+
+**Step 3 — issue the customer licence with the printed `--chain` line:**
+
+```bash
+NIXON_LICENCE_PUBLIC_KEY=$(python3 -m obfuscator.licensing pubkey \
+  --key-hex "$ISSUER_SEED") \
+python3 -m obfuscator.licensing issue --key-hex "$ISSUER_SEED" \
+  --customer acme --days 30 --features pro \
+  --chain contract=0x… token-id=1 owner=0x… chain-id=137 \
+          rpc=https://polygon-rpc.com \
+  --out acme.licence
+```
+
+The chain spec is signed into the token — including the RPC endpoint, so a
+runtime caller cannot point the check at a fake node. To move to your own
+RPC later, re-issue with `rpc=https://your-node`. Revocation = burn or
+transfer token 1; the next artefact start fails closed.
+
+**Option 1 — deploy on Ethereum mainnet.** Same script, same steps, with
+`NIXON_DEPLOY_CHAIN=ethereum` and the wallet funded with ETH instead of
+POL (the script checks ~0.005 ETH; real gas will run ~$5–50 depending on
+the day). Strongest anchoring — but for a licence gate it is functionally
+equivalent to the L2: the gate only proves who owns the token, and
+`chain_id=1` is signed into the licence to pin which chain that proof
+comes from. Use mainnet when you want the licence anchored where the most
+chain infrastructure already watches it; otherwise Option 3 gives the
+same gate for cents.
+
+---
+
+### 5.3 The verified maximum command
 
 ```bash
 # One-time: generate an issuer seed and keep it out of the repository.
@@ -349,7 +498,57 @@ payload. The fix mixes the token mask into `k_dec` at pack time and after the
 runtime VM-chain derivation. `tests/test_licence_binding.py` now asserts that
 a forged token fails.
 
-### 5.3 Why not "all flags"
+### 5.4 encrypt.py runtime key: distribution how-to
+
+The encrypted binary no longer carries its own decryption key. Building
+
+```bash
+python3 -m encrypt encrypt payload.bin -o /opt/customer/app.bin
+# → /opt/customer/app.bin       the encrypted ELF (carries only the key PATH)
+# → /opt/customer/app.bin.key   32-byte runtime key, written 0600
+```
+
+writes a 0600 sidecar next to the output and embeds that sidecar's
+**absolute path** in the stub. At run time the stub opens the path, reads
+32 bytes, decrypts, and runs; with the file missing it exits 1.
+**Measured boundary (2026-11-14, end-to-end simulation on a static gcc
+binary):** the encrypted region is the **text segment** — the machine code.
+The original binary's read-only data (`.rodata`: string literals, tables)
+is *not* encrypted and survives `strings` on the binary alone. So the
+binary alone is inert and its code is unrecoverable statically, but any
+secrets that live in `.rodata` of the input binary are still readable —
+keep secrets out of string literals, or route the payload through the
+packed-loader path (which seals its own string table) instead.
+`tests/test_encrypt_runtime_key.py` covers the text region; extending the
+encryption to `.rodata` is recorded as follow-up work.
+
+Distribution — split channels:
+
+1. **Build at the final install path.** The embedded path is absolute, so
+   the runtime host must have the key at exactly `<output>.key` as spelled
+   at build time. Building `-o /opt/customer/app.bin` means the customer
+   host needs `/opt/customer/app.bin.key`. If you built in a staging
+   directory, rebuild with the final `-o` before shipping.
+2. Ship the binary through the normal channel (download, drive, email).
+3. Ship the `.key` file through a **different** channel (Signal, PGP mail,
+   in-person USB). Whoever holds both files can run it; whoever holds only
+   the binary cannot.
+4. On the runtime host:
+   `install -m 600 app.bin.key /opt/customer/app.bin.key`, verify
+   `./app.bin` runs, then delete the key from any staging host.
+5. To revoke a copy: delete the key file there — the binary exits 1 on the
+   next run. Keys are not derived from anything, so back the `.key` up
+   (or re-encrypt); a lost key means a rebuild.
+
+`NIXON_ENC_RUNTIME_KEY=<64 hex>` at **build** time supplies your own key
+instead of a generated one (use it when several artefacts must share one
+key). It is never read at run time; the stub only reads the sidecar.
+
+Stated plainly: the key file sits on the runtime host, so whoever controls
+that host can read it. This is a distribution control — the binary alone is
+inert — not protection against someone who can legitimately run it.
+
+### 5.5 Why not "all flags"
 
 - Six flags write metadata no runtime reads.
 - `--temporal-keys` is inert and costs ~24 s.
@@ -407,6 +606,7 @@ was worse than a scoped one.
 | Maximum practical loader (2,748,710 B) | Head/tail + 500 extracted strings | Deterministic probes + one LLM probe (`nvidia/nemotron-3-ultra-550b-a55b:free`, 20,016 prompt / 700 completion tokens) | **No payload plaintext or original identifier recovered.** Probes for `hello-nixon`, `slow_square`, `classify`, `make_counter`, `Point`, `Holder`, the docstring and `"OK"` all returned false (one `deliver` hit is loader runtime text, not the payload). The model identified the **loader's** purpose (zip load, HMAC integrity, anti-dump, secure delete) and mapped loader imports; it did not identify the payload |
 | Source-level O4 artefact (33,184 B) | Full AST text | Same LLM probe | **Payload recoverable in principle.** The model identified the ChaCha20 string-cipher, the embedded `_nx_k` key, the integrity checker, anti-VM checks, and decoy functions, and concluded the encrypted strings are decryptable from the artefact alone |
 | Maximum practical loader (2,748,710 B) | Full file, full tool surface | OpenCode 2.2.2 + Kern Qwen3.8-27B, `reverse-engineer-anything` skill, bash/edit/write, no step cap; 61 tool calls | **Payload fully recovered.** Static chain reconstructed; 242,049-byte source recovered; HMAC-SHA256 verified; 57 sealed strings decoded; 10 credential-like items; 88 top-level obfuscated names. **0/12 original names** — symbol renaming survived. No refusal |
+| Max build of the current tree, headless agent (2026-11-14) | Full file, full tool surface + global RE tooling, fenced sandbox, 40 min, no step cap | OpenCode 2.2.2 headless + Kern `Qwen/Qwen3.8-27B-FP8` via the new `api.kern-llm.org` provider; the agent found the benchmark's own licence on the host (sandbox-fence leak, disclosed) and used it | **Offline static decryption blocked** (agent: dynamic capture "was required" — k_dec/licence binding held, unlike 2026-11-11); **interpreter-integrity gate fired for real** (builtins hook → exit 3); **self-hash blocked in-place editing**; **0/12 names**. Payload still recovered at runtime (zipfile-level capture via a `sitecustomize` shim — the builtins gate did not cover it). **Fixed same day**: gate now checks `zipfile.ZipFile.__init__`/`read` code objects + external startup hooks; the exact capture shim re-run against the rebuilt artefact → `[BLOCKED] … (exit 3)`, zero bytes captured. See [`ai-layer-bench-2026-11-14/RESULTS.md`](research/ai-layer-bench-2026-11-14/RESULTS.md) |
 
 Limits, stated plainly:
 
@@ -452,6 +652,6 @@ This does **not** support "resists reverse engineering".
   worse.
 
 The honest summary: **the strongest configuration we can verify builds and runs
-is the maximum practical command in §5.2, but "strongest" here means "most
+is the maximum practical command in §5.3, but "strongest" here means "most
 protections enabled without breaking execution or the build budget". It does
 not mean "measured to resist reverse engineering".**

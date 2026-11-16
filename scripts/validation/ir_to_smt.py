@@ -30,6 +30,23 @@ class _SmtUnsupported(Exception):
     """
 
 
+def _as_bool(expr):
+    """Coerce a Z3 expression to Bool so it can be used in If/And.
+
+    A block formula is a BitVec (the block's output value), while the
+    dispatch guards are Bool.  z3.If requires both branches to share a
+    sort, and z3.And accepts Bool only -- feeding a BitVec raised
+    "Sort mismatch at argument #1 for function (declare-fun and
+    (Bool Bool) Bool) supplied sort is (_ BitVec 64)", which aborted the
+    build under --validate fail.  A BitVec is truthy iff non-zero.
+    """
+    if z3.is_bool(expr):
+        return expr
+    if z3.is_bv(expr):
+        return expr != z3.BitVecVal(0, expr.size())
+    return z3.BoolVal(bool(expr))
+
+
 class IRToSMT:
     """
     Translates IR modules into Z3 formulas for equivalence checking.
@@ -82,7 +99,10 @@ class IRToSMT:
             result = self._translate_function(func)
             if result is not None:
                 constraints.append(result)
-        return z3.And(*constraints) if constraints else z3.BoolVal(True)
+        # Same sort guard: a function result can be a BitVec (its output
+        # value), and z3.And accepts Bool only.
+        return (z3.And(*[_as_bool(c) for c in constraints])
+                if constraints else z3.BoolVal(True))
 
     def _translate_function(self, func) -> z3.BoolRef | None:
         self.z3_registers = {}
@@ -123,7 +143,14 @@ class IRToSMT:
         entry_state = z3.BitVecVal(block_labels_map.get(func.entry_block.label if func.entry_block else "entry", 0), BITWIDTH)
         for i, (bidx, formula) in enumerate(block_smts):
             guard = (state_var == z3.BitVecVal(bidx, BITWIDTH))
-            masked_formula = z3.If(guard, formula, z3.BoolVal(True))
+            # A block formula is a BitVec (it encodes the block's output
+            # value), but z3.If's branches must share a sort and z3.And only
+            # accepts Bool.  Mixing them raised
+            #   "Sort mismatch at argument #1 for function
+            #    (declare-fun and (Bool Bool) Bool) supplied sort is (_ BitVec 64)"
+            # which aborted the whole build under --validate fail.  Coerce a
+            # BitVec branch to a Bool predicate before it reaches If/And.
+            masked_formula = z3.If(guard, _as_bool(formula), z3.BoolVal(True))
             dispatch.append(masked_formula)
 
         dispatch.append(state_var == entry_state)
@@ -150,7 +177,10 @@ class IRToSMT:
             if term_result is not None:
                 constraints.append(term_result)
 
-        return z3.And(*constraints) if constraints else z3.BoolVal(True)
+        # Same sort guard as the dispatch site: an instruction's result is a
+        # BitVec, and z3.And accepts Bool only.
+        return (z3.And(*[_as_bool(c) for c in constraints])
+                if constraints else z3.BoolVal(True))
 
     def _get_ir_value(self, operand) -> z3.BitVecRef:
         op_str = str(operand)
@@ -289,7 +319,15 @@ class IRToSMT:
             return None
         elif inst.opcode == 'nop':
             return None
-        raise NotImplementedError(f"Unsupported IR opcode: {inst.opcode if hasattr(inst, 'opcode') else 'unknown'}")
+        # DECLINE, not crash.  A raw NotImplementedError escaped the
+        # translator and was reported by the caller as a validation FAILURE
+        # with an empty counterexample -- so --validate fail aborted builds
+        # on any payload containing an opcode this encoding does not model
+        # (gep was the first one hit).  _SmtUnsupported is the documented
+        # "cannot model this" signal; the caller records a decline.
+        raise _SmtUnsupported(
+            "unsupported IR opcode: %s"
+            % (inst.opcode if hasattr(inst, 'opcode') else 'unknown'))
 
     def _translate_terminator(self, term, block_labels_map: dict[str, int],
                                state_var: z3.BitVecRef, current_label: str) -> z3.BoolRef | None:

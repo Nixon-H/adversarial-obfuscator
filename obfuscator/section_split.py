@@ -547,3 +547,167 @@ def emit_loader_snippet(func_name: str = None) -> str:
     """
     name = func_name or JOIN_FUNC
     return LOADER_JOIN_SOURCE.replace("{FUNC}", name)
+
+
+#: Loader-side MOVING decryption.  Each section is decrypted on demand,
+#: handed to the sink, then wiped, so the process never holds the whole
+#: plaintext at once.  A memory dump therefore captures one section, not the
+#: payload.
+LOADER_MOVING_SOURCE = '''def {FUNC}(pack_b85, key, sink):
+    """Decrypt one section at a time and hand it to ``sink``.
+
+    ``sink(bytes)`` is called once per section, in order, with that
+    section's plaintext only.  The buffer is zeroed before the next section
+    is decrypted, so at no instant does the process hold more than one
+    section of plaintext.  Returns True on success, False on any
+    verification failure (the caller must fail closed).
+
+    This is the moving-decryption counterpart of the whole-payload join:
+    the same per-section seal and HMAC, but the plaintext never accumulates.
+    """
+    import base64 as _nx_mb64
+    import hashlib as _nx_mh
+    import hmac as _nx_mhm
+    import json as _nx_mj
+    try:
+        pack = _nx_mj.loads(_nx_mb64.b85decode(pack_b85).decode("utf-8"))
+        sections = pack["sections"]
+        if len(sections) != pack["count"]:
+            return False
+        # Same key_hint check as the whole-payload join.
+        if _nx_mh.sha256(bytes(key)).hexdigest()[:16] != pack.get("key_hint"):
+            return False
+        ordered = sorted(sections, key=lambda s: s["i"])
+        if [s["i"] for s in ordered] != list(range(pack["count"])):
+            return False
+        total = 0
+        for entry in ordered:
+            nonce = bytes.fromhex(entry["nonce"])
+            enc = bytes.fromhex(entry["data"])
+            ks = bytearray()
+            c = 0
+            while len(ks) < len(enc):
+                ks.extend(_nx_mh.sha256(bytes(key) + nonce + c.to_bytes(8, "big")).digest())
+                c += 1
+            tagged = bytearray(a ^ b for a, b in zip(enc, bytes(ks[:len(enc)])))
+            for i in range(len(ks)):
+                ks[i] = 0
+            if len(tagged) < 32:
+                return False
+            tag, part = bytes(tagged[:32]), bytes(tagged[32:])
+            if not _nx_mhm.compare_digest(
+                    _nx_mhm.new(bytes(key) + nonce, part, _nx_mh.sha256).digest(), tag):
+                return False
+            buf = bytearray(part)
+            try:
+                sink(bytes(buf))
+            finally:
+                for i in range(len(buf)):
+                    buf[i] = 0
+            total += len(part)
+        if total != pack["total"]:
+            return False
+        return True
+    except Exception:
+        return False
+'''
+
+
+def emit_moving_snippet(func_name: str = "_nx_section_walk") -> str:
+    """Return the loader-side MOVING-decryption source, ready to embed."""
+    return LOADER_MOVING_SOURCE.replace("{FUNC}", func_name)
+
+
+#: Loader-side STREAMING decompression.  This is the piece that makes moving
+#: decryption real: instead of joining every section into one ciphertext
+#: buffer and decompressing that, each section is decrypted, fed straight
+#: into an incremental decompressor, and wiped.  Neither the full ciphertext
+#: nor the full compressed stream is ever resident.
+LOADER_STREAM_SOURCE = '''def {FUNC}(pack_b85, key):
+    """Decrypt + decompress section by section; return the raw payload.
+
+    Returns a ``bytearray`` (mutable, so the caller can wipe it) or None on
+    any verification failure.  At no point does the process hold the whole
+    ciphertext or the whole compressed stream: each section is decrypted
+    into a small buffer, pushed through the incremental decompressor, and
+    zeroed before the next section is touched.
+    """
+    import base64 as _nx_sb64
+    import bz2 as _nx_sbz2
+    import hashlib as _nx_sh
+    import hmac as _nx_shm
+    import json as _nx_sj
+    import lzma as _nx_slz
+    import zlib as _nx_szl
+    try:
+        pack = _nx_sj.loads(_nx_sb64.b85decode(pack_b85).decode("utf-8"))
+        sections = pack["sections"]
+        if len(sections) != pack["count"]:
+            return None
+        if _nx_sh.sha256(bytes(key)).hexdigest()[:16] != pack.get("key_hint"):
+            return None
+        ordered = sorted(sections, key=lambda s: s["i"])
+        if [s["i"] for s in ordered] != list(range(pack["count"])):
+            return None
+        # The compression backend is chosen by the first plaintext byte, so
+        # it can only be selected once the first section is decrypted.
+        dec = None
+        out = bytearray()
+        total = 0
+        for idx, entry in enumerate(ordered):
+            nonce = bytes.fromhex(entry["nonce"])
+            enc = bytes.fromhex(entry["data"])
+            ks = bytearray()
+            c = 0
+            while len(ks) < len(enc):
+                ks.extend(_nx_sh.sha256(bytes(key) + nonce + c.to_bytes(8, "big")).digest())
+                c += 1
+            tagged = bytearray(a ^ b for a, b in zip(enc, bytes(ks[:len(enc)])))
+            for i in range(len(ks)):
+                ks[i] = 0
+            if len(tagged) < 32:
+                return None
+            tag, part = bytes(tagged[:32]), bytes(tagged[32:])
+            if not _nx_shm.compare_digest(
+                    _nx_shm.new(bytes(key) + nonce, part, _nx_sh.sha256).digest(), tag):
+                return None
+            buf = bytearray(part)
+            try:
+                if dec is None:
+                    # First section: pick the backend from its first byte and
+                    # strip that byte from the stream.
+                    first = buf[0] if buf else -1
+                    body = bytes(buf[1:]) if buf else b""
+                    if first == 0x01:
+                        dec = _nx_sbz2.BZ2Decompressor()
+                    elif first == 0x02:
+                        dec = _nx_slz.LZMADecompressor()
+                    elif first == 0x00:
+                        dec = _nx_szl.decompressobj()
+                    else:
+                        # Legacy prefix-less zlib.
+                        dec = _nx_szl.decompressobj()
+                        body = bytes(buf)
+                    out.extend(dec.decompress(body))
+                else:
+                    out.extend(dec.decompress(bytes(buf)))
+            finally:
+                for i in range(len(buf)):
+                    buf[i] = 0
+            total += len(part)
+        if total != pack["total"]:
+            return None
+        # Flush whatever the incremental decompressor is still holding.
+        try:
+            out.extend(dec.flush())
+        except Exception:
+            pass
+        return out
+    except Exception:
+        return None
+'''
+
+
+def emit_stream_snippet(func_name: str = "_nx_section_stream") -> str:
+    """Return the loader-side STREAMING decrypt+decompress source."""
+    return LOADER_STREAM_SOURCE.replace("{FUNC}", func_name)

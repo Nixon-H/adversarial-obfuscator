@@ -30,6 +30,9 @@ STUB_HEADER_SIZE = 20
 # Keyed header adds 4 bytes of padding before the keystream; the key-path
 # delta is patched into the code's disp32.
 STUB_HEADER_SIZE_KEYED = 24
+# The .rodata variant appends rodata_base_delta (8), rodata_size (4) and
+# 4 bytes of padding after the keyed header.
+STUB_HEADER_SIZE_KEYED_RO = 40
 
 # rbx points at the `pop rbx` instruction: 1 byte (push rdx) + 5 (call).
 _ANCHOR = 6
@@ -137,13 +140,18 @@ _CODE, _OFFSETS = _build_code()
 STUB_CODE_SIZE = len(_CODE)
 
 
-def _build_code_keyed():
+def _build_code_keyed(with_rodata: bool = False):
     """Assemble the runtime-key variant of the decryptor.
 
     The embedded keystream is XOR-masked with a 32-byte key read from a
     file at runtime (path embedded in the stub header).  Without that file
     the stub exits(1); ciphertext XOR the embedded bytes is no longer the
     plaintext.  Register use adds r14 = key buffer, r15 = fd.
+
+    With ``with_rodata`` the stub also decrypts a second region (``.rodata``)
+    using the same masked-keystream scheme, bracketed by mprotect calls so
+    the section is read-only again before the original entry runs.  The
+    default path is byte-identical to the pre-existing stub.
     """
     code = bytearray()
 
@@ -224,6 +232,74 @@ def _build_code_keyed():
     code += b'\x41\x39\xd1'                    # cmp r9d, edx
     code += b'\x72' + bytes([(loop - (len(code) + 2)) & 0xFF])  # jb loop
 
+    # ---- optional second region: .rodata ----
+    # Same masked-keystream scheme, bracketed by mprotect so the section is
+    # read-only again before the original entry runs.  r13 holds the region
+    # base; rdx is reloaded with the .text size afterwards because the
+    # epilogue's mprotect RX still needs it.
+    ro_offsets = {}
+    if with_rodata:
+        code += b'\x4c\x8b\xab\x00\x00\x00\x00'    # mov r13, [rbx+ro_delta]
+        ro_offsets['ro_delta'] = len(code) - 4
+        code += b'\x49\x01\xdd'                    # add r13, rbx
+
+        # mprotect(ro_base, ro_size, RW)
+        code += b'\x4c\x89\xef'                    # mov rdi, r13
+        code += b'\x4c\x89\xee'                    # mov rsi, r13
+        off_ro_size1 = len(code)
+        code += b'\x8b\x93\x00\x00\x00\x00'        # mov edx, [rbx+ro_size]
+        code += b'\x48\x01\xd6'                    # add rsi, rdx
+        code += b'\x48\x81\xc6\xff\x0f\x00\x00'    # add rsi, 0xfff
+        code += b'\x48\x81\xe6\x00\xf0\xff\xff'    # and rsi, -4096
+        code += b'\x48\x81\xe7\x00\xf0\xff\xff'    # and rdi, -4096
+        code += b'\x48\x29\xfe'                    # sub rsi, rdi
+        code += b'\xba\x07\x00\x00\x00'            # mov edx, 7
+        code += b'\xb8\x0a\x00\x00\x00'            # mov eax, 10
+        code += b'\x0f\x05'                        # syscall
+
+        # decrypt: embedded_ks ^ runtime_key
+        code += b'\x4c\x89\xe8'                    # mov rax, r13
+        off_ro_size2 = len(code)
+        code += b'\x8b\x93\x00\x00\x00\x00'        # mov edx, [rbx+ro_size]
+        off_ro_ks = len(code)
+        code += b'\x4c\x8d\x83\x00\x00\x00\x00'    # lea r8, [rbx+ro_ks]
+        code += b'\x45\x31\xc9'                    # xor r9d, r9d
+        ro_loop = len(code)
+        code += b'\x47\x8a\x14\x08'                # mov r10b, [r8+r9]
+        code += b'\x4d\x89\xcb'                    # mov r11, r9
+        code += b'\x41\x83\xe3\x1f'                # and r11d, 31
+        code += b'\x47\x32\x14\x1e'                # xor r10b, [r14+r11]
+        code += b'\x46\x30\x14\x08'                # xor [rax+r9], r10b
+        code += b'\x41\xff\xc1'                    # inc r9d
+        code += b'\x41\x39\xd1'                    # cmp r9d, edx
+        code += b'\x72' + bytes([(ro_loop - (len(code) + 2)) & 0xFF])
+
+        # mprotect(ro_base, ro_size, R)
+        code += b'\x4c\x89\xef'                    # mov rdi, r13
+        code += b'\x4c\x89\xee'                    # mov rsi, r13
+        off_ro_size3 = len(code)
+        code += b'\x8b\x93\x00\x00\x00\x00'        # mov edx, [rbx+ro_size]
+        code += b'\x48\x01\xd6'                    # add rsi, rdx
+        code += b'\x48\x81\xc6\xff\x0f\x00\x00'    # add rsi, 0xfff
+        code += b'\x48\x81\xe6\x00\xf0\xff\xff'    # and rsi, -4096
+        code += b'\x48\x81\xe7\x00\xf0\xff\xff'    # and rdi, -4096
+        code += b'\x48\x29\xfe'                    # sub rsi, rdi
+        code += b'\xba\x05\x00\x00\x00'            # mov edx, 5
+        code += b'\xb8\x0a\x00\x00\x00'            # mov eax, 10
+        code += b'\x0f\x05'                        # syscall
+
+        # The epilogue's mprotect RX reads rdx as the .text size.
+        off_ro_restore = len(code)
+        code += b'\x8b\x93\x00\x00\x00\x00'        # mov edx, [rbx+size1]
+
+        ro_offsets.update({
+            'ro_size1': off_ro_size1 + 2,
+            'ro_size2': off_ro_size2 + 2,
+            'ro_size3': off_ro_size3 + 2,
+            'ro_keystream': off_ro_ks + 3,
+            'ro_restore': off_ro_restore + 2,
+        })
+
     # ---- restore stack, mprotect RX, jump to the original entry ----
     code += b'\x48\x83\xc4\x20'                # add rsp, 32
     code += b'\x4c\x89\xe0'                    # mov rax, r12
@@ -249,7 +325,7 @@ def _build_code_keyed():
     code += b'\x48\x01\xc8'                    # add rax, rcx
     code += b'\x48\xff\xe0'                    # jmp rax
 
-    return code, {
+    offsets = {
         'delta': off_delta + 3,
         'size1': off_size1 + 2,
         'entry': off_entry + 3,
@@ -257,14 +333,22 @@ def _build_code_keyed():
         'keystream': off_ks + 3,
         'key_path': off_path + 3,
     }
+    offsets.update(ro_offsets)
+    return code, offsets
 
 
 _CODE_KEYED, _OFFSETS_KEYED = _build_code_keyed()
 STUB_CODE_SIZE_KEYED = len(_CODE_KEYED)
 
+_CODE_KEYED_RO, _OFFSETS_KEYED_RO = _build_code_keyed(with_rodata=True)
+STUB_CODE_SIZE_KEYED_RO = len(_CODE_KEYED_RO)
+
 
 def _make_stub(text_size, original_entry, keystream, text_base_delta,
-               key_path: str | None = None):
+               key_path: str | None = None,
+               rodata_size: int = 0,
+               rodata_base_delta: int = 0,
+               rodata_keystream: bytes = b""):
     if text_size <= 0:
         raise ValueError("text_size must be positive")
     if original_entry < 0:
@@ -272,12 +356,27 @@ def _make_stub(text_size, original_entry, keystream, text_base_delta,
     if len(keystream) != text_size:
         raise ValueError(
             f"keystream length {len(keystream)} != text_size {text_size}")
+    if rodata_size < 0:
+        raise ValueError("rodata_size must be non-negative")
+    if rodata_size and len(rodata_keystream) != rodata_size:
+        raise ValueError(
+            f"rodata keystream length {len(rodata_keystream)} != "
+            f"rodata_size {rodata_size}")
+    if rodata_size and key_path is None:
+        raise ValueError(
+            "rodata encryption requires key_path: an unmasked keystream "
+            "would make the section trivially recoverable")
 
     if key_path is None:
         code = bytearray(_CODE)
         offsets = _OFFSETS
         header_size = STUB_HEADER_SIZE
         key_bytes = b""
+    elif rodata_size:
+        code = bytearray(_CODE_KEYED_RO)
+        offsets = _OFFSETS_KEYED_RO
+        header_size = STUB_HEADER_SIZE_KEYED_RO
+        key_bytes = key_path.encode("utf-8") + b"\x00"
     else:
         code = bytearray(_CODE_KEYED)
         offsets = _OFFSETS_KEYED
@@ -295,7 +394,7 @@ def _make_stub(text_size, original_entry, keystream, text_base_delta,
                      data_off + header_size)
     if key_path is not None:
         struct.pack_into('<i', code, offsets['key_path'],
-                         data_off + header_size + text_size)
+                         data_off + header_size + text_size + rodata_size)
 
     header = (struct.pack('<q', text_base_delta)
               + struct.pack('<q', original_entry)
@@ -305,13 +404,31 @@ def _make_stub(text_size, original_entry, keystream, text_base_delta,
         # the code's disp32, not in this field.
         header += struct.pack('<i', 0)
 
-    return bytes(code) + header + bytes(keystream) + key_bytes
+    if rodata_size:
+        # The .rodata fields sit after the keyed header, so the .text
+        # keystream offset above is unchanged.
+        header += (struct.pack('<q', rodata_base_delta)
+                   + struct.pack('<I', rodata_size)
+                   + struct.pack('<i', 0))
+        ro_ks_off = data_off + header_size + text_size
+        struct.pack_into('<i', code, offsets['ro_delta'], data_off + 24)
+        for key in ('ro_size1', 'ro_size2', 'ro_size3'):
+            struct.pack_into('<i', code, offsets[key], data_off + 32)
+        # The epilogue's mprotect RX reloads the .text size.
+        struct.pack_into('<i', code, offsets['ro_restore'], data_off + 16)
+        struct.pack_into('<i', code, offsets['ro_keystream'], ro_ks_off)
+
+    return (bytes(code) + header + bytes(keystream)
+            + bytes(rodata_keystream) + key_bytes)
 
 
 def make_stub_with_keystream(text_size: int, original_entry: int,
                              keystream: bytes,
                              text_base_delta: int | None = None,
-                             key_path: str | None = None) -> bytes:
+                             key_path: str | None = None,
+                             rodata_size: int = 0,
+                             rodata_base_delta: int = 0,
+                             rodata_keystream: bytes = b"") -> bytes:
     """Build a stub that decrypts ``text_size`` bytes at the .text base.
 
     Args:
@@ -326,11 +443,18 @@ def make_stub_with_keystream(text_size: int, original_entry: int,
             file and XORs it into the embedded keystream before decrypting.
             Without the file the stub exits(1).  Without this argument the
             keystream is embedded verbatim (legacy obfuscation-only mode).
+        rodata_size: When non-zero, the stub also decrypts this many bytes
+            at the .rodata base, bracketed by mprotect calls.
+        rodata_base_delta: Signed offset from the anchor to the .rodata base.
+        rodata_keystream: Exactly ``rodata_size`` bytes of masked keystream.
     """
     if text_base_delta is None:
         text_base_delta = -(text_size + _ANCHOR)
     return _make_stub(text_size, original_entry, keystream, text_base_delta,
-                      key_path=key_path)
+                      key_path=key_path,
+                      rodata_size=rodata_size,
+                      rodata_base_delta=rodata_base_delta,
+                      rodata_keystream=rodata_keystream)
 
 
 def make_stub_xor_decrypt(text_size: int, original_entry: int,
@@ -353,7 +477,11 @@ def make_stub_xor_decrypt(text_size: int, original_entry: int,
                       key_path=key_path)
 
 
-def stub_size(text_size: int, key_path_len: int = 0) -> int:
+def stub_size(text_size: int, key_path_len: int = 0,
+              rodata_size: int = 0) -> int:
+    if key_path_len and rodata_size:
+        return (STUB_CODE_SIZE_KEYED_RO + STUB_HEADER_SIZE_KEYED_RO
+                + text_size + rodata_size + key_path_len)
     if key_path_len:
         return (STUB_CODE_SIZE_KEYED + STUB_HEADER_SIZE_KEYED
                 + text_size + key_path_len)

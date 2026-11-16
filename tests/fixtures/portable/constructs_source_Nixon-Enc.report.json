@@ -1,0 +1,40 @@
+{
+  "build_info": {
+    "timestamp": "2026-11-14T12:53:22.831575"
+  },
+  "protection_features": {
+    "hw_locked": false,
+    "expiration": "None",
+    "network_auth": false,
+    "vm_inception": true,
+    "native_vm": false,
+    "memory_encryption": true,
+    "integrity_hmac": true
+  },
+  "metrics": {
+    "build_time_sec": 128.1073,
+    "Nixon_Enc_strings": 299
+  },
+  "outputs": [
+    {
+      "filename": "/home/nixon/Projects/adversarial-obfuscator/tests/fixtures/portable/constructs_source_Nixon-Enc_Debug_stego.py",
+      "mode": "Debug_stego",
+      "sha256": "8c9b765ce5c82e4c355675e8d8289a48f16be6bb183953ed65426864438435da"
+    },
+    {
+      "filename": "/home/nixon/Projects/adversarial-obfuscator/tests/fixtures/portable/constructs_source_Nixon-Enc_Debug.py",
+      "mode": "Debug",
+      "sha256": "41f10af2d450aafd5eaa798de0396b6e5957589df5f77ceef9fc0bfa67b7a8c8"
+    },
+    {
+      "filename": "/home/nixon/Projects/adversarial-obfuscator/tests/fixtures/portable/constructs_source_Nixon-Enc_Silent_stego.py",
+      "mode": "Silent_stego",
+      "sha256": "a9503204ae5fbda7628e38782c7a466d6bed01bfd1e08c981b3359093bd1cbf8"
+    },
+    {
+      "filename": "/home/nixon/Projects/adversarial-obfuscator/tests/fixtures/portable/constructs_source_Nixon-Enc_Silent.py",
+      "mode": "Silent",
+      "sha256": "cd913d58be9149da60cc14cbedb52bb340fb8ba4590468b3578a3309c6699bf2"
+    }
+  ]
+}

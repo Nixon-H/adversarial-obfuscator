@@ -221,6 +221,59 @@ def _static_metrics(name: str, source: str, artefact: str) -> dict:
     }
 
 
+def _runtime_metrics(artefact_path: str | Path, source_path: str | Path,
+                     runs: int = 3, timeout: int = 120) -> dict:
+    """Wall-clock cost of the loader stack, baseline vs artefact.
+
+    The static metrics answer "how much bigger"; this answers "how much
+    slower", which the bench matrix has always listed and never measured.
+    Both sides run in a subprocess so a crash on one side cannot take the
+    harness with it, and the median of ``runs`` is reported because a single
+    cold run on a loaded machine is noise, not a measurement.
+
+    A non-zero return code is recorded rather than raised: an artefact that
+    refuses to run is a result, and the caller needs to see it next to the
+    timing instead of losing the whole report to an exception.
+    """
+    def _timed(path: str | Path) -> dict:
+        samples: list[float] = []
+        rc = None
+        for _ in range(max(1, runs)):
+            started = time.perf_counter()
+            try:
+                proc = subprocess.run(
+                    [sys.executable, str(path)],
+                    capture_output=True, timeout=timeout, text=True,
+                    encoding="utf-8", errors="replace",
+                )
+                rc = proc.returncode
+            except subprocess.TimeoutExpired:
+                rc = "timeout"
+            samples.append((time.perf_counter() - started) * 1000.0)
+        samples.sort()
+        mid = len(samples) // 2
+        median = (samples[mid] if len(samples) % 2
+                  else (samples[mid - 1] + samples[mid]) / 2.0)
+        return {"median_ms": round(median, 1),
+                "min_ms": round(samples[0], 1),
+                "max_ms": round(samples[-1], 1),
+                "returncode": rc}
+
+    baseline = _timed(source_path)
+    artefact = _timed(artefact_path)
+    overhead = None
+    if baseline["median_ms"] > 0:
+        overhead = round(artefact["median_ms"] / baseline["median_ms"], 3)
+    return {
+        "runs": max(1, runs),
+        "baseline": baseline,
+        "artefact": artefact,
+        "overhead_x": overhead,
+        "baseline_path": str(source_path),
+        "artefact_path": str(artefact_path),
+    }
+
+
 def _surface_for_model(artefact: str, limit: int) -> dict:
     """Return the text an analyst model would see, without pretending we sent more."""
     if len(artefact) <= limit:
@@ -544,6 +597,14 @@ def main() -> int:
     parser.add_argument("--out-dir", default="docs/research/ai-layer-bench-2026-11-11")
     parser.add_argument("--include-packed", action="store_true",
                         help="also build the packed loader arm (slower)")
+    parser.add_argument("--runtime-artifact", default="",
+                        help="path to a built artefact; measures loader-stack "
+                             "wall-clock cost against --runtime-source")
+    parser.add_argument("--runtime-source", default="",
+                        help="unobfuscated payload to time as the baseline "
+                             "(defaults to --payload)")
+    parser.add_argument("--runtime-runs", type=int, default=3,
+                        help="timed runs per side; the median is reported")
     args = parser.parse_args()
 
     payload_path = Path(args.payload).resolve()
@@ -619,6 +680,17 @@ def main() -> int:
     else:
         print("OPENROUTER_API_KEY not set; building arms and static metrics only")
 
+    runtime: dict[str, Any] | None = None
+    if args.runtime_artifact:
+        runtime_source = Path(args.runtime_source).resolve() if args.runtime_source else payload_path
+        print(f"timing {args.runtime_artifact} against {runtime_source} "
+              f"({args.runtime_runs} runs each)", flush=True)
+        runtime = _runtime_metrics(args.runtime_artifact, runtime_source,
+                                   runs=args.runtime_runs, timeout=args.timeout)
+        print(f"runtime: baseline={runtime['baseline']['median_ms']}ms "
+              f"artefact={runtime['artefact']['median_ms']}ms "
+              f"overhead={runtime['overhead_x']}x", flush=True)
+
     report: dict[str, Any] = {
         "schema": "nixon-ai-layer-bench/1",
         "date": _dt.datetime.now(_dt.timezone.utc).isoformat(),
@@ -633,6 +705,8 @@ def main() -> int:
         "aggregates": {arm: _aggregate([c for c in cells if c.get("arm") == arm])
                        for arm in arms},
     }
+    if runtime is not None:
+        report["runtime"] = runtime
 
     json_path = out_dir / "results.json"
     json_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n",

@@ -84,14 +84,30 @@ class ProvenancePoisoner:
         return f"_{prefix}_{secrets.token_hex(6)}"
 
     def _generate_fake_call_graphs(self, tree: ast.Module) -> None:
+        # Every name gets a per-build suffix.  These fixed names collided
+        # with the loader template's own decoys: the template defines
+        # `_nx_decoy_validate_license(license_key, hardware_id)` and this
+        # pass injected `_nx_decoy_validate_license(key)`, so the lowered
+        # module carried two `define`s of one symbol and llc rejected it
+        # ("invalid redefinition of function").  That killed the native
+        # stage on every payload.  A random suffix keeps the decoys
+        # plausible while making the collision impossible.
+        _sfx = secrets.token_hex(3)
         funcs_data = [
-            ("_nx_decoy_validate_license", ["key"], "_nx_decoy_check"),
-            ("_nx_decoy_check_integrity", ["data"], "_nx_decoy_report"),
-            ("_nx_decoy_verify_signature", ["sig"], "_nx_decoy_validate_license"),
-            ("_nx_decoy_report_status", ["status"], "_nx_decoy_verify_signature"),
+            (f"_nx_decoy_validate_license_{_sfx}", ["key"], f"_nx_decoy_check_{_sfx}"),
+            (f"_nx_decoy_check_integrity_{_sfx}", ["data"], f"_nx_decoy_report_{_sfx}"),
+            (f"_nx_decoy_verify_signature_{_sfx}", ["sig"], f"_nx_decoy_validate_license_{_sfx}"),
+            (f"_nx_decoy_report_status_{_sfx}", ["status"], f"_nx_decoy_verify_signature_{_sfx}"),
         ]
 
-        for func_name, params, target in funcs_data:
+        # Define CALLEES before CALLERS.  Cython resolves names at compile
+        # time, so a function that calls one defined later in the file is
+        # rejected with "undeclared name not builtin" -- Python only
+        # tolerated the order because the call never ran at import.  The
+        # chain is validate_license -> check -> check_integrity -> report ->
+        # report_status -> verify_signature -> validate_license, so reversing
+        # the list puts every callee ahead of its caller.
+        for func_name, params, target in reversed(funcs_data):
             self._injected_func_names.add(func_name)
             self._injected_func_names.add(target)
             params_ast = [
@@ -123,9 +139,24 @@ class ProvenancePoisoner:
                         right=ast.Name(id="_nx_tmp", ctx=ast.Load()),
                     ),
                 ),
+                # Resolve the callee at CALL time through globals().  A
+                # direct `return target(x)` makes Cython resolve the name at
+                # compile time, and these decoys are merged into a much
+                # larger loader, so the definition order across that merge
+                # is not something this pass controls -- Cython rejected the
+                # file with "undeclared name not builtin".  A globals()
+                # lookup is order-independent, still a real call, and keeps
+                # the fake call graph intact for an analyst to find.
                 ast.Return(
                     value=ast.Call(
-                        func=ast.Name(id=target, ctx=ast.Load()),
+                        func=ast.Subscript(
+                            value=ast.Call(
+                                func=ast.Name(id="globals", ctx=ast.Load()),
+                                args=[], keywords=[],
+                            ),
+                            slice=ast.Constant(value=target),
+                            ctx=ast.Load(),
+                        ),
                         args=[ast.Name(id="_nx_result", ctx=ast.Load())],
                         keywords=[],
                     )

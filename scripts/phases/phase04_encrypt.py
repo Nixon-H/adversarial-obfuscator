@@ -45,7 +45,32 @@ def phase_encrypt_binary(input_o, output_enc):
     # relative import ("from . import aes"), which fails when the file
     # is run as a script ("attempted relative import with no known
     # parent package").  The package CLI is `python -m encrypt`.
-    run([sys.executable, "-m", "encrypt", "encrypt", input_o, "-o", output_enc])
+    cmd = [sys.executable, "-m", "encrypt", "encrypt", input_o, "-o", output_enc]
+    if _rodata_encryption_enabled():
+        cmd.append("--rodata")
+    run(cmd)
+
+
+def _rodata_encryption_enabled():
+    """Read ``shadow_compiler.encrypt.rodata.enabled`` from the default config.
+
+    Defaults to True: the encryptor itself refuses to touch .rodata when the
+    section is missing, empty, or shares a page with .text, so enabling it
+    cannot produce an unrunnable binary.
+    """
+    try:
+        with open(os.path.join(ROOT, "config", "default.json"),
+                  encoding="utf-8") as f:
+            cfg = json.load(f)
+        return bool(
+            cfg.get("shadow_compiler", {})
+            .get("encrypt", {})
+            .get("rodata", {})
+            .get("enabled", True)
+        )
+    except Exception as e:  # config is optional; never fail the build over it
+        log("ENCRYPT", f"  rodata config unreadable ({e}); defaulting to enabled")
+        return True
 
 
 def phase_entropy_flatten(input_bin, output_bin, config):

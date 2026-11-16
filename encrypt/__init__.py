@@ -72,6 +72,8 @@ def main(argv=None):
                             help='Encryption block size (default: 64)')
     enc_parser.add_argument('--per-block', action='store_true',
                             help='Use per-block stubs (may break cross-block jumps)')
+    enc_parser.add_argument('--rodata', action='store_true',
+                            help='Also encrypt .rodata in place (string literals)')
 
     pack_parser = sub.add_parser('pack', help='Pack a file into NIX container')
     pack_parser.add_argument('input', help='Input file to encrypt')
@@ -106,12 +108,17 @@ def main(argv=None):
             result = _encrypt.encrypt_binary(
                 args.input, args.output,
                 seed=args.seed, block_size=args.block_size,
+                encrypt_rodata=args.rodata,
             )
         print(f'Encrypted {result["num_blocks"]} blocks ({result["block_size"]}B each)')
         print(f'  Entry point:   {result["entry_point"]}')
         print(f'  Original text: {result["text_size"]} bytes')
         print(f'  Stub size:     {result["stub_size"]} bytes')
         print(f'  Key file:      {result["key_file"]} (distribute with the artifact)')
+        if result.get('rodata_encrypted'):
+            print(f'  .rodata:       {result["rodata_size"]} bytes encrypted')
+        elif result.get('rodata_skipped_reason'):
+            print(f'  .rodata:       skipped ({result["rodata_skipped_reason"]})')
 
     elif args.command == 'pack':
         container = _container.pack_encrypted_payload(args.input, args.key)

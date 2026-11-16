@@ -17,7 +17,10 @@ def main():
                         help="Output object file path (default: a.out)")
     parser.add_argument("-O", "--ollvm-passes", nargs="+",
                         default=[],
-                        choices=["bcf", "bogus", "fla", "flatten", "sub", "substitute"],
+                        choices=["bcf", "bogus", "fla", "flatten", "sub", "substitute",
+                                 "replay", "replay_poison", "transient",
+                                 "crypto_cfg", "crypto_checkpoint",
+                                 "speculative", "spec_traps"],
                         help="OLLVM obfuscation passes to apply")
     parser.add_argument("--module-name", default="nixon_module",
                         help="LLVM module name (default: nixon_module)")

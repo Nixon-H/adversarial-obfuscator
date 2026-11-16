@@ -184,6 +184,67 @@ def _value_ref(s: str) -> str:
     return s
 
 
+def _split_args_outside_strings(s: str) -> list:
+    """Split a call's argument list on commas that are not inside a string.
+
+    A regex literal like ``"\\d{1,3}\\.\\d{1,3}"`` contains commas; a plain
+    ``split(",")`` split it into fragments that were then re-typed as
+    separate arguments, and llc rejected the module.
+    """
+    out = []
+    cur = []
+    in_str = False
+    esc = False
+    depth = 0
+    for ch in s:
+        if in_str:
+            cur.append(ch)
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+            cur.append(ch)
+        elif ch in "([{<":
+            depth += 1
+            cur.append(ch)
+        elif ch in ")]}>":
+            depth = max(0, depth - 1)
+            cur.append(ch)
+        elif ch == "," and depth == 0:
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    if cur:
+        out.append("".join(cur))
+    return out
+
+
+def _phi_placeholder(ptype: str) -> str:
+    """A legal constant for a phi entry of the given type.
+
+    A phi entry must be a value of the phi's type; a string literal there is
+    rejected by llc ("expected value token").  irgen can emit one (a decoy
+    whose branches return different string constants), so the lowering
+    substitutes a type-correct constant instead of forwarding the literal.
+    """
+    t = ptype.strip()
+    if t == "i1":
+        return "false"
+    if t.startswith("i") and t[1:].isdigit():
+        return "0"
+    if t == "ptr":
+        return "null"
+    if t in ("float", "double", "half"):
+        return "0.0" if t != "half" else "0xH0000"
+    return "zeroinitializer"
+
+
 class NixonIRParser:
     def __init__(self, text: str):
         self.text = text
@@ -494,7 +555,14 @@ class NixonIRParser:
                 args_str = (m.group(3) or "").strip()
                 args = []
                 if args_str:
-                    for a in args_str.split(","):
+                    # Split on commas OUTSIDE string literals.  A plain
+                    # `split(",")` tore a regex literal apart:
+                    #   "\d{1,3}\.\d{1,3}"  ->  "\d{1"  +  "3}\.\d{1"  + ...
+                    # and the pieces were then re-typed as separate
+                    # arguments, producing
+                    #   call i32 @__method_findall(i32 %6, i32 "\d{1, i32 3}...")
+                    # which llc rejected with "expected value token".
+                    for a in _split_args_outside_strings(args_str):
                         a = a.strip()
                         if a:
                             args.append(self._resolve_call_arg(a, var_types))
@@ -718,11 +786,19 @@ def _emit_instruction(instr: dict) -> str:
         return f"{result_prefix}call {ret_type} {_llvm_id(callee)}({args})"
 
     if opcode == "phi":
-        incoming = ", ".join(
-            f"[{_value_ref(inc['value'])}, %{inc['label']}]"
-            for inc in instr.get("incoming", [])
-        )
-        return f"{result_prefix}phi {instr['type']} {incoming}"
+        # A phi entry must be a VALUE of the phi's type.  irgen can put a
+        # string literal there (a decoy's `"enterprise"` / `"none"`), and
+        # `_value_ref` passes literals through, so llc rejected the module
+        # with "expected value token".  Substitute a legal constant of the
+        # phi's type for any literal entry.
+        ptype = instr["type"]
+        entries = []
+        for inc in instr.get("incoming", []):
+            val = _value_ref(inc["value"])
+            if val.strip().startswith('"'):
+                val = _phi_placeholder(ptype)
+            entries.append(f"[{val}, %{inc['label']}]")
+        return f"{result_prefix}phi {ptype} {', '.join(entries)}"
 
     if opcode == "select":
         cond = _value_ref(instr["cond"])
@@ -816,6 +892,38 @@ def _renumber_function(func: dict) -> None:
                 instr[key] = rewrite(instr[key])
 
 
+def _unescape_ir_string(s: str) -> str:
+    """Decode the escapes irgen applies when it writes a string literal.
+
+    irgen's ``const_str`` writes ``\\"``, ``\\\\``, ``\\n``, ``\\t``, ``\\r``,
+    ``\\v``, ``\\f`` and ``\\xNN``.  The lowering needs the real characters
+    so it can emit a byte-accurate LLVM constant (declared length must
+    equal the bytes llc sees, or llc rejects the module).
+    """
+    out = []
+    i = 0
+    n = len(s)
+    simple = {"n": "\n", "t": "\t", "r": "\r", "v": "\x0b", "f": "\x0c",
+              "\\": "\\", '"': '"', "0": "\0"}
+    while i < n:
+        ch = s[i]
+        if ch != "\\" or i + 1 >= n:
+            out.append(ch)
+            i += 1
+            continue
+        nxt = s[i + 1]
+        if nxt == "x" and i + 3 < n + 1:
+            try:
+                out.append(chr(int(s[i + 2:i + 4], 16)))
+                i += 4
+                continue
+            except ValueError:
+                pass
+        out.append(simple.get(nxt, nxt))
+        i += 2
+    return "".join(out)
+
+
 def lower_ir_to_llvm(ir_text: str, module_name: str = "nixon_module") -> str:
     parser = NixonIRParser(ir_text)
     module = parser.parse()
@@ -830,8 +938,32 @@ def lower_ir_to_llvm(ir_text: str, module_name: str = "nixon_module") -> str:
     lines.append("")
 
     for s, name in parser.string_literals.items():
-        escaped = s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\0A")
-        raw = s.encode("utf-8")
+        # `s` arrives from the IR text with its escapes already applied
+        # (irgen writes \" \\ \n \t \r \xNN).  Re-escaping it here turned a
+        # single backslash into a double one, so the declared array length
+        # no longer matched the bytes llc actually saw:
+        #   [3 x i8] c"\\\"\00"  -> llc: constant expression type mismatch
+        # Decode the IR escapes to real characters first, then emit a
+        # correct LLVM C string whose length is derived from those bytes.
+        value = _unescape_ir_string(s)
+        out = []
+        for ch in value:
+            if ch == "\\":
+                out.append("\\5C")
+            elif ch == '"':
+                out.append("\\22")
+            elif ch == "\n":
+                out.append("\\0A")
+            elif ch == "\t":
+                out.append("\\09")
+            elif ch == "\r":
+                out.append("\\0D")
+            elif ord(ch) < 0x20 or ord(ch) == 0x7f:
+                out.append("\\%02X" % ord(ch))
+            else:
+                out.append(ch)
+        escaped = "".join(out)
+        raw = value.encode("utf-8")
         length = len(raw) + 1
         lines.append(f'{name} = private unnamed_addr constant [{length} x i8] c"{escaped}\\00"')
     if parser.string_literals:

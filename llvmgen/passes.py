@@ -13,6 +13,40 @@ def _get_new_label(base: str = "L") -> str:
     return f"{base}_{h}"
 
 
+_MODULE_PREAMBLE_PREFIXES = (
+    "; ModuleID",
+    "source_filename",
+    "target datalayout",
+    "target triple",
+)
+
+
+def _insert_header_decls(llvm_ir: str, decls: str) -> str:
+    """Insert module-level declarations after the module preamble.
+
+    LLVM's parser requires ``; ModuleID`` / ``source_filename`` /
+    ``target datalayout`` / ``target triple`` to be the first entities in a
+    module.  Prepending a ``declare`` to the whole text therefore produces
+    "expected top-level entity" and the pass output cannot be assembled.
+    Insert after the last preamble line instead.
+    """
+    decls = decls.strip("\n")
+    if not decls:
+        return llvm_ir
+    lines = llvm_ir.split("\n")
+    insert_idx = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(_MODULE_PREAMBLE_PREFIXES):
+            insert_idx = i + 1
+            continue
+        break
+    lines.insert(insert_idx, decls)
+    return "\n".join(lines)
+
+
 def _split_functions(llvm_ir: str) -> tuple[list[str], list[tuple[str, str, list[str]]]]:
     lines = llvm_ir.split("\n")
     header_lines = []
@@ -138,7 +172,13 @@ def _repair_phis(blocks: list[dict]) -> None:
                 continue
             have = {label for _value, label in entries}
             missing = [p for p in incoming_preds if p not in have]
-            if not missing:
+            # A pass can also REMOVE a branch, leaving the phi with an entry
+            # for a block that is no longer a predecessor.  LLVM rejects that
+            # too ("PHINode should have one entry for each predecessor"), and
+            # this function only ever added entries, never pruned them -- so
+            # the flattening pass's rebuilt CFG failed llc on every payload.
+            stale = have - set(incoming_preds)
+            if not missing and not stale:
                 new_lines.append(line)
                 continue
             first_value = entries[0][0]
@@ -147,22 +187,39 @@ def _repair_phis(blocks: list[dict]) -> None:
             # not ("Instruction does not dominate all uses").  The new
             # predecessors are dead paths, so the value does not matter.
             zero = _zero_for_type(vtype, first_value)
+            kept = [(v, p) for v, p in entries if p in set(incoming_preds)]
+            if not kept:
+                kept = [(zero, incoming_preds[0])]
+            rebuilt = ", ".join(f"[ {v}, %{p} ]" for v, p in kept)
             extra = ", ".join(f"[ {zero}, %{p} ]" for p in missing)
-            new_lines.append(f"{indent}{result} = phi {vtype} {extra}, {rest}")
+            joined = f"{rebuilt}, {extra}" if extra else rebuilt
+            new_lines.append(f"{indent}{result} = phi {vtype} {joined}")
         block["lines"] = new_lines
 
 
 def _zero_for_type(vtype: str, fallback: str) -> str:
-    """A constant of the given type, for a phi's new entry."""
+    """A LEGAL constant of the given type, for a phi's new entry.
+
+    Returning the original operand verbatim (the old fallback) put a string
+    literal into a phi:
+      %18 = phi i32 [ "none", %bb5 ], ...
+    which llc rejects with "expected value token".  A phi entry must be a
+    value of the phi's type, so an unrecognised type still gets a constant
+    of that type rather than whatever the first entry happened to be.
+    """
     if vtype == "i1":
         return "false"
-    if vtype in ("i8", "i16", "i32", "i64"):
+    if vtype in ("i8", "i16", "i32", "i64", "i128"):
         return "0"
     if vtype == "ptr":
         return "null"
     if vtype in ("float", "double"):
         return "0.0"
-    return fallback
+    if vtype == "half":
+        return "0xH0000"
+    # A vector type, e.g. <4 x i32>: zeroinitializer is valid for every
+    # first-class type and needs no per-element spelling.
+    return "zeroinitializer"
 
 
 def apply_bcf(llvm_ir: str, probability: float = 0.3) -> str:
@@ -527,8 +584,6 @@ def apply_replay_poison(llvm_ir: str, num_dead_cases: int = 4) -> str:
     parts.extend(result_bodies)
 
     stub = """
-declare i64 @__rdrand_stub()
-
 define internal i64 @__rdrand_stub() {
 entry:
   %val = call i64 @llvm.readcyclecounter()
@@ -538,7 +593,7 @@ entry:
 """
     result = "\n".join(parts)
     if "declare i64 @llvm.readcyclecounter" not in result:
-        result = "declare i64 @llvm.readcyclecounter()\n" + result
+        result = _insert_header_decls(result, "declare i64 @llvm.readcyclecounter()")
     if "define internal i64 @__rdrand_stub" not in result:
         result += stub
     return result
@@ -643,7 +698,7 @@ def apply_speculative_traps(ir_text: str, config: dict | None = None) -> str:
         result = "\n".join(lines)
 
     if "declare i64 @llvm.expect.i64" not in result:
-        result = "declare i64 @llvm.expect.i64(i64, i64)\n" + result
+        result = _insert_header_decls(result, "declare i64 @llvm.expect.i64(i64, i64)")
 
     return result
 
@@ -664,6 +719,7 @@ def apply_transient_execution(ir_text: str, config: dict) -> str:
         new_blocks = []
         prev_name = None
         prev_idx = -1
+        entry_name = blocks[0]["name"]
 
         for i, block in enumerate(blocks):
             lines = block["lines"]
@@ -674,9 +730,13 @@ def apply_transient_execution(ir_text: str, config: dict) -> str:
                     term_idx = j
                     break
 
-            if term_idx >= 0 and prev_name is not None:
-                prev_addr = f"ptrtoint (blockaddress(@{func_name.split('(')[0]}, %{prev_name}) to i64)"
-                curr_addr = f"ptrtoint (blockaddress(@{func_name.split('(')[0]}, %{block['name']}) to i64)"
+            # LLVM forbids `blockaddress` on a function's entry block, so the
+            # first block can never be the "previous" block of a marker.
+            if term_idx >= 0 and prev_name is not None and prev_name != entry_name:
+                # `blockaddress` yields a `ptr`; `ptrtoint` needs that type
+                # spelled out or LLVM rejects the constant expression.
+                prev_addr = f"ptrtoint (ptr blockaddress(@{func_name.split('(')[0]}, %{prev_name}) to i64)"
+                curr_addr = f"ptrtoint (ptr blockaddress(@{func_name.split('(')[0]}, %{block['name']}) to i64)"
                 size_expr = f"sub (i64 {curr_addr}, i64 {prev_addr})"
                 call_line = f"  call void @__transient_block_entry(i64 {prev_idx}, i64 {prev_addr}, i64 {size_expr})"
                 lines.insert(term_idx, call_line)
@@ -698,7 +758,7 @@ def apply_transient_execution(ir_text: str, config: dict) -> str:
 
     if not has_declare and "__transient_block_entry" in result:
         declare = "declare void @__transient_block_entry(i64, i64, i64)"
-        result = declare + "\n" + result
+        result = _insert_header_decls(result, declare)
 
     return result
 
@@ -802,7 +862,7 @@ declare i1 @__cfg_verify_block(i64, i64)
 declare void @__cfg_abort()
 """
     if "declare i64 @__cfg_chain_init" not in result:
-        result = decls + result
+        result = _insert_header_decls(result, decls)
 
     return result
 

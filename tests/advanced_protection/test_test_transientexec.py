@@ -52,11 +52,14 @@ small:
         from llvmgen.passes import apply_transient_execution
         result = apply_transient_execution(self.MULTI_BLOCK_IR, {})
         assert "__transient_block_entry" in result
-        # first block (entry) should not have a call (no predecessor)
-        # entry erases nothing (no prev), so no call with entry as prev_addr
-        # neg and pos each get a call erasing their predecessor (entry)
+        # The entry block has no predecessor, so it gets no call.  It also
+        # cannot be a predecessor: LLVM rejects `blockaddress` on a
+        # function's entry block, so `neg` (whose only predecessor is
+        # `entry`) gets no call either.  Only `pos` erases a predecessor
+        # that may legally appear in a blockaddress.
         count = result.count("call void @__transient_block_entry")
-        assert count == 2, f"Expected 2 calls for 3 blocks (entry has no predecessor), got {count}"
+        assert count == 1, f"Expected 1 call for 3 blocks, got {count}"
+        assert "blockaddress(@multi, %entry)" not in result
 
     def test_transient_pass_does_not_modify_single_block(self):
         from llvmgen.passes import apply_transient_execution
@@ -126,4 +129,6 @@ small:
         from llvmgen.passes import apply_all
         result = apply_all(self.MULTI_BLOCK_IR, ["transient"])
         assert "__transient_block_entry" in result
-        assert "blockaddress(@multi, %entry)" in result
+        # `entry` is never a blockaddress operand: LLVM rejects it.
+        assert "blockaddress(@multi, %entry)" not in result
+        assert "blockaddress(@multi, %neg)" in result
