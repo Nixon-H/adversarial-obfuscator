@@ -36,7 +36,8 @@ def _run_pipeline_build(source_path, cwd):
     env["PYTHONPATH"] = REPO_ROOT + os.pathsep + env.get("PYTHONPATH", "")
     return subprocess.run(
         [sys.executable, "-m", "obfuscator.core.pipeline", "build",
-         source_path, "--access", "net-url=https://127.0.0.1:9443/"],
+         source_path, "--in-place",
+         "--access", "net-url=https://127.0.0.1:9443/"],
         cwd=cwd, env=env, capture_output=True, text=True,
         timeout=_BUILD_TIMEOUT)
 

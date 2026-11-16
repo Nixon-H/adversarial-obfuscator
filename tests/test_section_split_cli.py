@@ -34,8 +34,8 @@ def _build(source, cwd, extra=()):
     env["NIXON_LOG_REDIRECT"] = "0"
     env["PYTHONPATH"] = REPO_ROOT + os.pathsep + env.get("PYTHONPATH", "")
     return subprocess.run(
-        [sys.executable, "-m", "obfuscator.core.pipeline", "build", source]
-        + list(extra),
+        [sys.executable, "-m", "obfuscator.core.pipeline", "build", source,
+         "--in-place"] + list(extra),
         cwd=cwd, env=env, capture_output=True, text=True, timeout=1800)
 
 

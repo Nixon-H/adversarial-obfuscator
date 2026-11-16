@@ -15,7 +15,6 @@ Both are pinned here at the IR-text level, which is where they surfaced.
 import sys
 import os
 
-import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)

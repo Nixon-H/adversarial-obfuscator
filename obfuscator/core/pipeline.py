@@ -4968,6 +4968,11 @@ def build_parser():
     build.add_argument('--no-section-split', dest='section_split', action='store_false',
                        help='Ship the payload as a single blob instead of N sealed sections (default: sections are on)')
     build.add_argument('--section-count', type=int, default=4, help='Number of sealed sections when section splitting is on (default 4)')
+    build.add_argument('--in-place', dest='in_place', action='store_true',
+                       help='Write dist/ beside the source (default: stage into '
+                            'dist-staging/<name>-<time>/ so the source directory '
+                            'stays clean -- a build directory is a different '
+                            'trust boundary from the artefact)')
     build.add_argument('--opt-level', dest='opt_level', type=int, default=None,
                        help='Protection ladder 0-5: resolve the 17 canonical transform flags from the level. Without it the loader build applies the full set')
     build.add_argument('--bind', help='Bind files inside payload')
@@ -5509,8 +5514,23 @@ def main():
                                  t.fail(str(e))
             final_rows = []
             base_name = os.path.splitext(os.path.basename(args.source))[0]
-            dist_dir = os.path.join(os.path.dirname(os.path.abspath(args.source)), "dist")
+            # Clean staging (Tier 3 #6).  Writing dist/ beside the source is
+            # what leaked the symbol table and a plaintext payload copy in
+            # the 2026-11-14 benchmark.  The build now stages into an
+            # isolated directory by default and says so; --in-place restores
+            # the old behaviour for callers that need it (the test fixtures
+            # locate artefacts beside the source).
+            _src_dir = os.path.dirname(os.path.abspath(args.source))
+            if getattr(args, "in_place", False):
+                dist_dir = os.path.join(_src_dir, "dist")
+            else:
+                dist_dir = os.path.join(
+                    _src_dir, "dist-staging", "%s-%d" % (base_name, int(time.time())))
             os.makedirs(dist_dir, exist_ok=True)
+            if not getattr(args, "in_place", False):
+                UI._out(" %sℹ Clean staging: artefacts go to %s (source "
+                        "directory untouched; --in-place to override)%s"
+                        % (UI.CYAN, dist_dir, UI.RESET))
             # The core was built before the packer ran (it is embedded in
             # the bundle, which is the only place the loader can find it).
             # Report which backend the build actually produced.
