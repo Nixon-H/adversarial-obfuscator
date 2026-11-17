@@ -633,3 +633,102 @@ now the realistic threat model. The flag is documented in its `--help`.
 | 17 | string-seal key ships inline, so the artefact is self-decryptable | **mitigated**: `--string-key-env` gives real confidentiality; default documented |
 | 18 | `kek_env` keyless mode existed but was unreachable from `build` | **fixed** |
 | 19 | `--rename-internal` absent from `build`; enabling it broke execution in a full stack | **exposed as opt-in, default OFF, failure documented** |
+
+
+---
+
+# Part 5 — OpenCode Go free tier (operator-supplied key)
+
+The operator supplied an OpenCode Go key and instructed: **free tier only,
+nothing else**.
+
+## 5.1 What the key can reach
+
+| model | status |
+|---|---|
+| `deepseek-v4.1-flash` | **blocked** — `GoUsageLimitError: monthly, resets in 9d 1h` |
+| `deepseek-v4-pro` | paid Go model (not free) |
+| `longcat-2.5-free` | works |
+| `hy4-flash-free` | works |
+| `beam-free` | works |
+| `iceman-contributor-free` | refuses: "trains on request data" (opt-in required) |
+
+**DeepSeek V4.1 Flash is a paid Go model and its monthly limit is
+exhausted.** It cannot be benchmarked on this key until the limit resets
+(9 days) or Extra Usage is enabled. No free DeepSeek model exists on this
+plan, so the free-tier runs below are **not DeepSeek** and are labelled by
+their real model names throughout.
+
+The key is read from `OC_GO_KEY` in the environment. It was never written
+into a repository file. (A copy was briefly placed in
+`~/.config/opencode/opencode.json` while diagnosing the CLI's auth path;
+the CLI never read it, and the file was restored from backup — no key
+remains on disk.)
+
+## 5.2 Free-tier ablation (3 models x 4 arms)
+
+| model | arm | plaintext in file | names | secrets | status |
+|---|---|---|---|---|---|
+| longcat-2.5-free | raw | 4 | 3/5 | 3/4 | ok |
+| longcat-2.5-free | lex | 4 | 0/5 | **4/4** | ok |
+| longcat-2.5-free | data | 0 | – | – | truncated |
+| longcat-2.5-free | full | 0 | – | – | truncated |
+| hy4-flash-free | raw | 4 | 3/5 | 3/4 | ok |
+| hy4-flash-free | lex | 4 | 1/5 | 3/4 | ok |
+| hy4-flash-free | data | 0 | – | – | truncated |
+| hy4-flash-free | full | 0 | – | – | truncated |
+| beam-free | raw | 4 | 3/5 | 3/4 | ok |
+| beam-free | lex | 4 | 0/5 | 3/4 | ok |
+| **beam-free** | **data** | **0** | **3/5** | **0/4** | **ok** |
+| beam-free | full | 0 | – | – | truncated |
+
+### The one completed `data` cell — verified, not assumed
+
+`beam-free` returned 0/4 secrets from the string-encrypted arm. Checked
+against the artefact rather than trusted:
+
+* none of the 4 real secrets appear in the file (0/4 plaintext);
+* the "secrets" the model did report were **ciphertext hex copied out of
+  the file** (e.g. `8bdf3ef0e40bad07…`), not plaintext;
+* a second run at the same budget returned only the *variable names*
+  (`API_ENDPOINT`, `API_TOKEN`, …) — again no values.
+
+So for this model the string-encryption arm genuinely blocked secret
+recovery, and the model's confident-looking output was a false positive.
+
+### What the free models do NOT show
+
+`lex` (rename + unicode ids + metadata strip) left **3/4 to 4/4** secrets
+recoverable on all three models, because it does not touch literals. This
+matches the DeepSeek and Kern runs: renaming is not confidentiality.
+
+## 5.3 Honest limits
+
+* **7 of 12 cells are truncated**, not blocked. The free models burn the
+  whole 16k budget on reasoning for the larger arms and return
+  `finish_reason=length` with empty content. The harness now flags that as
+  `measurement_failed` — the first version of this run scored those as
+  "0/4 recovered", which would have been a false protection win. That is
+  exactly the error class the earlier DeepSeek run taught, applied here
+  before drawing any conclusion.
+* **No DeepSeek data point exists on this key.** The DeepSeek V4.1 Flash
+  numbers in Part 4 came from the Mistral route
+  (`mistral/deepseek-v4-1-flash-1017`) and remain the only DeepSeek
+  measurements in this report.
+* The `full` arm was never completed by any free model, so no free-tier
+  claim is made about the full stack.
+
+## 5.4 Conclusion for this phase
+
+The free tier corroborates the two findings that matter and does not
+overturn them:
+
+1. **Renaming does not protect secrets** — every free model recovered
+   3/4–4/4 from the `lex` arm.
+2. **String sealing does block secret recovery** — the one completed
+   `data` cell recovered 0/4, with the model's output verified to be
+   ciphertext, not plaintext.
+
+The `--transforms string-key-env=NAME` fix from Part 4 remains the
+recommended control for secret-bearing payloads; nothing in this phase
+changes that.

@@ -1197,3 +1197,61 @@ The keyless answer was `{"secrets": []}` — an empty result, not a refusal.
   (`InventoryReconciler()` called with 2 args, no `__init__`); fixed, it now
   prints `AUDIT f7d946695f44c373`.
 * CLI.md regenerated.
+
+## 2026-11-17 (later) — OpenCode Go free tier
+
+Operator supplied an OpenCode Go key: free tier only, nothing else.
+
+### What the key reaches
+
+| model | status |
+|---|---|
+| deepseek-v4.1-flash | BLOCKED - monthly Go limit exhausted (resets 9d) |
+| longcat-2.5-free / hy4-flash-free / beam-free | work |
+| iceman-contributor-free | refuses: trains on request data |
+
+DeepSeek V4.1 Flash is a PAID Go model and its limit is exhausted, and there
+is no free DeepSeek on this plan. The free-tier runs are labelled by their
+real names — none of it is reported as DeepSeek. The DeepSeek numbers in the
+DS-via-Mistral phase came from the Mistral route and remain the only
+DeepSeek measurements.
+
+Key handling: read from OC_GO_KEY, never written to a repo file. A copy was
+briefly added to ~/.config/opencode/opencode.json while diagnosing the CLI
+auth path; the CLI never read it, and the file was restored from backup — no
+key remains on disk.
+
+### Free-tier ablation (3 models x 4 arms)
+
+| model | arm | plaintext | names | secrets |
+|---|---|---|---|---|
+| longcat-2.5-free | raw | 4 | 3/5 | 3/4 |
+| longcat-2.5-free | lex | 4 | 0/5 | 4/4 |
+| hy4-flash-free | raw | 4 | 3/5 | 3/4 |
+| hy4-flash-free | lex | 4 | 1/5 | 3/4 |
+| beam-free | raw | 4 | 3/5 | 3/4 |
+| beam-free | lex | 4 | 0/5 | 3/4 |
+| beam-free | data | 0 | 3/5 | 0/4 |
+
+7 of 12 cells are truncated (finish_reason=length, empty content), not
+blocked. The harness now flags that as measurement_failed; the first version
+scored them as "0/4 recovered", which would have been a false protection
+win — the same error class the DeepSeek run taught, caught here before
+drawing a conclusion.
+
+### Verified, not assumed
+
+The one completed data cell (beam-free, 0/4 secrets) was checked against the
+artefact: none of the 4 real secrets appear in the file, and the "secrets"
+the model reported were ciphertext hex copied out of the file. A second run
+returned only variable names. So string sealing genuinely blocked recovery,
+and the model's confident output was a false positive.
+
+### Corroborates the two findings that matter
+
+1. Renaming does not protect secrets (3/4-4/4 recovered from lex on every
+   free model).
+2. String sealing does block secret recovery (0/4, verified).
+
+Nothing here changes the --transforms string-key-env=NAME recommendation
+from the DS-via-Mistral phase.
