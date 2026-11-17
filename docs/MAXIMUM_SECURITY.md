@@ -351,12 +351,14 @@ same gate for cents.
 
 ### 5.3 The three maximum commands
 
-Pick one. **LOCAL** runs entirely on this machine. **CLOUD** adds the
-per-OS Cython build farm (windows → `.pyd`, ubuntu → `.so`, macos →
-`.dylib`; needs farm credentials). **ABSOLUTE** is every namespace and
-every gate at once (cloud + all of it). Nuitka was removed 2026-11-17 —
-the farm builds Cython blobs now, and `--package compile` no longer
-exists.
+Pick one. **LOCAL** runs entirely on this machine and produces a native
+blob for the **current OS only** (a Linux build makes a Linux `.so`;
+cross-compiling Python extensions needs the target toolchain). **CLOUD**
+and **ABSOLUTE** additionally trigger the per-OS Cython build farm —
+windows → `.pyd`, ubuntu → `.so`, macos → `.dylib`, each built with
+Cython → the C transform layer → the platform compiler — and embed all
+the blobs, so the payload runs natively on every OS. Nuitka was removed
+2026-11-17; `--package compile` no longer exists.
 
 All three need the string-seal shard. Keep it out of the artefact: without
 it the artefact ships its own seal key and an analyst — or an LLM — can
@@ -397,6 +399,10 @@ python3 -m obfuscator.core.pipeline build payload.py \
 Output: `<dirname(payload)>/dist/`. The `_Packed` and `_Stego` variants are
 written beside the payload, not in `dist/` — ship `dist/`.
 
+Native scope: **current OS only** (`--skip-cloud` keeps the build local,
+and Python extensions cannot be cross-compiled without the target
+toolchain). For win/mac/mac-arm blobs, use CLOUD or ABSOLUTE.
+
 #### CLOUD maximum — adds the per-OS Cython build farm
 
 ```bash
@@ -414,7 +420,11 @@ python3 -m obfuscator.core.pipeline build payload.py \
 Needs build-farm credentials (pipeline config or `--cf-token`) and network.
 The farm runs a 3-OS matrix (windows → `.pyd`, ubuntu → `.so`, macos →
 `.dylib`), each built with Cython → the C transform layer → the platform
-compiler, so the payload runs natively on every OS.
+compiler, so the payload runs natively on every OS. The farm is triggered
+BY the build now (no separate build-farm step): it runs after the local
+blob, the per-OS blobs are merged into the loader, and a farm failure
+degrades to bytecode fallback on the other OSes — the local blob is
+unaffected.
 **`stego` conflicts with the cloud build** (enforced, exit 1) — that is why
 it is absent from `--package` here.
 
