@@ -840,3 +840,135 @@ Corrected scope: only the files that actually leak are deleted — the
 `_Nixon-Enc_*.py` intermediates stay (callers need them) and are counted in
 the printed warning instead, so the operator still learns not to ship the
 source directory. `test_section_split_cli.py`: 2 passed.
+
+## 2026-11-17 — GLM 5.3 Flash attack campaign (varied positions) + fixes
+
+Full report: `docs/research/ai-layer-bench-2026-11-17/RESULTS.md`.
+
+### Round-2 E2E failures closed first
+
+* **Hybrid loader had no interpreter-integrity gate.** `{integrity_check_source}`
+  lives in LOADER_HEAD's template; the hybrid template never carried it, so a
+  sectioned artefact shipped with NO interpreter check — the 2026-11-14 bench
+  capture shim that a packed build refuses ran straight through a sectioned
+  build. Fix: `generate_hybrid_loader_script` injects INTEGRITY_CHECK_SOURCE
+  into the phase-4 suffix (before the entry point), binds the four `_nixon_*`
+  aliases it needs from `_ICS_ALIAS_MODULES`, and **fails the build** on an
+  alias with no module mapping (a future rename inside the sources template
+  can no longer silently ship a loader that NameErrors at run time).
+* **Tamper test blob finder was base64-only.** The sealed section pack is a
+  base85 literal, so the old `[A-Za-z0-9+/=]{200,}` finder matched nothing on
+  a sectioned artefact. The test now targets `_NX_SECTION_PACK` directly.
+* Also fixed three latent wrong-alias references (`運営` vs `운영`) in a
+  runtime secure-delete snippet — the babel-alias transplant trap again;
+  the alias dict is now DERIVED from the sources bytes, never typed.
+* `tests/conftest.py` seeds a session default for the two new loader kwargs
+  (see below) so in-process loader-exec tests keep working; subprocess-based
+  tests still build through the real CLI and ship the gates.
+
+### Benchmark findings → fixes (all shipped, all default-on)
+
+1. **Foreign-exec extraction (position A, attack 3) — BREACH → FIXED.**
+   `exec(artifact, {"__name__": "not_main"})` skipped the entry point,
+   survived every gate, exposed the reconstructed key and the loader's own
+   HMAC-verified join, and recovered all three payload secrets in two peeled
+   layers. Fix: `IDENTITY_GATE_TOP` (name + `__file__` + `argv[0]` agreement,
+   kill exit 2 before ANY state) in both shipped loader templates, and
+   `IDENTITY_GATE_STAGE` (name check) in every interior bootstrap
+   (EXEC_TEMPLATE, ZIP_LOADER_TEMPLATE, stego) — the whole exec chain dies at
+   every layer. New tests: `tests/test_identity_gate.py` (7).
+2. **Loader-code tamper (position A, attack D) — BREACH → FIXED.** Flipping
+   a byte in the loader CODE (85% of the file, outside the HMAC'd pack)
+   left the artefact running. Fix: the hybrid loader now carries the
+   Merkle+HMAC self-check (same construction as the packed loader); stamped
+   by `_stamp_hybrid_selfcheck` in the variant writer (last content step,
+   idempotent, loud failure), runs before any key material is reconstructed.
+   11-offset sweep: every parseable flip → `Self-check error` rc 137.
+3. **Token binding was decorative (position B2) — BREACH → FIXED.** The
+   build embedded the token's key material as the customer salt: the
+   artefact ran WITHOUT its token and an offline analyst could derive the
+   mask from the embedded literal. Fix: `seal_salt` (build-side mask) split
+   from `customer_salt` (loader-embedded, now empty for token builds);
+   `_key_binding_source` no longer substitutes the material into the
+   emitted source in licence mode (it leaked as a dead literal); the hybrid
+   loader pins the token payload hash and refuses forged tokens with
+   `licence token does not match the pinned token`; a missing token prints
+   `licence token required: set NIXON_LICENCE or place licence.json beside
+   the artefact` before the fail-closed kill (rc 137).
+4. **`--licence salt=` documented honestly**: the salt ships in the
+   artefact, so it is a per-customer DIFFER, not a secret — the CLI help
+   now says so and points at `token=` for real binding. Offline
+   reimplementation against a no-licence/salt-mode artefact remains possible
+   by design (keys must ship for standalone runs) — the documented boundary,
+   not hidden.
+
+### Capture routes (position C): all blocked
+
+zipfile-wrap shim → rc 3 `interpreter-integrity`, no capture.log; plain
+external sitecustomize → rc 3 `startup-hook-external`; in-process exec
+probe → refused by the identity gate.
+
+### Scorecard (after fixes)
+
+static strings blocked; foreign-exec blocked; loader tamper blocked;
+capture routes blocked; token-bound artefact undecryptable offline and
+inert without its token; no-licence/salt offline reimplementation = the
+documented boundary (keys ship by design).
+
+### Bug audit — two real bugs found and fixed (2026-11-17, same day)
+
+1. **`_nx_strict_fail` killed the test runner (and hid alert regressions).**
+   The emitted snippet did `import os as _nx_st_os` locally, which shadowed
+   the fake `_nx_st_os` the snippet test injects — `os._exit(137)` ran for
+   real inside pytest (SIGKILL of the whole run, every time the full suite
+   reached that test). The snippet now honours a pre-bound `_nx_st_os`
+   (`globals().get("_nx_st_os") or __import__("os")`), preserving runtime
+   semantics while making the test observe instead of die.
+2. **The kill ladder's server alert silently missed ~17% of builds
+   (NFKC).** Python NFKC-normalises identifiers at compile time, so
+   `def <babel name>` binds the NORMALISED key while the runtime
+   `globals().get("<raw name>")` looks up the raw string. 34/200 draws of
+   `get_random_var_name` produced non-invariant names (combining sequences:
+   Bengali ঁ, Devanagari ़), so `emit_kill_snippet(alert_fn=...)` embedded a
+   lookup key that did not exist — every strict-detection/kill alert was
+   lost in those builds, and `test_kill_ladder_reports_to_alert_before_wipe`
+   flaked identically (reproduced 40/40 in one process, 0/40 after the
+   fix). `get_random_var_name` now redraws until `NFKC(raw) == raw`.
+
+### Full-suite regression sweep (2026-11-17, continued)
+
+The first complete `tests/` run in this session surfaced 24 failures + 5
+errors. Triage: three were caused by this session's gate emission (raw
+template slices and shape assertions that predate the gates), the rest
+were PRE-EXISTING breakage from earlier commits that no complete run had
+reached. All fixed:
+
+* STAGE-gate `\n` escapes (identical bug class as the TOP gate): the Edit
+  written into a NON-raw triple-quoted template turned `\n` into a real
+  newline — every EXEC_TEMPLATE/ZIP layer was syntactically broken
+  (`test_artifact_tamper` untampered run, section_split_cli).
+* conftest's partial() replacement of `generate_hybrid_loader_script`
+  broke the facade identity test — replaced with a call-time sentinel
+  (`identity_gate=None` + module-level `_NX_TEST_LOADER_GATES_OFF` flag);
+  explicit kwargs still win, facade identity holds.
+* `build_local_cython` shipped two REAL NameErrors (undefined
+  `sysconfig` dead line, undefined `setup_content`) from commit cb09aa5 —
+  the local native path would crash on every payload. setup_content now
+  builds the extension from the TRANSFORMED payload.c.
+* Kill-ladder alert names: see the NFKC fix above (found BY this sweep).
+* `_nx_strict_fail` killed the runner: see above.
+* Poisoner decoy names now come from the seeded RNG (the
+  `ProvenancePoisoner(seed=N)` determinism contract was violated by
+  `secrets.token_hex`); `ProvenanceMetrics` counts the injected decoy
+  calls through their `globals()['...']` indirection (the counter only
+  saw bare Names → always 0).
+* Honey/decoy packs are DETERMINISTIC per build: `split_sealed`/
+  `pack_json` gained `nonce_seed` (sha256-derived nonces) so identical
+  build inputs produce byte-identical decoys — `test_loader_flag_off_
+  byte_identical_apart_from_markers` compares two generations and could
+  never pass with urandom nonces.
+* Structural tests updated for the new gate text: fragment/head slicing
+  tests resolve the `__NX_*` markers like the generator does; the keyed
+  anchor regex accepts the `strip("0")` guard; the geofence wiring test
+  asserts the GEOFENCE_GATE_CODE instantiation + the render call; CLI.md
+  regenerated for the honest `--licence` help.

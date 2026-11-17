@@ -1000,7 +1000,52 @@ class OpcodeMorpher:
             return code_obj.replace(co_code=bytes(raw_code), co_consts=tuple(new_consts))
         except Exception: return code_obj
     def get_runtime_map(self): return {self.enc_map[i]: i for i in range(256)}
-ZIP_LOADER_TEMPLATE = r'''import sys,os,base64,zipfile,io,tempfile,shutil,atexit,runpy
+#: Identity gates (benchmark 2026-11-17, attack 3): a foreign ``exec()`` of
+#: any generated stage used to define that stage's state with zero gates
+#: firing -- the payload entry was the only ``__name__``-guarded thing.
+#: The TOP gate guards the shipped artefact loader: it must be the script
+#: the interpreter was pointed at (name + __file__ + argv[0] agreement).
+#: The STAGE gate guards interior packaging layers, which run exec'd/runpy'd
+#: inside the artefact's own globals (a __file__/argv check is impossible
+#: there -- the runpy hop from a temp extraction dir changes __file__ --
+#: so a name check is the strongest they can do).  No braces in either
+#: text: these ride through ``%``-format templates AND
+#: ``.format(**build_context)``.
+
+IDENTITY_GATE_STAGE = '''\
+if __name__ not in ("__main__", "__mp_main__"):
+    import sys as _nx_id_sys
+    _nx_id_sys.stderr.write("[BLOCKED] identity: foreign exec refused (exit 2)\\n")
+    _nx_id_sys.exit(2)
+'''
+
+IDENTITY_GATE_TOP = '''\
+import os as _nx_id_os, sys as _nx_id_sys
+if __name__ == "__mp_main__":
+    # multiprocessing child: runpy re-imports the main module with a
+    # parent-owned argv, so the argv agreement below cannot hold.  The
+    # name plus a __file__ context is the strongest available check here.
+    if not globals().get("__file__"):
+        _nx_id_sys.stderr.write("[BLOCKED] identity: no script file context (exit 2)\\n")
+        _nx_id_sys.exit(2)
+elif __name__ != "__main__":
+    _nx_id_sys.stderr.write("[BLOCKED] identity: not a direct execution (exit 2)\\n")
+    _nx_id_sys.exit(2)
+else:
+    try:
+        _me = _nx_id_os.path.abspath(__file__)
+        _av = _nx_id_os.path.abspath(_nx_id_sys.argv[0] or "")
+        if _me != _av:
+            raise RuntimeError("execution context mismatch")
+    except NameError:
+        _nx_id_sys.stderr.write("[BLOCKED] identity: no script file context (exit 2)\\n")
+        _nx_id_sys.exit(2)
+    except Exception:
+        _nx_id_sys.stderr.write("[BLOCKED] identity: execution context mismatch (exit 2)\\n")
+        _nx_id_sys.exit(2)
+'''
+
+ZIP_LOADER_TEMPLATE = IDENTITY_GATE_STAGE + r'''import sys,os,base64,zipfile,io,tempfile,shutil,atexit,runpy
 %(VAR_PAYLOAD)s="%(PAYLOAD_STR)s"
 def %(VAR_BOOTSTRAP)s():
     try:
@@ -1040,7 +1085,8 @@ def %(VAR_BOOTSTRAP)s():
     except Exception as e:print("Err:",e);input("Press Enter...")
 if __name__=="__main__":%(VAR_BOOTSTRAP)s()
 '''
-EXEC_TEMPLATE = r'''import base64,lzma,zlib,sys,os;
+
+EXEC_TEMPLATE = IDENTITY_GATE_STAGE + r'''import base64,lzma,zlib,sys,os;
 %(VAR_PAYLOAD)s="%(PAYLOAD_STR)s"
 try:
     if "NX_ORIGIN" not in os.environ:
@@ -6060,6 +6106,7 @@ GEOFENCE_GATE_CODE = r'''        try:
         except: pass
 '''
 LOADER_HEAD = r'''# -*- coding: utf-8 -*-
+''' + IDENTITY_GATE_TOP + r'''
 # Silence deprecation warnings the loader would otherwise emit on Python <=3.11:
 # its MetaPathFinder has no find_spec, so the import machinery falls back to the
 # removed find_module() and warns. Those warning lines land in the artefact's
@@ -6611,7 +6658,11 @@ def _nx_strict_fail(reason):
     except Exception:
         pass
     try:
-        import os as _nx_st_os
+        # Honour a pre-bound ``_nx_st_os`` (the snippet test injects a fake
+        # to observe the exit without dying): a plain local import would
+        # shadow it and os._exit(137) would kill the TEST RUNNER, which is
+        # exactly what happened every time this test ran in a full suite.
+        _nx_st_os = globals().get("_nx_st_os") or __import__("os")
         _nx_st_os._exit(137)
     except Exception:
         pass

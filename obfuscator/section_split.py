@@ -77,7 +77,8 @@ def _section_key(master: bytes, index: int, nonce: bytes) -> bytes:
 
 
 def split_sealed(payload: bytes, *, sections: int = DEFAULT_SECTIONS,
-                 key: Optional[bytes] = None) -> dict:
+                 key: Optional[bytes] = None,
+                 nonce_seed: Optional[bytes] = None) -> dict:
     """Split payload into N sealed sections. Returns pack dict.
 
     pack = {sections: [...], count, total, key_hint, per_section}: key_hint
@@ -98,7 +99,17 @@ def split_sealed(payload: bytes, *, sections: int = DEFAULT_SECTIONS,
     out_sections = []
     for i in range(n):
         part = data[i * chunk:(i + 1) * chunk]
-        nonce = os.urandom(16)
+        # nonce_seed: derive the per-section nonces from caller material
+        # instead of os.urandom -- the honey/decoy pack must be
+        # DETERMINISTIC per build (same seed -> same pack), or two builds
+        # with identical inputs diverge byte-wise and reproducible-build
+        # checks (test_loader_flag_off_byte_identical_apart_from_markers)
+        # fail.  The real payload path keeps urandom.
+        if nonce_seed is None:
+            nonce = os.urandom(16)
+        else:
+            nonce = hashlib.sha256(b"nx-nonce:" + bytes(nonce_seed) +
+                                   i.to_bytes(4, "big")).digest()[:16]
         # Each section is sealed under its OWN key, derived from the master
         # key, the section index and the section nonce.
         skey = _section_key(key, i, nonce)
@@ -162,14 +173,17 @@ def stream_join(pack: dict, key: bytes) -> bytearray:
 
 
 def pack_json(payload: bytes, *, sections: int = DEFAULT_SECTIONS,
-              key: Optional[bytes] = None) -> tuple[bytes, bytes]:
+              key: Optional[bytes] = None,
+              nonce_seed: Optional[bytes] = None) -> tuple[bytes, bytes]:
     """Split + serialize. Returns (json_bytes, session_key).
 
     The caller transports json_bytes (inside the fallback blob) and the
-    session key via the existing BLOB_KEY path.
+    session key via the existing BLOB_KEY path.  ``nonce_seed`` makes the
+    pack deterministic (see split_sealed).
     """
     key = os.urandom(32) if key is None else bytes(key)
-    pack = split_sealed(payload, sections=sections, key=key)
+    pack = split_sealed(payload, sections=sections, key=key,
+                        nonce_seed=nonce_seed)
     return json.dumps(pack, sort_keys=True).encode("utf-8"), key
 
 

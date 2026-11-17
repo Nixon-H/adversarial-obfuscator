@@ -158,7 +158,7 @@ Every option `python3 -m obfuscator.core.pipeline build` accepts, generated from
 `scripts/gen_cli_reference.py` and checked by `tests/test_readme_matches_cli.py`,
 so it cannot drift. Editorial notes are marked where a flag is inert or archived.
 
-**31 options.**
+**32 options.**
 
 ### Input, output and build control
 
@@ -187,7 +187,7 @@ so it cannot drift. Editorial notes are marked where a flag is inert or archived
 
 | Option | What it does |
 |---|---|
-| `--licence KEY=VALUE [KEY=VALUE ...]` | Licence configuration: one flag for the whole licence gate. Sub-options: token=FILE = require this signed token at run time; salt=STRING = bind the key to a customer without a token; env-only = read the token only from NIXON_LICENCE; bootstrap-encrypted = encrypt the loader string table with a token key; chain = verify the signed ERC-721 owner on-chain. Booleans may be bare or =true/=false |
+| `--licence KEY=VALUE [KEY=VALUE ...]` | Licence configuration: one flag for the whole licence gate. Sub-options: token=FILE = require this signed token at run time (the token key material is the seal mask and is NOT in the artefact -- a missing token means the payload cannot decrypt); salt=STRING = per-customer differ WITHOUT a token: the salt ships in the artefact, so this separates customer builds but is NOT a secret -- use token= for real binding; env-only = read the token only from NIXON_LICENCE; bootstrap-encrypted = encrypt the loader string table with a token key; chain = verify the signed ERC-721 owner on-chain. Booleans may be bare or =true/=false |
 | `--watermark WATERMARK` | Embed an owner-supplied watermark message in the loader, HMAC-tagged and checked at load time: a stripped or edited watermark kills the artifact |
 
 ### Packaging, loaders, native backends and build farm
@@ -213,6 +213,7 @@ so it cannot drift. Editorial notes are marked where a flag is inert or archived
 | `--debug-dump-raw` | Compile the plaintext-dump debug aid into the artifact (it writes the decrypted payload to a 0600 temp file when NIXON_DUMP_RAW=1). Off by default: a normal artifact has no such capability |
 | `--exclude FAMILY [FAMILY ...]` | Skip shield families: "rea" turns every bait layer off; "rea.compliance", "rea.cognitive", "rea.bio" skip one; "integrity.snapshot", "integrity.stdlib-audit", "integrity.audit-hook" omit one default-on integrity gate |
 | `--fast` | Build the reduced-protection profile: detections only warn, entropy noise and rdtsc pressure are lower. Faster builds and faster artefacts; weaker posture. |
+| `--in-place` | Write dist/ beside the source (default: stage into dist-staging/<name>-<time>/ so the source directory stays clean -- a build directory is a different trust boundary from the artefact) |
 | `--package OPT [OPT ...]` | Packaging and mode. All options: native = cloud Cython compile keeping the bytecode fallback; native-only = cloud Cython with no fallback; compile = wrap the final loader in a Nuitka EXE/ELF; cloud = auto-build (cf,nk); platform=github = build farm (the only implemented one); layers=N = recursive packaging layers; zips=N = ZIP wrapper count; stego = hide the payload inside an image; portable = no native core, run anywhere; all (or everything) = every LOCAL packaging option: layers=25 zips=3 stego. The cloud compile (native/compile/cloud) is NOT part of all: it needs build-farm credentials and conflicts with stego — add it explicitly for cloud builds |
 | `--pin-structure` | Pin the EMITTER-ONLY draws (encoding order, slot picks, names, VM op-map) so two builds share a structure. Debugging aid; key material is not pinned, so artefacts are not byte-identical. **Structure only.** Pins emitter draws and the build timestamp; key material is not pinned, so artefacts are not byte-identical. |
 | `--private-key PRIVATE_KEY` | Deployment key |

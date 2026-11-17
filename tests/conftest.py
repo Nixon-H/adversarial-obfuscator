@@ -12,6 +12,21 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Test-session default for the loader identity gate.  The gate
+# (sources.IDENTITY_GATE_TOP) refuses to initialise the loader unless the
+# artifact is the script the interpreter was pointed at -- it exists to
+# kill exactly the foreign-exec extraction pattern the in-process tests
+# use (exec(loader_src, {"__name__": "fb_loader"})).  Shipped artefacts
+# always carry the gate: subprocess-based tests build through the real
+# CLI in a fresh interpreter, which this patch never touches.  A test
+# that needs the gate ON passes identity_gate=True explicitly -- the
+# partial only changes the default.
+import obfuscator.core.pipeline as _nx_pipeline
+# A flag, NOT a partial: replacing the module attribute broke the facade
+# identity test (the star-import surface saw the partial, the facade held
+# the real function).  The generator resolves the sentinels at call time.
+_nx_pipeline._NX_TEST_LOADER_GATES_OFF = True
+
 
 @pytest.fixture
 def test_script():

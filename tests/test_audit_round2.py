@@ -734,27 +734,21 @@ def _e2e_artifact(tmp_path_factory):
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     proc = subprocess.run(
         [sys.executable, "-m", "obfuscator.core.pipeline", "build",
-         str(payload), "--skip-cloud", "--package", "layers=2"],
+         str(payload), "--skip-cloud", "--in-place", "--package", "layers=2"],
         cwd=base, capture_output=True, text=True, timeout=1800,
         env=dict(os.environ, PYTHONPATH=repo, NIXON_LOG_REDIRECT="0"))
     assert proc.returncode == 0, proc.stderr[-800:]
-    # Section splitting is on by default now, so this build takes the hybrid
-    # loader path and the artefact lands wherever that path writes it (the
-    # pipeline's dist, named hybrid_loader_*).  Accept either location rather
-    # than pinning one: the test is about the integrity gate, not the path.
-    candidates = [
-        base / "dist" / "tiny_protected.py",
-    ]
-    candidates += sorted(
-        (base / "dist").glob("*_protected.py"), key=os.path.getmtime,
-        reverse=True) if (base / "dist").exists() else []
-    import glob as _glob
-    candidates += [__import__("pathlib").Path(p) for p in sorted(
-        _glob.glob("/tmp/dist/hybrid_loader_*_protected.py"),
-        key=os.path.getmtime, reverse=True)[:1]]
-    artifact = next((c for c in candidates if c.exists()), None)
-    assert artifact is not None, (
-        "no artifact produced; build log tail: %s" % (proc.stdout[-500:],))
+    # Find the artefact: the sectioned build ships the hybrid loader, which
+    # is written beside the source with --in-place.  Look for any
+    # *_protected.py in the dist directory.
+    dist = base / "dist"
+    candidates = sorted(dist.glob("*_protected.py"), key=os.path.getmtime,
+                        reverse=True) if dist.exists() else []
+    artifact = candidates[0] if candidates else None
+    assert artifact is not None and artifact.exists(), (
+        "no artifact produced; dist contents: %s; build log tail: %s"
+        % (os.listdir(str(dist)) if dist.exists() else [],
+           proc.stdout[-500:]))
     return base, artifact
 
 
@@ -829,11 +823,24 @@ def test_loader_refuses_a_tampered_artifact(_e2e_artifact, tmp_path):
 
     s = tampered.read_text(encoding="utf-8", errors="surrogateescape")
     # flip one character inside the longest encoded literal (payload blob)
-    # so the file stays syntactically valid but its data changes
-    blobs = _re.findall(r'[A-Za-z0-9+/=]{200,}', s)
-    assert blobs, "no payload blob found to tamper with"
-    blob = max(blobs, key=len)
-    pos = s.find(blob) + len(blob) // 2
+    # so the file stays syntactically valid but its data changes.
+    #
+    # The blob is the SEALED SECTION PACK, which the loader carries as a
+    # base85 literal (``_NX_SECTION_PACK = '...'``): b85 draws from a wider
+    # alphabet than the [A-Za-z0-9+/=] base64 finder this test used before,
+    # so a sectioned artefact produced NO match and the test asserted
+    # before flipping anything.  Prefer the pack literal directly (the
+    # real payload), falling back to the longest embedded literal.
+    pack = _re.search(
+        r"_NX_SECTION_PACK\s*=\s*['\"]([^\s'\"]{200,})['\"]", s)
+    if pack:
+        blob = pack.group(1)
+        pos = pack.start(1) + len(blob) // 2
+    else:
+        blobs = _re.findall(r'[A-Za-z0-9+/=]{200,}', s)
+        assert blobs, "no payload blob found to tamper with"
+        blob = max(blobs, key=len)
+        pos = s.find(blob) + len(blob) // 2
     orig_char = s[pos]
     s = s[:pos] + ('0' if orig_char != '0' else '1') + s[pos + 1:]
     tampered.write_text(s, encoding="utf-8", errors="surrogateescape")
