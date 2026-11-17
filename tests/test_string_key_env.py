@@ -116,3 +116,42 @@ def test_build_cli_exposes_string_key_env_via_transforms():
     import pytest
     with pytest.raises(SystemExit):
         parser.parse_args(["build", "x.py", "--string-key-env", "X"])
+
+
+# --- the BUILD path must honour it (audit 2026-11-17) -----------------------
+
+def test_fallback_opts_carry_the_shard():
+    """The dict that compiles the SHIPPED payload must carry string_key_env.
+
+    `fallback_opts` is what builds the sectioned artefact's payload. It had
+    fragment_strings=True but no string_key_env, so --transforms
+    string-key-env=... was accepted, validated, and then ignored: the
+    artefact ran without the shard because the seals used the inline key.
+    """
+    import inspect
+    import obfuscator.core.pipeline as pl
+    src = inspect.getsource(pl.build_project)
+    i = src.find("fallback_opts = {")
+    j = src.find("}", i)
+    block = src[i:j]
+    assert "string_key_env" in block, (
+        "fallback_opts lost string_key_env: the sectioned build's payload "
+        "would be sealed with the inline key and ignore the shard")
+    assert "fragment_strings" in block
+
+
+def test_native_path_applies_the_ast_layer():
+    """build_local_cython must take ast_opts and apply them.
+
+    It compiled RAW source with no options at all, so the native module --
+    the artefact that ships -- ignored every --transforms pass.
+    """
+    import inspect
+    import obfuscator.core.pipeline as pl
+    sig = inspect.signature(pl.build_local_cython)
+    assert "ast_opts" in sig.parameters, (
+        "build_local_cython lost its ast_opts parameter: the native module "
+        "would be compiled from raw source")
+    body = inspect.getsource(pl.build_local_cython)
+    assert "apply_ast_mutation" in body, (
+        "build_local_cython no longer applies the AST layer")
