@@ -6,7 +6,6 @@ checks both correctness (the transformed code is still valid C with the same
 semantics) and the security property.
 """
 import os
-import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

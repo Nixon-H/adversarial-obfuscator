@@ -416,3 +416,117 @@ Reading:
 | 11 | `bytes` literals never encrypted (salts/keys shipped in plaintext through the full stack) | **fixed**, 5 tests |
 | 12 | benchmark harnesses silently produced identical arms (options merged over all-on defaults) | **fixed** in the harness; noted for anyone writing ablations |
 | 13 | no regression test asserted that the `__main__` guard survives the full stack | **covered** by `test_bytes_literal_sealing.test_sealed_bytes_module_runs` |
+
+
+---
+
+# Part 3 — Final codebase audit
+
+Tools run: `ruff` (whole tree), `check_undefined_globals.py`,
+`remove_pure_dead_statements.py`, `clean_unused_locals.py`,
+`clean_unused_imports.py`, `audit_commit_removals.py --range 4`,
+`e2e_build_check.py`, `cargo test` (relay), plus the C-transform compile
+check and the full pytest suite.
+
+## 3.1 Findings
+
+| # | finding | severity | status |
+|---|---|---|---|
+| 14 | `scripts/lint/e2e_build_check.py` reported **0/5 builds produced a running artifact** | high (false alarm, but it hides real regressions) | **fixed** — 3/3 now |
+| 15 | `scripts/c_transform.py` emitted `memset` without `#include <string.h>` | medium | **fixed** |
+| 16 | two unused imports left by earlier test edits | low | **fixed** (ruff) |
+
+### #14 — the end-to-end build check was lying
+
+The script looked for artifacts named `*_Nixon-Enc*Packed.py` in the source
+directory. Artefact naming moved on: the build now writes
+`<stem>_protected_Packed.py` (plus a `_dbg` twin) beside the source, and a
+sectioned build writes the hybrid loader into `dist/` as
+`<stem>_protected.py`. The filter therefore matched nothing and the check
+reported **0/5** on builds that were in fact fine.
+
+Verified before changing anything: a fresh default build produced three
+artifacts and **all three ran and printed the marker**. The checker was
+stale, not the pipeline. It now accepts the real names (preferring the
+silent variant over `_dbg`) and falls back to `dist/`/`dist-staging/`.
+Result after the fix: **3/3 builds ok**.
+
+This matters beyond the script: a permanently-red end-to-end check is a
+check nobody reads, and it would have masked a genuine dead-artifact
+regression.
+
+### #15 — the subset-sum predicate did not compile standalone
+
+`_SS_CHECK_FN` calls `memset` but the emitted C had no `#include
+<string.h>`. Under C99 that is an implicit-declaration **error**:
+
+```
+error: implicit declaration of function 'memset'
+```
+
+Impact assessment: Cython's generated C always includes `<string.h>`
+(verified), so the real native path was unaffected. The bug bites when
+`transform_c` is used on hand-written C or by the test harness. Fixed by
+emitting the include with the helper; `gcc -fsyntax-only -std=c99` now
+passes.
+
+## 3.2 Clean results (no action needed)
+
+* `ruff check .` — clean.
+* `check_undefined_globals.py` — 0 undefined globals, 0 import errors
+  across 6 packages.
+* `remove_pure_dead_statements.py` / `clean_unused_locals.py` /
+  `clean_unused_imports.py` — 0 changes on the live tree.
+* `audit_commit_removals.py --range 4` — all 8 removed statements across
+  the recent commits are accounted for and intentional (dead locals, the
+  replaced identity-gate text, the entry-point rewrite). **No removal
+  dropped a live control.**
+* `cargo test` (relay) — 18 passed, builds clean.
+* Full pytest suite — 29,763 passed, 0 failed.
+
+## 3.3 Claims withdrawn during this work
+
+Recorded so the log is honest about what was investigated and disproved:
+
+1. **"The `full` arm silently does not run."** My benchmark payload had no
+   `__main__` guard, so `main()` was never called. Re-tested with a guarded
+   payload: the guard survives the full stack and the payload runs. **Not a
+   product defect.**
+2. **"`data`/`full` block DeepSeek completely (0/5 names, 0/4 secrets)."**
+   Those cells returned empty content with `finish_reason=length` — a
+   budget/measurement failure, not a protection result. Corrected in the
+   harness and in Part 2.
+3. **"The layer ablation shows `lex` recovers 1/5 names."** That was a
+   substring match on the word "reconcile" in prose. With identifier-
+   boundary scoring, `lex` recovers 0 declared names (1 prose mention).
+
+## 3.4 Unresolved / residual
+
+1. **DeepSeek evaluation of `data` and `full` is incomplete.** The endpoint's
+   credit balance caps `max_tokens` at ~2000 and the model's reasoning trace
+   consumes it, so those two arms could not be scored by the model. Their
+   protection is evidenced **statically** (0 plaintext secrets, was 1) and by
+   execution checks, not by a model cell. Re-running needs a funded key.
+2. **The 3.2 MB stego variant was not evaluated by the model** (same budget
+   cause). Recorded as a measurement failure, not a result.
+3. **No sealed Mimosa scan exists** for these commits (`scanner_no_output`,
+   and the scan MCP tools are not exposed in this session). The review here
+   is direct inspection plus the repo's own checkers.
+4. **No-licence and `salt=` artefacts remain offline-recoverable** by design
+   (Part 1 §7). `--licence token=` is the control for secret-bearing
+   payloads and it holds.
+5. **In-process extraction by a fully-controlled process** (faking
+   `__name__`, `__file__` and `argv[0]`) remains the standard
+   software-protection boundary.
+
+## 3.5 Recommendations
+
+* Fund a DeepSeek key (or raise the cap) and re-run `run_final.py` so `data`
+  and `full` get real model cells.
+* Keep `e2e_build_check.py` in CI now that it reports honestly; it is the
+  cheapest guard against the dead-artifact failure mode.
+* Run the sealed Mimosa scan before release.
+* For secret-bearing payloads use `--licence token=` and ship the token out
+  of band; never rely on `salt=`, renaming, or control-flow flattening for
+  confidentiality (measured: `lex`/`cfg`/`mba`/`decoys` all left the
+  secrets readable).

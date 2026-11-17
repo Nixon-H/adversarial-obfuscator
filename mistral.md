@@ -1059,3 +1059,68 @@ file is gone (silent AND _dbg variants). hwid-lock was already correct
 raced a 1-second trial against a multi-minute build.
 
 New tests: `tests/test_access_gates_sectioned.py` (11).
+
+## 2026-11-17 — DeepSeek V4.1 Flash benchmark phase + final audit
+
+Model: **DeepSeek V4.1 Flash exclusively** (`deepseek/deepseek-v4.1-flash`).
+No Mistral model; Kern untouched (its endpoint returned Cloudflare 1033).
+Full report: `docs/research/security-review-and-bench-2026-11-17.md` (Parts 2–3).
+
+### Real finding: bytes literals were never encrypted — FIXED
+
+`StringLiteralObfuscator.visit_Constant` matched only `str`, so every
+`bytes` literal passed through untouched. Measured against the artefact
+text: `SIGNING_SALT = b"wh-salt-2026-11"` survived the **full** stack, and
+DeepSeek recovered it from that arm. Salts, HMAC keys and byte secrets are
+exactly the constants worth hiding.
+
+| arm | plaintext secrets before | after |
+|---|---|---|
+| data | 1/3 (`b'wh-salt-2026-11'`) | **0/3** |
+| full | 1/3 (`b'wh-salt-2026-11'`) | **0/3** |
+
+Fix: `_seal_bytes` hex-encodes, seals through the same ChaCha20/XOR path,
+and emits `bytes.fromhex(<decoder>(seal))`. Both arms still produce the
+identical correct output. 5 new tests.
+
+### Harness bugs found before trusting any number
+
+1. The layer ablation was a **no-op**: `transform()` merges caller options
+   over ALL-ON defaults, so `lex`/`cfg`/`data`/`mba` were byte-identical
+   (md5 `673feef4…`). An ablation must turn the other families OFF.
+2. Empty cells were scored as 0 — the reasoning trace eats the budget, so
+   `content` is null with `finish_reason=length`. Now flagged
+   `measurement_failed`.
+3. The name scorer substring-matched prose ("reconcile" counted as
+   recovering the `reconcile` method). Now identifier-boundary only.
+
+### Claims withdrawn
+
+* "The `full` arm silently does not run" — **my payload had no `__main__`
+  guard**. With a guard the full stack runs correctly. Not a product bug.
+* "`data`/`full` block DeepSeek completely" — those cells never completed
+  (budget), so they are measurement failures, not protection results.
+
+### Final audit: two more defects fixed
+
+* `scripts/lint/e2e_build_check.py` reported **0/5** builds by looking for
+  `*_Nixon-Enc*Packed.py`; artefacts are now `<stem>_protected_Packed.py`.
+  Verified all real artefacts ran, then fixed the filter → **3/3 ok**. A
+  permanently-red check is one nobody reads, and it would mask a genuine
+  dead-artifact regression.
+* `scripts/c_transform.py` emitted `memset` without `#include <string.h>` —
+  a C99 error for standalone/hand-written C (Cython's own output always
+  includes it, so the native path was unaffected). Fixed, gcc-verified.
+
+### Clean
+
+ruff clean; 0 undefined globals; 0 dead statements / unused locals /
+unused imports; all 8 recent commit removals accounted for and intentional;
+relay `cargo test` 18 passed; full suite **29,763 passed, 0 failed**.
+
+### Residual
+
+DeepSeek could not score `data`/`full` (credit cap ~2000 max_tokens, all
+consumed by reasoning) — their protection is evidenced statically and by
+execution, not by a model cell. The 3.2 MB stego variant likewise. No
+sealed Mimosa scan exists for these commits.

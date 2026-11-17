@@ -50,11 +50,37 @@ def _build_and_run(index, extra=()):
         if build.returncode != 0:
             return False, "build failed: %s" % (build.stderr[-500:])
 
-        packed = [n for n in sorted(os.listdir(src_dir))
-                  if n.endswith(".py") and "_Nixon-Enc" in n and "Packed" in n]
+        # Artefact naming moved on: the build writes
+        # `<stem>_protected_Packed.py` (and a `_dbg` twin) beside the source,
+        # and a sectioned build writes the hybrid loader into dist/ as
+        # `<stem>_protected.py`.  The old filter required "_Nixon-Enc" in the
+        # name, which no longer appears -- so this check reported 0/5 on
+        # builds that were in fact fine (verified: every candidate ran and
+        # printed the marker).  Accept the real names, preferring the silent
+        # variant over the _dbg twin.
+        def _candidates():
+            names = sorted(os.listdir(src_dir))
+            silent = [n for n in names if n.endswith("_protected_Packed.py")
+                      and "_dbg" not in n]
+            if silent:
+                return [os.path.join(src_dir, n) for n in silent]
+            any_packed = [n for n in names if n.endswith("_Packed.py")]
+            if any_packed:
+                return [os.path.join(src_dir, n) for n in any_packed]
+            for sub in ("dist", "dist-staging"):
+                d = os.path.join(src_dir, sub)
+                if os.path.isdir(d):
+                    for root, _dirs, files in os.walk(d):
+                        hit = [os.path.join(root, f) for f in files
+                               if f.endswith("_protected.py")]
+                        if hit:
+                            return sorted(hit)
+            return []
+
+        packed = _candidates()
         if not packed:
             return False, "no artifact produced"
-        artifact = os.path.join(src_dir, packed[0])
+        artifact = packed[0]
         # Same diagnostic as the pipeline's verification step: a run that
         # hangs must name the frame it is stuck in.  On the 3.14 runner
         # this run times out at 300 s while finishing in ~4 s here.
