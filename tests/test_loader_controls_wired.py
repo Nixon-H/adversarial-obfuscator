@@ -197,7 +197,11 @@ def test_the_payload_entry_point_is_the_last_statement():
     assert "__main__" in ast.unparse(last)
 
     # And every gate call comes before it.
-    entry_at = src.rfind('if __name__ == "__main__":')
+    # The entry accepts __mp_main__ too (spawn multiprocessing support);
+    # accept either form so the ordering assertion tracks the real entry.
+    entry_at = src.rfind('if __name__ in ("__main__", "__mp_main__"):')
+    if entry_at < 0:
+        entry_at = src.rfind('if __name__ == "__main__":')
     for marker in ("_nx_kill(", "vm_check()", "driver_check(",
                    "_nx_snapshot_gate()", "_nx_stdlib_gate()"):
         pos = src.find(marker)
@@ -210,7 +214,11 @@ def test_the_payload_entry_point_is_the_last_statement():
 
 def test_the_gates_precede_the_entry_point_in_the_emitted_source():
     src = _emit(trial_seconds=3600, watermark="w")
-    entry_at = src.rfind('if __name__ == "__main__":')
+    # The entry accepts __mp_main__ too (spawn multiprocessing support);
+    # accept either form so the ordering assertion tracks the real entry.
+    entry_at = src.rfind('if __name__ in ("__main__", "__mp_main__"):')
+    if entry_at < 0:
+        entry_at = src.rfind('if __name__ == "__main__":')
     for marker in ("_nx_kill(", "_NX_WATERMARK_GATE = _nx_watermark_gate()"):
         pos = src.find(marker)
         assert 0 <= pos < entry_at, (

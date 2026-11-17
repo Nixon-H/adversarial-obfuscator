@@ -2394,6 +2394,14 @@ def _exec_fallback():
             _nx_wipe(bytearray(raw))
         except Exception:
             pass
+        # The payload's OWN exit code must survive (benchmark 2026-11-17,
+        # edge case): `except BaseException` also caught SystemExit, so a
+        # payload calling sys.exit(7) exited 1 -- a silent contract break
+        # for CI gates, --fail flags and shell scripts that branch on the
+        # status.  SystemExit is control flow, not an error: wipe, then
+        # re-raise it untouched.  KeyboardInterrupt likewise propagates.
+        if isinstance(e, SystemExit):
+            raise
         import traceback; traceback.print_exc()
         sys.exit(1)
 def _load_native():
@@ -2485,7 +2493,7 @@ def _load_native():
                     os.unlink(fpath)
                 except Exception: 
                     pass
-if __name__ == "__main__":
+if __name__ in ("__main__", "__mp_main__"):
     _load_native()
 '''
     # Phase-4 wiring: prepend hostguard (opt-in only), append secure-temp +
@@ -2823,12 +2831,24 @@ def _nx_self_check():
     #
     # Moving the entry point to the end makes them gating: a gate that
     # fires kills the artifact before the payload ever executes.
-    _ENTRY = '\nif __name__ == "__main__":\n    _load_native()\n'
+    # Spawn-based multiprocessing support (benchmark 2026-11-17, edge case):
+    # a spawn child re-imports this file as __mp_main__ and expects the
+    # module's definitions to exist so it can unpickle the parent's target
+    # function.  Running ONLY under __main__ left the child with no payload
+    # functions at all ("Can't get attribute '...' on <module '__mp_main__'>").
+    # Python's own spawn contract is exactly "define everything, do not run
+    # the __main__ block", so the payload runs for __mp_main__ too -- the
+    # payload's own `if __name__ == "__main__"` guard (which the loader
+    # rewrites) still keeps its side effects out of the child.
+    _ENTRY = ('\nif __name__ in ("__main__", "__mp_main__"):\n'
+              '    _load_native()\n')
     _entry_at = loader_src.rfind(_ENTRY)
     if _entry_at < 0:
         # Fall back to a looser match so an unexpected template shape
         # cannot silently reintroduce the ordering bug.
-        _entry_at = loader_src.rfind('if __name__ == "__main__":')
+        _entry_at = loader_src.rfind('if __name__ in ("__main__", "__mp_main__"):')
+        if _entry_at < 0:
+            _entry_at = loader_src.rfind('if __name__ == "__main__":')
         if _entry_at < 0:
             raise RuntimeError("loader template lost its __main__ entry point")
         _body = loader_src[:_entry_at]

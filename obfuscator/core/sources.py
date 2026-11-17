@@ -1021,28 +1021,25 @@ if __name__ not in ("__main__", "__mp_main__"):
 
 IDENTITY_GATE_TOP = '''\
 import os as _nx_id_os, sys as _nx_id_sys
-if __name__ == "__mp_main__":
-    # multiprocessing child: runpy re-imports the main module with a
-    # parent-owned argv, so the argv agreement below cannot hold.  The
-    # name plus a __file__ context is the strongest available check here.
-    if not globals().get("__file__"):
-        _nx_id_sys.stderr.write("[BLOCKED] identity: no script file context (exit 2)\\n")
-        _nx_id_sys.exit(2)
-elif __name__ != "__main__":
+if __name__ not in ("__main__", "__mp_main__"):
     _nx_id_sys.stderr.write("[BLOCKED] identity: not a direct execution (exit 2)\\n")
     _nx_id_sys.exit(2)
-else:
-    try:
-        _me = _nx_id_os.path.abspath(__file__)
-        _av = _nx_id_os.path.abspath(_nx_id_sys.argv[0] or "")
-        if _me != _av:
-            raise RuntimeError("execution context mismatch")
-    except NameError:
-        _nx_id_sys.stderr.write("[BLOCKED] identity: no script file context (exit 2)\\n")
-        _nx_id_sys.exit(2)
-    except Exception:
-        _nx_id_sys.stderr.write("[BLOCKED] identity: execution context mismatch (exit 2)\\n")
-        _nx_id_sys.exit(2)
+# Both accepted names get the SAME check.  A multiprocessing spawn child
+# re-imports this file as __mp_main__ with the real __file__ and an argv[0]
+# that resolves to it (measured), so it passes exactly like a direct run --
+# and a foreign exec that merely fakes the name still has to fake both
+# paths, which is the same bar as __main__.
+try:
+    _me = _nx_id_os.path.abspath(__file__)
+    _av = _nx_id_os.path.abspath(_nx_id_sys.argv[0] or "")
+    if _me != _av:
+        raise RuntimeError("execution context mismatch")
+except NameError:
+    _nx_id_sys.stderr.write("[BLOCKED] identity: no script file context (exit 2)\\n")
+    _nx_id_sys.exit(2)
+except Exception:
+    _nx_id_sys.stderr.write("[BLOCKED] identity: execution context mismatch (exit 2)\\n")
+    _nx_id_sys.exit(2)
 '''
 
 ZIP_LOADER_TEMPLATE = IDENTITY_GATE_STAGE + r'''import sys,os,base64,zipfile,io,tempfile,shutil,atexit,runpy

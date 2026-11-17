@@ -202,8 +202,6 @@ def insert_opaque_predicates(source: str, seed: bytes,
         "static const int __nx_opa_3 = %d;\n"
         % (a, b, c)
     )
-    # Insert the declarations before the first function.
-    first_fn = source.find("\ndef ") if "\ndef " in source else 0
     # C file: insert before the first `static` definition.
     first_static = source.find("\nstatic ")
     if first_static < 0:
@@ -376,8 +374,7 @@ def insert_dead_blocks(source: str, seed: bytes,
     for line in lines:
         stripped = line.strip()
         opens = stripped.count("{") - stripped.count("}")
-        closes = -opens if opens < 0 else 0
-        depth += stripped.count("{") - stripped.count("}")
+        depth += opens
         out.append(line)
         # Insert dead blocks inside function bodies (depth 1 or 2), not at
         # global scope (depth 0) or inside nested blocks (depth > 2).
