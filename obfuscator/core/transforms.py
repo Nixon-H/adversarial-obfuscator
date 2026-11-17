@@ -836,6 +836,15 @@ class StringLiteralObfuscator(ast.NodeTransformer):
         return node
 
     def visit_Constant(self, node):
+        # BYTES literals were never encrypted (benchmark 2026-11-17,
+        # DeepSeek V4.1 Flash layer ablation): `SIGNING_SALT = b'wh-salt-...'`
+        # survived every arm including `full`, because this visitor only
+        # matched `str`.  Salts, HMAC keys and byte secrets are exactly the
+        # constants worth hiding, so bytes are sealed too: the payload is
+        # hex-encoded, sealed like a string, and rebuilt with
+        # bytes.fromhex(<decoder>(seal)) at run time.
+        if isinstance(node.value, bytes) and 2 <= len(node.value) <= 200000:
+            return self._seal_bytes(node)
         if isinstance(node.value, str) and len(node.value) >= 2 and len(node.value) <= 200000:
             if node.value.startswith(self._part_prefix): return node
             if node.value.startswith("_NX_PART_"): return node
@@ -880,6 +889,47 @@ class StringLiteralObfuscator(ast.NodeTransformer):
                 keywords=[]
             )
         return node
+    def _seal_bytes(self, node):
+        """Seal a bytes literal; rebuild it with bytes.fromhex at run time."""
+        raw = node.value
+        hexed = raw.hex()
+        if len(hexed) > 200000:
+            return node
+        # The seal is a str; reuse the string table so identical byte
+        # literals share one entry.
+        if getattr(self, "mode", "xor") == "chacha20" and self._session is not None:
+            try:
+                from obfuscator.string_crypto import is_allowlisted as _allowed
+                if _allowed(hexed, self._allowlist,
+                            extra_prefixes=(self._part_prefix,)):
+                    return node
+            except Exception:
+                pass
+            try:
+                seal = self._session["encrypt"](hexed, self._allowlist)
+            except Exception:
+                return node
+            if seal is None:
+                return node
+        else:
+            seal = None
+        if hexed in self.string_table:
+            var_name = self.string_table[hexed]
+        else:
+            var_name = self._generate_babel_name()
+            self.string_table[hexed] = var_name
+        if seal is not None:
+            node._nx_chacha_seal = seal
+        return ast.Call(
+            func=ast.Attribute(
+                value=ast.Name(id="bytes", ctx=ast.Load()),
+                attr="fromhex", ctx=ast.Load()),
+            args=[ast.Call(
+                func=ast.Name(id=self.decoder_name, ctx=ast.Load()),
+                args=[ast.Name(id=var_name, ctx=ast.Load())],
+                keywords=[])],
+            keywords=[])
+
     def visit_Str(self, node):
         return self.visit_Constant(ast.Constant(value=node.s))
     def get_preamble(self):
