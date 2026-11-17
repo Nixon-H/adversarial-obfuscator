@@ -1034,3 +1034,28 @@ cost, and depth is cheap beyond ~10 layers.
 `tests/test_payload_fidelity.py` (6 tests): entry runs for `__mp_main__`,
 the gate applies the same check to both names, a fake `__mp_main__` still
 dies, a real spawn child passes, `SystemExit` is preserved end-to-end.
+
+### Access-gate matrix — three more silent bypasses (same day)
+
+Built one artefact per access gate on the SECTIONED (default) path and
+attacked each. Three gates were absent from the emitted loader entirely:
+
+* `--access expire=YYYY-MM-DD` — no `_NX_EXP_DATE`; an artefact with a past
+  expiry ran normally.
+* `--access block-countries=` / `allow-countries=` — no geo gate at all.
+* `--access one-shot` — the artefact survived every run.
+
+Cause: all three were wired only into the packed loader's `build_context`;
+the sectioned path never received them, so the flags parsed, showed up in
+the build report, and enforced nothing. Fixed by emitting them into the
+hybrid loader's phase-4 suffix (before the entry point) plus the call-site
+plumbing. The geo gate is inlined stdlib-only (the hybrid template does not
+bind the packed loader's urllib aliases) and fails closed when the location
+cannot be resolved.
+
+Verified after fix: expire → 137, geo → 137, one-shot → runs once then the
+file is gone (silent AND _dbg variants). hwid-lock was already correct
+(right host runs, wrong host 137). trial was correct — my first harness
+raced a 1-second trial against a multi-minute build.
+
+New tests: `tests/test_access_gates_sectioned.py` (11).
