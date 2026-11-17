@@ -297,3 +297,122 @@ checker reports 0 undefined globals; `docs/CLI.md` regenerated.
   depth buys little beyond ~10 layers for size and costs startup time.
 * Add the spawn/exit-code/unicode payloads to CI as a standing
   payload-fidelity gate (they are now `tests/test_payload_fidelity.py`).
+
+
+---
+
+# Part 2 — DeepSeek V4.1 Flash benchmarking phase
+
+Model: **DeepSeek V4.1 Flash exclusively** (`deepseek/deepseek-v4.1-flash`).
+No Mistral model was used; the Kern configuration was not touched (the Kern
+endpoint returned Cloudflare error 1033 and was not used at all).
+
+## 2.1 Harness corrections (measurement bugs found before trusting numbers)
+
+Three problems in my own harness would have produced false "protection
+wins". Each was found and fixed before any conclusion was drawn:
+
+1. **The layer ablation was a no-op.** `ObfuscationTransformer.transform`
+   merges the caller's options over a dict whose defaults are ALL-ON, so
+   passing `{"cfg_flatten": True}` changed nothing: `lex`, `cfg`, `data`
+   and `mba` all produced **byte-identical** output (md5
+   `673feef4…`). An ablation must turn the other families **off**; rebuilt
+   that way, the arms are genuinely distinct (1048 / 1859 / 5152 / 1090 /
+   9432 / 20809 bytes) and all still produce the same correct output.
+2. **Empty cells were scored as 0.** The model's reasoning trace consumed
+   the whole token budget, so `content` came back null with
+   `finish_reason=length`. Scoring that as "the model recovered nothing"
+   is a measurement failure, not a protection property. The harness now
+   flags `measurement_failed`, retries with a larger budget, and records
+   which channel produced any hit.
+3. **The name scorer was too loose.** Substring matching counted the word
+   "reconcile" in prose as recovering the `reconcile` identifier. Scoring
+   now requires an identifier-boundary match inside the model's declared
+   `names` list, and reports prose-only mentions separately.
+
+**One claim I made and then disproved:** I initially reported that the
+`full` arm "silently does not run" (exit 0, no output). That was **my
+payload's fault** — I wrote it without a `__main__` guard, so `main()` was
+never called. Re-tested with a guarded payload, the full stack preserves
+the guard and the payload runs (`AUDIT f3a53b08…`). **The obfuscator is
+not at fault; that finding is withdrawn.**
+
+## 2.2 Result: bytes literals were never encrypted — FIXED
+
+**Finding (real, reproducible).** The string obfuscator's `visit_Constant`
+matched only `str`:
+
+```python
+if isinstance(node.value, str) and len(node.value) >= 2 ...
+```
+
+Every `bytes` literal passed through untouched. Measured across the
+ablation arms, with the artefact's own text as ground truth:
+
+| arm | plaintext secrets in artefact (before) | after fix |
+|---|---|---|
+| raw | 3/3 | 3/3 (expected: no transform) |
+| lex | 3/3 | 3/3 (expected: rename only) |
+| cfg | 3/3 | 3/3 (expected: control flow only) |
+| mba | 3/3 | 3/3 (expected: MBA only) |
+| decoys | 3/3 | 3/3 (expected: decoys only) |
+| **data** | **1/3** (`b'wh-salt-2026-11'`) | **0/3** |
+| **full** | **1/3** (`b'wh-salt-2026-11'`) | **0/3** |
+
+DeepSeek recovered that salt from the **fully obfuscated** arm, because it
+was still a plaintext literal. Salts, HMAC keys and byte secrets are
+exactly the constants worth hiding, and the strongest stack left them in
+the clear.
+
+**Fix.** `StringLiteralObfuscator._seal_bytes` seals bytes the same way as
+strings: hex-encode the value, seal it through the same ChaCha20/XOR path,
+and emit `bytes.fromhex(<decoder>(seal))`. Verified:
+
+* `data` and `full` now contain **0** plaintext secrets (was 1 each);
+* both still produce the identical correct output
+  (`AUDIT f7d946695f44c373`);
+* the sealed value evaluates back to the original `bytes`;
+* 5 new regression tests (`tests/test_bytes_literal_sealing.py`).
+
+## 2.3 What DeepSeek recovered (and what it did not)
+
+Completed cells, scored on both channels (`content` and the reasoning
+trace, since the trace is real model output):
+
+| arm | bytes | secrets recovered | names recovered | content empty |
+|---|---|---|---|---|
+| raw | 387 | 2/2 | 3/4 | no |
+| lex | 420 | 2/2 | 1/4 | yes (reasoning only) |
+
+Reading:
+
+* **`lex` (rename + unicode ids + metadata strip) does not protect
+  secrets.** It renames identifiers, so the model recovered only 1/4
+  names — but both secrets were still plaintext literals in the file, and
+  the model read them. Renaming is not confidentiality.
+* **`raw`** is the control: the model recovers names, secrets and purpose,
+  as expected of unobfuscated source.
+
+## 2.4 Honest limits of this phase
+
+* **The credit ceiling stopped the run.** The endpoint's balance caps
+  `max_tokens` at ~2000; the model's reasoning trace consumes all of it on
+  any non-trivial artefact, so `content` is usually null. `data` and `full`
+  could not be evaluated by the model at all — their protection is
+  evidenced by **static** measurement (0 plaintext secrets) and by
+  execution checks, not by a model cell.
+* **The shipped-artefact attack is partly unmeasured.** DeepSeek returned
+  0/3 secrets and 1/4 names against the 95 KB sectioned artefact, and
+  returned empty content for the 3.2 MB stego variant — the latter is a
+  **measurement failure** (budget), not a protection result, and is
+  recorded as such.
+* **No conclusion is drawn from a cell that did not complete.** Every
+  incomplete cell is marked `measurement_failed` in the JSON.
+
+## 2.5 New audit items from this phase
+
+| # | item | status |
+|---|---|---|
+| 11 | `bytes` literals never encrypted (salts/keys shipped in plaintext through the full stack) | **fixed**, 5 tests |
+| 12 | benchmark harnesses silently produced identical arms (options merged over all-on defaults) | **fixed** in the harness; noted for anyone writing ablations |
+| 13 | no regression test asserted that the `__main__` guard survives the full stack | **covered** by `test_bytes_literal_sealing.test_sealed_bytes_module_runs` |
