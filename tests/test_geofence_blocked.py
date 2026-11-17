@@ -65,7 +65,7 @@ def test_loader_gate_passes_blocked_lists_to_the_class():
     # The site lives in GEOFENCE_GATE_CODE (rendered by the build into
     # ast_options and injected by the gate mechanism), not verbatim inside
     # LOADER_BODY -- assert BOTH halves of that wiring.
-    from obfuscator.core.sources import LOADER_BODY, GEOFENCE_GATE_CODE
+    from obfuscator.core.sources import GEOFENCE_GATE_CODE
     assert "{VAR_GEOFENCE_CLS}({allowed_countries}, {allowed_regions}, " \
            "{blocked_countries}, {blocked_regions})" in GEOFENCE_GATE_CODE
     from obfuscator.core import pipeline as pl

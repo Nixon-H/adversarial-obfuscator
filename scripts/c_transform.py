@@ -419,6 +419,10 @@ def generate_subset_sum_instance(seed: bytes, n: int = 8) -> dict:
 
 
 _SS_CHECK_FN = """
+/* memset needs <string.h>: C99 rejects implicit declarations, and Cython's
+   generated C does not always include it, so the transformed file failed to
+   compile for those payloads (found by the 2026-11-17 final audit). */
+#include <string.h>
 static int __nx_ss_check(const unsigned *set, int n, unsigned target) {{
     unsigned char dp[{dp_size}];
     memset(dp, 0, sizeof(dp));
