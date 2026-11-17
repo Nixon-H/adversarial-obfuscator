@@ -13,8 +13,6 @@ Each is asserted here at the emitter level (the value reaches the emitted
 loader and is enforced before the entry point), plus the trial gate's
 enforcement shape, which was correct but untested end to end.
 """
-import re
-
 from obfuscator.core.pipeline import generate_hybrid_loader_script
 
 _BLANKS = {"native_blobs": "", "fallback_blob": ""}
