@@ -972,3 +972,65 @@ reached. All fixed:
   anchor regex accepts the `strip("0")` guard; the geofence wiring test
   asserts the GEOFENCE_GATE_CODE instantiation + the render call; CLI.md
   regenerated for the honest `--licence` help.
+
+## 2026-11-17 (later) — DeepSeek V4.1 Flash benchmark phase
+
+Full report: `docs/research/security-review-and-bench-2026-11-17.md`.
+All benchmarking used DeepSeek V4.1 Flash exclusively; no Mistral model and
+no Kern configuration change.
+
+### Security review of recent commits
+
+Filtered every removed security-relevant line across `149c406`, `9b48bac`,
+`43bcaef`, `64b2718`, `00b8b2f`, `f324e89`, `7fd6ba7`, `e753b05`. **No
+security regression introduced.** The one real removal (`64b2718`'s
+per-section `hmac(key+nonce)` → `hmac(skey+nonce)`) is a strengthening:
+each section now has an independent key.
+
+Two functional regressions found in the same review, both fixed:
+`build_local_cython` had two real NameErrors (undefined `sysconfig` dead
+line, undefined `setup_content`); the hybrid loader shipped with no
+interpreter-integrity gate at all.
+
+Mimosa note: the commit hook reported `scanner_no_output`, and the Mimosa
+scan MCP tools are not exposed in this session — **no sealed scan exists
+for this commit**, and nothing here claims one.
+
+### Edge-case benchmark: two more functional defects fixed
+
+* **Spawn multiprocessing was broken** (pre-existing). A spawn child
+  re-imports the artefact as `__mp_main__` and unpickles the parent's
+  target by name; the loader ran the payload only under `__main__`, so the
+  child had no payload functions. The entry now runs for both names. **No
+  weakening**: a real spawn child was measured to have `__file__` and
+  `argv[0]` agreeing, so the identity gate applies the *same* check to
+  both names — a fake `__mp_main__` without a matching script still dies
+  (covered by a test). Verified: THREAD/MP/MP-SPAWN/ARGV/STDIN/EXC all OK.
+* **Payload exit code was rewritten to 1.** `except BaseException` also
+  caught `SystemExit`, so `sys.exit(7)` exited 1 — a silent contract break
+  for CI gates and `--fail` flags. `SystemExit` is now re-raised after the
+  wipes. Verified: protected artefact exits 7.
+* Unicode identifiers, Japanese strings, emoji, NFC normalisation and a
+  module-level (no `__main__` guard) payload all pass unchanged.
+
+### Performance benchmark (max profile)
+
+| metric | value |
+|---|---|
+| baseline startup | 0.134 s |
+| protected startup | 0.572 s (4.3×, +0.44 s) |
+| loader-only work | 0.227 s |
+| self-check | **1.4 ms** |
+| section join | 1.6 ms |
+| peak RSS (small) | 33 MB |
+| 1 → 25 packaging layers | 0.255 s → 0.334 s (+0.08 s), size flat |
+| 52 KB payload / 338 KB artefact | 1.23 s, 51 MB RSS |
+
+The gates cost ~3 ms total (0.7 % of overhead); recursive packaging is the
+cost, and depth is cheap beyond ~10 layers.
+
+### New regression tests
+
+`tests/test_payload_fidelity.py` (6 tests): entry runs for `__mp_main__`,
+the gate applies the same check to both names, a fake `__mp_main__` still
+dies, a real spawn child passes, `SystemExit` is preserved end-to-end.

@@ -66,8 +66,10 @@ def test_gate_is_default_on_for_shipped_builds(monkeypatch):
     src2, _, _ = pl.generate_hybrid_loader_script(
         dict(_BLANK_BLOBS), b"x", "11" * 32, identity_gate=True)
     assert "[BLOCKED] identity" in src2
-    # the gate text: main required, mp_main allowed with a file context
-    assert '__name__ != "__main__"' in src2
+    # the gate text: only main-ish names accepted, and BOTH of them must
+    # pass the same __file__/argv agreement check
+    assert 'not in ("__main__", "__mp_main__")' in src2
+    assert "_me != _av" in src2
     assert 'not in ("__main__", "__mp_main__")' in IDENTITY_GATE_STAGE
 
 
