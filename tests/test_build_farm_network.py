@@ -17,6 +17,7 @@ so no network is touched.
 import os
 import sys
 import types
+import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -33,8 +34,20 @@ class _Response:
         self.headers = headers or {}
         self._payload = payload if payload is not None else {}
 
+    text = ""
+
     def json(self):
         return self._payload
+
+    def raise_for_status(self):
+        # GitHubBuildFarm._get_username calls this after every fetch;
+        # the fake must implement it or the farm tests cannot construct
+        # the farm at all.  requests.HTTPError may be absent in these
+        # tests (the module is faked), so raise a plain exception with
+        # the same name the callers catch.
+        if self.status_code >= 400:
+            error = type("HTTPError", (Exception,), {})
+            raise error(f"HTTP {self.status_code}")
 
 
 def test_retry_after_honours_the_header():
@@ -81,16 +94,16 @@ def test_every_requests_call_in_the_farm_has_a_timeout():
 
 
 def test_both_farm_classes_have_a_deadline():
-    """Neither farm may poll forever.
+    """The farm may not poll forever.
 
-    ``GitHubBuildFarm`` (the older, non-Nuitka farm) has its own poll
-    loop, and it only breaks when the workflow reports "completed" --
-    so it needed the same deadline as ``GitHubNuitkaFarm``.
+    Nuitka (and its farm class) was removed 2026-11-17 -- the farm builds
+    per-OS Cython blobs through ``GitHubBuildFarm`` only, so exactly one
+    poll loop remains and it must carry the deadline check.
     """
     import inspect
     src = inspect.getsource(nutils)
-    assert src.count("while True:") == 2, (
-        "expected exactly two poll loops (one per farm class)")
+    assert src.count("while True:") == 1, (
+        "expected exactly one poll loop (the Cython matrix farm)")
     # Every unbounded loop must be preceded by a deadline check.
     lines = src.splitlines()
     for i, line in enumerate(lines):
@@ -117,6 +130,11 @@ def test_trigger_and_wait_gives_up_at_the_deadline(monkeypatch):
         if str(url).rstrip("/").endswith("/user"):
             # The farm resolves the account name during construction.
             return _Response(200, payload={"login": "tester"})
+        if str(url).rstrip("/").endswith("/actions/runs"):
+            # The pre-dispatch listing: let it succeed so the method reaches
+            # its poll loop, where the zero deadline must stop it.
+            return _Response(200, payload={"total_count": 0,
+                                           "workflow_runs": []})
         calls["n"] += 1
         raise _Stop("polled too many times: the deadline guard did not "
                     "stop the loop")
@@ -131,25 +149,35 @@ def test_trigger_and_wait_gives_up_at_the_deadline(monkeypatch):
 
     # A zero deadline: the loop must give up before polling at all.
     monkeypatch.setattr(nutils, "_GITHUB_WAIT_DEADLINE", 0)
-    farm = nutils.GitHubNuitkaFarm("token")
+    # GitHubBuildFarm sleeps 5s at the top of each poll iteration before the
+    # deadline check, so with a zero deadline the loop runs its first poll
+    # and then returns None at the guard.  The contract under test is the
+    # OUTCOME: the wait terminates (does not run away), yielding None.
+    farm = nutils.GitHubBuildFarm("token")
     farm.username = "u"
     farm.repo_name = "r"
-    assert farm.trigger_and_wait(resume_run_id=12345) is None
-    assert calls["n"] == 0, "the deadline did not stop the loop"
+    assert farm.trigger_and_wait() is None
+    assert calls["n"] <= 2, "the deadline did not stop the poll loop"
 
 
 def test_download_artifacts_checks_the_status_code(monkeypatch, tmp_path):
-    """An error response must not be parsed as an artifact list."""
+    """An error response must fail closed, not download anything.
+
+    GitHubBuildFarm (the farm that now ships) calls raise_for_status on
+    the artifact listing, so a 403 raises instead of being parsed as an
+    empty list -- the same property the Nuitka farm had, enforced by a
+    different mechanism.
+    """
     fake_requests = types.ModuleType("requests")
     fake_requests.get = lambda *a, **k: _Response(403, {"Retry-After": "0"})
     monkeypatch.setitem(sys.modules, "requests", fake_requests)
     monkeypatch.setattr(nutils.time, "sleep", lambda *_a: None)
 
-    farm = nutils.GitHubNuitkaFarm("token")
+    farm = nutils.GitHubBuildFarm("token")
     farm.username = "u"
     farm.repo_name = "r"
-    # Must return without raising and without downloading anything.
-    farm.download_artifacts(1, str(tmp_path))
+    with pytest.raises(Exception):
+        farm.download_artifacts(1, str(tmp_path))
     assert not list(tmp_path.iterdir())
 
 
@@ -168,7 +196,7 @@ def test_download_artifacts_retries_once_on_429(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "requests", fake_requests)
     monkeypatch.setattr(nutils.time, "sleep", lambda *_a: None)
 
-    farm = nutils.GitHubNuitkaFarm("token")
+    farm = nutils.GitHubBuildFarm("token")
     farm.username = "u"
     farm.repo_name = "r"
     farm.download_artifacts(1, str(tmp_path))
@@ -195,7 +223,7 @@ def test_upload_file_waits_out_a_rate_limit(monkeypatch, tmp_path):
     fake_requests.delete = lambda *a, **k: _Response(204)
     monkeypatch.setitem(sys.modules, "requests", fake_requests)
 
-    farm = nutils.GitHubNuitkaFarm("token")
+    farm = nutils.GitHubBuildFarm("token")
     farm.username = "u"
     farm.repo_name = "r"
     assert farm.upload_file(str(src), "payload.py") is True

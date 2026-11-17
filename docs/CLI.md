@@ -158,7 +158,7 @@ Every option `python3 -m obfuscator.core.pipeline build` accepts, generated from
 `scripts/gen_cli_reference.py` and checked by `tests/test_readme_matches_cli.py`,
 so it cannot drift. Editorial notes are marked where a flag is inert or archived.
 
-**32 options.**
+**31 options.**
 
 ### Input, output and build control
 
@@ -194,7 +194,6 @@ so it cannot drift. Editorial notes are marked where a flag is inert or archived
 
 | Option | What it does |
 |---|---|
-| `--exclude-android` | Skip Android build in Nuitka cloud compilation |
 | `--public` | Public Repo Mode (Flash Mode) - Nukes repo after build |
 | `--python PYTHON` | Python version for GitHub Actions (Defaults to local) |
 | `--resume RESUME` | Resume waiting for a specific GitHub Run ID (skip upload) |
@@ -214,7 +213,7 @@ so it cannot drift. Editorial notes are marked where a flag is inert or archived
 | `--exclude FAMILY [FAMILY ...]` | Skip shield families: "rea" turns every bait layer off; "rea.compliance", "rea.cognitive", "rea.bio" skip one; "integrity.snapshot", "integrity.stdlib-audit", "integrity.audit-hook" omit one default-on integrity gate |
 | `--fast` | Make the environment detections WARN instead of kill (the one thing this changes: measured, the identity gate, self-check, interpreter gate, section pack, moving decryption, honeypayload and split bootstrap all stay ON). Use it only where a false-positive kill would be worse than a missed detection. |
 | `--in-place` | Write dist/ beside the source (default: stage into dist-staging/<name>-<time>/ so the source directory stays clean -- a build directory is a different trust boundary from the artefact) |
-| `--package OPT [OPT ...]` | Packaging and mode. All options: native = cloud Cython compile keeping the bytecode fallback; native-only = cloud Cython with no fallback; compile = wrap the final loader in a Nuitka EXE/ELF; cloud = auto-build (cf,nk); platform=github = build farm (the only implemented one); layers=N = recursive packaging layers; zips=N = ZIP wrapper count; stego = hide the payload inside an image; portable = no native core, run anywhere; all (or everything) = every LOCAL packaging option: layers=25 zips=3 stego. The cloud compile (native/compile/cloud) is NOT part of all: it needs build-farm credentials and conflicts with stego — add it explicitly for cloud builds |
+| `--package OPT [OPT ...]` | Packaging and mode. All options: native = Cython compile (the payload becomes a per-OS native blob: .pyd/.so/.dylib) keeping the bytecode fallback; native-only = same with no fallback; cloud = auto-build (cf); platform=github = build farm (the only implemented one; matrix builds win/linux/mac Cython blobs); layers=N = recursive packaging layers; zips=N = ZIP wrapper count; stego = hide the payload inside an image; portable = no native core, run anywhere; all (or everything) = every LOCAL packaging option: layers=25 zips=3 stego. The cloud compile (native/compile/cloud) is NOT part of all: it needs build-farm credentials and conflicts with stego — add it explicitly for cloud builds |
 | `--pin-structure` | Pin the EMITTER-ONLY draws (encoding order, slot picks, names, VM op-map) so two builds share a structure. Debugging aid; key material is not pinned, so artefacts are not byte-identical. **Structure only.** Pins emitter draws and the build timestamp; key material is not pinned, so artefacts are not byte-identical. |
 | `--private-key PRIVATE_KEY` | Deployment key |
 | `--strict-detections` | Make the loader's environment detections (sandbox, emulator, debugger frame, geo-fence, licence) terminate the artifact instead of only perturbing it (ON by default; use --fast to opt out) |

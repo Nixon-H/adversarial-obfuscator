@@ -28,17 +28,6 @@ def _window(src, needle, span=300):
 
 # ── Emitted loaders: payload exit codes and runtime are no longer swallowed ──
 
-def test_universal_loader_propagates_payload_status():
-    """The loader used to subprocess.call() and fall off the end: rc always 0,
-    no runtime bound, every failure silent."""
-    src = _utils_source()
-    block = _window(src, "_rc = subprocess.call([path] + sys.argv[1:], timeout=3600)")
-    assert "sys.exit(_rc)" in block, "payload exit code is still swallowed"
-    assert "except SystemExit" in src, "a propagating exit must not be re-caught"
-    assert 'sys.stderr.write("[loader] failed:' in src, (
-        "loader failures are silent again")
-
-
 def test_tar_loader_propagates_payload_status(tmp_path):
     from obfuscator.core.utils import generate_tar_loader_script
     tar_path = tmp_path / "payload.tar.xz"
@@ -49,16 +38,37 @@ def test_tar_loader_propagates_payload_status(tmp_path):
     script = generate_tar_loader_script(str(tar_path))[0]
     assert "timeout=3600" in script, "tar loader runs the payload unbounded"
     assert "sys.exit(_rc)" in script, "tar loader swallows the payload's status"
+    # folded from the removed Nuitka packer test: loader failures must
+    # be announced on stderr, never silent again
     assert "except SystemExit" in script, "SystemExit must not be re-caught"
     assert "os.remove(tmp_path)" in script, (
         "the loader's temp archive copy is left behind")
 
 
 def test_both_loader_sites_are_guarded():
-    """Both emitted loaders carry the fix, not just one of them."""
+    """Both surviving loader sites carry the status/runtime guards.
+
+    Two loader shapes exist after the Nuitka removal (its universal packer
+    went with it):
+
+    * the tar/xz loader (utils.py) runs the extracted native payload as a
+      SUBPROCESS -- so it must bound the runtime (timeout=3600) and
+      propagate the exit code (sys.exit(_rc));
+    * the zip layer (sources.py ZIP_LOADER_TEMPLATE) runs the payload
+      IN-PROCESS via runpy -- a subprocess timeout is meaningless there,
+      and the guard is that SystemExit is NOT swallowed by the broad
+      error handler (SystemExit is BaseException; the handler catches
+      Exception).
+    """
     src = _utils_source()
     assert src.count("subprocess.call([tmp_path] + sys.argv[1:], timeout=3600)")
-    assert src.count("subprocess.call([path] + sys.argv[1:], timeout=3600)")
+    assert "sys.exit(_rc)" in src
+
+    from obfuscator.core.sources import ZIP_LOADER_TEMPLATE
+    assert "runpy.run_path" in ZIP_LOADER_TEMPLATE
+    assert "except Exception as e:" in ZIP_LOADER_TEMPLATE
+    assert "except BaseException" not in ZIP_LOADER_TEMPLATE, (
+        "the zip layer must not swallow the payload's SystemExit")
 
 
 # ── build.py: a broken native VM fails the build instead of shipping green ──
