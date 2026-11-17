@@ -17,7 +17,7 @@ with open('obfuscator/core/utils.py') as f:
 
 import ast
 tree = ast.parse(source)
-found = {'GitHubBuildFarm': False, 'GitHubNuitkaFarm': False}
+found = {'GitHubBuildFarm': False}
 for node in ast.iter_child_nodes(tree):
   if isinstance(node, ast.ClassDef) and node.name in found:
     found[node.name] = True

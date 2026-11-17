@@ -732,3 +732,66 @@ overturn them:
 The `--transforms string-key-env=NAME` fix from Part 4 remains the
 recommended control for secret-bearing payloads; nothing in this phase
 changes that.
+
+
+---
+
+# Part 6 — Native packaging: Nuitka removed, Cython-per-OS farm armed
+
+Operator decision: **remove Nuitka**, and make the native path
+**Cython → C transform → .so** in all three maximum commands.
+
+## 6.1 What was measured before the change
+
+* LOCAL max **already** built Cython → .c → C transform → gcc →
+  `payload_module.so` for the current OS, and embedded it base64 in the
+  loader (`C transform: [junk-functions(3), opaque-predicates(46),
+  dead-blocks(3), subset-sum(3), mba-substitution(5)]` measured on a real
+  build).
+* The cross-platform farm **already existed but was bypassed**:
+  `GitHubBuildFarm.create_workflow` carries a 3-OS GitHub Actions matrix
+  (windows → `.pyd`, ubuntu → `.so`, macos → `.dylib`) that runs Cython
+  per OS. The `--package compile/cloud` path routed to
+  `GitHubNuitkaFarm` instead, so the documented maximum shipped Nuitka
+  EXEs — a different artefact class — while the Cython matrix sat unused.
+* A single `.so` cannot span platforms: Windows needs a `.pyd`, macOS a
+  `.dylib`. Per-OS blobs are the only correct cross-platform shape, and
+  the loader already embeds all of them (`find_native_blobs` reads
+  `.native_blobs/`).
+
+## 6.2 Changes
+
+| change | detail |
+|---|---|
+| `--package compile` removed | it was the Nuitka `--onefile` wrapper |
+| `cloud` recipe: `nk` removed | a legacy `cf,nk` recipe degrades to `cf` instead of failing |
+| `--exclude-android` removed | it only configured the Nuitka cloud build |
+| `GitHubNuitkaFarm` deleted | ~680 lines; the farm now is `GitHubBuildFarm` (Cython matrix) |
+| farm call sites rewired | `_make_farm` returns `GitHubBuildFarm`; the `build-farm` command uses its signatures |
+| 429 retry ported | `download_artifacts` + `upload_file` wait out the server's `Retry-After` and retry once (the Nuitka farm had this; the matrix farm did not — ported rather than lost) |
+| `_get_username` made resilient | auth failure no longer `sys.exit(1)`s before the real farm calls run (matches the removed farm's behaviour and the farm tests) |
+| facade regenerated | 311 names (GitHubNuitkaFarm gone) |
+
+## 6.3 The three maximum commands after the change
+
+* **LOCAL**: `--package layers=25 stego` — the sectioned build already
+  arms the native path, so Cython → .so happens locally for the current OS.
+* **CLOUD**: `--package native platform=github layers=25 zips=3` —
+  `native` arms FORCE_NATIVE_EXEC with the local .so; `platform=github`
+  triggers the 3-OS Cython matrix for the other platforms.
+* **ABSOLUTE**: same as CLOUD plus every gate and the lowering families.
+
+`compile` is gone from all three: Nuitka no longer exists in the tree
+(`grep -ri nuitka` → 1 hit, a tools-to-check list entry, cleaned).
+
+## 6.4 Verified
+
+* Farm tests: 10/10 (tests migrated from `GitHubNuitkaFarm` to
+  `GitHubBuildFarm`; the fake transport now models the pre-dispatch runs
+  listing and implements `raise_for_status`).
+* Pipeline imports clean; ruff clean; facade regenerated.
+* Full suite: **29,768 passed, 0 failed** (run before the doc split;
+  re-run after).
+* What could NOT be verified locally: an actual farm run (needs GitHub
+  credentials and network). The workflow YAML and the blob-embedding path
+  are code-reviewed and parse-verified only.
