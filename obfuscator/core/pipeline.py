@@ -17,7 +17,8 @@ from .sources import (
     ENHANCED_ENV_KEYING_SOURCE, EXECUTION_TRACE_SOURCE, EXEC_TRACE_SOURCE, FAKE_CRYPTO_LAYER_SOURCE,
     FHE_SOURCE, FRAME_ANTI_DEBUG_SOURCE, GC_ANTI_DUMP_SOURCE, GC_MANIPULATION_SOURCE,
     GEOFENCE_SOURCE, GHOST_FUNC_SOURCE, GORDIAN_KNOT_SOURCE, HARDENING_SOURCE, HONEY_DECOY_SOURCE,
-    HOOK_SOURCE, HW_PERF_FINGERPRINT_SOURCE, IMPORTER_SOURCE, INTEGRITY_CHECK_SOURCE,
+    HOOK_SOURCE, HW_PERF_FINGERPRINT_SOURCE, IDENTITY_GATE_TOP,
+    IMPORTER_SOURCE, INTEGRITY_CHECK_SOURCE,
     INTEGRITY_MONITOR_SOURCE, IO_ENCODING_SOURCE, ISR_ENCODER_SOURCE, JIT_AST_SOURCE,
     KEY_SHARD_SOURCE, LOADER_BODY, LOADER_HEAD, LOGIC_ENTANGLE_SOURCE, MASK_SOURCE,
     MEM_RANDOMIZER_SOURCE, MERKLE_TREE_SOURCE, METAMORPHIC_SOURCE, MULTIDIM_ENCODE_SOURCE,
@@ -40,6 +41,25 @@ from .sources import (
 def build_pipeline(source, seed=None, mba_validator=None, extra_options=None):
     t = ObfuscationTransformer(seed=seed, mba_validator=mba_validator)
     return t.transform(source, options=extra_options)
+
+#: Modules behind the ``_nixon_*`` aliases that INTEGRITY_CHECK_SOURCE
+#: references.  The hybrid loader's template binds none of them, so the
+#: injected gate needs a binding per name; the mapping lives here (not
+#: inline in the loader assembly) so a rename inside the sources template
+#: fails LOUDLY -- an unknown alias raises instead of shipping a loader
+#: that NameErrors on every host.
+_ICS_ALIAS_MODULES = {
+    # Byte-exact with the names in INTEGRITY_CHECK_SOURCE (sources.py):
+    # babel aliases have confusable lookalikes -- this dict is DERIVED from
+    # the source bytes, never typed by hand (a typed lookalike shipped a
+    # loader that NameErrors on every host).
+    '_nixon_オペレーション운영': 'os',
+    '_nixon_システム시스템': 'sys',
+    '_nixon_シータイプ씨타입': 'ctypes',
+    '_nixon_ビルトイン빌트인': 'builtins',
+}
+
+
 
 #: Maps the canonical protection-ladder flags (``obfuscator.opt_levels``)
 #: onto the option names the AST mutator understands.  Shared by the
@@ -1451,8 +1471,6 @@ def build_local_cython(source_content, target_python=None):
         # This is the "between Cython and native" layer the architecture
         # calls for: the analyst must reverse the transformed C, not the
         # Cython-generated C.
-        cython_cmd = [python_exec if False else sys.executable, "-m", "cython",
-                      "-3", "payload.py"]
         cython_cmd = [sys.executable, "-m", "cython", "-3", "payload.py"]
         cython_result = subprocess.run(cython_cmd, cwd=build_dir,
                                        capture_output=True, text=True,
@@ -1472,7 +1490,6 @@ def build_local_cython(source_content, target_python=None):
             print(f"    [+] C transform: {_ct.transforms_applied}")
         except Exception as _ct_exc:
             print(f"    [!] C transform skipped: {_ct_exc}")
-        py_inc = sysconfig.get_paths().get("include", "")
         gcc_cmd = [
             sys.executable, "-c",
             "import sysconfig, subprocess, sys; "
@@ -1488,8 +1505,22 @@ def build_local_cython(source_content, target_python=None):
             print(f" [!] gcc compile of transformed C failed:\n{gcc_result.stderr[-500:]}")
             return None, None
         setup_path = os.path.join(build_dir, "setup.py")
+        # setup_content was referenced here without ever being defined in
+        # this function (the static undefined-global checker caught it):
+        # the local two-step build compiles the TRANSFORMED payload.c, so
+        # the setuptools step builds the extension from that C directly.
+        setup_content = (
+            "from setuptools import setup, Extension\n"
+            "setup(\n"
+            "    ext_modules=[\n"
+            "        Extension('payload_module', ['payload.c'],\n"
+            "                  extra_compile_args=['-O3', '-flto',\n"
+            "                                     '-fvisibility=hidden']),\n"
+            "    ],\n"
+            ")\n"
+        )
         with open(setup_path, "w", encoding="utf-8") as f:
-            f.write(setup_content)            
+            f.write(setup_content)
         python_exec = target_python if target_python else sys.executable
         cmd = [python_exec, "setup.py", "build_ext", "--inplace"]
         result = subprocess.run(cmd, cwd=build_dir, capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -1525,10 +1556,26 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
                                    stdlib_audit_off=False,
                                    section_split=False, section_count=4,
                                    customer_salt="", licence_bound=False,
-                                   licence_env_only=False):
+                                   licence_env_only=False,
+                                   strict_detections=False,
+                                   identity_gate=None,
+                                   self_check=None,
+                                   seal_salt=None,
+                                   licence_token_hash=""):
     # Phase-4 wiring: all new kwargs default to current behavior (no change
     # when absent). vm/secure-temp snippets are always appended (report-only,
     # safe); hostguard only when requested (changes exec semantics).
+    #
+    # identity_gate/self_check default ON through the None sentinel (the
+    # kwarg defaults are None, not True/False) so a test session can flip
+    # the session default WITHOUT replacing this module attribute — a
+    # partial() replacement broke the facade identity test (the star-import
+    # surface saw the partial, the facade held the real function).  Explicit
+    # kwargs always win.
+    if identity_gate is None:
+        identity_gate = not globals().get("_NX_TEST_LOADER_GATES_OFF", False)
+    if self_check is None:
+        self_check = not globals().get("_NX_TEST_LOADER_GATES_OFF", False)
     try:
         _vm_thr = float(vm_threshold)
     except Exception:
@@ -1906,6 +1953,9 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         "    return _data\n"
     )
     loader_template = r'''# -*- coding: utf-8 -*-
+__NX_IDENTITY_GATE__
+__NX_SELF_CHECK_DEFS__
+__NX_SELF_CHECK_CALL__
 # Traceback suppression (V10 v6.0 parity: sys.tracebacklimit = 0 +
 # excepthook override): loader tracebacks leak host paths + loader
 # internals. Installed FIRST so every later failure is silent. Opt-out
@@ -1964,10 +2014,13 @@ def _nx_licence_key():
 
     NIXON_LICENCE names the token; otherwise the usual names are
     tried next to the artefact and in the working directory.  The
-    signature is deliberately not checked here: the material is a
-    capability (a forged token derives a key that does not match
-    the ciphertext), and the artefact has no Ed25519 without the
-    cryptography wheel.
+    Ed25519 signature is not verified here (the artefact has no
+    cryptography wheel), but the token IS pinned: the build hashed the
+    exact payload it bound, and a presented token whose payload hash
+    differs is a FORGED token -- it must be reported and refused, not
+    silently used to derive a wrong key (benchmark 2026-11-17: a forged
+    token died with the kill ladder and no reason, which an operator
+    cannot debug).
     """
     try:
         import json as _nx_json, os as _nx_os, sys as _nx_sys
@@ -1980,11 +2033,28 @@ def _nx_licence_key():
             try:
                 with open(_c, "r", encoding="utf-8") as _f:
                     _doc = _nx_json.load(_f)
-                _km = (_doc.get("payload") or {}).get("key_material")
+                _pay = _doc.get("payload") or {}
+                if "{licence_token_hash}":
+                    _pin = _nx_json.dumps(_pay, sort_keys=True,
+                                          separators=(",", ":")).encode("utf-8")
+                    import hashlib as _nx_lk_hk
+                    if _nx_lk_hk.sha256(_pin).hexdigest() != "{licence_token_hash}":
+                        try:
+                            _nx_sys.stderr.write(
+                                "licence token does not match the pinned token\n")
+                            _nx_sys.stderr.flush()
+                        except Exception:
+                            pass
+                        _nx_sys.exit(1)
+                _km = _pay.get("key_material")
                 if _km:
                     return str(_km)
+            except SystemExit:
+                raise
             except Exception:
                 continue
+    except SystemExit:
+        raise
     except Exception:
         pass
     return None
@@ -2024,8 +2094,20 @@ def _nx_customer_mask(_key):
             # Bound at build time (--licence-token): the mask comes from
             # the customer's token.  Missing token -> no mask -> wrong
             # key -> garbage plaintext, which is the intended "inert
-            # without a licence" behaviour.
+            # without a licence" behaviour.  The artefact still FAILS
+            # CLOSED (the HMAC ladder kills it), but an operator shipping
+            # a bound artefact needs the customer to know WHY it died --
+            # say so when the token is genuinely absent (audit 2026-11-17).
             _salt = _nx_licence_key() or ""
+            if not _salt:
+                try:
+                    import sys as _nx_lk_sys
+                    _nx_lk_sys.stderr.write(
+                        "licence token required: set NIXON_LICENCE or place "
+                        "licence.json beside the artefact\n")
+                    _nx_lk_sys.stderr.flush()
+                except Exception:
+                    pass
         if _salt:
             # Customer binding: a second, domain-separated mask, so an
             # artefact built for one customer does not decrypt for
@@ -2434,13 +2516,22 @@ if __name__ == "__main__":
     # (Splitting the derived key with a build-bound seed would cancel the
     # salt at runtime: shares ^ seed-stream twice = raw key. Verified
     # 2026-09-20: that ordering derives the raw key, not the salted one.)
+    #
+    # seal_salt vs customer_salt (benchmark 2026-11-17, position B2): for a
+    # token-bound build the SEAIING mask must use the token's key material
+    # while the loader embeds NOTHING -- the runtime derives the same mask
+    # from the token.  The old code sealed AND embedded with the same value,
+    # which put the material in the artefact and made the token decorative
+    # (the artefact ran without its token; an offline analyst derived the
+    # mask from the embedded literal).
+    _seal_salt_local = str(seal_salt) if seal_salt is not None else str(customer_salt or '')
     _customer_salt = str(customer_salt or '')
-    _eff_key = _ke_derive(_raw_key, build_id, _customer_salt)
+    _eff_key = _ke_derive(_raw_key, build_id, _seal_salt_local)
     _s0, _s1 = _ke_split(_raw_key, _ke_seed(build_id))
     # Sanity: emitted shares must reconstruct the raw key; salt -> eff key.
     assert _ke_combine(_s0, _s1) == _raw_key, "key share roundtrip failed"
     assert _ke_derive(_ke_combine(_s0, _s1), build_id,
-                      _customer_salt) == _eff_key
+                      _seal_salt_local) == _eff_key
     # Re-encrypt the caller-supplied fallback blob under the effective key
     # so the loader's derived key actually decrypts it. byte-for-byte, the
     # transform is: decrypt(raw_key) -> plaintext -> encrypt(eff_key).
@@ -2578,6 +2669,34 @@ if __name__ == "__main__":
             pass
     except Exception:
         pass
+    # Interpreter-integrity gate.  The standard packed loader gets
+    # INTEGRITY_CHECK_SOURCE through its own template; the hybrid template
+    # never carried it, so a sectioned artefact shipped with NO interpreter
+    # check at all -- the 2026-11-14 bench capture shim (PYTHONPATH
+    # sitecustomize wrapping ZipFile) that a packed build refuses ran
+    # straight through a sectioned build.  Inject the same gate here, in
+    # the suffix (before the entry point, so it gates the payload), and
+    # bind the _nixon_* aliases it references: the hybrid template defines
+    # none of them.  A name the gate needs that no binding covers is a
+    # build failure, not a runtime NameError -- fail closed.
+    if "_check_interpreter_integrity_reason" not in loader_template:
+        _ics = INTEGRITY_CHECK_SOURCE.replace(
+            "{VAR_STRICT_ON}", str(bool(strict_detections)))
+        _bound = re.findall(r"^(_nixon_\w+)\s*=", loader_template, re.M)
+        _bindings = ""
+        for _alias in sorted(set(re.findall(r"_nixon_\w+", _ics))):
+            if _alias == "_nixon_integrity_reason":
+                continue  # the gate's own variable
+            if _alias in _bound:
+                continue  # the template (or a prefix snippet) binds it
+            _mod = _ICS_ALIAS_MODULES.get(_alias)
+            if _mod is None:
+                raise RuntimeError(
+                    "integrity gate references unbound alias %r with no "
+                    "module mapping; refusing to ship a loader that would "
+                    "NameError at run time" % (_alias,))
+            _bindings += "%s = __import__(%r)\n" % (_alias, _mod)
+        _phase4_suffix += _bindings + _ics + "\n"
     if licence_env_only:
         # The template carries the placeholder on its own indented line, so
         # the replacement must NOT repeat the leading indentation: the
@@ -2593,11 +2712,93 @@ if __name__ == "__main__":
             '"license.json"):\n'
             '                _cands.append(_nx_os.path.join(_d, _n))'
         )
+    # Identity gate (see sources.IDENTITY_GATE_TOP): injected FIRST, before the
+    # traceback suppression, so a foreign exec dies before ANY loader
+    # state exists.  Test callers that exec the loader in-process pass
+    # identity_gate=False; the shipped artefact always has the gate.
+    loader_template = loader_template.replace(
+        "__NX_IDENTITY_GATE__",
+        IDENTITY_GATE_TOP if identity_gate else "")
+    assert "__NX_IDENTITY_GATE__" not in loader_template, \
+        "stale identity-gate marker in the hybrid loader template"
+    # Self-check (benchmark 2026-11-17): the standard packed loader
+    # verifies its own bytes at run time; the hybrid loader did not, so a
+    # flipped BYTE IN THE LOADER CODE (offset 85% of the file) left the
+    # artifact running normally -- only the section pack was HMAC'd.  The
+    # defs are inert; the CALL runs right after the identity gate and
+    # before any key material is reconstructed.  The build stamps the two
+    # 64-zero slots in the write step (_stamp_hybrid_selfcheck) AFTER the
+    # full source exists, hashing every line except the two value lines
+    # and the licence-token pin -- the exact same filter the runtime
+    # applies.
+    _self_check_defs = r'''
+def constant_time_compare(a, b):
+    if len(a) != len(b): return False
+    result = 0
+    for x, y in zip(a, b): result |= x ^ y
+    return result == 0
+def _nx_self_fail(reason):
+    import sys as _nx_sf_sys
+    try:
+        _nx_sf_sys.stderr.write("Self-check error: %s\n" % (reason,))
+        _nx_sf_sys.stderr.flush()
+    except Exception:
+        pass
+    import os as _nx_sf_os
+    _nx_sf_os._exit(137)
+def _nx_self_check():
+    import hashlib as _nx_self_sha
+    with open(__file__, 'rb') as f: lines = f.readlines()
+    # The lines that hold the EXPECTED values are excluded from the
+    # hash: a value cannot be part of what it describes.  They are
+    # identified by the VALUES themselves, not by a marker string.
+    filtered_lines = [l for l in lines
+                      if _NX_SELF_CK.encode() not in l
+                      and _NX_SELF_HM.encode() not in l
+                      and (not _NX_SELF_TOK or _NX_SELF_TOK.encode() not in l)]
+    content = b"".join(filtered_lines)
+    chunks = [content[i:i+1024] for i in range(0, len(content), 1024)]
+    hashes = [_nx_self_sha.sha256(b).hexdigest() for b in chunks]
+    while len(hashes) > 1:
+        if len(hashes) % 2 == 1: hashes.append(hashes[-1])
+        hashes = [_nx_self_sha.sha256((hashes[i] + hashes[i+1]).encode()).hexdigest()
+                  for i in range(0, len(hashes), 2)]
+    root = hashes[0] if hashes else ""
+    if not constant_time_compare(root.encode(), _NX_SELF_CK.encode()):
+        _nx_self_fail("merkle expected=%s got=%s lines=%d"
+                      % (_NX_SELF_CK[:16], str(root)[:16], len(filtered_lines)))
+    import hmac as _nx_self_mac
+    sig = _nx_self_mac.new(bytes.fromhex(_NX_SELF_HK), content,
+                           _nx_self_sha.sha256).hexdigest()
+    if sig != _NX_SELF_HM:
+        _nx_self_fail("hmac expected=%s got=%s"
+                      % (str(_NX_SELF_HM)[:16], str(sig)[:16]))
+'''
+    if self_check:
+        loader_template = loader_template.replace(
+            "__NX_SELF_CHECK_DEFS__", _self_check_defs)
+        loader_template = loader_template.replace(
+            "__NX_SELF_CHECK_CALL__",
+            '_NX_SELF_CK = "%s"\n_NX_SELF_HM = "%s"\n'
+            '_NX_SELF_TOK = "{licence_token_hash}"\n'
+            '_NX_SELF_HK = "%s"\n'
+            "_nx_self_check()\n"
+            % ("0" * 64, "0" * 64, "00" * 32))
+        loader_template = loader_template.replace(
+            "{licence_token_hash}", str(licence_token_hash or ""))
+    else:
+        loader_template = loader_template.replace(
+            "__NX_SELF_CHECK_DEFS__", "").replace(
+            "__NX_SELF_CHECK_CALL__", "")
+    assert "__NX_SELF_CHECK_DEFS__" not in loader_template and \
+        "__NX_SELF_CHECK_CALL__" not in loader_template, \
+        "stale self-check marker in the hybrid loader template"
     loader_src = (
         loader_template
         .replace("__LOCAL_TOKEN_SEARCH__", _local_token_search)
         .replace("{build_id}", build_id)
         .replace("{customer_salt}", _customer_salt)
+        .replace("{licence_token_hash}", str(licence_token_hash or ""))
         .replace("{licence_bound}", "1" if licence_bound else "0")
         .replace("{share0}", _s0)
         .replace("{share1}", _s1)
@@ -2608,6 +2809,8 @@ if __name__ == "__main__":
     assert "{share0}" not in loader_src and "{share1}" not in loader_src
     assert "{build_id}" not in loader_src and "{fallback_blob_val}" not in loader_src
     assert "{key_hex}" not in loader_src, "stale {key_hex} placeholder"
+    assert "{licence_token_hash}" not in loader_src, (
+        "stale licence token pin placeholder")
     assert "__LOCAL_TOKEN_SEARCH__" not in loader_src
     # The payload entry point must be LAST.
     #
@@ -2944,6 +3147,64 @@ def _nx_licence_payload():
     )
 
 
+def _stamp_hybrid_selfcheck(src_text, hmac_secret_hex, token_hash=""):
+    """Fill the hybrid loader's self-check slots (build side).
+
+    Hashes every line except the two slot lines and the licence-token
+    pin -- the exact filter the runtime applies (by VALUE once the slots
+    are stamped; here by the pre-stamp slot shape).  The verification at
+    the end re-applies the runtime filter against the stamped bytes and
+    fails the build if the two would ever disagree: a disagreement means
+    every run of the artefact dies, so it must never ship.
+    """
+    script_bytes = src_text.replace("\r\n", "\n").encode("utf-8")
+    tok = str(token_hash or "").encode("utf-8")
+    ck_slot = b'_NX_SELF_CK = "' + b"0" * 64 + b'"'
+    hm_slot = b'_NX_SELF_HM = "' + b"0" * 64 + b'"'
+    if ck_slot not in script_bytes and hm_slot not in script_bytes:
+        # Already stamped (the variant writer stamps before the
+        # artefact move step re-reads it): stamping twice would hash
+        # the stamped values into the hash and the runtime filter
+        # would disagree.
+        return src_text
+    # The runtime HMAC key slot must hold the REAL secret before the
+    # content hash is computed: the HK line is part of the hashed
+    # content, so replacing it after the fact would change what the
+    # runtime hashes.
+    hk_slot = b'_NX_SELF_HK = "' + b"0" * 64 + b'"'
+    real_hk = str(hmac_secret_hex).encode("utf-8")
+    script_bytes = script_bytes.replace(hk_slot, b'_NX_SELF_HK = "' + real_hk + b'"', 1)
+    lines_for_hash = []
+    for line in script_bytes.splitlines(keepends=True):
+        if ck_slot in line or hm_slot in line or (tok and tok in line):
+            continue
+        lines_for_hash.append(line)
+    content = b"".join(lines_for_hash)
+    chunks = [content[i:i + 1024] for i in range(0, len(content), 1024)]
+    hashes = [hashlib.sha256(b).hexdigest() for b in chunks]
+    while len(hashes) > 1:
+        if len(hashes) % 2 == 1:
+            hashes.append(hashes[-1])
+        hashes = [hashlib.sha256((hashes[i] + hashes[i + 1]).encode()).hexdigest()
+                  for i in range(0, len(hashes), 2)]
+    root = hashes[0] if hashes else ""
+    hm = hmac.new(bytes.fromhex(hmac_secret_hex), content, hashlib.sha256).hexdigest()
+    out = script_bytes.replace(ck_slot, b'_NX_SELF_CK = "' + root.encode("utf-8") + b'"', 1)
+    out = out.replace(hm_slot, b'_NX_SELF_HM = "' + hm.encode("utf-8") + b'"', 1)
+    if root.encode("utf-8") not in out or hm.encode("utf-8") not in out:
+        raise RuntimeError(
+            "hybrid self-check stamp failed: a slot pattern did not match "
+            "the emitted loader (template drifted from the stamping code)")
+    rt_keep = [l for l in out.splitlines(keepends=True)
+               if root.encode("utf-8") not in l and hm.encode("utf-8") not in l
+               and (not tok or tok not in l)]
+    if b"".join(rt_keep) != content:
+        raise RuntimeError(
+            "hybrid self-check filter mismatch: the build hashed %d lines "
+            "but the runtime would hash %d" % (len(lines_for_hash), len(rt_keep)))
+    return out.decode("utf-8")
+
+
 def _key_binding_source(mode: str, customer_salt: str,
                         env_only: bool = False) -> str:
     """The run-time binding emit for a key-bound artefact.
@@ -2954,6 +3215,12 @@ def _key_binding_source(mode: str, customer_salt: str,
     search: the token must come from ``NIXON_LICENCE``, so it cannot be
     picked up from a ``licence.json`` shipped beside the artefact.
     """
+    if mode == "licence":
+        # licence mode ships nothing: the run-time branch reads the token.
+        # Substituting the material anyway would put it into the emitted
+        # source as a dead-string literal -- the exact leak found in the
+        # 2026-11-17 benchmark (position B2).
+        customer_salt = ""
     if '"' in customer_salt or "\\" in customer_salt or "\n" in customer_salt:
         raise SystemExit("customer_salt contains characters the loader cannot carry")
     if env_only:
@@ -3064,6 +3331,11 @@ def build_project(args):
     _licence_chain_enabled = bool(getattr(args, "licence_chain", False))
     _key_raw = None
     _customer_salt = str(getattr(args, "customer_salt", "") or "")
+    # Build-side seal mask: salt mode ships its salt (per-customer differ,
+    # by design); token mode seals under the token's key material and
+    # ships nothing.  Every build-side mask below must use THIS, never
+    # _customer_salt (which is what the artefact embeds).
+    _seal_salt = _customer_salt
     _licence_path = str(getattr(args, "licence_token", "") or "")
     if _licence_chain_enabled and not _licence_path:
         raise SystemExit("--licence-chain requires --licence-token")
@@ -3097,10 +3369,21 @@ def build_project(args):
             raise SystemExit(
                 "--licence-chain requires a licence token with signed chain "
                 "metadata; issue it with obfuscator.licensing --chain ...")
-        _customer_salt = str(_lic_km)
+        # seal_salt vs customer_salt (benchmark 2026-11-17, position B2):
+        # the token's key material is the mask the payload key is sealed
+        # under -- the build side needs it, the ARTEFACT must not carry it.
+        # Embedding it (the old behaviour) made the token decorative: the
+        # artefact ran without its token and an offline analyst derived the
+        # mask straight from the embedded literal.  The loader derives the
+        # same mask at run time from the token (via _nx_licence_key).
+        _seal_salt = str(_lic_km)
+        _customer_salt = ""
         _licence_bound = True
         _licence_token_hash = hashlib.sha256(
             _lic_canonical(_lic_payload)).hexdigest()
+        # main()'s post-build write step re-stamps the artefact (idempotent)
+        # and needs the pin; build_project is the only place it is computed.
+        args._licence_token_hash = str(_licence_token_hash or "")
     # Both key bindings are applied on this path too (see the blob-key
     # emission below), so the flags no longer require --native.
     if not os.path.exists(source): 
@@ -3262,8 +3545,11 @@ def build_project(args):
                 section_count=int(getattr(args, 'section_count', 4) or 4),
                 watermark=str(getattr(args, 'watermark', '') or '') or None,
                 customer_salt=_customer_salt,
+                seal_salt=_seal_salt,
+                licence_token_hash=str(_licence_token_hash or ''),
                 licence_bound=_licence_bound,
                 licence_env_only=_licence_env_only,
+                strict_detections=bool(getattr(args, 'strict_detections', True)),
             )
             if getattr(args, 'section_split', False):
                 # The split needs a fallback payload to split, and there
@@ -3642,6 +3928,16 @@ def _VERIFY_INTEGRITY():
                 _candidate = _hl_fh.read()
             if "_NX_SECTION_PACK = ''" not in _candidate and \
                     "_stream(_NX_SECTION_PACK" in _candidate:
+                # Self-check stamping is the LAST content step before
+                # the variant loop writes the artefact: the hash must
+                # cover the final bytes (pack, honey, every gate
+                # already present).  A stamping failure is a build
+                # failure -- an unstamped loader carries 64-zero slots
+                # and dies on EVERY host.
+                _candidate = _stamp_hybrid_selfcheck(
+                    _candidate, secrets.token_hex(32),
+                    token_hash=str(_licence_token_hash or ''))
+                args._hybrid_loader_src = _candidate
                 _hybrid_src = _candidate
                 UI._out(" %sℹ Sectioned build: shipping the hybrid loader "
                         "(section pack + moving decryption)%s"
@@ -3790,8 +4086,8 @@ def _VERIFY_INTEGRITY():
             # key_material.  Encryption below uses the masked key, so an
             # artefact without its token decrypts to garbage.
             _key_raw = key
-            if _customer_salt or _licence_bound:
-                _bm = hashlib.sha256(b"nx-customer:" + _customer_salt.encode()).digest()
+            if _seal_salt or _licence_bound:
+                _bm = hashlib.sha256(b"nx-customer:" + _seal_salt.encode()).digest()
                 key = bytes([_b ^ _bm[_i % len(_bm)] for _i, _b in enumerate(key)])
             recipe_in = generate_recipe(6); recipe_out = generate_recipe(6, True)
             # Emitted for the record only: the key derivation uses the
@@ -3809,7 +4105,7 @@ def _VERIFY_INTEGRITY():
                 # BLOB_KEY (which decrypts native blobs).  The loader applies
                 # the same mask after k_dec is derived.
                 _plm = hashlib.sha256(
-                    b"nx-customer:" + _customer_salt.encode()).digest()
+                    b"nx-customer:" + _seal_salt.encode()).digest()
                 encryption_key = bytes([
                     _a ^ _b for _a, _b in zip(encryption_key, _plm)])
             # Loader-compatibility: the artifact-side decryptors (CIPHER_SOURCE
@@ -3894,17 +4190,17 @@ def _VERIFY_INTEGRITY():
             _raw_dump_block = "pass"
             if getattr(args, "debug_dump_raw", False):
                 _raw_dump_block = (
-                    "if _nixon_オペレーション運営.environ.get("
+                    "if _nixon_オペレーション운영.environ.get("
                     '"NIXON_DUMP_RAW", "0") == "1":\n'
                     "    _nx_dfd, _nx_dpath = "
                     "_nixon_テンプ임시.mkstemp("
                     'prefix="nixon_raw_", suffix=".py")\n'
                     "    try:\n"
-                    "        _nixon_オペレーション運営.write("
+                    "        _nixon_オペレーション운영.write("
                     "_nx_dfd, raw if isinstance(raw, bytes) "
                     'else raw.encode("utf-8"))\n'
                     "    finally:\n"
-                    "        _nixon_オペレーション運営.close(_nx_dfd)")
+                    "        _nixon_オペレーション운영.close(_nx_dfd)")
             # Bind the payload key to the packed core: the emitted key is
             # the raw key mixed with sha256(nixon_core.so), which the loader
             # re-mixes from the bytes it extracts.  Patching the core now
@@ -3946,9 +4242,9 @@ def _VERIFY_INTEGRITY():
                             for _i, _b in enumerate(_rt_blob_key))
                     except Exception as _rt_exc:
                         print("  [!] Native blob key: core mix skipped: %s" % (_rt_exc,))
-                if _customer_salt or _licence_bound:
+                if _seal_salt or _licence_bound:
                     _rt_mask = hashlib.sha256(
-                        b"nx-customer:" + _customer_salt.encode()).digest()
+                        b"nx-customer:" + _seal_salt.encode()).digest()
                     _rt_blob_key = bytes(
                         _b ^ _rt_mask[_i % len(_rt_mask)]
                         for _i, _b in enumerate(_rt_blob_key))
@@ -4414,7 +4710,7 @@ def _VERIFY_INTEGRITY():
             # at run time.  In licence mode the material is not in the
             # artefact at all, so a missing token must fail loudly rather
             # than decrypt to garbage.
-            if _key_raw is not None and (_customer_salt or _licence_bound):
+            if _key_raw is not None and (_seal_salt or _licence_bound):
                 # The emitted key is the raw key mixed with the core
                 # digest, so the anchor has to be the mixed hex.
                 _anchor = 'BLOB_KEY = bytes.fromhex("%s")' % _key_raw_hex
@@ -4548,7 +4844,7 @@ def _VERIFY_INTEGRITY():
                 # The loader derives the same key from the external token at
                 # run time; the artefact itself never carries this mask.
                 _bootstrap_key = hashlib.sha256(
-                    b"nx-bootstrap-string-table:" + _customer_salt.encode()).digest()
+                    b"nx-bootstrap-string-table:" + _seal_salt.encode()).digest()
             enc_blob, enc_key_a, enc_key_b = get_Nixon_Enc_table(_bootstrap_key)
             final_script = Nixon_Enc_script
             # Quote-robust: an AST round-trip (auto-fix above) normalizes
@@ -5116,8 +5412,14 @@ def build_parser():
     build.add_argument('--licence', nargs='+', default=None, metavar='KEY=VALUE',
                        help='Licence configuration: one flag for the whole '
                             'licence gate. Sub-options: token=FILE = require '
-                            'this signed token at run time; salt=STRING = bind '
-                            'the key to a customer without a token; env-only = '
+                            'this signed token at run time (the token key '
+                            'material is the seal mask and is NOT in the '
+                            'artefact -- a missing token means the payload '
+                            'cannot decrypt); salt=STRING = per-customer '
+                            'differ WITHOUT a token: the salt ships in the '
+                            'artefact, so this separates customer builds but '
+                            'is NOT a secret -- use token= for real binding; '
+                            'env-only = '
                             'read the token only from NIXON_LICENCE; '
                             'bootstrap-encrypted = encrypt the loader string '
                             'table with a token key; chain = verify the signed '
@@ -5506,7 +5808,11 @@ def main():
             # artifact used to run the pure-Python fallback (no-op
             # encrypt/decrypt) and then die in its self-check.  The .so
             # is still left in dist/ for callers that ship the pair.
-            _dist_dir = os.path.join(os.path.dirname(os.path.abspath(args.source)), "dist")
+            # Use the ORIGINAL source path for dist_dir: args.source may have
+            # been swapped to the hybrid loader's temp file (in /tmp), which
+            # would put the artefact in the wrong directory.
+            _orig_src = getattr(args, "_original_source", None) or args.source
+            _dist_dir = os.path.join(os.path.dirname(os.path.abspath(_orig_src)), "dist")
             _core_so = getattr(args, "_core_so", None)
             if _core_so is None and not getattr(args, "portable", False):
                 try:
@@ -5641,14 +5947,19 @@ def main():
                             except Exception as e:
                                  t.fail(str(e))
             final_rows = []
-            base_name = os.path.splitext(os.path.basename(args.source))[0]
+            base_name = os.path.splitext(os.path.basename(
+                getattr(args, "_original_source", args.source)))[0]
             # Clean staging (Tier 3 #6).  Writing dist/ beside the source is
             # what leaked the symbol table and a plaintext payload copy in
             # the 2026-11-14 benchmark.  The build now stages into an
             # isolated directory by default and says so; --in-place restores
             # the old behaviour for callers that need it (the test fixtures
-            # locate artefacts beside the source).
-            _src_dir = os.path.dirname(os.path.abspath(args.source))
+            # locate artefacts beside the source).  dist_dir is computed from
+            # the ORIGINAL source path (not the temp loader path), so the
+            # artefact lands beside the payload the user named.
+            _orig_src_dir = os.path.dirname(os.path.abspath(
+                getattr(args, "_original_source", args.source)))
+            _src_dir = _orig_src_dir
             if getattr(args, "in_place", False):
                 dist_dir = os.path.join(_src_dir, "dist")
             else:
@@ -5722,10 +6033,21 @@ def main():
             # attempt wrote it before packing and the packer turned
             # `hello_protected.py` into `hello_protected_Packed.py`, leaving
             # nothing for the move step (and the tests) to find.
+            _hl_write_ok = False
             try:
                 _hl_src2 = getattr(args, "_hybrid_loader_src", None)
                 if _hl_src2 and "_NX_SECTION_PACK = ''" not in _hl_src2 and \
                         "_stream(_NX_SECTION_PACK" in _hl_src2:
+                    # Self-check stamping is the LAST content step: the
+                    # hash must cover the final bytes (the section pack,
+                    # the honey pack and every gate are already in).  A
+                    # stamping failure is a build failure -- shipping an
+                    # artefact whose self-check disagrees with itself
+                    # would kill the artefact on every host.
+                    _hl_src2 = _stamp_hybrid_selfcheck(
+                        _hl_src2, secrets.token_hex(32),
+                        token_hash=str(getattr(args, "_licence_token_hash", "") or ""))
+                    args._hybrid_loader_src = _hl_src2
                     _stem2 = os.path.splitext(os.path.basename(
                         getattr(args, "_original_source", args.source)))[0]
                     for _sfx2, _dbg2 in (("Debug", True), ("Silent", False)):
@@ -5734,11 +6056,20 @@ def main():
                             % (_stem2, "_dbg" if _dbg2 else ""))
                         with open(_dest2, "w", encoding="utf-8") as _dfh2:
                             _dfh2.write(_hl_src2)
+                    _hl_write_ok = True
                     UI._out(" %sℹ Sectioned artefact: hybrid loader written "
                             "to %s (section pack + moving decryption)%s"
                             % (UI.CYAN, dist_dir, UI.RESET))
             except Exception:
-                pass
+                # A HALF-WRITTEN or UNSTAMPED artefact is worse than no
+                # artefact: an unstamped loader carries 64-zero self-check
+                # slots and dies on EVERY host, and a stamping failure
+                # means the template drifted from the stamping code.  Say
+                # so loudly instead of shipping either.
+                if not _hl_write_ok:
+                    raise SystemExit(
+                        "sectioned artefact write/stamp failed: %s"
+                        % (traceback.format_exc(limit=3),))
             UI._out(f" {UI.CYAN}ℹ Artifacts moved to: {dist_dir}{UI.RESET}")
             # Clean-staging audit.  The 2026-11-14 benchmark lost the entire
             # symbol table to a .renamelog left beside the payload, and ~850 MB

@@ -60,12 +60,18 @@ def test_no_lists_allows_any_location():
 
 
 def test_loader_gate_passes_blocked_lists_to_the_class():
-    # The instantiation site in LOADER_BODY must actually hand the blocked
-    # lists to the class; otherwise the enforcement above never runs in a
-    # real artefact.
-    from obfuscator.core.sources import LOADER_BODY
+    # The instantiation site must actually hand the blocked lists to the
+    # class; otherwise the enforcement above never runs in a real artefact.
+    # The site lives in GEOFENCE_GATE_CODE (rendered by the build into
+    # ast_options and injected by the gate mechanism), not verbatim inside
+    # LOADER_BODY -- assert BOTH halves of that wiring.
+    from obfuscator.core.sources import LOADER_BODY, GEOFENCE_GATE_CODE
     assert "{VAR_GEOFENCE_CLS}({allowed_countries}, {allowed_regions}, " \
-           "{blocked_countries}, {blocked_regions})" in LOADER_BODY
+           "{blocked_countries}, {blocked_regions})" in GEOFENCE_GATE_CODE
+    from obfuscator.core import pipeline as pl
+    src = open(pl.__file__, encoding="utf-8").read()
+    assert "ast_options['geofence_gate_code'] = _render_gate(" in src, (
+        "the build must render GEOFENCE_GATE_CODE into the gate mechanism")
 
 
 def test_expire_gate_reads_the_embedded_date():

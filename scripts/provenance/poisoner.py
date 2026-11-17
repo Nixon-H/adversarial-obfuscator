@@ -81,7 +81,12 @@ class ProvenancePoisoner:
         return tree
 
     def _nx_name(self, prefix: str = "nx") -> str:
-        return f"_{prefix}_{secrets.token_hex(6)}"
+        # Seeded RNG, not secrets: the poisoner advertises seed
+        # determinism (ProvenancePoisoner(seed=N) must produce identical
+        # trees), and secrets.token_hex made every decoy name
+        # irreproducible.  The salt below keeps the unseeded build path
+        # random exactly as before.
+        return f"_{prefix}_{self._rng.getrandbits(24):06x}"
 
     def _generate_fake_call_graphs(self, tree: ast.Module) -> None:
         # Every name gets a per-build suffix.  These fixed names collided
@@ -92,7 +97,7 @@ class ProvenancePoisoner:
         # ("invalid redefinition of function").  That killed the native
         # stage on every payload.  A random suffix keeps the decoys
         # plausible while making the collision impossible.
-        _sfx = secrets.token_hex(3)
+        _sfx = "%06x" % self._rng.getrandbits(24)
         funcs_data = [
             (f"_nx_decoy_validate_license_{_sfx}", ["key"], f"_nx_decoy_check_{_sfx}"),
             (f"_nx_decoy_check_integrity_{_sfx}", ["data"], f"_nx_decoy_report_{_sfx}"),

@@ -384,7 +384,34 @@ def get_random_var_name(prefix="NX"):
                 break
         if not found:
             suffix += random.choice(['A', 'B', 'C', 'X', 'Y', 'Z'])
-    return f"_nixon_{suffix}"
+    name = f"_nixon_{suffix}"
+    # NFKC invariance is not cosmetic: Python normalises identifiers at
+    # compile time, so `def <name>` binds the NFKC-normalised key while a
+    # runtime `globals().get("<raw name>")` looks up the raw string.  A
+    # non-invariant name (17% of the old draw: combining sequences such as
+    # Bengali ঁ or Devanagari ़) made the kill ladder's server alert look
+    # up a key that does not exist -- the webhook silently missed every
+    # strict-kill in those builds, and the snippet test flaked the same
+    # way.  Redraw until raw == normalised.
+    import unicodedata as _unicodedata
+    for _ in range(50):
+        if _unicodedata.normalize("NFKC", name) == name:
+            return name
+        suffix = ""
+        for _ in range(random.randint(5, 10)):
+            found = False
+            for _ in range(20):
+                r_start, r_end = random.choice(babel_ranges)
+                char = chr(random.randint(r_start, r_end))
+                if ("_" + char).isidentifier() and char.isprintable():
+                    suffix += char
+                    found = True
+                    break
+            if not found:
+                suffix += random.choice(['A', 'B', 'C', 'X', 'Y', 'Z'])
+        name = f"_nixon_{suffix}"
+    # The ASCII fallback is always invariant.
+    return "_nixon_" + "".join(random.choices('ABCDEFGHJKMNPQRSTUVWXYZ', k=8))
 FUNC_NEXT_H = get_random_var_name("NEXT_H")
 FUNC_REM_ENT = get_random_var_name("REM_ENT")
 FUNC_SEC_WIPE = get_random_var_name("SEC_WIPE")

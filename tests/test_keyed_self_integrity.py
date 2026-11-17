@@ -73,7 +73,11 @@ def test_keyed_anchor_is_skipped_for_unlicensed_builds():
     start = template.index("def {FUNC_SELF}():")
     end = template.index("def {FUNC_LIVE_CHK}():", start)
     body = template[start:end]
-    assert re.search(r"if \{VAR_KEYED_ANCHOR\}:\s*\n", body), (
+    # The guard grew an explicit all-zeros clause (the 64-zero placeholder
+    # used to be truthy and armed the check on unlicensed builds): both the
+    # bare and the strip("0") forms guard on the anchor being non-empty.
+    assert re.search(r"if \{VAR_KEYED_ANCHOR\}( and \{VAR_KEYED_ANCHOR\}\.strip\(\"0\"\))?:\s*\n",
+                     body), (
         "the keyed check must be guarded by the anchor being non-empty")
 
 

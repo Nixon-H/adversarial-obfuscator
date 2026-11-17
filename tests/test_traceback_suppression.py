@@ -16,10 +16,26 @@ def _head_frag():
     import ast as _ast
     tree = _ast.parse(open("obfuscator/core/pipeline.py").read())
     for node in _ast.walk(tree):
-        if isinstance(node, _ast.Assign):
+        # skip the later `loader_template = loader_template.replace(...)`
+        # rebindings: only the raw-string literal assignment carries the
+        # template text
+        if isinstance(node, _ast.Assign) and isinstance(node.value, _ast.Constant):
             for t in node.targets:
                 if getattr(t, "id", "") == "loader_template":
-                    return node.value.value[:1500]
+                    head = node.value.value[:1500]
+    # The template's first lines carry the identity-gate and self-check
+    # MARKERS (the generator replaces them with real text); the raw
+    # markers are not executable, so resolve them exactly as the
+    # generator does -- gate text stripped (this fragment exec IS a
+    # non-main exec) and the self-check markers emptied (its call reads
+    # __file__).
+    while "__NX_" in head:
+        head = head.replace("__NX_IDENTITY_GATE__\n", "")
+        head = head.replace("__NX_SELF_CHECK_DEFS__\n", "")
+        head = head.replace("__NX_SELF_CHECK_CALL__\n", "")
+        if "__NX_" in head:
+            raise AssertionError("unknown __NX_ marker in the loader head")
+    return head
     raise AssertionError("loader_template not found")
 
 

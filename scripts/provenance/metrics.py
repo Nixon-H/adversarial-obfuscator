@@ -35,19 +35,33 @@ class ProvenanceMetrics:
             f for f in all_funcs if "_nx_proto_" in f.name
         ]
 
-        decoy_calls = [
-            c for c in all_calls if (
-                isinstance(c.func, ast.Name)
-                and c.func.id.startswith("_nx_decoy_")
-            )
-        ]
+        def _decoy_name_of(call):
+            # The injected decoys call each other through
+            # globals()['_nx_decoy_...'] (anti-analysis indirection), not
+            # through bare Names — count both shapes, keyed by the actual
+            # decoy name.
+            func = call.func
+            if isinstance(func, ast.Name):
+                name = func.id
+            elif isinstance(func, ast.Subscript) and (
+                    isinstance(func.value, ast.Call)
+                    and isinstance(func.value.func, ast.Name)
+                    and func.value.func.id == "globals"
+                    and isinstance(func.slice, ast.Constant)
+                    and isinstance(func.slice.value, str)):
+                name = func.slice.value
+            else:
+                return None
+            return name if name.startswith(
+                ("_nx_decoy_", "_nx_fake_", "_nx_proto_")) else None
+
+        decoy_calls = [c for c in all_calls if _decoy_name_of(c)]
 
         fake_call_edges = set()
         for c in decoy_calls:
-            if isinstance(c.func, ast.Name):
-                caller_func = self._find_enclosing_func(tree, c)
-                if caller_func:
-                    fake_call_edges.add((caller_func, c.func.id))
+            caller_func = self._find_enclosing_func(tree, c)
+            if caller_func:
+                fake_call_edges.add((caller_func, _decoy_name_of(c)))
 
         misleading_imports = [
             i for i in all_imports if self._is_misleading_import(i)

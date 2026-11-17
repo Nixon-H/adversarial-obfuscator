@@ -2262,6 +2262,14 @@ def stego_encode(source_code):
     # ('invalid non-printable character U+0090'). Steganography round-trips
     # bytes; the text layer has to be decoded afterwards.
     bootstrap = r'''# -*- coding: utf-8 -*-
+# Identity gate (sources.IDENTITY_GATE_STAGE equivalent): this module runs
+# exec'd inside the artefact's own globals at run time -- a foreign exec
+# with a non-main __name__ must not reach the decode.  Inlined here because
+# transforms cannot import sources (sources imports transforms).
+if __name__ not in ("__main__", "__mp_main__"):
+    import sys as _nx_id_sys
+    _nx_id_sys.stderr.write("[BLOCKED] identity: foreign exec refused (exit 2)\n")
+    _nx_id_sys.exit(2)
 _="{hidden}"
 exec(bytes(int("".join("0" if c=="\u200b" else "1" for c in _[i:i+8]), 2) for i in range(0, len(_), 8)).decode("utf-8"))
 '''

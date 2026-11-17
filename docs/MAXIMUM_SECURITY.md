@@ -433,6 +433,23 @@ dropped; these run in every normal build without a flag:
   snapshot and stdlib function-audit gates
   (opt out: `--exclude integrity.audit-hook|integrity.snapshot|integrity.stdlib-audit`).
 - Post-build verification suite (PHASE 3) on the native path.
+- **Identity gate** (2026-11-17): shipped loaders refuse to initialise
+  under a foreign `exec()` — the artefact must be the script the
+  interpreter was pointed at (`__name__` main-ish AND `__file__` ==
+  `sys.argv[0]`, exit 2 otherwise); interior packaging layers get a
+  name-only stage gate. Closes the foreign-exec extraction route found
+  by the 2026-11-17 GLM 5.3 Flash benchmark
+  (docs/research/ai-layer-bench-2026-11-17/RESULTS.md).
+- **Hybrid-loader self-check** (2026-11-17): the sectioned artefact
+  verifies its own bytes (Merkle + per-build HMAC, stamped as the last
+  content step; runs before any key material is reconstructed) — flipping
+  any loader byte kills it with `Self-check error` (rc 137).
+- **Real token binding** (2026-11-17): `--licence token=` no longer
+  embeds the token's key material in the artefact (the seal mask and the
+  loader-embedded salt are now separate), the hybrid loader pins the
+  token payload hash (forged token refused by name), a missing token
+  prints its reason before the fail-closed kill. `--licence salt=` is
+  documented as a per-customer differ, not a secret.
 
 **Native path (`scripts/build.py`) maximum additions:** the opt-in passes
 `--transforms data function-intent speculation struct`, `--validate fail`,

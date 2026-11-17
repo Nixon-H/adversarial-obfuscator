@@ -144,7 +144,11 @@ def build_honey_pack(seed: bytes, build_id: str, *, sections: int = 2) -> dict:
     # indistinguishable by shape.
     import zlib
     stream = bytes([0x00]) + zlib.compress(source.encode("utf-8"))
-    js, session_key = pack_json(stream, sections=sections, key=key)
+    # Deterministic per build: the decoy's section nonces derive from the
+    # honey seed, so two builds with the same inputs produce byte-identical
+    # decoys (reproducible builds + the byte-identity loader tests).
+    js, session_key = pack_json(stream, sections=sections, key=key,
+                                nonce_seed=seed)
     return {
         "pack_b85": base64.b85encode(js).decode("ascii"),
         "key_hint": hashlib.sha256(session_key).hexdigest()[:16],
