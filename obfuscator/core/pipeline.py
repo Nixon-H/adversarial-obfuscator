@@ -1449,7 +1449,16 @@ def prepare_obfuscated_source(source_path, ast_opts=None):
     print("    [+] Pre-obfuscating source for native build...")
     protected_code, _ = apply_ast_mutation(source_code, options=ast_opts, strict=True)
     return protected_code
-def build_local_cython(source_content, target_python=None):
+def build_local_cython(source_content, target_python=None, ast_opts=None):
+    """Compile the payload to a native module via Cython + the C transform.
+
+    ``ast_opts`` applies the SAME AST layer the bytecode fallback gets.
+    Without it the native module was built from RAW source: measured
+    2026-11-17, a build with --transforms string-key-env=... produced a .so
+    whose strings were sealed with the inline key (the shard was ignored),
+    because this function had no options parameter at all.  The native path
+    is the one that actually ships, so it must receive the same transforms.
+    """
     import tempfile
     import subprocess
     import sys
@@ -1459,6 +1468,17 @@ def build_local_cython(source_content, target_python=None):
     build_dir = tempfile.mkdtemp(prefix="nixon_local_build_")
     try:
         src_path = os.path.join(build_dir, "payload.py")
+        # Apply the AST layer FIRST (same options as the fallback), then
+        # rewrite the main guard so Cython compiles the body eagerly.
+        if ast_opts:
+            try:
+                _pre, _ = apply_ast_mutation(source_content, ast_opts, strict=True)
+                source_content = _pre
+                print("    [+] Native source pre-obfuscated (AST layer applied)")
+            except Exception as _pre_exc:
+                print(f"    [!] Native pre-obfuscation FAILED: {_pre_exc}")
+                print("    [!] Refusing to compile untransformed source (fail closed).")
+                return None, None
         source_content = source_content.replace('if __name__ == "__main__":', 'if True:')
         with open(src_path, "w", encoding="utf-8") as f:
             f.write(source_content)
@@ -3568,7 +3588,37 @@ def build_project(args):
              args.python = local_py_ver
         with UI.Task("Native Build", "Building Native Binary...") as t:
             target_py = sys.executable
-            blob_data, blob_name = build_local_cython(open(source, 'r').read(), target_python=target_py)
+            # The full ast_options dict is assembled further down (it needs
+            # the deployed-contract and shard values resolved later), so
+            # build the subset the AST layer actually reads here.  Without
+            # this the native module -- the artefact that ships -- was
+            # compiled from RAW source and ignored every --transforms pass,
+            # including string-key-env (measured 2026-11-17).
+            _native_ast_opts = {
+                'fragment_strings': True,
+                'string_key_env': (str(getattr(args, 'tx_string_key_env', '') or '') or None),
+                'string_crypto': getattr(args, 'string_crypto', None),
+                'symbol_rename': True,
+                'unicode_ids': True,
+                'strip_meta': True,
+                'cfg_flatten': True,
+                'opaque_predicates': True,
+                'bogus_exceptions': True,
+                'mba_subs': True,
+                'split_vars': True,
+                'unfold_constants': True,
+                'enhanced_junk': True,
+                'break_decompiler': True,
+                'code_checksums': True,
+                'obf_calls': True,
+                'exception_flow': True,
+                'residue_random': True,
+                'hwid': str(getattr(args, 'hwid', '') or ''),
+                'trial_seconds': None,
+            }
+            blob_data, blob_name = build_local_cython(
+                open(source, 'r').read(), target_python=target_py,
+                ast_opts=_native_ast_opts)
             blob_key = secrets.token_bytes(32)
             args._inner_key = blob_key
             blob_key_hex = blob_key.hex()
@@ -3606,7 +3656,16 @@ def build_project(args):
                 'allowed_countries': getattr(args, 'allow_countries', '').split(',') if getattr(args, 'allow_countries', '') else [],
                 'blocked_countries': getattr(args, 'block_countries', '').split(',') if getattr(args, 'block_countries', '') else [],
                 'allowed_regions': getattr(args, 'allow_regions', '').split(',') if getattr(args, 'allow_regions', '') else [],
-                'blocked_regions': getattr(args, 'block_regions', '').split(',') if getattr(args, 'block_regions', '') else []
+                'blocked_regions': getattr(args, 'block_regions', '').split(',') if getattr(args, 'block_regions', '') else [],
+                # Keyless string sealing (audit 2026-11-17): this dict is what
+                # compiles the SHIPPED payload on the sectioned path, and it
+                # was missing string_key_env entirely -- so --transforms
+                # string-key-env=... was accepted, validated, and then ignored
+                # on the default build path.  Verified: the artefact ran
+                # without the shard because the seals had been made with the
+                # inline key.
+                'string_key_env': (str(getattr(args, 'tx_string_key_env', '') or '') or None),
+                'string_crypto': getattr(args, 'string_crypto', None),
             }
             fallback_opts['force_native'] = "False"
             # Phase-4 wiring: thread hwid/trial/macros into the fallback compile.

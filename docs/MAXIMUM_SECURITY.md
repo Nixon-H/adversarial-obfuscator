@@ -360,13 +360,21 @@ python3 -m obfuscator.licensing issue --key-hex "$ISSUER_SEED" \
   --customer acme --days 30 --features pro --out acme.licence
 
 # Build. Output goes next to the payload: <dirname(payload)>/dist/
-NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD \
+# The string-seal shard: keep it OUT of the artefact. Without it the
+# artefact ships its own seal key and an analyst (or an LLM) can simply call
+# the shipped decoder -- measured 2026-11-17: 4/4 secrets recovered with the
+# inline key, 0/4 with this shard.
+NX_SEAL_SHARD=$(openssl rand -hex 32)
+
+NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD NX_SEAL_SHARD=$NX_SEAL_SHARD \
 python3 -m obfuscator.core.pipeline build payload.py \
   --skip-cloud \
   --anti-rea-level maximum \
   --section-count 6 \
   --watermark NX-MAX-001 \
+  --transforms string-key-env=NX_SEAL_SHARD \
   --access trial=7d \
+  --access block-countries=RU,KP \
   --licence token=acme.licence env-only bootstrap-encrypted chain \
   --package layers=25 stego
 
@@ -391,16 +399,19 @@ python3 -m obfuscator.core.pipeline build payload.py \
   --section-count 8 \
   --watermark NX-001 \
   --lowering io,scalar,string,container,service,protocol,function,import,fusion,arithmetic,truth,slice,format,augassign \
-  --transforms data function-intent speculation \
+  --transforms data function-intent speculation string-key-env=NX_SEAL_SHARD \
   --access trial=7d expire=2027-12-31 hwid=<machine-hwid> hwid-lock kod driver-check \
            name-gate rename-internal bind-mac webhook=https://alerts.example/hook \
-           vm-threshold=65 \
+           block-countries=RU,KP vm-threshold=65 \
   --licence token=acme.licence env-only bootstrap-encrypted chain \
   --tls-ca-bundle /etc/ssl/certs/ca.pem \
   --package native compile cloud platform=github layers=25 zips=3
 
-# Run. Without the token the artefact exits 1.
-NIXON_LICENCE=acme.licence python3 dist/payload_protected.py
+# Run. Without the token the artefact exits 1. The seal shard must be
+# present at RUN time too (that is the point: the artefact alone cannot
+# decrypt its own strings).
+NIXON_LICENCE=acme.licence NX_SEAL_SHARD=$NX_SEAL_SHARD \
+  python3 dist/payload_protected.py
 ```
 
 Every remaining loader flag is either in this command or deliberately
