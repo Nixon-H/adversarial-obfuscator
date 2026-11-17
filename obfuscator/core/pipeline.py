@@ -3634,7 +3634,59 @@ def build_project(args):
                 t.success(f"{blob_name} (Base64)")
             else:
                 t.update(status="WARN", value="Skipped/Failed (Using bytecode)")
-                _nixon_utils._console.write("\n") 
+                _nixon_utils._console.write("\n")
+            # Per-OS blobs via the Cython matrix farm (audit 2026-11-18):
+            # platform=github was parsed and then IGNORED -- the three
+            # maximum commands produced a CURRENT-OS .so only, because the
+            # farm was reachable solely through the separate build-farm
+            # subcommand.  With the farm wired here, CLOUD/ABSOLUTE build
+            # windows (.pyd), linux (.so) and macos (.dylib) blobs, each
+            # through Cython -> the C transform layer -> the platform
+            # compiler (the farm driver applies the same c_transform as the
+            # local build).  --skip-cloud keeps the build local (current OS
+            # only).  A farm failure degrades to bytecode fallback on the
+            # other OSes -- the local blob is unaffected.
+            _farm_platform = (getattr(args, 'platform', 'auto') or 'auto')
+            if _farm_platform == 'github' and not getattr(args, 'skip_cloud', False):
+                _gh_token = ConfigManager().get("github_token") or \
+                    os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+                if not _gh_token:
+                    UI.warn("platform=github but no GitHub token: other OSes "
+                            "fall back to bytecode (local blob still embedded)")
+                else:
+                    try:
+                        _farm = _make_farm(args, _gh_token)
+                        if _farm.create_disposable_repo():
+                            _ct_src = os.path.join(os.path.dirname(
+                                os.path.dirname(os.path.abspath(__file__))),
+                                "scripts", "c_transform.py")
+                            if not _farm.upload_file(source, "payload.py"):
+                                raise RuntimeError("payload upload failed")
+                            _farm.upload_file(_ct_src, "c_transform.py")
+                            _farm.create_workflow(source)
+                            _run_id = _farm.trigger_and_wait()
+                            if _run_id:
+                                _blob_dir = os.path.join(
+                                    os.path.dirname(os.path.abspath(source)),
+                                    ".native_blobs")
+                                os.makedirs(_blob_dir, exist_ok=True)
+                                _farm.download_artifacts(_run_id, _blob_dir)
+                                _fat = find_native_blobs(source)
+                                for _os_name, _b64 in _fat.items():
+                                    # local blob wins for the current OS
+                                    if _b64 and not blobs.get(_os_name):
+                                        blobs[_os_name] = _b64
+                                        UI.item("Native blob", _os_name,
+                                                "EMBEDDED (farm)")
+                            else:
+                                UI.warn("Cython farm run returned no id: "
+                                        "other OSes fall back to bytecode")
+                        else:
+                            UI.warn("Cython farm repo unavailable: other OSes "
+                                    "fall back to bytecode")
+                    except Exception as _farm_exc:
+                        UI.warn(f"Cython farm build failed: {_farm_exc} "
+                                "(other OSes fall back to bytecode)")
         with UI.Task("Hybrid Loader", "Compiling Universal Fallback...") as t:
             # NOTE: 'ast_options' is assigned later in this function, so it
             # is never in locals() here — the literal below is the live

@@ -893,15 +893,29 @@ class GitHubBuildFarm:
         payload_filename = _os.path.basename(payload_filename or "")
         if not _re.match(r'^[a-zA-Z0-9_.-]+\.py$', payload_filename):
             payload_filename = "payload.py"
+        # The driver applies the SAME C transform layer the local build does
+        # (c_transform.py is uploaded beside payload.py by the caller): the
+        # per-OS blobs must not be weaker than the local .so.  Seed derives
+        # from the payload, so all three OS builds share one transform.
+        # No braces in the driver: the workflow embeds it in an f-string
+        # with doubled braces.
         script_content = f"""
-from setuptools import setup, Extension
+import os, sys, hashlib, secrets
+sys.path.insert(0, os.getcwd())
+# 1. Cython: payload.py -> payload.c (transpile only)
 from Cython.Build import cythonize
-import os
-files = ['{payload_filename}']
-extensions = [Extension("payload", files)]
+from setuptools import Extension
+cythonize([Extension("payload", ["{payload_filename}"])], language_level=3)
+# 2. The C transform layer, same as the local native build
+import c_transform
+_seed = hashlib.sha256(open("{payload_filename}", "rb").read()).digest()
+_res = c_transform.transform_file("payload.c", _seed)
+print("C transform:", _res.transforms_applied)
+# 3. Compile the TRANSFORMED C into the per-OS native blob
+from setuptools import setup
 setup(
     name='payload',
-    ext_modules=cythonize(extensions, language_level=3, compiler_directives={{'always_allow_keywords': True}}),
+    ext_modules=[Extension("payload", ["payload.c"])],
     script_args=['build_ext', '--inplace']
 )
 """
