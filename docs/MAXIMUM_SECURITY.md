@@ -349,24 +349,36 @@ same gate for cents.
 
 ---
 
-### 5.3 The verified maximum command
+### 5.3 The three maximum commands
+
+Pick one. **LOCAL** runs entirely on this machine. **CLOUD** adds the
+Cython/Nuitka compile on the GitHub build farm (needs farm credentials).
+**ABSOLUTE** is every namespace and every gate at once (cloud + all of it).
+
+All three need the string-seal shard. Keep it out of the artefact: without
+it the artefact ships its own seal key and an analyst — or an LLM — can
+simply call the shipped decoder. Measured 2026-11-17: **4/4 secrets
+recovered** with the inline key, **0/4** with the shard.
+
+#### One-time setup (all three)
 
 ```bash
-# One-time: generate an issuer seed and keep it out of the repository.
+# Issuer seed for licence tokens. Keep it out of the repository.
 ISSUER_SEED=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
 
 # Issue a token for one customer.
 python3 -m obfuscator.licensing issue --key-hex "$ISSUER_SEED" \
   --customer acme --days 30 --features pro --out acme.licence
 
-# Build. Output goes next to the payload: <dirname(payload)>/dist/
-# The string-seal shard: keep it OUT of the artefact. Without it the
-# artefact ships its own seal key and an analyst (or an LLM) can simply call
-# the shipped decoder -- measured 2026-11-17: 4/4 secrets recovered with the
-# inline key, 0/4 with this shard.
+# String-seal shard. Export it for the build AND for every run.
 NX_SEAL_SHARD=$(openssl rand -hex 32)
+export NX_SEAL_SHARD
+```
 
-NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD NX_SEAL_SHARD=$NX_SEAL_SHARD \
+#### LOCAL maximum — runs on this machine
+
+```bash
+NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD \
 python3 -m obfuscator.core.pipeline build payload.py \
   --skip-cloud \
   --anti-rea-level maximum \
@@ -377,23 +389,32 @@ python3 -m obfuscator.core.pipeline build payload.py \
   --access block-countries=RU,KP \
   --licence token=acme.licence env-only bootstrap-encrypted chain \
   --package layers=25 stego
+```
 
-# CLOUD maximum (adds the Cython/Nuitka compile on the GitHub build farm).
-# Needs build-farm credentials (pipeline config or --cf-token) and network.
-# NOTE: stego conflicts with the cloud build (enforced, exit 1) — drop it
-# from --package when cloud is present.
+Output: `<dirname(payload)>/dist/`. The `_Packed` and `_Stego` variants are
+written beside the payload, not in `dist/` — ship `dist/`.
+
+#### CLOUD maximum — adds the build-farm compile
+
+```bash
 NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD \
 python3 -m obfuscator.core.pipeline build payload.py \
   --section-count 6 \
   --watermark NX-001 \
+  --transforms string-key-env=NX_SEAL_SHARD \
   --access trial=7d \
+  --access block-countries=RU,KP \
   --licence token=acme.licence env-only bootstrap-encrypted chain \
   --package native compile cloud platform=github layers=25 zips=3
+```
 
-# ABSOLUTE maximum — every namespace, every gate, one command. Everything
-# below resolves (parse-verified); defaults not shown are already on
-# (all six transforms, anti-REA maximum, advanced protection,
-# split-bootstrap, sectioned sealing, strict detections, integrity gates).
+Needs build-farm credentials (pipeline config or `--cf-token`) and network.
+**`stego` conflicts with the cloud build** (enforced, exit 1) — that is why
+it is absent from `--package` here.
+
+#### ABSOLUTE maximum — every namespace, every gate
+
+```bash
 NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD \
 python3 -m obfuscator.core.pipeline build payload.py \
   --section-count 8 \
@@ -406,10 +427,18 @@ python3 -m obfuscator.core.pipeline build payload.py \
   --licence token=acme.licence env-only bootstrap-encrypted chain \
   --tls-ca-bundle /etc/ssl/certs/ca.pem \
   --package native compile cloud platform=github layers=25 zips=3
+```
 
-# Run. Without the token the artefact exits 1. The seal shard must be
-# present at RUN time too (that is the point: the artefact alone cannot
-# decrypt its own strings).
+Parse-verified. Defaults not shown are already on: all six AST transforms,
+anti-REA at maximum, advanced protection, split-bootstrap, sectioned
+sealing, strict detections and the integrity gates.
+
+#### Run (all three)
+
+```bash
+# Without the token the artefact exits 1. The seal shard must be present at
+# RUN time too — that is the point: the artefact alone cannot decrypt its
+# own strings.
 NIXON_LICENCE=acme.licence NX_SEAL_SHARD=$NX_SEAL_SHARD \
   python3 dist/payload_protected.py
 ```
