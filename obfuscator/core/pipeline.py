@@ -1560,6 +1560,12 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
                                    strict_detections=False,
                                    identity_gate=None,
                                    self_check=None,
+                                   expire_ts=0,
+                                   one_shot=False,
+                                   allowed_countries=None,
+                                   blocked_countries=None,
+                                   allowed_regions=None,
+                                   blocked_regions=None,
                                    seal_salt=None,
                                    licence_token_hash=""):
     # Phase-4 wiring: all new kwargs default to current behavior (no change
@@ -1683,6 +1689,128 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         except Exception:
             pass
     _phase4_suffix += ("_NX_KOD_ARMED = %r\n" % (bool(kod),))
+    # Expiry and geo gates (benchmark 2026-11-17, access-gate matrix): both
+    # were wired ONLY into the packed loader's build context, so on the
+    # SECTIONED path (the default) --access expire=... and
+    # --access block-countries=... were silently ignored: the artefact ran
+    # with no expiry and no geo enforcement at all.  An operator who sets
+    # an expiry must get one.  Emitted here, before the entry point, so a
+    # firing gate stops the payload.
+    try:
+        _exp_ts = float(expire_ts or 0)
+    except Exception:
+        _exp_ts = 0.0
+    if _exp_ts > 0:
+        _phase4_suffix += ("_NX_EXP_DATE = %r\n" % (_exp_ts,))
+        _phase4_suffix += (
+            "try:\n"
+            "    import time as _nx_exp_time\n"
+            "    if _nx_exp_time.time() > _NX_EXP_DATE:\n"
+            "        try:\n"
+            "            _nx_kill('expired')\n"
+            "        except Exception:\n"
+            "            pass\n"
+            "        import os as _nx_exp_os\n"
+            "        _nx_exp_os._exit(137)\n"
+            "except SystemExit:\n"
+            "    raise\n"
+            "except Exception:\n"
+            "    pass\n")
+    _geo = {
+        "a_c": list(allowed_countries or []),
+        "b_c": list(blocked_countries or []),
+        "a_r": list(allowed_regions or []),
+        "b_r": list(blocked_regions or []),
+    }
+    if any(_geo.values()):
+        # Inline, stdlib-only geo gate: the packed loader's GEOFENCE_SOURCE
+        # needs urllib aliases the hybrid template does not bind.  Same
+        # semantics (fail closed when the location cannot be determined),
+        # same kill ladder.
+        _phase4_suffix += (
+            "_NX_GEO = %r\n"
+            "try:\n"
+            "    import json as _nx_geo_json\n"
+            "    import urllib.request as _nx_geo_req\n"
+            "    _nx_geo_loc = None\n"
+            "    for _nx_geo_url in ('https://ipapi.co/json/',\n"
+            "                        'https://ip-api.com/json/'):\n"
+            "        try:\n"
+            "            _nx_geo_r = _nx_geo_req.urlopen(_nx_geo_url, timeout=5)\n"
+            "            _nx_geo_d = _nx_geo_json.loads(_nx_geo_r.read())\n"
+            "            _nx_geo_loc = {'country': _nx_geo_d.get('country_code')\n"
+            "                          or _nx_geo_d.get('countryCode'),\n"
+            "                          'region': _nx_geo_d.get('region')\n"
+            "                          or _nx_geo_d.get('regionName')}\n"
+            "            if _nx_geo_loc.get('country'):\n"
+            "                break\n"
+            "            _nx_geo_loc = None\n"
+            "        except Exception:\n"
+            "            _nx_geo_loc = None\n"
+            "    _nx_geo_ok = False\n"
+            "    if _nx_geo_loc:\n"
+            "        _c = _nx_geo_loc.get('country')\n"
+            "        _r = _nx_geo_loc.get('region')\n"
+            "        _a_c = _NX_GEO['a_c']; _b_c = _NX_GEO['b_c']\n"
+            "        _a_r = _NX_GEO['a_r']; _b_r = _NX_GEO['b_r']\n"
+            "        if _b_c and _c in _b_c:\n"
+            "            _nx_geo_ok = False\n"
+            "        elif _b_r and _r in _b_r:\n"
+            "            _nx_geo_ok = False\n"
+            "        elif _a_c and _c not in _a_c:\n"
+            "            _nx_geo_ok = False\n"
+            "        elif _a_r and _r not in _a_r:\n"
+            "            _nx_geo_ok = False\n"
+            "        else:\n"
+            "            _nx_geo_ok = True\n"
+            "    if not _nx_geo_ok:\n"
+            "        try:\n"
+            "            _nx_kill('geo-blocked')\n"
+            "        except Exception:\n"
+            "            pass\n"
+            "        import os as _nx_geo_os\n"
+            "        _nx_geo_os._exit(137)\n"
+            "except SystemExit:\n"
+            "    raise\n"
+            "except Exception:\n"
+            "    pass\n" % (_geo,))
+    if one_shot:
+        # One-shot (benchmark 2026-11-17, access-gate matrix): the packed
+        # loader registers an atexit self-delete, but the SECTIONED path
+        # never received the flag, so --access one-shot shipped an artefact
+        # that survived every run.  Same semantics here: on clean exit,
+        # overwrite the artefact with random bytes and unlink it.  argv[0]
+        # and NX_ORIGIN are the targets (never __file__, which in a packed
+        # artefact is a temp extraction the outer loader removes anyway).
+        _phase4_suffix += (
+            "_NX_ONE_SHOT = True\n"
+            "try:\n"
+            "    import atexit as _nx_os_atexit\n"
+            "    import os as _nx_os_mod\n"
+            "    def _nx_one_shot_cleanup():\n"
+            "        try:\n"
+            "            _t = set()\n"
+            "            import sys as _nx_os_sys\n"
+            "            if _nx_os_sys.argv and _nx_os_sys.argv[0]:\n"
+            "                _t.add(_nx_os_mod.path.abspath(_nx_os_sys.argv[0]))\n"
+            "            _o = _nx_os_mod.environ.get('NX_ORIGIN')\n"
+            "            if _o:\n"
+            "                _t.add(_o)\n"
+            "            for _p in _t:\n"
+            "                try:\n"
+            "                    if _nx_os_mod.path.isfile(_p):\n"
+            "                        _sz = _nx_os_mod.path.getsize(_p)\n"
+            "                        with open(_p, 'rb+') as _fh:\n"
+            "                            _fh.write(_nx_os_mod.urandom(_sz))\n"
+            "                        _nx_os_mod.unlink(_p)\n"
+            "                except Exception:\n"
+            "                    pass\n"
+            "        except Exception:\n"
+            "            pass\n"
+            "    _nx_os_atexit.register(_nx_one_shot_cleanup)\n"
+            "except Exception:\n"
+            "    pass\n")
+
     _phase4_suffix += ("_NX_TRIAL_SECONDS = %r\n" % (trial_seconds,))
     # NOTE: _NX_KOD_ARMED / _NX_TRIAL_SECONDS above are informational /
     # reserved build-manifest literals (golden tests assert their bytes).
@@ -3470,6 +3598,29 @@ def build_project(args):
             fallback_opts['force_native'] = "False"
             # Phase-4 wiring: thread hwid/trial/macros into the fallback compile.
             _w_hwid = str(getattr(args, 'hwid', '') or '')
+            # Expiry + geo values for the hybrid loader (they used to reach
+            # only the packed loader's build context, so the sectioned path
+            # ignored --access expire=/block-countries= entirely).
+            _w_expire_ts = 0.0
+            _w_expire_spec = str(getattr(args, 'expire', '') or '')
+            if _w_expire_spec:
+                try:
+                    _w_expire_ts = datetime.strptime(
+                        _w_expire_spec, "%Y-%m-%d").timestamp()
+                except Exception:
+                    _w_expire_ts = 0.0
+            _w_allow_c = [c.strip() for c in
+                          str(getattr(args, 'allow_countries', '') or '').split(',')
+                          if c.strip()]
+            _w_block_c = [c.strip() for c in
+                          str(getattr(args, 'block_countries', '') or '').split(',')
+                          if c.strip()]
+            _w_allow_r = [r.strip() for r in
+                          str(getattr(args, 'allow_regions', '') or '').split(',')
+                          if r.strip()]
+            _w_block_r = [r.strip() for r in
+                          str(getattr(args, 'block_regions', '') or '').split(',')
+                          if r.strip()]
             _w_trial_seconds = None
             _w_trial_spec = str(getattr(args, 'trial', '') or '')
             if _w_trial_spec:
@@ -3563,6 +3714,12 @@ def build_project(args):
                 stdlib_audit_off=_w_stdlib_audit_off,
                 section_split=bool(getattr(args, 'section_split', False)),
                 section_count=int(getattr(args, 'section_count', 4) or 4),
+                expire_ts=_w_expire_ts,
+                one_shot=bool(getattr(args, 'one_shot', False)),
+                allowed_countries=_w_allow_c,
+                blocked_countries=_w_block_c,
+                allowed_regions=_w_allow_r,
+                blocked_regions=_w_block_r,
                 watermark=str(getattr(args, 'watermark', '') or '') or None,
                 customer_salt=_customer_salt,
                 seal_salt=_seal_salt,

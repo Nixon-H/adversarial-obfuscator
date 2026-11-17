@@ -145,6 +145,34 @@ ingredient. `--licence salt=` ships its salt, so it is a per-customer
 differ, not a secret — the CLI help now says so. Token binding (B2) is the
 control for secret-bearing payloads, and it holds.
 
+### E4 — access-gate matrix: THREE gates were silently ignored on the default path
+
+Built one artefact per gate against the sectioned (default) build and tried
+to defeat each. Three gates **did not exist in the emitted artefact at all**:
+
+| gate | before | after |
+|---|---|---|
+| `--access expire=YYYY-MM-DD` | `_NX_EXP_DATE` absent; artefact ran past its date | emitted before the entry; expired build dies 137 |
+| `--access block-countries=` / `allow-countries=` | no geo gate; ran from a blocked region | emitted before the entry; blocked/unknown geo dies 137 |
+| `--access one-shot` | artefact survived every run | atexit self-delete (overwrite + unlink) |
+
+Root cause: all three were wired only into the **packed** loader's
+`build_context`. The sectioned path (the default since the section-split
+work) never received them, so the flags parsed, appeared in the build
+report, and enforced nothing.
+
+Fixed in `generate_hybrid_loader_script` (three new kwargs, emitted into the
+phase-4 suffix so they gate the payload) and at the call site. The geo gate
+is inlined stdlib-only because the hybrid template does not bind the
+`urllib` aliases the packed loader's `GEOFENCE_SOURCE` uses; semantics are
+the same, including **fail closed when the location cannot be determined**.
+
+Verified after the fix: `expire-past` → rc 137, `geo-blocked` → rc 137,
+`one-shot` → first run OK then the artefact is gone (both the silent and
+`_dbg` variants). `hwid-lock` was already correct both ways (right host
+runs, wrong host 137), and `trial` was correct once the harness stopped
+racing a 1-second deadline against a multi-minute build.
+
 ### C — capture routes: blocked (all three)
 
 | route | result |
@@ -235,6 +263,7 @@ Bugs found and fixed in this pass:
 | 7 | dead `python_exec if False else` line | tripped the undefined-global checker |
 | 8 | spawn multiprocessing (E1 above) | payload unusable under spawn |
 | 9 | exit-code rewrite (E2 above) | CI/`--fail` contracts broken |
+| 10 | `expire=`, `block-countries=`, `one-shot` never reached the sectioned loader | three advertised access gates enforced nothing on the default build path |
 
 Static checks: `ruff` clean on the changed tree; the undefined-global
 checker reports 0 undefined globals; `docs/CLI.md` regenerated.
