@@ -352,8 +352,11 @@ same gate for cents.
 ### 5.3 The three maximum commands
 
 Pick one. **LOCAL** runs entirely on this machine. **CLOUD** adds the
-Cython/Nuitka compile on the GitHub build farm (needs farm credentials).
-**ABSOLUTE** is every namespace and every gate at once (cloud + all of it).
+per-OS Cython build farm (windows → `.pyd`, ubuntu → `.so`, macos →
+`.dylib`; needs farm credentials). **ABSOLUTE** is every namespace and
+every gate at once (cloud + all of it). Nuitka was removed 2026-11-17 —
+the farm builds Cython blobs now, and `--package compile` no longer
+exists.
 
 All three need the string-seal shard. Keep it out of the artefact: without
 it the artefact ships its own seal key and an analyst — or an LLM — can
@@ -394,10 +397,10 @@ python3 -m obfuscator.core.pipeline build payload.py \
 Output: `<dirname(payload)>/dist/`. The `_Packed` and `_Stego` variants are
 written beside the payload, not in `dist/` — ship `dist/`.
 
-#### CLOUD maximum — adds the build-farm compile
+#### CLOUD maximum — adds the per-OS Cython build farm
 
 ```bash
-NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD \
+NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD NX_SEAL_SHARD=$NX_SEAL_SHARD \
 python3 -m obfuscator.core.pipeline build payload.py \
   --section-count 6 \
   --watermark NX-001 \
@@ -405,17 +408,20 @@ python3 -m obfuscator.core.pipeline build payload.py \
   --access trial=7d \
   --access block-countries=RU,KP \
   --licence token=acme.licence env-only bootstrap-encrypted chain \
-  --package native compile cloud platform=github layers=25 zips=3
+  --package native platform=github layers=25 zips=3
 ```
 
 Needs build-farm credentials (pipeline config or `--cf-token`) and network.
+The farm runs a 3-OS matrix (windows → `.pyd`, ubuntu → `.so`, macos →
+`.dylib`), each built with Cython → the C transform layer → the platform
+compiler, so the payload runs natively on every OS.
 **`stego` conflicts with the cloud build** (enforced, exit 1) — that is why
 it is absent from `--package` here.
 
 #### ABSOLUTE maximum — every namespace, every gate
 
 ```bash
-NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD \
+NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD NX_SEAL_SHARD=$NX_SEAL_SHARD \
 python3 -m obfuscator.core.pipeline build payload.py \
   --section-count 8 \
   --watermark NX-001 \
@@ -426,7 +432,7 @@ python3 -m obfuscator.core.pipeline build payload.py \
            block-countries=RU,KP vm-threshold=65 \
   --licence token=acme.licence env-only bootstrap-encrypted chain \
   --tls-ca-bundle /etc/ssl/certs/ca.pem \
-  --package native compile cloud platform=github layers=25 zips=3
+  --package native platform=github layers=25 zips=3
 ```
 
 Parse-verified. Defaults not shown are already on: all six AST transforms,
