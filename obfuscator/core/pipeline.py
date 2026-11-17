@@ -3917,6 +3917,16 @@ def _VERIFY_INTEGRITY():
         'opaque_predicates': True,
         'exception_flow': True,
         'fragment_strings': True,
+        # Keyless string sealing (benchmark 2026-11-17, DS 4.1 Flash via
+        # Mistral): the default mode ships the 32-byte seal key AND the
+        # decoder in the artefact, so a capable analyst -- including an LLM
+        # that can reason about code -- simply calls the decoder. Measured:
+        # the model decrypted all 12 seals of the `data` arm and recovered
+        # every secret ("All 12 seals authenticated and decrypted cleanly").
+        # string_key_env derives the seal key from an ENV SHARD, so the
+        # artefact alone cannot be decrypted offline. Opt-in: the operator
+        # must supply the shard at both build and run time.
+        'string_key_env': (str(getattr(args, 'tx_string_key_env', '') or '') or None),
         'mba_subs': True,
         'obf_calls': True,
         'stego': getattr(args, 'stego', False),
@@ -5220,6 +5230,11 @@ _LOADER_TX_FIELDS = {
     "data": "tx_data", "data-level": "tx_data_level",
     "function-intent": "tx_function_intent", "speculation": "tx_speculation",
     "remote": "tx_remote", "remote-bundle": "tx_remote_bundle",
+    # Keyless string sealing: string-key-env=NAME derives the seal key from
+    # environment variable NAME instead of shipping it in the artefact.
+    # Lives here (not as a standalone build flag) to respect the CLI
+    # consolidation rule that per-knob spellings are rejected on `build`.
+    "string-key-env": "tx_string_key_env",
 }
 _LOADER_TX_BOOLEAN = {"data", "function-intent", "speculation", "remote"}
 
@@ -5480,7 +5495,8 @@ def apply_unified_specs(args):
             setattr(args, _LOADER_TX_FIELDS[key], value)
     for dest, default in (("tx_data", False), ("tx_data_level", 3),
                           ("tx_function_intent", False),
-                          ("tx_speculation", False)):
+                          ("tx_speculation", False),
+                          ("tx_string_key_env", None)):
         if not hasattr(args, dest):
             setattr(args, dest, default)
     # Direct readers (args.bind_mac, args.expire, ...) need the dests to
@@ -5624,7 +5640,14 @@ def build_parser():
                             'intent = rename functions by what they do, '
                             'speculation = speculation-resistant code. struct '
                             'stays native-pipeline only (it configures the '
-                            'LLVM/IR flow)')
+                            'LLVM/IR flow). string-key-env=NAME = derive the '
+                            'string-seal key from environment variable NAME '
+                            '(hex shard) instead of shipping it in the '
+                            'artefact, so the artefact alone cannot be '
+                            'decrypted offline (the shard must be present at '
+                            'BOTH build and run time; without it the default '
+                            'inline key lets an analyst call the shipped '
+                            'decoder and recover every string)')
     build.add_argument('--package', nargs='+', default=None, metavar='OPT',
                        help='Packaging and mode. All options: native = cloud '
                             'Cython compile keeping the bytecode fallback; '

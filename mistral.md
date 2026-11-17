@@ -1124,3 +1124,76 @@ DeepSeek could not score `data`/`full` (credit cap ~2000 max_tokens, all
 consumed by reasoning) — their protection is evidenced statically and by
 execution, not by a model cell. The 3.2 MB stego variant likewise. No
 sealed Mimosa scan exists for these commits.
+
+## 2026-11-17 (later) — DS 4.1 Flash via Mistral: the string-seal finding
+
+Model: **`mistral/deepseek-v4-1-flash-1017`** via `opencode run`. DeepSeek
+V4.1 Flash served through Mistral, per instruction. No other Mistral model,
+no Kern.
+
+### Route history (why the earlier runs were incomplete)
+
+| route | outcome |
+|---|---|
+| OpenRouter `deepseek/deepseek-v4.1-flash` | credit cap ~2000 max_tokens; reasoning ate it; `data`/`full` never completed |
+| Kern `Qwen3.8-27B` | wrong model for this phase; 524 timeouts >~5 KB |
+| **Mistral `deepseek-v4-1-flash-1017`** | **all 7 arms completed** |
+
+### FINDING: string "encryption" was a self-contained puzzle
+
+The default string-seal mode ships **the 32-byte key AND the decoder in the
+same artefact**. The model said, verbatim:
+
+> "I'll decrypt the embedded constants by extracting the decryption routine
+> and running it in a sandboxed way."
+
+…and recovered **4/4 secrets**. It broke no cryptography — it called the
+program's own decryptor. Source-level encryption whose key travels with the
+ciphertext defeats `grep`, not an analyst who can execute code.
+
+Ablation (DS 4.1 Flash via Mistral):
+
+| arm | plaintext in file | names | secrets |
+|---|---|---|---|
+| raw | 4 | 3/5 | 3/4 |
+| lex | 4 | **5/5** | **4/4** |
+| cfg | 4 | 3/5 | 3/4 |
+| **data** | **0** | **5/5** | **4/4** ← decrypted |
+| mba | 4 | 3/5 | 3/4 |
+| decoys | 4 | 3/5 | 3/4 |
+| **full** | **0** | **0/5** | 3/4 |
+
+Only `full` blocks identifier recovery. `lex` scored 5/5 here vs 0/5 on
+Kern — identifier recovery is model-dependent and neither number is a
+property of the layer.
+
+### FIX: `--transforms string-key-env=NAME`
+
+The crypto layer already had `make_session(kek_env=…)` ("the artifact alone
+cannot be decrypted offline") but it was **unreachable from `build`**. Wired
+through `--transforms` (not a standalone flag — the CLI consolidation rule
+rejects per-knob spellings on `build`, and
+`test_removed_access_spellings_are_rejected` enforces it).
+
+Verified, same payload / model / prompt:
+
+| build | runs without shard | secrets recovered |
+|---|---|---|
+| inline key (default) | yes | **4/4** |
+| `string-key-env` | **no** (`ValueError: string KEK unavailable`) | **0/4** |
+
+The keyless answer was `{"secrets": []}` — an empty result, not a refusal.
+
+5 new tests (`tests/test_string_key_env.py`).
+
+### Also in this pass
+
+* `--rename-internal` was briefly added to `build` and then **removed**:
+  enabling it in a full stack produced
+  `TypeError: _nx_eef8f5() takes no arguments`, and the consolidation test
+  requires the spelling to stay rejected. Documented as opt-in-only on
+  `obfuscate`.
+* My benchmark payload was broken for several runs
+  (`InventoryReconciler()` called with 2 args, no `__init__`); fixed, it now
+  prints `AUDIT f7d946695f44c373`.
+* CLI.md regenerated.

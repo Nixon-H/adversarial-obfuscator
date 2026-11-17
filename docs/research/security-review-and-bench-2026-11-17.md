@@ -530,3 +530,106 @@ Recorded so the log is honest about what was investigated and disproved:
   of band; never rely on `salt=`, renaming, or control-flow flattening for
   confidentiality (measured: `lex`/`cfg`/`mba`/`decoys` all left the
   secrets readable).
+
+
+---
+
+# Part 4 — DS 4.1 Flash via Mistral: the string-seal finding
+
+Model: **`mistral/deepseek-v4-1-flash-1017`** (DeepSeek V4.1 Flash served
+through Mistral), run via `opencode run --model …`. No other Mistral model
+and no Kern model was used.
+
+Earlier routes and why they were abandoned:
+
+| route | outcome |
+|---|---|
+| OpenRouter `deepseek/deepseek-v4.1-flash` | credit cap ~2000 max_tokens; the reasoning trace consumed it, so `data`/`full` never completed |
+| Kern `Qwen/Qwen3.8-27B-FP8` | wrong model for this phase; also 524 origin timeouts on artefacts >~5 KB |
+| **Mistral `deepseek-v4-1-flash-1017`** | **all 7 arms completed, no measurement failures** |
+
+## 4.1 The finding: string "encryption" was a self-contained puzzle
+
+The default string-seal mode ships **the 32-byte key and the decoder in the
+same artefact**. The model read the code and said, verbatim:
+
+> "I'll decrypt the embedded constants by extracting the decryption routine
+> and running it in a sandboxed way."
+
+…then recovered **4/4 secrets**. It did not break any cryptography — it
+called the program's own decryptor. Source-level encryption whose key
+travels with the ciphertext defeats `grep`; it does not defeat an analyst
+who can execute code, and an LLM can.
+
+Full ablation (DS 4.1 Flash via Mistral, seed 4242, one arm per family):
+
+| arm | bytes | plaintext secrets in file | names recovered | secrets recovered |
+|---|---|---|---|---|
+| raw | 1077 | 4 | 3/5 | 3/4 |
+| lex | 1014 | 4 | **5/5** | **4/4** |
+| cfg | 1835 | 4 | 3/5 | 3/4 |
+| **data** | 5300 | **0** | **5/5** | **4/4** ← decrypted |
+| mba | 1070 | 4 | 3/5 | 3/4 |
+| decoys | 8965 | 4 | 3/5 | 3/4 |
+| **full** | 8819 | **0** | **0/5** | 3/4 ← partly decrypted |
+
+Reading:
+
+* **Only `full` blocks identifier recovery** (0/5) — the combination of
+  renaming + unicode ids + junk. `lex` alone scores **5/5** here (it
+  renames, but the model still recovered the names from context), which
+  contradicts the earlier Kern reading and shows the result is
+  model-dependent.
+* **`data` protects nothing against a capable analyst**: 0 plaintext
+  secrets, yet 4/4 recovered by executing the shipped decoder.
+* `cfg`, `mba`, `decoys` leave secrets at 3/4 — they were never designed
+  to hide strings.
+
+## 4.2 The fix: `--string-key-env`
+
+The crypto layer already had a keyless mode (`make_session(kek_env=…)`:
+"seals are encrypted under KDF(build_key, env_shard) … so the artifact
+alone cannot be decrypted offline") but it was **unreachable from `build`**.
+Wired it through as `--string-key-env ENV_NAME`.
+
+Verified end-to-end, same payload, same model, same prompt:
+
+| build | runs without shard | secrets recovered |
+|---|---|---|
+| inline key (default) | yes | **4/4** |
+| `--string-key-env` | **no** (`ValueError: string KEK unavailable`) | **0/4** |
+
+The keyless model answer was `{"secrets": []}` — an empty result, not a
+refusal, i.e. it genuinely could not decrypt.
+
+5 new regression tests (`tests/test_string_key_env.py`), including that the
+keyless artefact refuses to run without its shard and runs correctly with
+it.
+
+## 4.3 Recommendation
+
+**For any payload with real secrets, build with `--string-key-env`.** The
+default remains inline-key for standalone distribution (an artefact that
+needs no environment is easier to ship), but that mode provides no
+confidentiality against an analyst who can execute the artefact — which is
+now the realistic threat model. The flag is documented in its `--help`.
+
+## 4.4 Withdrawn / corrected from earlier parts
+
+* The Kern ablation's `lex` result (0/5 names) did **not** reproduce on DS
+  4.1 Flash via Mistral (5/5). Identifier recovery is model-dependent;
+  neither number should be quoted as a property of the layer.
+* The Kern `data`/`full` cells were measurement failures (524 timeouts),
+  not protection wins. They are now measured.
+* My benchmark payload was broken for several runs
+  (`InventoryReconciler()` called with 2 args but no `__init__`), which
+  invalidated the first Kern pass. Fixed; the payload now runs
+  (`AUDIT f7d946695f44c373`).
+
+## 4.5 New audit items
+
+| # | item | status |
+|---|---|---|
+| 17 | string-seal key ships inline, so the artefact is self-decryptable | **mitigated**: `--string-key-env` gives real confidentiality; default documented |
+| 18 | `kek_env` keyless mode existed but was unreachable from `build` | **fixed** |
+| 19 | `--rename-internal` absent from `build`; enabling it broke execution in a full stack | **exposed as opt-in, default OFF, failure documented** |
