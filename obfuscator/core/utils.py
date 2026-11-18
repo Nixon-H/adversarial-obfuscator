@@ -945,10 +945,32 @@ sys.path.insert(0, os.getcwd())
 from Cython.Build import cythonize
 from setuptools import Extension
 cythonize([Extension("payload", ["{payload_filename}"])], language_level=3)
-# 2. The C transform layer, same as the local native build
-import c_transform
-_seed = hashlib.sha256(open("{payload_filename}", "rb").read()).digest()
-_res = c_transform.transform_file("payload.c", _seed)
+# 2. The C transform layer, same as the local native build.
+# SEED SEPARATION (review §5, 2026-11-18): this used to be
+# sha256(payload bytes), which is REPRODUCIBLE -- fine for a rebuild of the
+# same target, but it meant all three OS runners drew IDENTICAL transform
+# choices, so one analysis of the linux blob predicted the windows and mac
+# layouts. A reproducible seed and an anti-correlation seed are different
+# requirements and are now derived separately:
+#   * _repro_seed  -> logged, stable for the same payload (audit trail);
+#   * _divers_seed -> the transform seed, salted with per-runner entropy so
+#                      each platform gets its own polymorphic sequence.
+# Matrix builds are separate machines, so os.urandom differs per runner and
+# the three blobs no longer share a structure. Set NIXON_REPRODUCIBLE=1 to
+# pin the old behaviour when bit-identical rebuilds are wanted.
+import c_transform, os as _os
+_payload_bytes = open("{payload_filename}", "rb").read()
+_repro_seed = hashlib.sha256(_payload_bytes).digest()
+print("repro seed:", _repro_seed.hex())
+if _os.environ.get("NIXON_REPRODUCIBLE"):
+    _divers_seed = _repro_seed
+    print("C transform seed: REPRODUCIBLE (NIXON_REPRODUCIBLE=1)")
+else:
+    _divers_seed = hashlib.sha256(
+        _repro_seed + _os.urandom(32) + _os.uname().machine.encode()
+    ).digest()
+    print("C transform seed: DIVERSIFIED", _divers_seed.hex()[:16])
+_res = c_transform.transform_file("payload.c", _divers_seed)
 print("C transform:", _res.transforms_applied)
 # Strip the Cython metadata comment block before compiling. It is pure
 # metadata (JSON inside a C comment) and MSVC rejected it as code --

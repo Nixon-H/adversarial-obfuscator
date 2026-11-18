@@ -6,15 +6,15 @@ patched defence must not disable the whole measurement.
 """
 from __future__ import annotations
 
+from .safe_parse import extract_strings
+
 import base64
 import bz2
 import json
 import lzma
-import marshal
 import os
 import re
 import subprocess
-import types
 import zlib
 
 
@@ -81,9 +81,7 @@ def probe_packed_elf_symbols(artefact_path):
     """
     import hashlib
     import hmac
-    import marshal
     import tempfile
-    import types
 
     text = _read(artefact_path).decode("utf-8", "replace")
     m = re.search(r"_NX_SECTION_PACK\s*=\s*'([^']+)'", text)
@@ -145,31 +143,23 @@ def probe_packed_elf_symbols(artefact_path):
                 "derived": True, "found_elf": False,
                 "reason": "no compression envelope"}
 
-    # the payload may carry the native module as a base64 literal
+    # the payload may carry the native module as a base64 literal.
+    # NO DESERIALISER (deep scan 2026-11-18, CWE-502): this used to call
+    # marshal.loads on an attacker-supplied stream. The probe only needs the
+    # long string constants, and those are plain byte runs in the marshal
+    # stream, so they are recovered by scanning -- no code object is ever
+    # built, and a hostile artefact can only choose which strings are
+    # reported, never execute anything in this process.
     elfs = []
-    try:
-        code = marshal.loads(inner)
-        strings = []
-        blob = []
-        def walk(c):
-            for k in c.co_consts:
-                if isinstance(k, str):
-                    strings.append(k)
-                elif isinstance(k, types.CodeType):
-                    walk(k)
-        walk(code)
-        for s in strings:
-            if len(s) < 512:
+    for s in extract_strings(inner, min_len=512):
+        for cand in (base64.b64decode, base64.b85decode):
+            try:
+                d = cand(s + "=" * (-len(s) % 4))
+            except Exception:
                 continue
-            for cand in (base64.b64decode, base64.b85decode):
-                try:
-                    d = cand(s + "=" * (-len(s) % 4))
-                except Exception:
-                    continue
-                if d[:4] == b"\x7fELF":
-                    elfs.append(d)
-    except Exception:
-        pass
+            if d[:4] == b"\x7fELF":
+                elfs.append(d)
+                break
 
     if not elfs:
         return {"probe": "packed_elf", "applicable": True, "derived": True,
@@ -511,18 +501,12 @@ def probe_payload_strings(artefact_path):
         return {"probe": "payload_strings", "applicable": True,
                 "derived": True, "payload_strings": []}
 
-    strings = []
-    try:
-        code = marshal.loads(inner)
-
-        def walk(c):
-            for k in c.co_consts:
-                if isinstance(k, str):
-                    strings.append(k)
-                elif isinstance(k, types.CodeType):
-                    walk(k)
-        walk(code)
-    except Exception:
+    # NO DESERIALISER (deep scan 2026-11-18, CWE-502). This probe exists to
+    # find payload identifiers in the decoded stream, and those are plain
+    # length-prefixed byte runs -- `marshal.loads` was never needed here.
+    # A hostile artefact now influences only which strings are reported.
+    strings = extract_strings(inner, min_len=4)
+    if not strings:
         strings = [inner.decode("utf-8", "replace")[:4000]]
 
     blob = "\n".join(strings)

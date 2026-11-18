@@ -233,10 +233,75 @@ A benchmark that is not itself audited reports whatever its own bugs say. This
 is why each metric was re-derived from the raw probe data by hand after the
 run, not taken from the summary line.
 
+---
+
+## 5b. Runtime memory extraction — the first dynamic result, and it is a failure
+
+Every number above is **static**: it measures what an analyst can read off the
+artefact file. The review's actual claim is about an attacker who *executes*
+the artefact and dumps its memory. That was not measured until now, and it is
+the metric that decides whether "nothing is recoverable" is true.
+
+`pydeobsbench/memory_probe.py` executes the artefact and, as its parent
+process, reads every readable private mapping of the live process through
+`/proc/<pid>/mem` — the same content `gcore` would capture. It samples
+repeatedly, because a moving-decryption scheme is plaintext only briefly and a
+single snapshot would score it clean by accident. It reports the **max**
+recovery across samples, plus the sample count so a weak measurement is
+visible.
+
+**Positive control first.** A 3-line plain payload with a module-level secret
+produced `samples=1` and *missed* its own secret (the process exited first).
+Held open for 2 s it reported `secrets_recovered=1, names_recovered=1`. The
+probe is therefore able to see a secret when one is genuinely resident — a
+clean result from it means something.
+
+**Result on the protected artefact (cipher target, `layers=25 zips=3`,
+native path):**
+
+| measurement | value |
+|---|---|
+| samples | 40–42 |
+| secret recovered | **`cipher-master-K_77`** — the target's `KEY` constant |
+| names recovered | **`main`, `seal`** |
+| where | one `rw-p [anon]` page — a live Python object in the interpreter heap |
+| readable fraction of process lifetime | **91%** (first hit at t=0.395 s) |
+| reproduced | yes, on two independent builds |
+
+**Second target (`inventory`, 4 secrets) — all four recovered:**
+
+| measurement | value |
+|---|---|
+| secrets recovered | **4/4** |
+| — | `pg_prod_INV_SuperSecret_9911` (production DB password) |
+| — | `wt_live_INV_9c04d1f3` (live API token) |
+| — | `inv-salt-2026-11`, `https://warehouse.internal.example/api/v3/reconcile` |
+| names recovered | 2/5 (`main`, `reconcile`) |
+
+
+The protections that were supposed to prevent this — section sealing, moving
+decryption with buffer wiping, 25 packaging layers — do not prevent it,
+because the payload must eventually hold its own constants as ordinary Python
+objects in order to run. That is the irreducible boundary the review warned
+about, now measured rather than assumed.
+
+**What this does and does not say.** It says a local attacker who can read the
+process memory of their own running copy recovers the payload's secrets in
+under a second. It does not say the *artefact file* is weak — §2's static
+numbers stand (0 names, 0 secrets, licence-bound derivation fails 8/8). Both
+are true at once, and only the first one answers "nothing is recoverable".
+
+**Consequence for the stopping condition.** "Nothing is recoverable" is
+**false** as stated. The honest claim is narrower: *offline reconstruction from
+the artefact is blocked; in-process memory extraction is not, and cannot be
+made absolutely safe in CPython.* Reducing the window (shorter plaintext
+lifetime, avoiding long-lived secret objects, `mlock`/no-core-dump policy) is
+mitigation, not prevention.
 
 ---
 
 ## 6. Honest limits of this benchmark
+
 
 1. **The AI was given the artefact text only.** No debugger, no Frida, no
    Ghidra, no angr (not installed). This measures static + LLM reconstruction,
