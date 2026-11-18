@@ -1,0 +1,730 @@
+{
+  "profile": "max",
+  "work_root": "/tmp/pydeobs-max-o1w7hwi2",
+  "results": [
+    {
+      "target": "algo",
+      "profile": "max",
+      "artefact": "/tmp/pydeobs-max-o1w7hwi2/algo/dist/algo_protected.py",
+      "artefact_bytes": 297218,
+      "build_seconds": 15.5,
+      "score": {
+        "source_reconstruction": {
+          "names_from_payload": 0,
+          "names_from_ai": 0,
+          "names_total": 4
+        },
+        "secret_recovery": {
+          "from_plaintext": 0,
+          "from_decrypted_payload": 0,
+          "from_ai": 0,
+          "from_runtime_output": 0,
+          "total": 0
+        },
+        "algorithm_recovery": {
+          "ai_overlap": 0.077,
+          "ai_overlap_basis": [
+            "0x7feb352d",
+            "0x846ca68b",
+            "derive",
+            "finaliser",
+            "mix32",
+            "multiply",
+            "rotate",
+            "rotl32",
+            "rounds",
+            "runs",
+            "seed",
+            "state",
+            "xorshift"
+          ],
+          "ai_overlap_note": "",
+          "ground_truth": "mix32: xorshift-multiply-xorshift-multiply-xorshift finaliser (0x7FEB352D then 0x846CA68B); rotl32 is a 32-bit rotate; derive runs 8 rounds of mix32(rotl32(state,5) ^ (seed+i))"
+        },
+        "patch_resistance": {
+          "section_pack_derivable": true
+        },
+        "leakage": {
+          "elf_symbols_found": false,
+          "temp_files": [],
+          "native_blob_present": true,
+          "native_blob_derivable": true,
+          "native_exports": [
+            "PyInit_payload"
+          ],
+          "native_payload_names": [],
+          "native_hardened": {
+            "relro": true,
+            "nx": true,
+            "symtab": false,
+            "comment": false
+          }
+        }
+      },
+      "probes": {
+        "plaintext": {
+          "probe": "plaintext",
+          "secrets_recovered": 0,
+          "secrets_total": 0,
+          "secrets_hit": [],
+          "names_recovered": 1,
+          "names_total": 4,
+          "names_hit": [
+            "derive"
+          ]
+        },
+        "section_decrypt": {
+          "probe": "section_decrypt",
+          "applicable": true,
+          "derived": true,
+          "payload_bytes": 4690,
+          "decompressed_bytes": 201950,
+          "reason": "all 4 sections verified and joined offline"
+        },
+        "payload_strings": {
+          "probe": "payload_strings",
+          "applicable": true,
+          "derived": true,
+          "payload_strings": "<stripped: 7 decoded strings; sample kept>",
+          "joined_text_chars": 8000,
+          "joined_text": "<stripped: decoded payload text; see the report for the measured counts>",
+          "payload_strings_sample": [
+            "[BLOCKED] identity: foreign exec refused (exit 2)\n",
+            "\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200b...",
+            "",
+            "\u200b",
+            "0",
+            "1",
+            "utf-8"
+          ],
+          "payload_strings_count": 7
+        },
+        "elf_symbols": {
+          "probe": "elf_symbols",
+          "found_elf": false,
+          "symbols": []
+        },
+        "native_blob": {
+          "probe": "native_blob",
+          "applicable": true,
+          "found": true,
+          "derived": true,
+          "valid_object": true,
+          "platform": "linux",
+          "elf_bytes": 147544,
+          "dynamic_exports": [
+            "PyInit_payload"
+          ],
+          "export_count": 1,
+          "symtab_present": false,
+          "comment_present": false,
+          "relro": true,
+          "nx_stack": true,
+          "payload_names_in_strings": [],
+          "pyx_strings": [
+            "__pyx_Upf_7payload_12_nixon__4_nx_bl_7g0bt22qit8co75pvrp4a",
+            "__pyx_Upf_7payload_12_nixon__8od224g4owc15fkhvbtp7m",
+            "__pyx_pf_7payload_10_nx_71abe3",
+            "__pyx_pf_7payload_2_nx_baseline",
+            "__pyx_pf_7payload_4_nx_verify",
+            "__pyx_pf_7payload_6_nx_4f4e5d",
+            "__pyx_pf_7payload_8_nx_084eb1",
+            "__pyx_scope_struct___nixon_",
+            "__pyx_t_2",
+            "__pyx_t_3",
+            "__pyx_t_4",
+            "__pyx_t_5",
+            "__pyx_t_7",
+            "__pyx_t_9"
+          ],
+          "pyx_string_count": 14
+        },
+        "runtime_output": {
+          "probe": "runtime_output",
+          "returncode": 0,
+          "stdout": "DERIVE 3249269004\n",
+          "stderr": "",
+          "timed_out": false
+        },
+        "temp_files": {
+          "probe": "temp_files",
+          "new_files": []
+        },
+        "memory_maps": {
+          "probe": "memory_maps",
+          "max_maps": 120,
+          "rwx_mappings": 0
+        },
+        "ai": {
+          "probe": "ai",
+          "model": "mistral/deepseek-v4-1-flash-1017",
+          "truncated": true,
+          "names_recovered": 0,
+          "names_total": 4,
+          "names_hit": [],
+          "secrets_recovered": 0,
+          "secrets_total": 0,
+          "secrets_hit": [],
+          "algorithm_overlap": 0.077,
+          "overlap_basis": [
+            "0x7feb352d",
+            "0x846ca68b",
+            "derive",
+            "finaliser",
+            "mix32",
+            "multiply",
+            "rotate",
+            "rotl32",
+            "rounds",
+            "runs",
+            "seed",
+            "state",
+            "xorshift"
+          ],
+          "overlap_note": "",
+          "payload_markers_found": [],
+          "loader_reversed": true,
+          "algorithm_text": "The artefact is the boot stub of a self-defending Python packer (Nixon/pydeobs V10 v6.0 style loader), not the protected program: line 117 is a single 55,661-byte `NATIVE_BLOBS = {'windows': '', 'linux': '<55,620 b64 chars>'}` literal that is truncated mid-string, and the loader body (key reconstruction, blob decrypt, marshal/exec or ctypes native load) is absent. Only these stages are present and reproducible. (1) IDENTITY GATE at import: if __name__ is neither '__main__' nor '__mp_main__', write '[BLOCKED] identity: not a direct execution (exit 2)' to stderr and sys.exit(2). Then _me = os.path.abspath(__file__) and _av = os.path.abspath(sys.argv[0] or ''); if they differ raise RuntimeError('execution context mismatch'). NameError is caught separately -> '[BLOCKED] identity: no script file context (exit 2)', any other exception -> '[BLOCKED] identity: execution context mismatch (exit 2)'; both exit 2. Accepting __mp_main__ is deliberate: a multiprocessing spawn child re-imports the file under that name with a matching argv[0], so it passes exactly like a direct run. (2) constant_time_compare(a, b): return False immediately if len(a) != len(b); else OR-accumulate x ^ y over zip(a, ",
+          "refused": false,
+          "content_head": "I'll read the prompt file first.\nI need to see more of the artefact to identify names and algorithm. Let me check the file size and the rest.\nThe file is only 116 lines, with line 117 being a massive single-line blob. Let me inspect the tail of that line for any code after the payload.\nThe visible code ends at the blob; the rest of the artefact was truncated. Let me see if the blob itself decodes to anything identifiable.\nThe blob is opaque and the code after it was truncated. Let me check whether the repo holds the matching generator/loader so I can characterize what the artefact computes.\nTh",
+          "measurement_failed": false
+        }
+      }
+    },
+    {
+      "target": "cipher",
+      "profile": "max",
+      "artefact": "/tmp/pydeobs-max-o1w7hwi2/cipher/dist/cipher_protected.py",
+      "artefact_bytes": 342907,
+      "build_seconds": 16.9,
+      "score": {
+        "source_reconstruction": {
+          "names_from_payload": 0,
+          "names_from_ai": 0,
+          "names_total": 3
+        },
+        "secret_recovery": {
+          "from_plaintext": 0,
+          "from_decrypted_payload": 0,
+          "from_ai": 0,
+          "from_runtime_output": 0,
+          "total": 1
+        },
+        "algorithm_recovery": {
+          "ai_overlap": 0.0,
+          "ai_overlap_basis": [
+            "body",
+            "concatenated",
+            "counter_be32",
+            "keystream",
+            "nonce",
+            "prefixed",
+            "seal",
+            "seed",
+            "sha256"
+          ],
+          "ai_overlap_note": "",
+          "ground_truth": "keystream: SHA-256(KEY || seed || counter_be32) concatenated; seal: XOR body, HMAC-SHA256(KEY || nonce, body)[:16] prefixed"
+        },
+        "patch_resistance": {
+          "section_pack_derivable": true
+        },
+        "leakage": {
+          "elf_symbols_found": false,
+          "temp_files": [],
+          "native_blob_present": true,
+          "native_blob_derivable": true,
+          "native_exports": [
+            "PyInit_payload"
+          ],
+          "native_payload_names": [],
+          "native_hardened": {
+            "relro": true,
+            "nx": true,
+            "symtab": false,
+            "comment": false
+          }
+        }
+      },
+      "probes": {
+        "plaintext": {
+          "probe": "plaintext",
+          "secrets_recovered": 0,
+          "secrets_total": 1,
+          "secrets_hit": [],
+          "names_recovered": 1,
+          "names_total": 3,
+          "names_hit": [
+            "seal"
+          ]
+        },
+        "section_decrypt": {
+          "probe": "section_decrypt",
+          "applicable": true,
+          "derived": true,
+          "payload_bytes": 4871,
+          "decompressed_bytes": 194414,
+          "reason": "all 4 sections verified and joined offline"
+        },
+        "payload_strings": {
+          "probe": "payload_strings",
+          "applicable": true,
+          "derived": true,
+          "payload_strings": "<stripped: 7 decoded strings; sample kept>",
+          "joined_text_chars": 8000,
+          "joined_text": "<stripped: decoded payload text; see the report for the measured counts>",
+          "payload_strings_sample": [
+            "[BLOCKED] identity: foreign exec refused (exit 2)\n",
+            "\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200b\u200b...",
+            "",
+            "\u200b",
+            "0",
+            "1",
+            "utf-8"
+          ],
+          "payload_strings_count": 7
+        },
+        "elf_symbols": {
+          "probe": "elf_symbols",
+          "found_elf": false,
+          "symbols": []
+        },
+        "native_blob": {
+          "probe": "native_blob",
+          "applicable": true,
+          "found": true,
+          "derived": true,
+          "valid_object": true,
+          "platform": "linux",
+          "elf_bytes": 181472,
+          "dynamic_exports": [
+            "PyInit_payload"
+          ],
+          "export_count": 1,
+          "symtab_present": false,
+          "comment_present": false,
+          "relro": true,
+          "nx_stack": true,
+          "payload_names_in_strings": [],
+          "pyx_strings": [
+            "__pyx_Upf_7payload_10_nixon__ng6cz71tuzrbgb1mu10f2d",
+            "__pyx_Upf_7payload_16_nixon__4_nx_bl_xko421qdubqzsrx9aoxae72tpl2a7912e",
+            "__pyx_gb_7payload_10_nx_faf434_2generator",
+            "__pyx_pf_7payload_2_nx_baseline",
+            "__pyx_pf_7payload_4_nx_verify",
+            "__pyx_pf_7payload_6_nx_0eb3a8",
+            "__pyx_pf_7payload_8_nx_faf434",
+            "__pyx_scope_struct_1_genexpr",
+            "__pyx_scope_struct___nixon_",
+            "__pyx_t_13",
+            "__pyx_t_2",
+            "__pyx_t_3",
+            "__pyx_t_4",
+            "__pyx_t_5",
+            "__pyx_t_6",
+            "__pyx_t_7",
+            "__pyx_t_8"
+          ],
+          "pyx_string_count": 17
+        },
+        "runtime_output": {
+          "probe": "runtime_output",
+          "returncode": 0,
+          "stdout": "SEALED 8771940273853809a401795ec7699cdc\n",
+          "stderr": "",
+          "timed_out": false
+        },
+        "temp_files": {
+          "probe": "temp_files",
+          "new_files": []
+        },
+        "memory_maps": {
+          "probe": "memory_maps",
+          "max_maps": 120,
+          "rwx_mappings": 0
+        },
+        "ai": {
+          "probe": "ai",
+          "model": "mistral/deepseek-v4-1-flash-1017",
+          "truncated": true,
+          "names_recovered": 0,
+          "names_total": 3,
+          "names_hit": [],
+          "secrets_recovered": 0,
+          "secrets_total": 1,
+          "secrets_hit": [],
+          "algorithm_overlap": 0.0,
+          "overlap_basis": [
+            "body",
+            "concatenated",
+            "counter_be32",
+            "keystream",
+            "nonce",
+            "prefixed",
+            "seal",
+            "seed",
+            "sha256"
+          ],
+          "overlap_note": "",
+          "payload_markers_found": [],
+          "loader_reversed": false,
+          "algorithm_text": "",
+          "refused": false,
+          "content_head": "I'll read that file first.\nThe prompt's artefact is truncated (only the header/self-check preamble is included). Let me confirm whether the full source exists anywhere so I can answer from evidence rather than guess.\nI read the file. The artefact in it is truncated, so let me be precise about what that means before answering.\nThe blob is a native payload (ELF), and the Python body that would call into it is cut off by the prompt's own truncation marker. I'll decode what is present so the answer is grounded, without guessing.\nThe artefact is truncated in the middle of a single `NATIVE_BLOBS = {",
+          "measurement_failed": false
+        }
+      }
+    },
+    {
+      "target": "inventory",
+      "profile": "max",
+      "artefact": "/tmp/pydeobs-max-o1w7hwi2/inventory/dist/inventory_protected.py",
+      "artefact_bytes": 294705,
+      "build_seconds": 13.4,
+      "score": {
+        "source_reconstruction": {
+          "names_from_payload": 0,
+          "names_from_ai": 0,
+          "names_total": 5
+        },
+        "secret_recovery": {
+          "from_plaintext": 0,
+          "from_decrypted_payload": 0,
+          "from_ai": 0,
+          "from_runtime_output": 0,
+          "total": 4
+        },
+        "algorithm_recovery": {
+          "ai_overlap": 0.0,
+          "ai_overlap_basis": [
+            "audit",
+            "canonical",
+            "counted",
+            "delta",
+            "json",
+            "ledger_count",
+            "reconcile",
+            "salt",
+            "signature"
+          ],
+          "ai_overlap_note": "",
+          "ground_truth": "reconcile: delta = counted - ledger_count; ok = (delta == 0). audit signature: SHA-256 over (salt || canonical-JSON(payload))"
+        },
+        "patch_resistance": {
+          "section_pack_derivable": true
+        },
+        "leakage": {
+          "elf_symbols_found": false,
+          "temp_files": [],
+          "native_blob_present": true,
+          "native_blob_derivable": true,
+          "native_exports": [
+            "PyInit_payload"
+          ],
+          "native_payload_names": [],
+          "native_hardened": {
+            "relro": true,
+            "nx": true,
+            "symtab": false,
+            "comment": false
+          }
+        }
+      },
+      "probes": {
+        "plaintext": {
+          "probe": "plaintext",
+          "secrets_recovered": 0,
+          "secrets_total": 4,
+          "secrets_hit": [],
+          "names_recovered": 0,
+          "names_total": 5,
+          "names_hit": []
+        },
+        "section_decrypt": {
+          "probe": "section_decrypt",
+          "applicable": true,
+          "derived": true,
+          "payload_bytes": 5870,
+          "decompressed_bytes": 191510,
+          "reason": "all 4 sections verified and joined offline"
+        },
+        "payload_strings": {
+          "probe": "payload_strings",
+          "applicable": true,
+          "derived": true,
+          "payload_strings": "<stripped: 7 decoded strings; sample kept>",
+          "joined_text_chars": 8000,
+          "joined_text": "<stripped: decoded payload text; see the report for the measured counts>",
+          "payload_strings_sample": [
+            "[BLOCKED] identity: foreign exec refused (exit 2)\n",
+            "\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200b\u200b...",
+            "",
+            "\u200b",
+            "0",
+            "1",
+            "utf-8"
+          ],
+          "payload_strings_count": 7
+        },
+        "elf_symbols": {
+          "probe": "elf_symbols",
+          "found_elf": false,
+          "symbols": []
+        },
+        "native_blob": {
+          "probe": "native_blob",
+          "applicable": true,
+          "found": true,
+          "derived": true,
+          "valid_object": true,
+          "platform": "linux",
+          "elf_bytes": 143456,
+          "dynamic_exports": [
+            "PyInit_payload"
+          ],
+          "export_count": 1,
+          "symtab_present": false,
+          "comment_present": false,
+          "relro": true,
+          "nx_stack": true,
+          "payload_names_in_strings": [],
+          "pyx_strings": [
+            "__pyx_Upf_7payload_10_nx_04bdd3_2_nixon__eri414jh87aztgou9ai89dqz0cir2p2cay7152a",
+            "__pyx_Upf_7payload_10_nx_04bdd3_4_nixon__3g6az68woxds12do2x475de0vp",
+            "__pyx_Upf_7payload_17_nixon__4_nx_bl_9sk793nqf1at5t6ghr60cmgwbqa076icvz",
+            "__pyx_Upf_7payload_8_nixon__zme7138crbbc6dv23d3yru88be1a7906n",
+            "__pyx_pf_7payload_2_nx_baseline",
+            "__pyx_pf_7payload_4_nx_verify",
+            "__pyx_pf_7payload_6_nx_a2f234",
+            "__pyx_scope_struct___nixon_",
+            "__pyx_t_10",
+            "__pyx_t_14",
+            "__pyx_t_2",
+            "__pyx_t_3",
+            "__pyx_t_4",
+            "__pyx_t_5",
+            "__pyx_t_6",
+            "__pyx_t_7",
+            "__pyx_t_8"
+          ],
+          "pyx_string_count": 17
+        },
+        "runtime_output": {
+          "probe": "runtime_output",
+          "returncode": 0,
+          "stdout": "AUDIT 19487c7b06691c76\n",
+          "stderr": "",
+          "timed_out": false
+        },
+        "temp_files": {
+          "probe": "temp_files",
+          "new_files": []
+        },
+        "memory_maps": {
+          "probe": "memory_maps",
+          "max_maps": 121,
+          "rwx_mappings": 0
+        },
+        "ai": {
+          "probe": "ai",
+          "model": "mistral/deepseek-v4-1-flash-1017",
+          "truncated": true,
+          "names_recovered": 0,
+          "names_total": 5,
+          "names_hit": [],
+          "secrets_recovered": 0,
+          "secrets_total": 4,
+          "secrets_hit": [],
+          "algorithm_overlap": 0.0,
+          "overlap_basis": [
+            "audit",
+            "canonical",
+            "counted",
+            "delta",
+            "json",
+            "ledger_count",
+            "reconcile",
+            "salt",
+            "signature"
+          ],
+          "overlap_note": "",
+          "payload_markers_found": [
+            "256"
+          ],
+          "loader_reversed": true,
+          "algorithm_text": "This is not a computational program; it is a self-defending Python loader/wrapper whose payload is truncated away in the given artefact. Behaviour, in order: (1) Guard clause: if __name__ is not '__main__' or '__mp_main__', write '[BLOCKED] identity: not a direct execution' to stderr and exit(2). (2) Identity check: compute _me = abspath(__file__) and _av = abspath(sys.argv[0] or ''); if they differ raise RuntimeError('execution context mismatch'); a NameError (no __file__) or that error both produce a '[BLOCKED] identity: ...' message on stderr and exit(2). The intent is to allow only direct execution or a multiprocessing 'spawn' child re-import, while blocking import, exec, or renamed copies. (3) constant_time_compare(a, b): returns False if lengths differ, otherwise ORs the XOR of each zipped byte pair into an accumulator and returns accumulator == 0 (branch-free-ish byte comparison to avoid timing leaks; note it is meant for bytes/int sequences, not str). (4) _nx_self_fail(reason): writes 'Self-check error: <reason>' to stderr, flushes, then calls os._exit(137) to kill the process without unwinding. (5) _nx_self_check(): re-reads its own source file (__file__) line by line in b",
+          "refused": false,
+          "content_head": "I'll read the prompt file first.\n```json\n{\"names\": [\"constant_time_compare\", \"_nx_self_fail\", \"_nx_self_check\", \"_nx_quiet_excepthook\", \"NATIVE_BLOBS\", \"_NX_SELF_CK\", \"_NX_SELF_HM\", \"_NX_SELF_TOK\", \"_NX_SELF_HK\"], \"algorithm\": \"This is not a computational program; it is a self-defending Python loader/wrapper whose payload is truncated away in the given artefact. Behaviour, in order: (1) Guard clause: if __name__ is not '__main__' or '__mp_main__', write '[BLOCKED] identity: not a direct execution' to stderr and exit(2). (2) Identity check: compute _me = abspath(__file__) and _av = abspath(sys.",
+          "measurement_failed": false
+        }
+      }
+    },
+    {
+      "target": "tiny",
+      "profile": "max",
+      "artefact": "/tmp/pydeobs-max-o1w7hwi2/tiny/dist/tiny_protected.py",
+      "artefact_bytes": 279270,
+      "build_seconds": 12.0,
+      "score": {
+        "source_reconstruction": {
+          "names_from_payload": 0,
+          "names_from_ai": 0,
+          "names_total": 4
+        },
+        "secret_recovery": {
+          "from_plaintext": 0,
+          "from_decrypted_payload": 0,
+          "from_ai": 0,
+          "from_runtime_output": 0,
+          "total": 2
+        },
+        "algorithm_recovery": {
+          "ai_overlap": null,
+          "ai_overlap_basis": [
+            "chars",
+            "salt"
+          ],
+          "ai_overlap_note": "insufficient distinctive terms (2: ['chars', 'salt']); ratio not reported",
+          "ground_truth": "SHA-256 over (salt || payload), first 16 hex chars"
+        },
+        "patch_resistance": {
+          "section_pack_derivable": true
+        },
+        "leakage": {
+          "elf_symbols_found": false,
+          "temp_files": [],
+          "native_blob_present": true,
+          "native_blob_derivable": true,
+          "native_exports": [
+            "PyInit_payload"
+          ],
+          "native_payload_names": [],
+          "native_hardened": {
+            "relro": true,
+            "nx": true,
+            "symtab": false,
+            "comment": false
+          }
+        }
+      },
+      "probes": {
+        "plaintext": {
+          "probe": "plaintext",
+          "secrets_recovered": 0,
+          "secrets_total": 2,
+          "secrets_hit": [],
+          "names_recovered": 0,
+          "names_total": 4,
+          "names_hit": []
+        },
+        "section_decrypt": {
+          "probe": "section_decrypt",
+          "applicable": true,
+          "derived": true,
+          "payload_bytes": 4111,
+          "decompressed_bytes": 122582,
+          "reason": "all 4 sections verified and joined offline"
+        },
+        "payload_strings": {
+          "probe": "payload_strings",
+          "applicable": true,
+          "derived": true,
+          "payload_strings": "<stripped: 7 decoded strings; sample kept>",
+          "joined_text_chars": 8000,
+          "joined_text": "<stripped: decoded payload text; see the report for the measured counts>",
+          "payload_strings_sample": [
+            "[BLOCKED] identity: foreign exec refused (exit 2)\n",
+            "\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200c\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200c\u200c\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200c\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200c\u200b\u200b\u200b\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200b\u200c\u200c\u200b\u200b\u200c\u200c\u200b\u200b\u200c\u200c\u200c\u200b...",
+            "",
+            "\u200b",
+            "0",
+            "1",
+            "utf-8"
+          ],
+          "payload_strings_count": 7
+        },
+        "elf_symbols": {
+          "probe": "elf_symbols",
+          "found_elf": false,
+          "symbols": []
+        },
+        "native_blob": {
+          "probe": "native_blob",
+          "applicable": true,
+          "found": true,
+          "derived": true,
+          "valid_object": true,
+          "platform": "linux",
+          "elf_bytes": 135168,
+          "dynamic_exports": [
+            "PyInit_payload"
+          ],
+          "export_count": 1,
+          "symtab_present": false,
+          "comment_present": false,
+          "relro": true,
+          "nx_stack": true,
+          "payload_names_in_strings": [],
+          "pyx_strings": [
+            "__pyx_Upf_7payload_14_nixon__4_nx_bl_czo312g1mnbq8bvo8cwl8b73a",
+            "__pyx_Upf_7payload_8_nixon__icly48dphm0ew5jurpjk9dxh95d",
+            "__pyx_pf_7payload_2_nx_baseline",
+            "__pyx_pf_7payload_4_nx_verify",
+            "__pyx_pf_7payload_6_nx_d76172",
+            "__pyx_scope_struct___nixon_",
+            "__pyx_t_10",
+            "__pyx_t_12",
+            "__pyx_t_2",
+            "__pyx_t_3",
+            "__pyx_t_4",
+            "__pyx_t_5",
+            "__pyx_t_7",
+            "__pyx_t_8"
+          ],
+          "pyx_string_count": 14
+        },
+        "runtime_output": {
+          "probe": "runtime_output",
+          "returncode": 0,
+          "stdout": "TINY 9e8b029a65070dbd\n",
+          "stderr": "",
+          "timed_out": false
+        },
+        "temp_files": {
+          "probe": "temp_files",
+          "new_files": []
+        },
+        "memory_maps": {
+          "probe": "memory_maps",
+          "max_maps": 119,
+          "rwx_mappings": 0
+        },
+        "ai": {
+          "probe": "ai",
+          "model": "mistral/deepseek-v4-1-flash-1017",
+          "truncated": true,
+          "names_recovered": 0,
+          "names_total": 4,
+          "names_hit": [],
+          "secrets_recovered": 0,
+          "secrets_total": 2,
+          "secrets_hit": [],
+          "algorithm_overlap": null,
+          "overlap_basis": [
+            "chars",
+            "salt"
+          ],
+          "overlap_note": "insufficient distinctive terms (2: ['chars', 'salt']); ratio not reported",
+          "payload_markers_found": [
+            "256"
+          ],
+          "loader_reversed": true,
+          "algorithm_text": "The supplied text is only the front half of a self-defending Python loader; the executable body is cut off, so what follows describes the computation that is actually present (every step is verifiable against the listing) and then what the missing half must do.\n\n(1) Execution-identity gate. If __name__ is neither '__main__' nor '__mp_main__', write '[BLOCKED] identity: not a direct execution (exit 2)' to stderr and sys.exit(2). Otherwise set _me = os.path.abspath(__file__) and _av = os.path.abspath(sys.argv[0] or \"\"); if _me != _av, raise RuntimeError('execution context mismatch'). Wrap in try/except: NameError -> stderr '[BLOCKED] identity: no script file context (exit 2)', sys.exit(2); any other Exception -> stderr '[BLOCKED] identity: execution context mismatch (exit 2)', sys.exit(2). The __mp_main__ allowance exists because a multiprocessing 'spawn' child re-imports the file under that name with the real __file__ and a matching argv[0].\n\n(2) constant_time_compare(a, b): return False if len(a) != len(b); else accumulate result |= x ^ y over zip(a, b) (bytes are XORed as integers) and return result == 0. No early exit, so timing does not depend on where the first difference is.\n\n",
+          "refused": false,
+          "content_head": "I'll read the prompt file first.\n{\"names\": [\"constant_time_compare\", \"_nx_self_fail\", \"_nx_self_check\", \"_nx_quiet_excepthook\", \"_me\", \"_av\", \"_nx_id_os\", \"_nx_id_sys\", \"_nx_self_sha\", \"_nx_self_mac\", \"_nx_sf_os\", \"_nx_sf_sys\", \"_nx_tb_sys\", \"_nx_tb_os\", \"_ct_loader\", \"_ctypes_pythonapi\", \"_ctypes_c_char_p\", \"_ctypes_c_ssize_t\", \"_ctypes_py_object\", \"_NX_SELF_CK\", \"_NX_SELF_HM\", \"_NX_SELF_TOK\", \"_NX_SELF_HK\", \"NATIVE_BLOBS\"], \"algorithm\": \"The supplied text is only the front half of a self-defending Python loader; the executable body is cut off, so what follows describes the computation that i",
+          "measurement_failed": false
+        }
+      }
+    }
+  ]
+}
