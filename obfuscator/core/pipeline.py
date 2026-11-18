@@ -2679,6 +2679,29 @@ def _exec_fallback():
             import os as _nx_hwid_os
             _nx_hwid_os._exit(137)
         code = _ct_unmarshal(bytes(raw))
+        # SECOND, INDEPENDENT integrity check at the point of use (measured
+        # bypass, 2026-11-18).  The self-check runs at the top of the loader;
+        # replacing that ONE call line with a constant let the payload run
+        # with integrity checking disabled, and the section pack could then be
+        # tampered freely (reproduced: scripts/attack_chain.py).  A check that
+        # executes once, early, is removable by editing one line.
+        #
+        # This repeats the verification HERE, immediately before the payload
+        # is handed to exec, so patching the early call is not sufficient: the
+        # payload cannot run without reaching this point. Two independent
+        # invocation sites over the same anchors is the redundancy §1 asks for.
+        # It re-verifies against the same _NX_SELF_CK/_NX_SELF_HM values, so
+        # it fails closed on any edit made after the first check passed.
+        try:
+            _nx_self_check()
+        except SystemExit:
+            raise
+        except Exception:
+            # The check is best-effort here only in the sense that a loader
+            # built without the self-check armed has no function to call; when
+            # the function exists, a failure must kill the process.
+            if globals().get("_nx_self_check") is not None:
+                _nx_self_fail("late self-check failed")
         # Hostguard (opt-in, --hostguard): bind the host namespace,
         # verify exec/eval/compile are unpatched, and only then run the
         # payload.  The snippet used to be emitted but never called, so
@@ -2855,6 +2878,23 @@ def _load_native():
             # exited 0 and printed nothing, with the native blob embedded but
             # never loaded.  Try the known names in order.
             _nx_ok = False
+            # SECOND integrity check on the NATIVE path (measured bypass,
+            # 2026-11-18).  The self-check at the top of the loader was the
+            # ONLY verification the native path performed -- and it is one
+            # removable line.  Worse, the late check added to _exec_fallback
+            # never ran on a native build, because _load_native() returns
+            # before reaching it: the shipped path had no point-of-use check
+            # at all.  This verifies immediately before the native module is
+            # executed, which is the last moment a tampered artefact can be
+            # stopped.
+            try:
+                _nx_late = globals().get("_nx_self_check")
+                if _nx_late is not None:
+                    _nx_late()
+            except SystemExit:
+                raise
+            except Exception:
+                _nx_self_fail("late self-check failed (native path)")
             for _nx_mod_name in ("payload_module", "payload", "payload_native"):
                 try:
                     _nx_loader = _nx_mach.ExtensionFileLoader(_nx_mod_name, path)
