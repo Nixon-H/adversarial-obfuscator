@@ -1,0 +1,198 @@
+{
+  "profile": "absolute-licensed",
+  "work_root": "/tmp/pydeobs-absolute-licensed-9fjbh_0p",
+  "results": [
+    {
+      "target": "inventory",
+      "profile": "absolute-licensed",
+      "artefact": "/tmp/pydeobs-absolute-licensed-9fjbh_0p/inventory/dist/inventory_protected.py",
+      "artefact_bytes": 108074,
+      "build_seconds": 6.2,
+      "score": {
+        "source_reconstruction": {
+          "names_from_payload": 0,
+          "names_from_ai": 0,
+          "names_total": 5
+        },
+        "secret_recovery": {
+          "from_plaintext": 0,
+          "from_decrypted_payload": 0,
+          "from_ai": 0,
+          "from_runtime_output": 0,
+          "total": 4
+        },
+        "algorithm_recovery": {
+          "ai_overlap": 0.4,
+          "ground_truth": "reconcile: delta = counted - ledger_count; ok = (delta == 0). audit signature: SHA-256 over (salt || canonical-JSON(payload))"
+        },
+        "patch_resistance": {
+          "section_pack_derivable": false
+        },
+        "leakage": {
+          "elf_symbols_found": false,
+          "temp_files": []
+        }
+      },
+      "probes": {
+        "plaintext": {
+          "probe": "plaintext",
+          "secrets_recovered": 0,
+          "secrets_total": 4,
+          "secrets_hit": [],
+          "names_recovered": 0,
+          "names_total": 5,
+          "names_hit": []
+        },
+        "section_decrypt": {
+          "probe": "section_decrypt",
+          "applicable": true,
+          "derived": false,
+          "reason": "HMAC failed on 8/8 sections (key not derivable)"
+        },
+        "payload_strings": {
+          "probe": "payload_strings",
+          "applicable": true,
+          "derived": false
+        },
+        "elf_symbols": {
+          "probe": "elf_symbols",
+          "found_elf": false,
+          "symbols": []
+        },
+        "runtime_output": {
+          "probe": "runtime_output",
+          "returncode": 137,
+          "stdout": "",
+          "stderr": "licence token required: set NIXON_LICENCE or place licence.json beside the artefact\nlicence token required: set NIXON_LICENCE or place licence.json beside the artefact\n",
+          "timed_out": false
+        },
+        "temp_files": {
+          "probe": "temp_files",
+          "new_files": []
+        },
+        "memory_maps": {
+          "probe": "memory_maps",
+          "max_maps": 138,
+          "rwx_mappings": 0
+        },
+        "ai": {
+          "probe": "ai",
+          "model": "mistral/deepseek-v4-1-flash-1017",
+          "truncated": true,
+          "names_recovered": 0,
+          "names_total": 5,
+          "names_hit": [],
+          "secrets_recovered": 0,
+          "secrets_total": 4,
+          "secrets_hit": [],
+          "algorithm_overlap": 0.4,
+          "payload_markers_found": [
+            "256"
+          ],
+          "loader_reversed": true,
+          "algorithm_text": "This is a vendor-licensed Python artefact loader (a 'pydeobs'-style protected script) whose real payload is never shown in the excerpt. On start it (1) refuses to run unless __name__ is __main__/__mp_main__ AND os.path.abspath(__file__) == os.path.abspath(sys.argv[0]), else prints [BLOCKED] identity and exits 2; (2) silently handles tracebacks (sys.tracebacklimit=0 + stub excepthook writing 'fatal error' and exit 1) unless NIXON_TRACEBACKS=1; (3) integrity self-check: re-reads its own source, drops every line containing _NX_SELF_CK, _NX_SELF_HM or _NX_SELF_TOK, splits the remaining bytes into 1024-byte chunks, computes sha256 hex per chunk and then repeatedly pairs adjacent hashes with sha256(h[i]+h[i+1]) (duplicating the last hash on odd counts) to a Merkle root, and compares it constant-time to _NX_SELF_CK (also verifies HMAC-SHA256 of the same filtered content keyed by _NX_SELF_HK bytes equals _NX_SELF_HM); on failure writes 'Self-check error: ...' to stderr and os._exit(137). (4) Key derivation: XOR-split two base64 'shares' _BLOB_S0 ^ _BLOB_S1 -> raw key, then per-byte XOR with sha256(_NX_BUILD_ID).digest() repeated -> BLOB_KEY; then optional customer/licence mask: salt = _NX_",
+          "refused": false,
+          "content_head": "{\"names\": [\"constant_time_compare\", \"_nx_self_fail\", \"_nx_self_check\", \"_nx_quiet_excepthook\", \"_nx_licence_key\", \"_nx_wipe\", \"_nx_customer_mask\", \"_nx_key_reconstruct\", \"_xor_decrypt\", \"_ct_unmarshal\", \"_nyser_loads\", \"_exec_fallback\", \"_load_native\", \"_nx_purge_stale\", \"_nx_secure_write\", \"_nx_cleanup\", \"_nx_run_bounded\", \"_nx_has_cpu_hypervisor\", \"_nx_has_vm_processes\", \"_nx_has_dmi_strings\", \"_nx_has_vm_mac\", \"_nx_has_vm_drivers\", \"_nx_has_vm_fs\", \"_nx_has_vm_net\", \"_nx_has_vm_services\", \"_nx_has_steal_time\", \"_nx_has_sysvirt\", \"_nx_has_hw_constraints\", \"_nx_has_clock_bias\", \"_nx_kill\", \"v",
+          "measurement_failed": false
+        }
+      }
+    },
+    {
+      "target": "cipher",
+      "profile": "absolute-licensed",
+      "artefact": "/tmp/pydeobs-absolute-licensed-9fjbh_0p/cipher/dist/cipher_protected.py",
+      "artefact_bytes": 108251,
+      "build_seconds": 6.0,
+      "score": {
+        "source_reconstruction": {
+          "names_from_payload": 0,
+          "names_from_ai": 0,
+          "names_total": 3
+        },
+        "secret_recovery": {
+          "from_plaintext": 0,
+          "from_decrypted_payload": 0,
+          "from_ai": 0,
+          "from_runtime_output": 0,
+          "total": 1
+        },
+        "algorithm_recovery": {
+          "ai_overlap": 0.111,
+          "ground_truth": "keystream: SHA-256(KEY || seed || counter_be32) concatenated; seal: XOR body, HMAC-SHA256(KEY || nonce, body)[:16] prefixed"
+        },
+        "patch_resistance": {
+          "section_pack_derivable": false
+        },
+        "leakage": {
+          "elf_symbols_found": false,
+          "temp_files": []
+        }
+      },
+      "probes": {
+        "plaintext": {
+          "probe": "plaintext",
+          "secrets_recovered": 0,
+          "secrets_total": 1,
+          "secrets_hit": [],
+          "names_recovered": 1,
+          "names_total": 3,
+          "names_hit": [
+            "seal"
+          ]
+        },
+        "section_decrypt": {
+          "probe": "section_decrypt",
+          "applicable": true,
+          "derived": false,
+          "reason": "HMAC failed on 8/8 sections (key not derivable)"
+        },
+        "payload_strings": {
+          "probe": "payload_strings",
+          "applicable": true,
+          "derived": false
+        },
+        "elf_symbols": {
+          "probe": "elf_symbols",
+          "found_elf": false,
+          "symbols": []
+        },
+        "runtime_output": {
+          "probe": "runtime_output",
+          "returncode": 137,
+          "stdout": "",
+          "stderr": "licence token required: set NIXON_LICENCE or place licence.json beside the artefact\nlicence token required: set NIXON_LICENCE or place licence.json beside the artefact\n",
+          "timed_out": false
+        },
+        "temp_files": {
+          "probe": "temp_files",
+          "new_files": []
+        },
+        "memory_maps": {
+          "probe": "memory_maps",
+          "max_maps": 140,
+          "rwx_mappings": 0
+        },
+        "ai": {
+          "probe": "ai",
+          "model": "mistral/deepseek-v4-1-flash-1017",
+          "truncated": true,
+          "names_recovered": 0,
+          "names_total": 3,
+          "names_hit": [],
+          "secrets_recovered": 0,
+          "secrets_total": 1,
+          "secrets_hit": [],
+          "algorithm_overlap": 0.111,
+          "payload_markers_found": [
+            "256"
+          ],
+          "loader_reversed": true,
+          "algorithm_text": "This is not a computation; it is a self-defending encrypted-payload loader (a packing/anti-analysis stub). Reimplementation summary: (1) Harness: the file refuses to run unless __name__ is '__main__'/'__mp_main__' AND os.path.abspath(__file__)==os.path.abspath(sys.argv[0]); otherwise exit 2. It sets sys.tracebacklimit=0 and a silent excepthook unless NIXON_TRACEBACKS=1. (2) Integrity: read its own source lines, drop every line containing the literal self-check constant values, concatenate the rest, split into 1024-byte chunks, SHA-256 each chunk, then repeatedly pairwise-hash (duplicating an odd last element) hex digests of adjacent pairs until one root remains ('merkle root'); constant-time compare to _NX_SELF_CK, else exit 137; then HMAC-SHA256(key=bytes.fromhex(_NX_SELF_HK), msg=filtered source) must equal _NX_SELF_HM, else exit 137. (3) Key derivation: k1 = b64decode(_BLOB_S0) XOR b64decode(_BLOB_S1); key = k1 XOR repeat(sha256(_NX_BUILD_ID)[:32]); then optional customer mask: salt = _NX_CUSTOMER_SALT or (if licence-bound) key_material from the JSON token named by NIXON_LICENCE, whose canonical payload JSON sha256 must equal _NX_SELF_TOK or exit 1; mask = sha256(b'nx-customer:'",
+          "refused": false,
+          "content_head": "I'll read the prompt file first.\n```json\n{\"names\": [\"constant_time_compare\", \"_nx_self_fail\", \"_nx_self_check\", \"_nx_licence_key\", \"_nx_wipe\", \"_nx_customer_mask\", \"_nx_key_reconstruct\", \"_xor_decrypt\", \"_ct_unmarshal\", \"_nyser_loads\", \"_exec_fallback\", \"_load_native\", \"_nx_purge_stale\", \"_nx_secure_write\", \"_nx_cleanup\", \"_nx_run_bounded\", \"_nx_has_cpu_hypervisor\", \"_nx_has_vm_processes\", \"_nx_has_dmi_strings\", \"_nx_has_vm_mac\", \"_nx_has_vm_drivers\", \"_nx_has_vm_fs\", \"_nx_has_vm_net\", \"_nx_has_vm_services\", \"_nx_has_steal_time\", \"_nx_has_sysvirt\", \"_nx_has_hw_constraints\", \"_nx_has_clock_bias",
+          "measurement_failed": false
+        }
+      }
+    }
+  ]
+}
