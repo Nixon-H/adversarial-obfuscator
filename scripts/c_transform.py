@@ -425,11 +425,31 @@ def insert_dead_blocks(source: str, seed: bytes,
     out = []
     depth = 0
     block_idx = 0
+    # Aggregate/type bodies are not statement positions: a bare `{ ... }`
+    # block injected inside `enum X {`, `struct X {` or `union X {` is
+    # invalid C ("expected identifier before '{' token").  Found by fuzzing
+    # 40 seeds on 2026-11-18: 2 of 40 produced uncompilable C, both from a
+    # dead block landing inside `enum __Pyx_ReferenceSharing {`.  The old
+    # guard only excluded `static`, declarator lines and control-flow
+    # headers, so any aggregate opening was fair game.
+    _aggregate_depth = 0
+    _agg_re = re.compile(r"\b(?:enum|struct|union)\b[^;{]*\{")
     for line in lines:
         stripped = line.strip()
         opens = stripped.count("{") - stripped.count("}")
+        _opens_aggregate = bool(_agg_re.search(stripped)) and \
+            not stripped.startswith(("//", "/*", "*"))
         depth += opens
         out.append(line)
+        if _aggregate_depth > 0:
+            # Inside (or closing) an aggregate body: never inject here.
+            _aggregate_depth = max(0, _aggregate_depth + opens)
+            continue
+        if _opens_aggregate:
+            # Track every brace this line opened, so a nested aggregate
+            # declared on one line (`struct A { struct B {`) is covered too.
+            _aggregate_depth = opens if opens > 0 else 0
+            continue
         # Insert dead blocks inside function bodies (depth 1 or 2), not at
         # global scope (depth 0) or inside nested blocks (depth > 2).
         # Skip lines that OPEN an aggregate initialiser or a declaration:
@@ -529,10 +549,15 @@ def insert_subset_sum_predicates(source: str, seed: bytes,
     for i, inst in enumerate(instances):
         arr_name = "__nx_ss_set_%02d" % (i,)
         set_vals = ", ".join(str(v) for v in inst["set"])
+        # `__nx_gen` marks every line this pass emits, so a later pass can
+        # skip the whole block by marker instead of re-deriving scope from
+        # the text. A per-line `static` test was not enough (audit
+        # 2026-11-18): MBA still rewrote `..._n = N;` and gcc rejected the
+        # result with "initializer element is not constant".
         functions.append(
-            "static const unsigned %s[] = {%s};\n"
-            "static const int %s_n = %d;\n"
-            "static const unsigned %s_target = %uU;\n"
+            "static const unsigned %s[] = {%s}; /* __nx_gen */\n"
+            "static const int %s_n = %d; /* __nx_gen */\n"
+            "static const unsigned %s_target = %uU; /* __nx_gen */\n"
             % (arr_name, set_vals, arr_name, len(inst["set"]),
                arr_name, inst["target"])
         )
@@ -668,9 +693,39 @@ def substitute_constants_mba(source: str, seed: bytes,
     original constant -- but the optimiser cannot see the slot as a constant,
     so the expression survives to the binary.
     """
+    # STRUCTURAL guard (audit 2026-11-18): a per-line `static` test is
+    # fragile -- it has to re-derive "am I inside a declaration" from the
+    # text around the match, and it got that wrong on the subset-sum lines
+    # this same pass emits (`static const int __nx_ss_set_02_n = 7;`), which
+    # produced `initializer element is not constant` at gcc. Instead, skip
+    # every match that sits at FILE SCOPE (brace depth 0): only a
+    # function-local initialiser may be replaced, and a file-scope one is
+    # exactly the constant-expression case C forbids.
     _CONST_ASSIGN = re.compile(r"=\s*(-?\d+)\s*;")
     chosen = []
     for m in _CONST_ASSIGN.finditer(source):
+        # brace depth at the match: count { and } in the prefix
+        prefix = source[:m.start()]
+        depth = prefix.count("{") - prefix.count("}")
+        if depth <= 0:
+            continue  # file scope: C requires a constant expression here
+        # NEVER substitute inside a control-flow header. The subset-sum
+        # helper's DP loop is `for (int j = 4095; j >= (int)v; j--)`; MBA-ing
+        # the 4095 produced a 400-char expression as a loop bound, which
+        # broke the DP table AND made the file's brace count look unbalanced
+        # (the expression is long enough that the guard then mis-read the
+        # file scope). A loop bound must stay a plain integer.
+        line_start = source.rfind("\n", 0, m.start()) + 1
+        line = source[line_start:source.find("\n", m.start())]
+        if re.match(r"\s*(for|while|switch|if)\s*\(", line):
+            continue
+        # ...and never inside a function DECLARATION (parameter default)
+        if re.search(r"\bstatic\b", line):
+            continue
+        # generated blocks are off-limits: their initialisers must stay
+        # constant expressions, and they are OUR text, not the payload's
+        if "__nx_gen" in line:
+            continue
         value = int(m.group(1))
         if abs(value) < 2 or abs(value) > 100000:
             continue
@@ -696,7 +751,12 @@ def substitute_constants_mba(source: str, seed: bytes,
             continue
         if re.search(r"\[\s*\d+\s*\]", line):
             continue
-        chosen.append(value)
+        # Record the POSITION, not just the value: replacing by
+        # `str.replace("= N;", ..., 1)` hits the FIRST occurrence anywhere in
+        # the file, which is often a `static const` line rather than the
+        # function-local one the guard just approved. That is how MBA kept
+        # reaching the subset-sum initialisers (audit 2026-11-18).
+        chosen.append((m.start(), len(m.group(0)), value))
     if not chosen:
         return source, 0
 
@@ -705,17 +765,19 @@ def substitute_constants_mba(source: str, seed: bytes,
     # slot: one slot per (value, round). Sharing one slot per value was the
     # bug that turned 100 into 3811 mid-development.
     slots = []
-    new_source = source
     count = 0
-    for value in chosen:
+    # Splice from the END so earlier offsets stay valid.
+    out = source
+    for pos, span, value in sorted(chosen, key=lambda t: -t[0]):
         expr = _mba_expression_with_slot(abs(value), rng, rounds, slots)
-        sign = "-" if value < 0 else ""
-        if sign:
+        if value < 0:
             expr = "(-(%s))" % expr
-        old = "= %d;" % value
-        if old in new_source:
-            new_source = new_source.replace(old, "= (%s);" % expr, 1)
-            count += 1
+        segment = out[pos:pos + span]
+        # replace only the integer inside this exact span
+        new_seg = re.sub(r"-?\d+", "(%s)" % expr, segment, count=1)
+        out = out[:pos] + new_seg + out[pos + span:]
+        count += 1
+    new_source = out
     if count == 0:
         return source, 0
     decl = ("\n/* MBA runtime slots (volatile: not constant-foldable). */\n"

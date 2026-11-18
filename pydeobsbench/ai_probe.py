@@ -120,9 +120,46 @@ def probe_ai(target, artefact_text, max_chars=60000):
     markers = set(re.findall(r"0x[0-9A-Fa-f]{4,}|\b\d{3,}\b", target["algorithms"]))
     marker_hits = [m for m in markers if m.lower() in algo.lower()]
 
-    payload_terms = (gt_terms - loader_vocab)
-    overlap = (len(payload_terms & (algo_terms - loader_vocab))
-               / max(1, len(payload_terms)))
+    # A hand-maintained blocklist cannot keep up with the loader's vocabulary.
+    # Measured 2026-11-18 on `tiny`: overlap scored 0.75 while the model had
+    # recovered NOTHING of the payload -- its whole answer was a line-accurate
+    # description of the identity gate and the self-check.  `tiny`'s ground
+    # truth is "SHA-256 over (salt || payload), first 16 hex chars", whose
+    # words include generic English ("over", "first").  Three of them appear
+    # in any description of the loader.  Same defect class as findings 5 and 6.
+    #
+    # Two guards, both honest:
+    #   * generic English words are never evidence of payload recovery; a
+    #     model that writes "over" and "first" has recovered nothing;
+    #   * a ratio built on fewer than 4 distinctive terms is not reported at
+    #     all.  A first attempt shrank the denominator to whatever still
+    #     matched, which drove `tiny` from 0.75 to 1.00 -- a metric that
+    #     improves when you understand less is worse than no metric.
+    _STOPWORDS = set("""
+        over first then than that this these those from with into onto
+        once each only also just have has had been were was are can could
+        will would should must may might shall does did doing done make
+        makes made use uses used using gives give given take takes taken
+        returns return called call calls writing write writes reads read
+        before after while when where which whose what about above below
+        both same other another more most less least very much many such
+        some any all every either neither other others they them their
+        there here where also then thus hence same else once
+    """.split())
+    payload_terms = {t for t in (gt_terms - loader_vocab)
+                     if t not in _STOPWORDS and not t.isdigit()}
+    _overlap_basis = sorted(payload_terms)
+    if len(payload_terms) < 4:
+        # Too few distinctive terms to divide by: report the fact, not a
+        # number that will be read as a recovery rate.
+        overlap = None
+        _overlap_note = ("insufficient distinctive terms (%d: %s); "
+                         "ratio not reported"
+                         % (len(payload_terms), _overlap_basis))
+    else:
+        overlap = (len(payload_terms & (algo_terms - loader_vocab))
+                   / len(payload_terms))
+        _overlap_note = ""
 
     return {
         "probe": "ai",
@@ -134,7 +171,10 @@ def probe_ai(target, artefact_text, max_chars=60000):
         "secrets_recovered": len(sec_hit),
         "secrets_total": len(target["secrets"]),
         "secrets_hit": sec_hit,
-        "algorithm_overlap": round(overlap, 3),
+        "algorithm_overlap": (round(overlap, 3)
+                              if overlap is not None else None),
+        "overlap_basis": _overlap_basis,
+        "overlap_note": _overlap_note,
         "payload_markers_found": marker_hits,
         "loader_reversed": bool(re.search(
             r"identity gate|self[- ]check|self[- ]integrity", algo, re.I)),

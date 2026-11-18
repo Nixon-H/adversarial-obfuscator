@@ -55,7 +55,10 @@
           "probe": "payload_strings",
           "applicable": true,
           "derived": true,
-          "payload_strings": [
+          "payload_strings": "<stripped: 20 decoded strings; sample kept>",
+          "joined_text_chars": 1262,
+          "joined_text": "<stripped: decoded payload text; see the report for the measured counts>",
+          "payload_strings_sample": [
             "bad string seal",
             "string seal authentication failed",
             "little",
@@ -67,17 +70,9 @@
             "50c53c022675d39625ac725ef22569d41a370dd5271a3088754435718e8c57e311c21fbcc4bed63899dc609f",
             "7620c6663ebc74316fca5c28a17bd7a2a7f99ec698c158a77658ae625e494280bf79a391",
             "f7766a8cffc13de3631a747b2fc793e8ecd210b5a475c379443163953c14b3",
-            "7809e182b3243696cd5b71c1f38f3e117ac0fc42cb4f689a6508f8538f438995a7",
-            "20e6087cebb00adefe03d5d38f25076278c30ad73edce854c6fbcb4ad186bc33633fc937bb",
-            "4242d2016fe29bf89bd74a1082184bac098189de1a67473c1e2cace3c0e21102dc",
-            "829045a0a25273388decd717f985d871af4eddf86b234857cfd46322acf2",
-            "aebbb15533ee12df6bfacbca7fa6cd03f3e284e989a98119ddfb86bd513d94f7a2",
-            "7d4ef8b49601bb9a791978f85af6a7e811ed1ce8e2d63a37839a8b3aec7d96dcc504b974",
-            "\u0415\u0415\u0412D\u0415F\u0415\u0414\u0413\u0415\u0410\u0413\u0412\u0419\u0415\u0418\u0415\u0418\u0410\u0414\u0415\u0417\u0416\u0418\u0413\u0411\u0414\u0417\u0412\u0414\u0410\u0415",
-            "\u0415\u0415\u0412D\u0415F\u0415\u0414\u0413\u0415\u0410\u0413\u0412\u0419\u0415\u0418\u0415\u0418\u0410\u0414\u0415\u0417\u0416\u0418\u0413\u0411\u0414\u0417\u0412\u0414\u0410\u0415",
-            "__main__"
+            "7809e182b3243696cd5b71c1f38f3e117ac0fc42cb4f689a6508f8538f438995a7"
           ],
-          "joined_text": "bad string seal\nstring seal authentication failed\nlittle\nutf-8\n9144874d9908f29fbecfa8e42405547640ae00efb1221e971c2fda57e09cbe14e616034b185229abd4ccc2906004fd4ffccc62341c7e903f93c74427546277a0cfa1dfa2335f76cd86bf612c16b188\n7962f306a296358183346358003c14271b847941a3a551f6c760bfef10ab84519d0bbe9ed82ce23e56884d0980a3e765\n0355d10897d05cdb5575f9f7213d393473e071c5aa0d999d21f173806933443a1aecbdc920ecf33b3a202258c0758f444ed2e2346bbaf9d8\n159fda6da7db75e4622bf7341536f19a6f89189376316c4378824d6a70b607bbfefa5bb870c75eb91bda5fbe440eb0ce86cce096ee4f90c34a6ce3a8\n50c53c022675d39625ac725ef22569d41a370dd5271a3088754435718e8c57e311c21fbcc4bed63899dc609f\n7620c6663ebc74316fca5c28a17bd7a2a7f99ec698c158a77658ae625e494280bf79a391\nf7766a8cffc13de3631a747b2fc793e8ecd210b5a475c379443163953c14b3\n7809e182b3243696cd5b71c1f38f3e117ac0fc42cb4f689a6508f8538f438995a7\n20e6087cebb00adefe03d5d38f25076278c30ad73edce854c6fbcb4ad186bc33633fc937bb\n4242d2016fe29bf89bd74a1082184bac098189de1a67473c1e2cace3c0e21102dc\n829045a0a25273388decd717f985d871af4eddf86b234857cfd46322acf2\naebbb15533ee12df6bfacbca7fa6cd03f3e284e989a98119ddfb86bd513d94f7a2\n7d4ef8b49601bb9a791978f85af6a7e811ed1ce8e2d63a37839a8b3aec7d96dcc504b974\n\u0415\u0415\u0412D\u0415F\u0415\u0414\u0413\u0415\u0410\u0413\u0412\u0419\u0415\u0418\u0415\u0418\u0410\u0414\u0415\u0417\u0416\u0418\u0413\u0411\u0414\u0417\u0412\u0414\u0410\u0415\n\u0415\u0415\u0412D\u0415F\u0415\u0414\u0413\u0415\u0410\u0413\u0412\u0419\u0415\u0418\u0415\u0418\u0410\u0414\u0415\u0417\u0416\u0418\u0413\u0411\u0414\u0417\u0412\u0414\u0410\u0415\n__main__"
+          "payload_strings_count": 20
         },
         "elf_symbols": {
           "probe": "elf_symbols",
@@ -177,7 +172,10 @@
           "probe": "payload_strings",
           "applicable": true,
           "derived": true,
-          "payload_strings": [
+          "payload_strings": "<stripped: 14 decoded strings; sample kept>",
+          "joined_text_chars": 818,
+          "joined_text": "<stripped: decoded payload text; see the report for the measured counts>",
+          "payload_strings_sample": [
             "bad string seal",
             "string seal authentication failed",
             "little",
@@ -189,11 +187,9 @@
             "556fe5d3531b3e7b5ea72e5310a7ec46a4bc5abdb42e7c8e21be8dad6d89f44f6eda2b3a6c",
             "7fcc89f3c68b839c1c3badc548dc0d39bd3867243d207ba741c1b12fe642b9ce8a396f8150",
             "8ea38e998b6a5627f12a00c0433a575f0c74677b10b15d3e2aa33521df75c72d5e06a4f925",
-            "2ae5510ecf9881b943fdf7b38921f7cba6267ee474777bcb4be7340ec1ac2210e434",
-            "043ab23e1e797832f5c6a7baa46a028860f693d04352b32a1c7ae454efaa6ed9dc1e3e20923f389255cb20ae230ac7b3b6094268d116eff8",
-            "__main__"
+            "2ae5510ecf9881b943fdf7b38921f7cba6267ee474777bcb4be7340ec1ac2210e434"
           ],
-          "joined_text": "bad string seal\nstring seal authentication failed\nlittle\nutf-8\n2aa14a4c25ec4770d0988e6a1a0af731e880c40c85b74528591076b43793d7d4b4e67504\n038f06706b529144e9f87c349e785630526c08b1258ab008e2c510218ab389f8ce2c106ddf37e5afcf4064a2fe9e8199fe948380e0e83624924da3e221ecbb69\nfcaf977f20e09bbeacadb70a11c3e0918c30ff5b1ab5193b8a49d4b5bb175ecfeec7ae6c1d\n6cf7fac7a3108b0be50f643cf06fdc1b6b7d16351d9e1146c77ab3caed515d\n556fe5d3531b3e7b5ea72e5310a7ec46a4bc5abdb42e7c8e21be8dad6d89f44f6eda2b3a6c\n7fcc89f3c68b839c1c3badc548dc0d39bd3867243d207ba741c1b12fe642b9ce8a396f8150\n8ea38e998b6a5627f12a00c0433a575f0c74677b10b15d3e2aa33521df75c72d5e06a4f925\n2ae5510ecf9881b943fdf7b38921f7cba6267ee474777bcb4be7340ec1ac2210e434\n043ab23e1e797832f5c6a7baa46a028860f693d04352b32a1c7ae454efaa6ed9dc1e3e20923f389255cb20ae230ac7b3b6094268d116eff8\n__main__"
+          "payload_strings_count": 14
         },
         "elf_symbols": {
           "probe": "elf_symbols",

@@ -46,8 +46,221 @@ _DYNAMIC_REF_FUNCS = frozenset(["getattr", "setattr", "hasattr", "delattr"])
 
 # Special first-arg names whose ``self.m`` / ``cls.m`` receivers count
 # as same-class access. Anything else (``obj.m`` where obj is not
-# self/cls) is treated as potentially external.
+# self/cls) is treated as potentially external -- UNLESS the receiver is a
+# local variable that provably never escapes this module (see
+# _local_instance_names).
 _SELF_NAMES = frozenset(["self", "cls", "mcs"])
+
+
+def _local_instance_names(tree):
+    # type: (ast.Module) -> Dict[str, str]
+    """Map local variable -> class name for non-escaping local instances.
+
+    PEER-REVIEW GAP (found by PyDeObsBench 2026-11-18).  The proof only
+    accepted ``self.m()`` / ``cls.m()`` receivers, so the most ordinary
+    pattern in real code --
+
+        rec = InventoryReconciler(url, token)
+        rec.reconcile("SKU-1", 40)
+
+    -- counted as EXTERNAL use and blocked the rename.  Measured: the native
+    blob shipped ``payload._nx_b4b307.reconcile`` and
+    ``__pyx_pf_..._4reconcile`` for a class whose method was reached only
+    from ``main()`` in the same file.
+
+    A name qualifies when ALL of the following hold (otherwise it is left
+    out and the method stays preserved -- the conservative default):
+
+      (a) it is bound exactly once, by ``name = ClassName(...)`` where
+          ClassName is a class defined in this module;
+      (b) that binding is inside a function body (not module level, where
+          the instance could be exported as a global);
+      (c) the name is never stored to again (no reassignment, no
+          augmented assign, no ``for name in``, no ``with ... as name``);
+      (d) the name is never passed as a call argument, returned, yielded,
+          stored in a container, or captured by a nested function -- i.e.
+          it does not escape the function that created it.
+    """
+    import ast as _ast
+
+    classes = set()
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.ClassDef):
+            classes.add(node.name)
+    if not classes:
+        return {}
+
+    # (a)+(b) candidate bindings, with the enclosing function
+    bindings = {}   # type: Dict[str, List[Tuple[int, str, Any]]]
+    escapes = set()
+    rebinds = set()
+
+    class _Binder(_ast.NodeVisitor):
+        def __init__(self):
+            self.fn_depth = 0  # >0 inside a function body
+            self.fn_node = None
+
+        def visit_FunctionDef(self, node):
+            prev = self.fn_node
+            self.fn_node = node
+            self.fn_depth += 1
+            self.generic_visit(node)
+            self.fn_depth -= 1
+            self.fn_node = prev
+
+        def visit_AsyncFunctionDef(self, node):
+            self.visit_FunctionDef(node)
+
+        def visit_Lambda(self, node):
+            self.fn_depth += 1
+            self.generic_visit(node)
+            self.fn_depth -= 1
+
+        def visit_Assign(self, node):
+            for tgt in node.targets:
+                if not isinstance(tgt, _ast.Name):
+                    if isinstance(tgt, (_ast.Tuple, _ast.List)):
+                        for elt in _ast.walk(tgt):
+                            if isinstance(elt, _ast.Name):
+                                rebinds.add(elt.id)
+                    continue
+                val = node.value
+                is_ctor = (
+                    isinstance(val, _ast.Call)
+                    and isinstance(val.func, _ast.Name)
+                    and val.func.id in classes)
+                if is_ctor and self.fn_depth > 0:
+                    bindings.setdefault(tgt.id, []).append(
+                        (id(self.fn_node), val.func.id, self.fn_node))
+                else:
+                    rebinds.add(tgt.id)
+            self.generic_visit(node)
+
+        def visit_AugAssign(self, node):
+            if isinstance(node.target, _ast.Name):
+                rebinds.add(node.target.id)
+            self.generic_visit(node)
+
+        def visit_AnnAssign(self, node):
+            if isinstance(node.target, _ast.Name):
+                rebinds.add(node.target.id)
+            self.generic_visit(node)
+
+        def visit_For(self, node):
+            for elt in _ast.walk(node.target):
+                if isinstance(elt, _ast.Name):
+                    rebinds.add(elt.id)
+            self.generic_visit(node)
+
+        visit_AsyncFor = visit_For
+
+        def visit_With(self, node):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    for elt in _ast.walk(item.optional_vars):
+                        if isinstance(elt, _ast.Name):
+                            rebinds.add(elt.id)
+            self.generic_visit(node)
+
+        visit_AsyncWith = visit_With
+
+        def visit_ExceptHandler(self, node):
+            if node.name:
+                rebinds.add(node.name)
+            self.generic_visit(node)
+
+        def visit_Call(self, node):
+            # (d) any appearance as a bare argument value is an escape
+            for a in list(node.args) + [k.value for k in node.keywords]:
+                if isinstance(a, _ast.Name):
+                    escapes.add(a.id)
+            self.generic_visit(node)
+
+        def visit_Return(self, node):
+            for elt in _ast.walk(node.value) if node.value else []:
+                if isinstance(elt, _ast.Name):
+                    escapes.add(elt.id)
+            self.generic_visit(node)
+
+        def visit_Yield(self, node):
+            if node.value is not None:
+                for elt in _ast.walk(node.value):
+                    if isinstance(elt, _ast.Name):
+                        escapes.add(elt.id)
+            self.generic_visit(node)
+
+        visit_YieldFrom = visit_Yield
+
+        def visit_Subscript(self, node):
+            # storing into a container: `store[name] = ...`
+            if isinstance(node.ctx, _ast.Store) and isinstance(node.slice, _ast.Name):
+                escapes.add(node.slice.id)
+            self.generic_visit(node)
+
+        def visit_Dict(self, node):
+            for k in node.keys:
+                if isinstance(k, _ast.Name):
+                    escapes.add(k.id)
+            self.generic_visit(node)
+
+        def visit_List(self, node):
+            if isinstance(node.ctx, _ast.Load):
+                for elt in node.elts:
+                    if isinstance(elt, _ast.Name):
+                        escapes.add(elt.id)
+            self.generic_visit(node)
+
+        visit_Tuple = visit_List
+        visit_Set = visit_List
+
+    try:
+        _Binder().visit(tree)
+    except Exception:
+        return {}
+
+    result = {}  # type: Dict[str, str]
+    for name, hits in bindings.items():
+        if name in rebinds or name in escapes:
+            continue
+        if len(hits) != 1:
+            continue
+        _fn_id, cls_name, _fn = hits[0]
+        # (d, continued) a closure capture: the name is loaded inside a
+        # DIFFERENT function than the one that bound it.  Loading it in the
+        # binding function is fine; anything else may leak it.
+        captured = [False]
+
+        class _CaptureCheck(_ast.NodeVisitor):
+            def __init__(self):
+                self.cur = None
+
+            def visit_FunctionDef(self, node):
+                prev = self.cur
+                self.cur = id(node)
+                self.generic_visit(node)
+                self.cur = prev
+
+            visit_AsyncFunctionDef = visit_FunctionDef
+
+            def visit_Lambda(self, node):
+                prev = self.cur
+                self.cur = id(node)
+                self.generic_visit(node)
+                self.cur = prev
+
+            def visit_Name(self, node):
+                if (node.id == name and isinstance(node.ctx, _ast.Load)
+                        and self.cur != _fn_id):
+                    captured[0] = True
+
+        try:
+            _CaptureCheck().visit(tree)
+        except Exception:
+            continue
+        if captured[0]:
+            continue
+        result[name] = cls_name
+    return result
 
 
 def _decorator_names(node):
@@ -166,6 +379,11 @@ class _UsageScanner(ast.NodeVisitor):
         self.dynamic_refs = set()  # type: Set[str]
         self.external_name_load = set()  # type: Set[str]
         self._in_attr_value = 0
+        # local variable -> class name, for non-escaping instances created
+        # in this module (see _local_instance_names).  `rec = C(); rec.m()`
+        # is an in-module use: the renamer rewrites the attribute, so it is
+        # not evidence of external reachability.
+        self.local_instances = {}  # type: Dict[str, str]
 
     def visit_ClassDef(self, node):
         # type: (ast.ClassDef) -> None
@@ -179,10 +397,18 @@ class _UsageScanner(ast.NodeVisitor):
         if attr in self.name_to_classes:
             owners = self.name_to_classes[attr]
             if not (set(self.class_stack) & owners):
-                # Use outside every owning class body: external.
-                # (self.m inside the owner is the internal pattern and
-                # does not taint; obj.m outside does.)
-                self.external_attr.add(attr)
+                # Use outside every owning class body.  That is external
+                # UNLESS the receiver is a proven non-escaping local
+                # instance of one of the owning classes (`rec = C();
+                # rec.m()` inside main): the renamer rewrites that
+                # attribute too, so it proves nothing about outside code.
+                _recv_ok = False
+                if isinstance(node.value, ast.Name):
+                    _cls = self.local_instances.get(node.value.id)
+                    if _cls and _cls in owners:
+                        _recv_ok = True
+                if not _recv_ok:
+                    self.external_attr.add(attr)
         self._in_attr_value += 1
         self.visit(node.value)
         self._in_attr_value -= 1
@@ -244,6 +470,12 @@ def find_internal_methods(tree, all_names=None):
     if not defined:
         return set()
     scanner = _UsageScanner(defined)
+    # Learn non-escaping local instances BEFORE scanning uses, so
+    # `rec = C(); rec.m()` counts as an in-module use of m.
+    try:
+        scanner.local_instances = _local_instance_names(tree)
+    except Exception:
+        scanner.local_instances = {}
     try:
         scanner.visit(tree)
     except Exception:

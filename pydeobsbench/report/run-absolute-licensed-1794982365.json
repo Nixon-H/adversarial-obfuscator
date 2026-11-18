@@ -1,0 +1,236 @@
+{
+  "profile": "absolute-licensed",
+  "work_root": "/tmp/pydeobs-absolute-licensed-44vsdrbs",
+  "results": [
+    {
+      "target": "inventory",
+      "profile": "absolute-licensed",
+      "artefact": "/tmp/pydeobs-absolute-licensed-44vsdrbs/inventory/dist/inventory_protected.py",
+      "artefact_bytes": 307647,
+      "build_seconds": 15.8,
+      "score": {
+        "source_reconstruction": {
+          "names_from_payload": 0,
+          "names_from_ai": 0,
+          "names_total": 5
+        },
+        "secret_recovery": {
+          "from_plaintext": 0,
+          "from_decrypted_payload": 0,
+          "from_ai": 0,
+          "from_runtime_output": 0,
+          "total": 4
+        },
+        "algorithm_recovery": {
+          "ai_overlap": 0.1,
+          "ground_truth": "reconcile: delta = counted - ledger_count; ok = (delta == 0). audit signature: SHA-256 over (salt || canonical-JSON(payload))"
+        },
+        "patch_resistance": {
+          "section_pack_derivable": false
+        },
+        "leakage": {
+          "elf_symbols_found": false,
+          "temp_files": [],
+          "native_blob_present": true,
+          "native_blob_derivable": true,
+          "native_exports": [],
+          "native_payload_names": [],
+          "native_hardened": {
+            "relro": null,
+            "nx": null,
+            "symtab": null,
+            "comment": null
+          }
+        }
+      },
+      "probes": {
+        "plaintext": {
+          "probe": "plaintext",
+          "secrets_recovered": 0,
+          "secrets_total": 4,
+          "secrets_hit": [],
+          "names_recovered": 0,
+          "names_total": 5,
+          "names_hit": []
+        },
+        "section_decrypt": {
+          "probe": "section_decrypt",
+          "applicable": true,
+          "derived": false,
+          "reason": "HMAC failed on 8/8 sections (key not derivable)"
+        },
+        "payload_strings": {
+          "probe": "payload_strings",
+          "applicable": true,
+          "derived": false
+        },
+        "elf_symbols": {
+          "probe": "elf_symbols",
+          "found_elf": false,
+          "symbols": []
+        },
+        "native_blob": {
+          "probe": "native_blob",
+          "applicable": true,
+          "found": true,
+          "derived": true,
+          "valid_object": false,
+          "magic": "5d9e310b65d36cb8",
+          "note": "blob is not a raw object file. If the artefact still runs, the loader XORed it into garbage and the payload came from the bytecode fallback."
+        },
+        "runtime_output": {
+          "probe": "runtime_output",
+          "returncode": 137,
+          "stdout": "",
+          "stderr": "licence token required: set NIXON_LICENCE or place licence.json beside the artefact\nlicence token required: set NIXON_LICENCE or place licence.json beside the artefact\n",
+          "timed_out": false
+        },
+        "temp_files": {
+          "probe": "temp_files",
+          "new_files": []
+        },
+        "memory_maps": {
+          "probe": "memory_maps",
+          "max_maps": 141,
+          "rwx_mappings": 0
+        },
+        "ai": {
+          "probe": "ai",
+          "model": "mistral/deepseek-v4-1-flash-1017",
+          "truncated": true,
+          "names_recovered": 0,
+          "names_total": 5,
+          "names_hit": [],
+          "secrets_recovered": 0,
+          "secrets_total": 4,
+          "secrets_hit": [],
+          "algorithm_overlap": 0.1,
+          "payload_markers_found": [
+            "256"
+          ],
+          "loader_reversed": true,
+          "algorithm_text": "The supplied artefact is a protection wrapper (loader stub), not the protected program itself; the real logic is inside the NATIVE_BLOBS blobs, which are truncated in this excerpt, so no application algorithm can be recovered. What IS fully reproducible: (1) Execution-context gate: abort with '[BLOCKED] identity' and exit 2 unless __name__ is '__main__' or '__mp_main__', and unless os.path.abspath(__file__) == os.path.abspath(sys.argv[0] or ''). (2) constant_time_compare(a,b): False if lengths differ, else OR-fold of x^y over zip(a,b) as bytes, true iff result == 0 \u2014 a timing-safe equality check. (3) Self-integrity check (_nx_self_check): read own source as bytes, split into lines, drop every line containing any of the literals _NX_SELF_CK, _NX_SELF_HM, or (if non-empty) _NX_SELF_TOK \u2014 i.e. the lines holding the expected values are excluded so the values do not describe themselves; concatenate remaining lines; split the byte stream into 1024-byte chunks; SHA-256 each chunk to a hex digest; then build a Merkle tree by repeatedly pairing adjacent digests, duplicating the final digest when the count is odd, and hashing sha256(hex_left + hex_right).encode() as ASCII text; the root is t",
+          "refused": false,
+          "content_head": "I'll read the prompt file first.\nI've read the prompt. Let me check the full artefact directory for additional context before answering.\nThe artefact is a loader stub \u2014 the actual program logic lives in the compressed/encrypted `NATIVE_BLOBS` payload. Let me check whether the rest of the loader code (anything after line 117) is present.\n{\"names\": [\"constant_time_compare\", \"_nx_self_fail\", \"_nx_self_check\", \"_nx_quiet_excepthook\", \"_NX_SELF_CK\", \"_NX_SELF_HM\", \"_NX_SELF_TOK\", \"_NX_SELF_HK\", \"NATIVE_BLOBS\"], \"algorithm\": \"The supplied artefact is a protection wrapper (loader stub), not the prote",
+          "measurement_failed": false
+        }
+      }
+    },
+    {
+      "target": "cipher",
+      "profile": "absolute-licensed",
+      "artefact": "/tmp/pydeobs-absolute-licensed-44vsdrbs/cipher/dist/cipher_protected.py",
+      "artefact_bytes": 354273,
+      "build_seconds": 18.8,
+      "score": {
+        "source_reconstruction": {
+          "names_from_payload": 0,
+          "names_from_ai": 0,
+          "names_total": 3
+        },
+        "secret_recovery": {
+          "from_plaintext": 0,
+          "from_decrypted_payload": 0,
+          "from_ai": 0,
+          "from_runtime_output": 0,
+          "total": 1
+        },
+        "algorithm_recovery": {
+          "ai_overlap": 0.222,
+          "ground_truth": "keystream: SHA-256(KEY || seed || counter_be32) concatenated; seal: XOR body, HMAC-SHA256(KEY || nonce, body)[:16] prefixed"
+        },
+        "patch_resistance": {
+          "section_pack_derivable": false
+        },
+        "leakage": {
+          "elf_symbols_found": false,
+          "temp_files": [],
+          "native_blob_present": true,
+          "native_blob_derivable": true,
+          "native_exports": [],
+          "native_payload_names": [],
+          "native_hardened": {
+            "relro": null,
+            "nx": null,
+            "symtab": null,
+            "comment": null
+          }
+        }
+      },
+      "probes": {
+        "plaintext": {
+          "probe": "plaintext",
+          "secrets_recovered": 0,
+          "secrets_total": 1,
+          "secrets_hit": [],
+          "names_recovered": 1,
+          "names_total": 3,
+          "names_hit": [
+            "seal"
+          ]
+        },
+        "section_decrypt": {
+          "probe": "section_decrypt",
+          "applicable": true,
+          "derived": false,
+          "reason": "HMAC failed on 8/8 sections (key not derivable)"
+        },
+        "payload_strings": {
+          "probe": "payload_strings",
+          "applicable": true,
+          "derived": false
+        },
+        "elf_symbols": {
+          "probe": "elf_symbols",
+          "found_elf": false,
+          "symbols": []
+        },
+        "native_blob": {
+          "probe": "native_blob",
+          "applicable": true,
+          "found": true,
+          "derived": true,
+          "valid_object": false,
+          "magic": "5d9e310b65d36cb8",
+          "note": "blob is not a raw object file. If the artefact still runs, the loader XORed it into garbage and the payload came from the bytecode fallback."
+        },
+        "runtime_output": {
+          "probe": "runtime_output",
+          "returncode": 137,
+          "stdout": "",
+          "stderr": "licence token required: set NIXON_LICENCE or place licence.json beside the artefact\nlicence token required: set NIXON_LICENCE or place licence.json beside the artefact\n",
+          "timed_out": false
+        },
+        "temp_files": {
+          "probe": "temp_files",
+          "new_files": []
+        },
+        "memory_maps": {
+          "probe": "memory_maps",
+          "max_maps": 142,
+          "rwx_mappings": 0
+        },
+        "ai": {
+          "probe": "ai",
+          "model": "mistral/deepseek-v4-1-flash-1017",
+          "truncated": true,
+          "names_recovered": 0,
+          "names_total": 3,
+          "names_hit": [],
+          "secrets_recovered": 0,
+          "secrets_total": 1,
+          "secrets_hit": [],
+          "algorithm_overlap": 0.222,
+          "payload_markers_found": [
+            "256"
+          ],
+          "loader_reversed": true,
+          "algorithm_text": "Guarded-Script Integrity Bootstrap (V10 v6.0 'identity' loader). NOTE: the supplied artefact is truncated mid-constant on line 117, so only the guard scaffold is recoverable; the protected payload that follows NATIVE_BLOBS is absent. Behaviour of the visible code, in order: (1) IDENTITY GATE (runs at import, before anything else): if __name__ is neither '__main__' nor '__mp_main__' -> write '[BLOCKED] identity: not a direct execution (exit 2)' to stderr and sys.exit(2). Then compute _me = os.path.abspath(__file__) and _av = os.path.abspath(sys.argv[0] or ''); if they are not string-equal raise RuntimeError('execution context mismatch'), which is caught and turned into '[BLOCKED] identity: execution context mismatch (exit 2)' + exit(2); a NameError inside the try (i.e. no __file__) is caught by a separate handler producing the same '[BLOCKED] identity: no script file context' message and exit(2). Rationale (per source comment): a multiprocessing spawn child re-imports the file as __mp_main__ with a real __file__ and argv[0] resolving to it, so it passes identically to a direct run, while foreign exec must forge both paths. (2) constant_time_compare(a, b): returns False immediately i",
+          "refused": false,
+          "content_head": "I'll read the prompt file first.\nI'll analyze the artifact structure to identify names and the algorithm \u2014 let me look at the rest of the file and the directory contents.\nThe artefact is truncated at line 117. Let me extract every identifier definition that's visible to recover names.\nEverything past line 117 is cut off, so the artifact's actual payload logic isn't present. I'll analyze what *is* recoverable \u2014 including whether the embedded constants are real secrets or just integrity digests.\nThe four hex constants are 64-char (32-byte) digests, and the blob is high-entropy base64 truncated m",
+          "measurement_failed": false
+        }
+      }
+    }
+  ]
+}

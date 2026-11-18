@@ -1478,7 +1478,18 @@ def build_local_cython(source_content, target_python=None, ast_opts=None):
                 print(f"    [!] Native pre-obfuscation FAILED: {_pre_exc}")
                 print("    [!] Refusing to compile untransformed source (fail closed).")
                 return None, None
-        source_content = source_content.replace('if __name__ == "__main__":', 'if True:')
+        # The AST layer above REWRITES the guard with single quotes
+        # (`if __name__ == '__main__':`), so a replace that only matched the
+        # double-quoted form silently did nothing: the payload's __main__
+        # block was compiled as a guard that never fires inside the
+        # extension module, and a native build ran the module body only.
+        # Measured 2026-11-18 with a marker payload.  Accept either quote
+        # style (and the parenthesised form).
+        for _guard in ('if __name__ == "__main__":',
+                       "if __name__ == '__main__':",
+                       'if (__name__ == "__main__"):',
+                       "if (__name__ == '__main__'):"):
+            source_content = source_content.replace(_guard, "if True:")
         with open(src_path, "w", encoding="utf-8") as f:
             f.write(source_content)
         print(f"    [>] Local Build Directory: {build_dir}")
@@ -1522,54 +1533,169 @@ def build_local_cython(source_content, target_python=None, ast_opts=None):
             print("    [!] Refusing to ship untransformed C (fail closed).")
             return None, None
         print(f"    [+] C transform: {_ct.transforms_applied}")
-        gcc_cmd = [
-            sys.executable, "-c",
-            "import sysconfig, subprocess, sys; "
-            "inc = sysconfig.get_paths()['include']; "
-            "subprocess.check_call(['gcc', '-shared', '-O3', '-flto', "
-            "'-fvisibility=hidden', '-std=c99', '-I', inc, "
-            "'-I', '.', '-o', 'payload_module.so', 'payload.c'])",
+        # NATIVE HARDENING, VERIFIED (audit 2026-11-18).  The shipped blob was
+        # measured with `readelf`/`nm` and had NONE of these: 355 static
+        # symbols (full Cython function-name map), no GNU_RELRO bind-now, no
+        # stack protector, no _FORTIFY_SOURCE, and a .comment leaking the
+        # compiler version.  Enabling them is not enough -- each one is probed
+        # on the produced object afterwards, because a hardening flag that is
+        # not applied is indistinguishable from one that is, unless you look.
+        #
+        # -fPIC, not -fPIE: this is a shared object.  -fPIE is for
+        # executables and gcc rejects -- or silently ignores -- it under
+        # -shared.  -fvisibility-inlines-hidden is C++-only and gcc warns on
+        # it for C, so it is dropped from the C compile (it was already
+        # there before this change; the warning is now gone).
+        _hard_flags = [
+            "-fPIC",
+            "-fstack-protector-strong",
+            "-D_FORTIFY_SOURCE=2",
+            "-fcf-protection=full",
+            "-Wl,-z,relro,-z,now",
+            "-Wl,-z,noexecstack",
         ]
-        gcc_result = subprocess.run(gcc_cmd, cwd=build_dir,
+        _gcc_argv = ["gcc", "-shared", "-O3", "-flto",
+                     "-fvisibility=hidden", "-std=c99"] + _hard_flags + [
+                     "-I", __import__("sysconfig").get_paths()["include"],
+                     "-I", ".", "-o", "payload_module.so", "payload.c"]
+        # Invoke gcc DIRECTLY so its diagnostics reach us.  The previous
+        # form ran gcc inside `python -c` + check_call, which printed a
+        # Python traceback and DISCARDED gcc's message -- the build then
+        # degraded to "Native compilation failed, using Python mode" and
+        # every benchmark would have been measuring the fallback.
+        gcc_result = subprocess.run(_gcc_argv, cwd=build_dir,
                                     capture_output=True, text=True,
                                     timeout=600)
         if gcc_result.returncode != 0:
-            print(f" [!] gcc compile of transformed C failed:\n{gcc_result.stderr[-500:]}")
-            return None, None
-        setup_path = os.path.join(build_dir, "setup.py")
-        # setup_content was referenced here without ever being defined in
-        # this function (the static undefined-global checker caught it):
-        # the local two-step build compiles the TRANSFORMED payload.c, so
-        # the setuptools step builds the extension from that C directly.
-        setup_content = (
-            "from setuptools import setup, Extension\n"
-            "setup(\n"
-            "    ext_modules=[\n"
-            "        Extension('payload_module', ['payload.c'],\n"
-            "                  extra_compile_args=['-O3', '-flto',\n"
-            "                                     '-fvisibility=hidden']),\n"
-            "    ],\n"
-            ")\n"
-        )
-        with open(setup_path, "w", encoding="utf-8") as f:
-            f.write(setup_content)
-        python_exec = target_python if target_python else sys.executable
-        cmd = [python_exec, "setup.py", "build_ext", "--inplace"]
-        result = subprocess.run(cmd, cwd=build_dir, capture_output=True, text=True, encoding="utf-8", errors="replace")
-        if result.returncode != 0:
-            print(f" [!] Local Build Error Details:\n{result.stderr}")
-            if result.stdout:
-                print(f" [!] Local Build Stdout:\n{result.stdout}")
-            return None, None            
-        built_file = None
-        for f in os.listdir(build_dir):
-            if f.startswith("payload") and not f.endswith(".py") and not f.endswith(".c"):
-                built_file = os.path.join(build_dir, f)
-                break
-        if built_file:
-            print(f"    [+] Local compilation success: {os.path.basename(built_file)}")
-            with open(built_file, "rb") as f:
-                return f.read(), os.path.basename(built_file)
+            _err = (gcc_result.stderr or "")[-2000:]
+            print(f" [!] gcc compile of transformed C failed:\n{_err}")
+            # Retry once WITHOUT the optional hardening flags that some
+            # toolchains do not implement (old gcc, musl, MSVC fronts).
+            # The mandatory ones (stack protector, RELRO, NX) stay.
+            _core_flags = ["-fPIC", "-fstack-protector-strong",
+                           "-Wl,-z,relro,-z,now", "-Wl,-z,noexecstack"]
+            _gcc_retry = ["gcc", "-shared", "-O3", "-flto",
+                          "-fvisibility=hidden", "-std=c99"] + _core_flags + [
+                          "-I", __import__("sysconfig").get_paths()["include"],
+                          "-I", ".", "-o", "payload_module.so", "payload.c"]
+            gcc_result = subprocess.run(_gcc_retry, cwd=build_dir,
+                                        capture_output=True, text=True,
+                                        timeout=600)
+            if gcc_result.returncode != 0:
+                print(" [!] retry without optional flags also failed:\n%s"
+                      % ((gcc_result.stderr or "")[-2000:],))
+                return None, None
+            print("    [+] compiled with the reduced hardening set "
+                  "(-fcf-protection/_FORTIFY_SOURCE unsupported here)")
+        # NO SECOND COMPILE (audit 2026-11-18).  A `setup.py build_ext` step
+        # used to run here on the same payload.c, producing a SECOND
+        # object with different flags.  Three problems, all measured:
+        #   1. setuptools adds `-Wl,-Bsymbolic-functions`; combined with
+        #      `-z now` that produced "relocation against PyExc_SystemError
+        #      in read-only section .text" -> final link failed, the whole
+        #      native build reported [ERROR], and the artefact shipped the
+        #      PYTHON fallback (every earlier "native" benchmark measured
+        #      bytecode).
+        #   2. Its weaker flags could win the "first payload* binary" pick,
+        #      discarding the hardening above.
+        #   3. It was pure duplication: the loader writes the blob to a
+        #      temp file with mkstemp and imports it through an explicit
+        #      ExtensionFileLoader, so the filename carries no meaning and
+        #      the direct gcc output is a complete, loadable extension.
+        # The direct hardened object is therefore the one that ships.
+        #
+        # THE STRIPPED, VERIFIED OBJECT SHIPS: 355 static symbols -- the
+        # complete Cython function-name map -- were shipping in a 142 KB
+        # blob.  `strip -x` keeps the dynamic table (PyInit_payload must
+        # stay exported) and drops .symtab/.strtab/frame data.
+        _shipped = os.path.join(build_dir, "payload_module.so")
+        _built = _shipped if os.path.exists(_shipped) else None
+        if _built is None:
+            for f in sorted(os.listdir(build_dir)):
+                if f.startswith("payload") and (f.endswith(".so") or f.endswith(".pyd")):
+                    _built = os.path.join(build_dir, f)
+                    break
+        if _built:
+            _strip = shutil.which("strip")
+            _objcopy = shutil.which("objcopy")
+            if _strip:
+                try:
+                    # --strip-all, not -x: -x keeps the dynamic symbol table
+                    # plus local symbols, and the local ones included the
+                    # Cython frame helpers.  --strip-all keeps the dynamic
+                    # table (PyInit_payload survives), so the extension still
+                    # loads -- verified by importing the stripped object,
+                    # which printed the payload's own output.
+                    subprocess.run([_strip, "--strip-all", _built],
+                                   check=False, capture_output=True, timeout=120)
+                except Exception as _st_exc:
+                    print(f"    [!] strip failed: {_st_exc}")
+            else:
+                print("    [!] strip not found: static symbols will ship")
+            # .comment carries the compiler version and nothing else.  An
+            # analyst reads "GCC: (Debian 14.2.0-19)" straight out of the
+            # blob and knows exactly which codegen quirks and hardening
+            # defaults to expect.  Removing it does not affect loading
+            # (verified: the stripped, comment-free object still imports).
+            if _objcopy:
+                try:
+                    subprocess.run([_objcopy, "--remove-section=.comment",
+                                    _built], check=False,
+                                   capture_output=True, timeout=120)
+                except Exception:
+                    pass
+            # VERIFY, do not assume: report what actually survived.
+            #
+            # Read the DYNAMIC symbol table (`nm -D`), which is the one an
+            # analyst still sees on a stripped object.  Two earlier versions
+            # of this check were wrong in opposite directions:
+            #   * plain `nm` counted undefined dynamic imports as "static
+            #     symbols" -> reported 161 survivors on an object with 1;
+            #   * after --strip-all, .symtab is gone, so plain `nm` reports
+            #     nothing at all -> reported 0 and looked perfect even if
+            #     exports had leaked.
+            # The dynamic table is the correct surface: PyInit_ must be
+            # there, and nothing else should be.
+            try:
+                _readelf = shutil.which("readelf")
+                if _readelf:
+                    _rw = subprocess.run([_readelf, "-lW", _built],
+                                         capture_output=True, text=True)
+                    _has_relro = "GNU_RELRO" in _rw.stdout
+                    _stk = [ln for ln in _rw.stdout.splitlines()
+                            if "GNU_STACK" in ln]
+                    _has_nx = bool(_stk) and "RWE" not in _stk[0]
+                    _has_symtab = ".symtab" in subprocess.run(
+                        [_readelf, "-SW", _built],
+                        capture_output=True, text=True).stdout
+                    _sym = subprocess.run(
+                        [shutil.which("nm") or "nm", "-D", "--defined-only",
+                         _built], capture_output=True, text=True)
+                    _exports = [ln.split()[-1]
+                                for ln in _sym.stdout.splitlines()
+                                if len(ln.split()) >= 3]
+                    print("    [+] Hardening: RELRO=%s NX=%s symtab=%s "
+                          "dynamic-exports=%s"
+                          % (_has_relro, _has_nx,
+                             "present" if _has_symtab else "stripped",
+                             _exports or "none"))
+                    # A loadable extension needs exactly its init export.
+                    # Anything beyond that is a name an analyst can read off
+                    # `nm -D` without reversing anything.
+                    _extra = [s for s in _exports
+                              if not s.startswith(("PyInit_", "_init",
+                                                   "_fini", "__"))]
+                    if _extra:
+                        print("    [!] %d readable static symbol(s) survived "
+                              "the strip: %s" % (len(_extra), _extra[:6]))
+                    else:
+                        print("    [+] only the module init symbol remains "
+                              "defined (payload names not readable via nm)")
+            except Exception:
+                pass
+            print(f"    [+] Local compilation success: {os.path.basename(_built)}")
+            with open(_built, "rb") as f:
+                return f.read(), os.path.basename(_built)
         else:
             print("    [!] Compilation failed: No binary found.")
             return None, None
@@ -2624,7 +2750,47 @@ def _load_native():
             return sys.modules[__name__]
         return None
     try:
-        encrypted_blob = base64.b85decode(blobs[blob_key])
+        # ENCODING MUST MATCH THE PRODUCER (audit 2026-11-18).  Every
+        # producer -- build_local_cython (pipeline.py:3663) and
+        # find_native_blobs (pipeline.py:848) -- writes base64.  This loader
+        # used b85decode, which raises ValueError on a base64 string; the
+        # broad except below swallowed it and the artefact silently fell
+        # back to bytecode.  Measured: a sectioned artefact with a 161 KB
+        # ELF embedded ran its bytecode fallback and printed nothing, and
+        # `strings` never showed the payload because the blob was never
+        # decoded.  Accept both: base64 first (what the build emits), then
+        # b85 for any artefact built by an older template.
+        _bx = blobs[blob_key]
+        if isinstance(_bx, bytes):
+            _bx = _bx.decode("ascii", "ignore")
+        # b64decode without validate=True DISCARDS non-alphabet characters,
+        # so a b85 string (whose alphabet holds !#$%&()*+-;<=>?@^_`{|}~)
+        # decodes to garbage instead of raising.  Accept a candidate only if
+        # it yields an object-file / archive magic; otherwise fall through to
+        # the other codec and, failing both, fail closed.
+        _nx_magics = (b"\x7fELF", b"MZ", b"\xcf\xfa\xed\xfe",
+                      b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf",
+                      b"\xfe\xed\xfa\xce", b"\xca\xfe\xba\xbe",
+                      b"!<arch>\n")
+        encrypted_blob = None
+        for _dec in (base64.b64decode, base64.b85decode):
+            try:
+                _cand = _dec(_bx, validate=True) if _dec is base64.b64decode \
+                    else _dec(_bx)
+            except Exception:
+                continue
+            _plain = _xor_decrypt(_cand, _NX_EFF_KEY)
+            if _plain[:4] in _nx_magics or _plain[:8] in _nx_magics:
+                encrypted_blob = _cand
+                break
+        if encrypted_blob is None:
+            # Neither codec produced a loadable image: refuse rather than
+            # hand dlopen a file that cannot load.  (Previously this path
+            # swallowed the ValueError and silently ran bytecode.)
+            if _NX_SECTION_PACK or _nx_ci_bypass_ok():
+                _exec_fallback()
+                return sys.modules[__name__]
+            return None
         blob_data = _xor_decrypt(encrypted_blob, _NX_EFF_KEY)
         fd, path = tempfile.mkstemp(suffix=ext, prefix="_nx_")
         with os.fdopen(fd, "wb") as f:
@@ -2632,13 +2798,32 @@ def _load_native():
         fpath = path 
         try:
             from importlib import machinery as _nx_mach
-            _nx_loader = _nx_mach.ExtensionFileLoader("payload_native", path)
-            spec = importlib.util.spec_from_file_location(
-                "payload_native", path, loader=_nx_loader)
-            if spec and spec.loader:
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                return 
+            # MODULE NAME MUST MATCH THE .so EXPORT (audit 2026-11-18).
+            # There are three producers today:
+            #   local Cython build -> PyInit_payload_module
+            #   farm matrix build  -> PyInit_payload
+            #   earlier templates  -> PyInit_payload_native
+            # Importing with a name the blob does not export raises
+            # "dynamic module does not define module export function" and the
+            # loader silently fell back to bytecode -- measured: the artifact
+            # exited 0 and printed nothing, with the native blob embedded but
+            # never loaded.  Try the known names in order.
+            _nx_ok = False
+            for _nx_mod_name in ("payload_module", "payload", "payload_native"):
+                try:
+                    _nx_loader = _nx_mach.ExtensionFileLoader(_nx_mod_name, path)
+                    spec = importlib.util.spec_from_file_location(
+                        _nx_mod_name, path, loader=_nx_loader)
+                    if not (spec and spec.loader):
+                        continue
+                    module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(module)
+                    _nx_ok = True
+                    break
+                except ImportError:
+                    continue
+            if _nx_ok:
+                return
             else:
                 if _nx_ci_bypass_ok():
                     _exec_fallback()
@@ -2718,6 +2903,33 @@ if __name__ in ("__main__", "__mp_main__"):
             bytecode_fallback = _ke_xor(_plain, _eff_key)
         except Exception:
             pass
+    # NATIVE BLOBS MUST BE PACKED WITH THE SAME KEY THE LOADER DERIVES
+    # (audit 2026-11-18).  The packed-loader branch XORs its blobs against
+    # _key_raw (+core mix, +customer mask) at pipeline.py:4636 -- but this
+    # HYBRID loader is generated BEFORE that block and is handed the raw,
+    # UNPACKED blob dict.  The emitted loader then XORed a plaintext ELF
+    # with its derived key and wrote garbage to disk, so dlopen failed with
+    # "invalid ELF header"/ImportError and the broad except fell back to
+    # bytecode.  Measured: a sectioned artefact with a 161 KB ELF embedded
+    # printed nothing and `strings` showed no payload identifiers.
+    # Re-pack here, mirroring the loader's own derivation (raw -> build-id
+    # salt -> customer/licence mask) so the two cannot drift.
+    try:
+        _nb_packed = {}
+        for _plat, _b64 in (native_blobs or {}).items():
+            if not _b64:
+                _nb_packed[_plat] = ""
+                continue
+            try:
+                _nb_raw = base64.b64decode(_b64, validate=True)
+            except Exception:
+                _nb_packed[_plat] = _b64  # already packed / foreign codec
+                continue
+            _nb_packed[_plat] = base64.b64encode(
+                _ke_xor(_nb_raw, _eff_key)).decode("ascii")
+        native_blobs = _nb_packed
+    except Exception as _nb_exc:
+        print("  [!] Native blob re-pack failed: %s" % (_nb_exc,))
     # The emitted FALLBACK_BLOB carries the EFFECTIVE-key ciphertext
     # (b85 text) so the loader decrypt path works without further wiring;
     # the second return value stays the same b85 string for callers/tests.
@@ -3606,6 +3818,24 @@ def build_project(args):
                 'string_key_env': (str(getattr(args, 'tx_string_key_env', '') or '') or None),
                 'string_crypto': getattr(args, 'string_crypto', None),
                 'symbol_rename': True,
+                # METHOD NAMES ARE PART OF THE SYMBOL SURFACE (audit
+                # 2026-11-18).  `symbol_rename` deliberately leaves methods
+                # alone (zero-arg super(), override dispatch), so the native
+                # blob shipped `payload._nx_b4b307.fetch_ledger` and
+                # `payload._nx_b4b307.reconcile` as readable qualname strings
+                # plus `__pyx_pf_..._4reconcile` C symbols -- the class was
+                # renamed and every method inside it was not.  The benchmark
+                # caught it: names 0/5 through the bytecode path, 2/5 through
+                # the native blob (fetch_ledger, reconcile).
+                # `rename_internal` runs a whole-module proof first
+                # (obfuscator/internal_rename.py) and renames ONLY methods
+                # whose every use resolves inside the same class body, with
+                # no getattr/setattr/hasattr/delattr string reference, no
+                # __all__ export and no external-contract decorator.  Anything
+                # it cannot prove stays preserved, so this cannot break
+                # external API dispatch -- it only removes names that were
+                # already unreachable from outside.
+                'rename_internal': True,
                 'unicode_ids': True,
                 'strip_meta': True,
                 'cfg_flatten': True,
@@ -3674,10 +3904,65 @@ def build_project(args):
                                 os.path.dirname(os.path.dirname(
                                     os.path.abspath(__file__)))),
                                 "scripts", "c_transform.py")
-                            if not _farm.upload_file(source, "payload.py"):
-                                raise RuntimeError("payload upload failed")
-                            _farm.upload_file(_ct_src, "c_transform.py")
-                            _farm.create_workflow(source)
+                            # FARM/LOCAL PARITY (audit 2026-11-18).  This used
+                            # to upload the RAW source while the local build
+                            # compiled an AST-obfuscated one, so the two
+                            # non-local OS blobs were weaker than the local
+                            # blob on every axis the AST layer provides
+                            # (symbol rename, string sealing, CFG flattening,
+                            # opaque predicates...).  A build that is strong
+                            # on the developer's OS and weak on the shipped
+                            # ones is a false sense of protection: the attacker
+                            # picks the weak artefact.
+                            # Compile the same mutated source the local build
+                            # sees, in a temp file, and upload that.
+                            _farm_src = source
+                            _farm_tmp = None
+                            try:
+                                _applied, _flat = apply_ast_mutation(
+                                    open(source, "r", encoding="utf-8").read(),
+                                    _native_ast_opts, strict=False)
+                                if _applied and _applied != open(
+                                        source, "r", encoding="utf-8").read():
+                                    _farm_tmp = os.path.join(
+                                        os.path.dirname(os.path.abspath(source)),
+                                        ".nx_farm_payload.py")
+                                    # The farm driver derives the transform
+                                    # seed from the uploaded bytes, so the
+                                    # three OS blobs share one transform --
+                                    # which is what we want here.
+                                    # Only a whitespace-free, executable
+                                    # variant is safe to upload: syntax-check
+                                    # it before trusting it.
+                                    compile(_applied, "<farm>", "exec")
+                                    with open(_farm_tmp, "w",
+                                              encoding="utf-8") as _ffh:
+                                        _ffh.write(_applied)
+                                    _farm_src = _farm_tmp
+                                    UI.item("Cython farm", "source",
+                                            "AST layer applied (local parity)")
+                                else:
+                                    UI.warn("farm: AST layer produced no "
+                                            "change; uploading raw source")
+                            except Exception as _fa_exc:
+                                UI.warn("farm: AST pre-pass failed (%s); "
+                                        "uploading raw source" % _fa_exc)
+                                _farm_src = source
+                            try:
+                                if not _farm.upload_file(_farm_src, "payload.py"):
+                                    raise RuntimeError("payload upload failed")
+                                _farm.upload_file(_ct_src, "c_transform.py")
+                                # create_workflow takes the payload's
+                                # FILENAME for its regex guard; the farm
+                                # resolves the file by name inside the repo,
+                                # so pass the uploaded name.
+                                _farm.create_workflow("payload.py")
+                            finally:
+                                if _farm_tmp and os.path.exists(_farm_tmp):
+                                    try:
+                                        os.unlink(_farm_tmp)
+                                    except Exception:
+                                        pass
                             _run_id = _farm.trigger_and_wait()
                             if _run_id:
                                 _blob_dir = os.path.join(
@@ -3731,6 +4016,13 @@ def build_project(args):
                 # inline key.
                 'string_key_env': (str(getattr(args, 'tx_string_key_env', '') or '') or None),
                 'string_crypto': getattr(args, 'string_crypto', None),
+                # Same method-name gap as the native path (audit 2026-11-18):
+                # the bytecode fallback is what runs when the native blob is
+                # missing or fails to load, so leaving methods unrenamed here
+                # would keep the leak reachable through the fallback.  The
+                # proof is whole-module and only renames methods it can prove
+                # are unreachable from outside.
+                'rename_internal': True,
             }
             fallback_opts['force_native'] = "False"
             # Phase-4 wiring: thread hwid/trial/macros into the fallback compile.
@@ -3895,6 +4187,25 @@ def build_project(args):
                     UI._out(" %sℹ Moving decryption: stream helper emitted and "
                             "called (runtime marker: NIXON_PATH_MARKER)%s"
                             % (UI.CYAN, UI.RESET))
+            # NATIVE BLOBS IN THE HYBRID LOADER (audit 2026-11-18): the
+            # placeholder substitution at the packed-loader path (below,
+            # ~line 5146) never touches the HYBRID loader -- it is generated
+            # separately, and its template carries its own
+            # `NATIVE_BLOBS = "__NATIVE_BLOBS_PLACEHOLDER__"`.  Measured on a
+            # shipped sectioned artefact: the placeholder survived into the
+            # artefact, so the native blob was absent and the payload ran
+            # from bytecode.  Substitute it here, at generation time, before
+            # the loader is written to its temp file.
+            if real_blobs_dict and any(real_blobs_dict.values()):
+                _nb_lit = repr(real_blobs_dict)
+                for _q in ('"', "'"):
+                    hybrid_loader_src = hybrid_loader_src.replace(
+                        _q + "__NATIVE_BLOBS_PLACEHOLDER__" + _q, _nb_lit)
+                if "NATIVE_BLOBS_PLACEHOLDER" in hybrid_loader_src:
+                    raise SystemExit(
+                        "hybrid loader still carries the blob placeholder "
+                        "after substitution; refusing to ship an artefact "
+                        "whose native module is missing")
             args._real_native_blobs = real_blobs_dict
             args._real_fallback_blob = real_fallback_str
             # Secure temp (no predictable CWD artifact): system temp dir,

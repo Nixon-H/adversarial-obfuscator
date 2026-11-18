@@ -25,8 +25,8 @@ from .dynamic_probes import (
     probe_memory_maps, probe_runtime_output, probe_temp_files,
 )
 from .static_probes import (
-    probe_elf_symbols, probe_payload_strings, probe_plaintext,
-    probe_section_decrypt,
+    probe_elf_symbols, probe_native_blob, probe_payload_strings,
+    probe_plaintext, probe_section_decrypt,
 )
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -121,6 +121,7 @@ def score(target, probes):
     pstr = probes.get("payload_strings", {})
     ai = probes.get("ai", {})
     elf = probes.get("elf_symbols", {})
+    nblob = probes.get("native_blob", {})
     rt = probes.get("runtime_output", {})
     tmp = probes.get("temp_files", {})
 
@@ -168,7 +169,13 @@ def score(target, probes):
             "total": len(target["secrets"]),
         },
         "algorithm_recovery": {
-            "ai_overlap": ai.get("algorithm_overlap", 0.0),
+            # None means "not measurable" (too few distinctive ground-truth
+            # terms to divide by) -- kept distinct from 0.0 ("measured, no
+            # recovery") so a report never reads a missing number as a clean
+            # zero.
+            "ai_overlap": ai.get("algorithm_overlap"),
+            "ai_overlap_basis": ai.get("overlap_basis"),
+            "ai_overlap_note": ai.get("overlap_note", ""),
             "ground_truth": target["algorithms"],
         },
         "patch_resistance": {
@@ -177,6 +184,19 @@ def score(target, probes):
         "leakage": {
             "elf_symbols_found": elf.get("found_elf", False),
             "temp_files": tmp.get("new_files", []),
+            # Native module: the loader carries its own key, so the blob is
+            # always extractable on an unbound build. What varies is what it
+            # exposes once extracted.
+            "native_blob_present": nblob.get("found", False),
+            "native_blob_derivable": nblob.get("derived", False),
+            "native_exports": nblob.get("dynamic_exports", []),
+            "native_payload_names": nblob.get("payload_names_in_strings", []),
+            "native_hardened": {
+                "relro": nblob.get("relro"),
+                "nx": nblob.get("nx_stack"),
+                "symtab": nblob.get("symtab_present"),
+                "comment": nblob.get("comment_present"),
+            },
         },
     }
 
@@ -214,6 +234,7 @@ def run(targets, profile, do_ai, out_path):
                 "section_decrypt": probe_section_decrypt(art),
                 "payload_strings": probe_payload_strings(art),
                 "elf_symbols": probe_elf_symbols(art),
+                "native_blob": probe_native_blob(art, tgt),
                 "runtime_output": probe_runtime_output(art),
                 "temp_files": probe_temp_files(art),
                 "memory_maps": probe_memory_maps(art),
@@ -225,10 +246,13 @@ def run(targets, profile, do_ai, out_path):
                 if a.get("measurement_failed"):
                     print("  AI MEASUREMENT FAILED:", a.get("error"), flush=True)
                 else:
-                    print("  AI: names %d/%d, secrets %d/%d, algo overlap %.2f"
+                    _ov = a.get("algorithm_overlap")
+                    print("  AI: names %d/%d, secrets %d/%d, algo overlap %s"
                           % (a["names_recovered"], a["names_total"],
                              a["secrets_recovered"], a["secrets_total"],
-                             a["algorithm_overlap"]), flush=True)
+                             ("%.2f" % _ov) if _ov is not None
+                             else "n/a (%s)" % (a.get("overlap_note") or "?",
+                                                )), flush=True)
             sc = score(tgt, probes)
             results.append({
                 "target": name, "profile": profile,
