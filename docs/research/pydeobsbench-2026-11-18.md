@@ -449,6 +449,40 @@ the argument for the §5-B work (compiler diversity) that has not been done.
 
 ---
 
+## 5f. Can an environment variable rescue a modified artefact? Measured: no
+
+The review warns that "an environment variable is not a secure secret boundary
+when the attacker controls the execution environment". The loader has a CI
+shortcut (`NIXON_VERIFY_SKIP_VERSION_CHECK` + `NIXON_CI`/`NIXON_ALLOW_SKIP`)
+that permits the bytecode fallback. If that shortcut could run a *modified*
+artefact, it would be a provenance hole; if the integrity check fires first, it
+cannot.
+
+Measured on a real artefact, three states:
+
+| artefact state | env vars | result |
+|---|---|---|
+| intact | none | rc 0, payload ran (native) |
+| intact | both CI vars set | rc 0, payload ran |
+| linux blob replaced with `AAAA` | none | **rc 137**, merkle mismatch |
+| linux blob replaced with `AAAA` | both CI vars set | **rc 137**, merkle mismatch |
+| linux blob emptied (`''`) | none | **rc 137**, merkle mismatch |
+| linux blob emptied (`''`) | both CI vars set | **rc 137**, merkle mismatch |
+
+**Conclusion.** The CI shortcut cannot be used to run a tampered artefact: the
+self-check runs before the fallback gate is consulted, and it covers the blob
+literal. The ordering is correct and it is now verified rather than assumed.
+
+**What remains a design concern.** The shortcut still lets an *unmodified*
+artefact skip the native path on an attacker-supplied env var. That does not
+expose anything the attacker did not already have (they can run their own copy
+of the bytecode fallback), but it means "did the native module load?" is not a
+property the artefact can assert about itself — which is why §8 measures it
+externally, from the shipped blob, instead of trusting a runtime claim.
+
+---
+
+## 6. Honest limits of this benchmark
 ## 6. Honest limits of this benchmark
 
 
