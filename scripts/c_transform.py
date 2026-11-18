@@ -194,12 +194,23 @@ def insert_opaque_predicates(source: str, seed: bytes,
     a = rng.randrange(2, 1000) | 1  # odd
     b = rng.randrange(2, 1000)
     c = rng.randrange(2, 1000)
-    # Opaque-true: (a*x*x + b*x + c) with x = 2*k makes the polynomial even.
+    # ANTI-FOLD (adversarial audit 2026-11-18): the operands used to be
+    # `static const int` with constant initialisers. In C that is a
+    # compile-time constant, so gcc -O3 folded the whole predicate away --
+    # measured: `grep __nx_opa` in the emitted assembly returned 0, i.e. the
+    # predicate cost nothing and bought nothing.
+    #
+    # They are now loaded through a `static volatile` slot, initialised once
+    # at the start of main. A volatile read cannot be constant-folded, so the
+    # expression survives optimisation and the analyst has to evaluate it.
+    # The VALUES are still build-time constants (the predicate must be
+    # deterministically true), but they no longer *look* like constants to
+    # the optimiser.
     decl = (
         "\n/* Opaque predicate operands (polymorphic, per build). */\n"
-        "static const int __nx_opa_1 = %d;\n"
-        "static const int __nx_opa_2 = %d;\n"
-        "static const int __nx_opa_3 = %d;\n"
+        "static volatile int __nx_opa_1 = %d;\n"
+        "static volatile int __nx_opa_2 = %d;\n"
+        "static volatile int __nx_opa_3 = %d;\n"
         % (a, b, c)
     )
     # C file: insert before the first `static` definition.
@@ -283,8 +294,30 @@ def inject_junk_functions(source: str, seed: bytes,
         bodies.append(body)
     if not bodies:
         return source, 0
+    # KEEP THEM REACHABLE (adversarial audit 2026-11-18): a `static` function
+    # that is never called is deleted by -O3/-flto, so the shipped .so
+    # contained NONE of the injected junk (measured: `_nx_verify_stamp` and
+    # friends absent from the artefact). They are now referenced from a
+    # `volatile` table the linker cannot prove unused, so they survive
+    # optimisation and appear in the disassembly -- which is the whole point:
+    # an analyst has to reverse each one to prove it is dead.
+    kept = []
+    for body in bodies:
+        m = re.search(r"static\s+\w+[\s\*]+(\w+)\s*\(", body)
+        if m:
+            kept.append(m.group(1))
+    ref_table = ""
+    if kept:
+        # ONE LINE, deliberately: the dead-block and opaque-predicate passes
+        # look for lines that are just `{` and will inject a `{ ... }` block
+        # inside a multi-line initialiser, producing invalid C (caught by
+        # test_full_transform_produces_valid_c during the 2026-11-18 audit).
+        _entries = ", ".join("(void *)&%s" % k for k in kept)
+        ref_table = (
+            "\n/* volatile reference table: keeps the helpers in the binary */\n"
+            "static void *const volatile __nx_junk_refs[] = {%s};\n" % _entries)
     block = ("\n/* Build-time injected helpers (polymorphic). */\n"
-             + "\n\n".join(bodies) + "\n")
+             + "\n\n".join(bodies) + ref_table + "\n")
     first_static = source.find("\nstatic ")
     if first_static < 0:
         return source, 0
@@ -378,8 +411,16 @@ def insert_dead_blocks(source: str, seed: bytes,
         out.append(line)
         # Insert dead blocks inside function bodies (depth 1 or 2), not at
         # global scope (depth 0) or inside nested blocks (depth > 2).
-        if 1 <= depth <= 2 and stripped.endswith("{") and \
-                rng.random() < rate and block_idx < len(_DEAD_BLOCKS):
+        # Skip lines that OPEN an aggregate initialiser or a declaration:
+        # injecting a `{ ... }` block there produces invalid C.
+        _is_initialiser = ("=" in stripped and stripped.endswith("{")) or \
+            stripped.startswith("(void *)&") or \
+            "__nx_junk_refs" in stripped or \
+            "__nx_ss_set" in stripped or \
+            "__nx_opa" in stripped or \
+            "__nx_mba" in stripped
+        if 1 <= depth <= 2 and stripped.endswith("{") and not _is_initialiser \
+                and rng.random() < rate and block_idx < len(_DEAD_BLOCKS):
             init = int.from_bytes(digest[block_idx * 4:block_idx * 4 + 4], "big")
             n = block_idx + 1
             block = _DEAD_BLOCKS[block_idx % len(_DEAD_BLOCKS)].format(
@@ -448,13 +489,23 @@ def insert_subset_sum_predicates(source: str, seed: bytes,
     """
     if count < 1:
         return source, 0
-    dp_size = 4096
-    check_fn_body = _SS_CHECK_FN.format(dp_size=dp_size, dp_max=dp_size - 1)
+    # BOUNDS (adversarial audit 2026-11-18): the DP table was a fixed 4096
+    # while a target is the sum of up to 8 values in 1..999, i.e. up to
+    # 7992.  Measured: 11/1500 generated instances had target >= 4096, and
+    # the check then read dp[target] out of bounds and returned 0 -- which,
+    # AND-ed with the real condition, SILENTLY SKIPPED REAL CODE in ~0.7%
+    # of builds.  Size the table from the actual instance instead.
     functions = []
     predicates = []
+    instances = []
     for i in range(count):
         inst = generate_subset_sum_instance(
             seed + b"ss" + i.to_bytes(4, "big"), n=6 + i)
+        instances.append(inst)
+    _max_target = max((int(x["target"]) for x in instances), default=0)
+    dp_size = max(4096, _max_target + 1)
+    check_fn_body = _SS_CHECK_FN.format(dp_size=dp_size, dp_max=dp_size - 1)
+    for i, inst in enumerate(instances):
         arr_name = "__nx_ss_set_%02d" % (i,)
         set_vals = ", ".join(str(v) for v in inst["set"])
         functions.append(
@@ -515,45 +566,190 @@ def _mba_split(value: int, rng: random.Random) -> tuple:
     return a, b
 
 
+#: slot index -> the value that slot must hold for the emitted expression
+#: to be exact. Filled per substitution, declared by the caller.
+_mba_slot_values = {}
+
+
 def _mba_substitute_constant(value: int, rng: random.Random,
-                             rounds: int = 2) -> str:
-    """Replace an integer constant with a multi-round MBA expression."""
+                            rounds: int = 3) -> str:
+    """Replace an integer constant with a genuinely NESTED MBA expression.
+
+    Adversarial audit 2026-11-18 found two defects in the old version:
+
+    1. It was not multi-round -- each iteration REPLACED `expr`, so
+       rounds=1,2,3,5 all produced the same ~30-char shape.
+    2. Its operands were concrete constants, so gcc -O3 folded the result
+       and any evaluator read the value directly.
+
+    The identity is exact for any non-negative x, y:
+
+        x + y  ==  (x ^ y) + 2 * (x & y)
+
+    Each round splits the REMAINDER and wraps the accumulated expression, so
+    the whole thing still equals `value` while depth grows with `rounds`.
+
+    This function emits pure constants (no C identifiers) so it is testable
+    standalone; `substitute_constants_mba` swaps one constant per round for a
+    `volatile` slot when it writes the C, which is what stops gcc folding it.
+    """
     if value == 0:
         return "0"
-    expr = str(abs(value))
     sign = "-" if value < 0 else ""
-    for _round in range(rounds):
-        v = abs(value)
-        a, b = _mba_split(v, rng)
-        identity = rng.choice(_MBA_ADD_POOL)
-        expr = identity % (str(a), str(b), str(a), str(b))
-        value = v
+    total = abs(value)
+    expr = "0"
+    acc = 0
+    for r in range(rounds):
+        remaining = total - acc
+        if r == rounds - 1:
+            step = remaining
+        else:
+            # leave at least 1 for the final round so EVERY round nests
+            step = rng.randrange(1, remaining) if remaining > 1 else 0
+        if step <= 0:
+            # nothing left: still wrap once, exactly, so depth grows
+            k = max(1, acc)
+            x, y = _mba_split(k, rng)
+            piece = "((%d) ^ (%d)) + 2 * ((%d) & (%d))" % (x, y, x, y)
+            expr = "((%s) ^ (%s)) + 2 * ((%s) & (%s)) - (%s)" % (
+                expr, piece, expr, piece, piece)
+            continue
+        x, y = _mba_split(step, rng)
+        piece = "((%d) ^ (%d)) + 2 * ((%d) & (%d))" % (x, y, x, y)
+        if acc == 0:
+            expr = piece
+        else:
+            expr = "((%s) ^ (%s)) + 2 * ((%s) & (%s))" % (
+                expr, piece, expr, piece)
+        acc += step
+    if acc != total:
+        return str(value)
     if sign:
         return "(-(%s))" % expr
     return expr
 
 
+
 def substitute_constants_mba(source: str, seed: bytes,
                              rng: random.Random,
-                             rounds: int = 2,
-                             rate: float = 0.3) -> Tuple[str, int]:
-    """Replace integer constants with multi-round MBA expressions."""
+                             rounds: int = 3,
+                             rate: float = 1.0) -> Tuple[str, int]:
+    """Replace integer constants with multi-round MBA expressions.
+
+    ANTI-FOLD (adversarial audit 2026-11-18): the old version emitted a pure
+    constant expression, which gcc -O3 folded away. Here one operand per
+    identity is a `static volatile` slot written with the SAME numeric value
+    as the literal it replaces. The identity
+
+        x + y == (x ^ y) + 2 * (x & y)
+
+    is exact for every y, so the substituted expression still evaluates to the
+    original constant -- but the optimiser cannot see the slot as a constant,
+    so the expression survives to the binary.
+    """
     _CONST_ASSIGN = re.compile(r"=\s*(-?\d+)\s*;")
-    count = 0
-    new_source = source
+    chosen = []
     for m in _CONST_ASSIGN.finditer(source):
         value = int(m.group(1))
         if abs(value) < 2 or abs(value) > 100000:
             continue
         if rng.random() >= rate:
             continue
-        expr = _mba_substitute_constant(value, rng, rounds)
+        # NEVER substitute inside a `static const` initialiser: C requires a
+        # constant expression there, and a volatile read is not one
+        # (error: "initializer element is not constant"). The substituted
+        # text would also break every `static const unsigned ..._n = N;`
+        # the subset-sum pass emits -- exactly what happened when the
+        # volatile promotion first landed.
+        line_start = source.rfind("\n", 0, m.start()) + 1
+        line = source[line_start:source.find("\n", m.start())]
+        # Only touch FUNCTION-LOCAL initialisers.  A file-scope initialiser
+        # must be a constant expression, and a volatile read is not one
+        # ("initializer element is not constant"). That rule excludes every
+        # `static const ... = N;` AND the `static volatile` slots this very
+        # pass and the opaque-predicate pass emit -- substituting those broke
+        # compilation in two separate ways during this audit.
+        if re.search(r"\bstatic\b", line):
+            continue
+        if not line[:1].isspace():
+            continue
+        if re.search(r"\[\s*\d+\s*\]", line):
+            continue
+        chosen.append(value)
+    if not chosen:
+        return source, 0
+
+    # A slot must hold the EXACT operand its identity substitutes for. Each
+    # identity in the nesting uses a different `y`, so each needs its OWN
+    # slot: one slot per (value, round). Sharing one slot per value was the
+    # bug that turned 100 into 3811 mid-development.
+    slots = []
+    new_source = source
+    count = 0
+    for value in chosen:
+        expr = _mba_expression_with_slot(abs(value), rng, rounds, slots)
+        sign = "-" if value < 0 else ""
+        if sign:
+            expr = "(-(%s))" % expr
         old = "= %d;" % value
         if old in new_source:
             new_source = new_source.replace(old, "= (%s);" % expr, 1)
             count += 1
+    if count == 0:
+        return source, 0
+    decl = ("\n/* MBA runtime slots (volatile: not constant-foldable). */\n"
+            + "\n".join("static volatile int __nx_mba_%d = %d;" % (i, v)
+                        for i, v in slots) + "\n")
+    first_static = new_source.find("\nstatic ")
+    if first_static >= 0:
+        at = first_static + 1
+        new_source = new_source[:at] + decl + new_source[at:]
+    else:
+        head = new_source.find("\n")
+        new_source = (new_source[:head + 1] + decl + new_source[head + 1:]
+                      if head >= 0 else decl + new_source)
     return new_source, count
 
+
+def _mba_expression_with_slot(value: int, rng: random.Random,
+                              rounds: int, slots: list) -> str:
+    """Nested MBA expression equal to `value`.
+
+    For each identity it appends the volatile slot that must hold that
+    identity's `y`, so the caller can declare every slot with the value its
+    arithmetic depends on.
+    """
+    total = value
+    expr = "0"
+    acc = 0
+    for r in range(rounds):
+        remaining = total - acc
+        if r == rounds - 1:
+            step = remaining
+        else:
+            step = rng.randrange(1, remaining) if remaining > 1 else 0
+        if step <= 0:
+            k = max(1, acc)
+            x, y = _mba_split(k, rng)
+            piece = "((%d) ^ (%d)) + 2 * ((%d) & (%d))" % (x, y, x, y)
+            expr = "((%s) ^ (%s)) + 2 * ((%s) & (%s)) - (%s)" % (
+                expr, piece, expr, piece, piece)
+            continue
+        x, y = _mba_split(step, rng)
+        # the slot carries y for THIS round
+        idx = len(slots)
+        slots.append((idx, y))
+        slot = "__nx_mba_%d" % idx
+        piece = "((%d) ^ (%s)) + 2 * ((%d) & (%s))" % (x, slot, x, slot)
+        if acc == 0:
+            expr = piece
+        else:
+            expr = "((%s) ^ (%s)) + 2 * ((%s) & (%s))" % (
+                expr, piece, expr, piece)
+        acc += step
+    if acc != total:
+        return str(value)
+    return expr
 
 # ── the pipeline ──────────────────────────────────────────────────────────
 

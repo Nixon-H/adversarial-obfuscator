@@ -25,8 +25,9 @@ static char __pyx_k_url[] = "https://api.example.com/v2";
 
 static int __pyx_f_1f(int x) {
   int result = 0;
+  int limit = 4242;
   if (x > 0) {
-    result = 1;
+    result = 1 + limit;
   }
   return result;
 }
@@ -118,3 +119,116 @@ def test_full_transform_compiles():
     assert proc.returncode == 0, (
         "transformed C does not compile:\n%s\n---\n%s"
         % (proc.stderr[:800], result.source[:400]))
+
+
+# --- adversarial validation (2026-11-18) -----------------------------------
+# These three claims did not survive measurement. Each test pins the fix.
+
+def test_subset_sum_dp_table_covers_every_generated_target():
+    """The DP table was a fixed 4096; targets reach the sum of up to 8
+    values in 1..999 (max 7992).  11/1500 instances overflowed, and the
+    AND-ed predicate then returned 0 -- silently skipping real code."""
+    import hashlib
+    for trial in range(200):
+        seed = hashlib.sha256(b"bounds-%d" % trial).digest()
+        insts = [generate_subset_sum_instance(
+            seed + b"ss" + i.to_bytes(4, "big"), n=6 + i) for i in range(3)]
+        max_target = max(int(x["target"]) for x in insts)
+        dp_size = max(4096, max_target + 1)
+        assert max_target < dp_size
+
+
+def test_emitted_subset_sum_fn_is_sized_for_the_instance():
+    from scripts.c_transform import insert_subset_sum_predicates
+    import hashlib
+    src = CYX_C
+    seed = hashlib.sha256(b"size-probe").digest()
+    out, n = insert_subset_sum_predicates(src, seed, __import__("random").Random(1),
+                                          count=3)
+    assert n == 3
+    import re
+    m = re.search(r"unsigned char dp\[(\d+)\]", out)
+    assert m, "no dp table in the emitted C"
+    dp = int(m.group(1))
+    targets = [int(t) for t in re.findall(r"__nx_ss_set_\d+_target = (\d+)U", out)]
+    assert targets, "no targets emitted"
+    assert max(targets) < dp, (
+        "dp[%d] does not cover target %d" % (dp, max(targets)))
+
+
+def test_mba_length_grows_with_rounds():
+    """'multi-round' used to REPLACE the expression each round."""
+    import random
+    from scripts.c_transform import _mba_substitute_constant
+    lengths = []
+    for rounds in (1, 2, 3):
+        e = _mba_substitute_constant(42, random.Random(42), rounds=rounds)
+        lengths.append(len(e))
+    assert lengths[1] > lengths[0], lengths
+    assert lengths[2] > lengths[1], lengths
+
+
+def test_mba_is_exact_for_every_operand_value():
+    """The nested identity must equal the original constant."""
+    import random
+    from scripts.c_transform import _mba_substitute_constant
+    for value in (1, 2, 7, 42, 100, 999, 5000, -42):
+        for rounds in (1, 2, 3, 5):
+            e = _mba_substitute_constant(value, random.Random(42), rounds=rounds)
+            assert eval(e) == value, (value, rounds, e[:80])
+
+
+def test_mba_slots_carry_the_value_their_identity_needs():
+    """Every volatile slot must hold the exact operand its identity needs.
+
+    Sharing one slot per value (instead of per value AND round) silently
+    changed 100 into 3811; hashing the slot value changed 42 into 7561.
+    Both were caught by this check.
+    """
+    import random
+    import re
+    from scripts.c_transform import substitute_constants_mba
+    for value in (42, 100, 999, 5000):
+        # function-local, so the MBA pass will consider it (file-scope
+        # initialisers are skipped: C requires a constant expression there)
+        C = ('#include <stdio.h>\n'
+             'static int f(void)\n'
+             '{\n'
+             '    int x = %d;\n'
+             '    return x;\n'
+             '}\n' % value)
+        out, n = substitute_constants_mba(C, b"seed", random.Random(1),
+                                          rounds=3, rate=1.0)
+        assert n == 1
+        expr = re.search(r"int x = (.*?);", out, re.S).group(1).strip()
+        if expr.startswith("(") and expr.endswith(")"):
+            expr = expr[1:-1]
+        for m in re.finditer(r"__nx_mba_(\d+) = (\d+);", out):
+            expr = expr.replace("__nx_mba_%s" % m.group(1), m.group(2))
+        assert eval(expr) == value, (
+            "MBA slots do not reproduce %d (got %d)" % (value, eval(expr)))
+
+
+def test_opaque_operands_are_volatile_not_const():
+    """`static const int` is a C constant: gcc -O3 folded the whole
+    predicate away (0 refs in the assembly)."""
+    from scripts.c_transform import insert_opaque_predicates
+    import random
+    # Cython's output always carries `static` declarations; the transform
+    # anchors its inserted block on the first one (returning 0 without it).
+    src = (
+        '#include <stdio.h>\n'
+        'static int real_work(int v);\n'
+        'int main(int argc, char **argv)\n'
+        '{\n'
+        '    int v = argc;\n'
+        '    if (v > 0) {\n'
+        '        printf("%d\\n", v);\n'
+        '    }\n'
+        '    return 0;\n'
+        '}\n'
+    )
+    out, n = insert_opaque_predicates(src, b"vol", random.Random(1), rate=1.0)
+    assert n >= 1
+    assert "static volatile int __nx_opa" in out
+    assert "static const int __nx_opa" not in out
