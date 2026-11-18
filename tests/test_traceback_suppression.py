@@ -13,7 +13,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 def _head_frag():
+    """Return the loader template's head, cut at a COMPLETE STATEMENT.
+
+    A fixed character window is fragile: every loader change shifts the
+    content and a slice can land mid-token. Measured 2026-11-18 -- after the
+    earliest-anti-dump prctl was added, a 1500-char window cut `importlib.util`
+    to `i` and then `_nx_licenc` mid-def, and the resulting SyntaxError looked
+    exactly like a suppression regression. The cut is now made at the last
+    statement boundary before the limit, so the fragment is always executable.
+    """
     import ast as _ast
+    template = None
     tree = _ast.parse(open("obfuscator/core/pipeline.py").read())
     for node in _ast.walk(tree):
         # skip the later `loader_template = loader_template.replace(...)`
@@ -22,7 +32,10 @@ def _head_frag():
         if isinstance(node, _ast.Assign) and isinstance(node.value, _ast.Constant):
             for t in node.targets:
                 if getattr(t, "id", "") == "loader_template":
-                    head = node.value.value[:1500]
+                    template = node.value.value
+    if template is None:
+        raise AssertionError("loader_template not found")
+    head = _cut_at_statement_boundary(template)
     # The template's first lines carry the identity-gate and self-check
     # MARKERS (the generator replaces them with real text); the raw
     # markers are not executable, so resolve them exactly as the
@@ -36,6 +49,37 @@ def _head_frag():
         if "__NX_" in head:
             raise AssertionError("unknown __NX_ marker in the loader head")
     return head
+
+
+def _cut_at_statement_boundary(template, limit=2600):
+    """Longest prefix of `template` (<= limit) that parses as Python.
+
+    Walks back line by line from the limit, stripping the marker lines the
+    generator replaces. The first prefix that compiles is returned; that is a
+    complete sequence of statements by construction.
+    """
+    lines = template.splitlines(keepends=True)
+    total = 0
+    end = 0
+    for i, line in enumerate(lines):
+        total += len(line)
+        if total > limit:
+            break
+        end = i + 1
+    for cut in range(end, 0, -1):
+        candidate = "".join(lines[:cut])
+        candidate = (candidate
+                     .replace("__NX_IDENTITY_GATE__\n", "")
+                     .replace("__NX_SELF_CHECK_DEFS__\n", "")
+                     .replace("__NX_SELF_CHECK_CALL__\n", ""))
+        if "__NX_" in candidate:
+            continue
+        try:
+            compile(candidate, "<frag>", "exec")
+        except SyntaxError:
+            continue
+        return candidate
+    raise AssertionError("could not find an executable prefix of the template")
     raise AssertionError("loader_template not found")
 
 
