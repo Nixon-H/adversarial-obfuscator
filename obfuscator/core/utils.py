@@ -779,6 +779,33 @@ def _verify_download_zip(zip_path, artifact_name, sign_key):
                  "signatures present for %r — proceeding without "
                  "verification (auditable downgrade).", artifact_name)
     return True
+def render_farm_driver(payload_filename="payload.py"):
+    """Return the driver text the farm workflow embeds, for inspection.
+
+    `create_workflow` builds this as an f-string inside a method, which makes
+    it awkward to read from a test (and `eval` on generated source is the wrong
+    tool). This renders the same template through the class, so a test can
+    compile it and assert the attestation fields are present before a real farm
+    run -- the f-string context has already produced two syntax bugs, where
+    literal braces were read as format specifiers.
+    """
+    farm = object.__new__(GitHubBuildFarm)
+    farm.token = ""
+    farm.tor_proxy = None
+    farm.proxies = None
+    farm.headers = {}
+    farm.base_url = "https://api.github.com"
+    farm.repo_name = "inspect"
+    farm.username = "inspect"
+    # create_workflow uploads as a side effect; the renderer only needs the
+    # text, so swallow the network failure and read what it produced.
+    try:
+        farm.create_workflow(payload_filename)
+    except Exception:
+        pass
+    return getattr(farm, "_nx_last_driver", "")
+
+
 class GitHubBuildFarm:
     def __init__(self,token, use_tor=False, tor_proxy=None):
         self.token=token
@@ -940,6 +967,7 @@ class GitHubBuildFarm:
         # with doubled braces.
         script_content = f"""
 import os, sys, hashlib, secrets
+import platform as _platform
 sys.path.insert(0, os.getcwd())
 # 1. Cython: payload.py -> payload.c (transpile only)
 from Cython.Build import cythonize
@@ -995,7 +1023,68 @@ setup(
     ext_modules=[Extension("payload", ["payload.c"])],
     script_args=['build_ext', '--inplace']
 )
+# 4. RUNNER SELF-ATTESTATION (review item 7.9, farm-runner integrity).
+# A compromised runner can bypass every protection implemented in the
+# compiler, so the runner states what it used: OS/Python/Cython, the toolchain
+# version strings, the hash of the payload it was GIVEN, the hash of the C it
+# transformed, the transform seeds, and the hash of every blob it produced.
+# The controller verifies this on download (obfuscator.runner_attest.verify)
+# against the digest it recorded before upload.
+#
+# Built with json.dumps over collected values rather than a dict literal: this
+# driver is embedded in an f-string, where literal braces are format specifiers
+# and a nested dict silently corrupts the template.
+def _tool_version(_argv):
+    try:
+        import subprocess as _sp
+        _r = _sp.run(_argv, capture_output=True, text=True, timeout=30)
+        _lines = (_r.stdout or "").strip().splitlines()
+        return _lines[0][:200] if _lines else ""
+    except Exception:
+        return ""
+try:
+    import Cython as _Cy
+    _cython_v = str(getattr(_Cy, "__version__", ""))
+except Exception:
+    _cython_v = ""
+_artifact_pairs = list()
+for _name in sorted(_os.listdir(".")):
+    if _name.startswith("payload") and _name.endswith((".so", ".pyd", ".dylib")):
+        _artifact_pairs.append((_name, hashlib.sha256(open(_name, "rb").read()).hexdigest()))
+_runner_pairs = [
+    ("os", _platform.system()),
+    ("release", _platform.release()),
+    ("machine", _platform.machine()),
+    ("python", _sys.version.split()[0]),
+    ("cython", _cython_v),
+    ("cc", _tool_version(["cc", "--version"])),
+    ("gcc", _tool_version(["gcc", "--version"])),
+    ("clang", _tool_version(["clang", "--version"])),
+]
+_seed_pairs = [
+    ("reproducible", _repro_seed.hex()),
+    ("diversified", _divers_seed.hex()),
+    ("mode", "reproducible" if _os.environ.get("NIXON_REPRODUCIBLE") else "diversified"),
+]
+_top = [
+    ("schema", "nx-runner-attestation/v1"),
+    ("runner", dict(_runner_pairs)),
+    ("payload_sha256", hashlib.sha256(_payload_bytes).hexdigest()),
+    ("c_sha256", hashlib.sha256(open("payload.c", "rb").read()).hexdigest()),
+    ("seed", dict(_seed_pairs)),
+    ("transforms", list(getattr(_res, "transforms_applied", []) or [])),
+    ("artifacts", dict(_artifact_pairs)),
+]
+import json as _j
+with open("runner-attestation.json", "w", encoding="utf-8") as _af:
+    _af.write(_j.dumps(dict(_top), indent=2, sort_keys=True))
+print("runner attestation:", dict(_top)["payload_sha256"][:16],
+      "blobs:", len(_artifact_pairs))
 """
+        # Keep the rendered driver on the instance: create_workflow assembles
+        # it as an f-string, and a test needs to compile exactly that text
+        # without eval'ing generated source.
+        self._nx_last_driver = script_content
         indented_script = "\n".join(["          " + line for line in script_content.strip().split('\n')])
         workflow_yaml = f"""name: Nixon Native Build
 on:

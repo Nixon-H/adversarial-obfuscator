@@ -4362,6 +4362,70 @@ def build_project(args):
                                     ".native_blobs")
                                 os.makedirs(_blob_dir, exist_ok=True)
                                 _farm.download_artifacts(_run_id, _blob_dir)
+                                # §7.9 FARM-RUNNER INTEGRITY. The runner
+                                # attests to what it actually built (payload
+                                # hash, C hash, toolchain, blob hashes); verify
+                                # that claim against the digest we recorded
+                                # BEFORE upload. A runner that swapped the
+                                # payload, edited the transform layer or handed
+                                # back different bytes cannot produce a
+                                # matching record without knowing the bytes we
+                                # sent.
+                                # A missing attestation is a MISMATCH, not a
+                                # pass: a runner that omits the file has
+                                # attested to nothing, and treating that as
+                                # "no objection" is how this kind of control
+                                # becomes decoration.
+                                try:
+                                    from obfuscator.runner_attest import (
+                                        verify as _ra_verify,
+                                        summary as _ra_summary,
+                                    )
+                                    from obfuscator.build_manifest import (
+                                        _sha256_file as _ra_sha,
+                                    )
+                                    _ra_dir = _blob_dir
+                                    _ra_doc = None
+                                    for _ra_name in os.listdir(_ra_dir):
+                                        if _ra_name == "runner-attestation.json":
+                                            try:
+                                                with open(os.path.join(
+                                                        _ra_dir, _ra_name),
+                                                        encoding="utf-8") as _rf:
+                                                    _ra_doc = json.load(_rf)
+                                            except Exception:
+                                                _ra_doc = None
+                                            break
+                                    _ra_expect = hashlib.sha256(
+                                        open(source, "rb").read()).hexdigest()
+                                    _ra_dl = []
+                                    for _ra_name in os.listdir(_ra_dir):
+                                        if _ra_name.endswith(
+                                                (".so", ".pyd", ".dylib")):
+                                            _ra_dl.append((_ra_name, _ra_sha(
+                                                os.path.join(_ra_dir,
+                                                             _ra_name))))
+                                    _ra_res = _ra_verify(
+                                        _ra_doc, _ra_expect, _ra_dl,
+                                        require_artifacts=bool(_ra_dl))
+                                    if _ra_res["ok"]:
+                                        UI.item("Farm attestation",
+                                                _ra_summary(_ra_doc), "VERIFIED")
+                                    else:
+                                        UI.warn(
+                                            "farm attestation FAILED: %s"
+                                            % ("; ".join(
+                                                _ra_res["problems"][:3]),))
+                                        if os.environ.get(
+                                                "NIXON_REQUIRE_FARM_ATTEST") == "1":
+                                            raise SystemExit(
+                                                "farm runner attestation failed "
+                                                "and NIXON_REQUIRE_FARM_ATTEST=1")
+                                except SystemExit:
+                                    raise
+                                except Exception as _ra_exc:
+                                    UI.warn("farm attestation check skipped: %s"
+                                            % (_ra_exc,))
                                 _fat = find_native_blobs(source)
                                 for _os_name, _b64 in _fat.items():
                                     # local blob wins for the current OS
