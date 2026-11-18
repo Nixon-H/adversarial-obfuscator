@@ -3665,8 +3665,14 @@ def build_project(args):
                     try:
                         _farm = _make_farm(args, _gh_token)
                         if _farm.create_disposable_repo():
+                            # __file__ is obfuscator/core/pipeline.py: the
+                            # REPO ROOT is three dirnames up, not two -- with
+                            # two this resolved to obfuscator/scripts/... and
+                            # the farm upload failed with ENOENT (caught by
+                            # the live ABSOLUTE run, 2026-11-18).
                             _ct_src = os.path.join(os.path.dirname(
-                                os.path.dirname(os.path.abspath(__file__))),
+                                os.path.dirname(os.path.dirname(
+                                    os.path.abspath(__file__)))),
                                 "scripts", "c_transform.py")
                             if not _farm.upload_file(source, "payload.py"):
                                 raise RuntimeError("payload upload failed")
@@ -5346,9 +5352,13 @@ def _make_farm(args, gh_token):
     if platform in ('auto', 'github'):
         # Nuitka was removed (operator decision, 2026-11-17): the farm now
         # builds per-OS Cython blobs (.pyd/.so/.dylib) through the matrix
-        # workflow in GitHubBuildFarm.create_workflow.
+        # workflow in GitHubBuildFarm.create_workflow.  Signature note:
+        # GitHubBuildFarm.__init__ takes (token, use_tor, tor_proxy) ONLY --
+        # passing the Nuitka farm's is_public= here raised TypeError and the
+        # farm trigger silently degraded on every build (caught by the live
+        # ABSOLUTE run, 2026-11-18).  is_public is a Nuitka-farm concept: the
+        # native farm repo is always private.
         return GitHubBuildFarm(gh_token,
-                               is_public=getattr(args, 'public', False),
                                use_tor=getattr(args, 'tor', False),
                                tor_proxy=getattr(args, 'tor_proxy', None))
     raise ValueError("unknown build farm platform %r (implemented: github)"
