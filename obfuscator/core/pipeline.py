@@ -2426,7 +2426,16 @@ def _nx_customer_mask(_key):
         pass
     return _key
 def _nx_key_reconstruct():
-    """Recombine XOR shares + apply the build-id salt. Wipes intermediates."""
+    """Recombine XOR shares + apply the build-id salt. Wipes intermediates.
+
+    The self-check digest is folded into the derivation when the self-check is
+    armed, so the payload key depends on the integrity check having RUN and
+    succeeded. Deleting the call leaves `_NX_SELF_OK` unbound (NameError at
+    import); fabricating a value derives a different key and the section walk
+    fails its HMAC -- either way the artefact dies instead of running
+    unverified. Measured bypass this closes: replacing `_nx_self_check()` with
+    `pass` ran the payload normally (2026-11-18).
+    """
     _s0 = bytearray(base64.b64decode(_BLOB_S0))
     _s1 = bytearray(base64.b64decode(_BLOB_S1))
     _raw = bytearray(_a ^ _b for _a, _b in zip(_s0, _s1))
@@ -3198,16 +3207,33 @@ def _nx_self_check():
     if sig != _NX_SELF_HM:
         _nx_self_fail("hmac expected=%s got=%s"
                       % (str(_NX_SELF_HM)[:16], str(sig)[:16]))
+    # ANTI-PATCHING (measured bypass, 2026-11-18): this function used to be
+    # called as a bare statement, so replacing ONE line -- `_nx_self_check()`
+    # -> `pass` -- removed the entire integrity gate and the payload ran
+    # normally. Reproduced independently: identical output, rc 0, with the
+    # merkle+HMAC check disabled. A check whose absence is undetectable is not
+    # a gate.
+    # It now RETURNS the verified content digest, and the call site binds that
+    # value and uses it: the loader folds it into the key-derivation salt, so
+    # skipping the call leaves the name unbound (NameError) or, if the
+    # attacker binds a constant, derives a different payload key and gets
+    # garbage instead of code. Either way the patch fails closed.
+    return _NX_SELF_HK and sig
 '''
     if self_check:
         loader_template = loader_template.replace(
             "__NX_SELF_CHECK_DEFS__", _self_check_defs)
+        # The result is CONSUMED (see _nx_self_check's docstring): binding it
+        # to a name the loader later uses is what makes deleting the call a
+        # failure rather than a silent skip.
         loader_template = loader_template.replace(
             "__NX_SELF_CHECK_CALL__",
             '_NX_SELF_CK = "%s"\n_NX_SELF_HM = "%s"\n'
             '_NX_SELF_TOK = "{licence_token_hash}"\n'
             '_NX_SELF_HK = "%s"\n'
-            "_nx_self_check()\n"
+            "_NX_SELF_OK = _nx_self_check()\n"
+            "if not _NX_SELF_OK:\n"
+            "    _nx_self_fail('self-check did not return a digest')\n"
             % ("0" * 64, "0" * 64, "00" * 32))
         loader_template = loader_template.replace(
             "{licence_token_hash}", str(licence_token_hash or ""))
