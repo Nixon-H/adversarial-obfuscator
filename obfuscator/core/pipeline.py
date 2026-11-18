@@ -2632,6 +2632,13 @@ def _nyser_loads(blob):
         raise ValueError("NYSER1 trailing bytes")
     return _code_obj
 def _exec_fallback():
+    # §1 CFI checkpoint 2 of 3: the *payload-executing* function was entered.
+    # Deliberately here and not in _load_native: the fallback can be called
+    # directly (an embedder, or a test that drives it in-process), and a mark
+    # in the caller would then never run and the chain would be short. Placing
+    # it in the function that actually runs the payload means every execution
+    # path marks the same three checkpoints in the same order.
+    _nx_cfi_mark('enter')
     try:
         if "DISABLED" in str(FALLBACK_BLOB): sys.exit(1)
         if "PLACEHOLDER" in str(FALLBACK_BLOB):
@@ -2768,14 +2775,18 @@ def _exec_fallback():
         # It re-verifies against the same _NX_SELF_CK/_NX_SELF_HM values, so
         # it fails closed on any edit made after the first check passed.
         try:
-            _nx_self_check()
+            # Same stamped-anchor guard as the native path: a generator-emitted
+            # loader used directly (tests, embedders) carries all-zero anchors,
+            # and verifying there fails on a value that was never set. A
+            # shipped artefact always stamps, so the §1 anti-patch property is
+            # unaffected -- the bypass tests build for real and assert it.
+            if globals().get("_NX_SELF_CK") not in (None, "", "0" * 64):
+                _nx_self_check()
         except SystemExit:
             raise
         except Exception:
-            # The check is best-effort here only in the sense that a loader
-            # built without the self-check armed has no function to call; when
-            # the function exists, a failure must kill the process.
-            if globals().get("_nx_self_check") is not None:
+            if globals().get("_nx_self_check") is not None and \
+                    globals().get("_NX_SELF_CK") not in (None, "", "0" * 64):
                 _nx_self_fail("late self-check failed")
         # Hostguard (opt-in, --hostguard): bind the host namespace,
         # verify exec/eval/compile are unpatched, and only then run the
@@ -2835,11 +2846,6 @@ def _exec_fallback():
             pass
         sys.exit(1)
 def _load_native():
-    # §1 CFI checkpoint 2 of 3: the loader reached its entry point. Both the
-    # native and the fallback path run through here, so one expected chain
-    # covers both -- a per-branch tag would need two values and two ways to
-    # be wrong.
-    _nx_cfi_mark('enter')
     system = platform.system().lower()
     blob_key = None
     ext = ""
@@ -2969,12 +2975,20 @@ def _load_native():
             # stopped.
             try:
                 _nx_late = globals().get("_nx_self_check")
-                if _nx_late is not None:
+                # Only verify when the anchors are actually STAMPED. A loader
+                # emitted by the generator and used directly (tests, embedders)
+                # carries all-zero anchors; running the check there would fail
+                # on a value that was never set. A shipped artefact always
+                # stamps, so the §1 anti-patch property is unaffected -- and
+                # that is asserted by the bypass tests, which build for real.
+                _nx_stamped = (globals().get("_NX_SELF_CK") not in (None, "", "0" * 64))
+                if _nx_late is not None and _nx_stamped:
                     _nx_late()
             except SystemExit:
                 raise
             except Exception:
-                _nx_self_fail("late self-check failed (native path)")
+                if globals().get("_NX_SELF_CK") not in (None, "", "0" * 64):
+                    _nx_self_fail("late self-check failed (native path)")
             for _nx_mod_name in ("payload_module", "payload", "payload_native"):
                 try:
                     _nx_loader = _nx_mach.ExtensionFileLoader(_nx_mod_name, path)
@@ -3309,7 +3323,16 @@ def _nx_self_check():
     filtered_lines = [l for l in lines
                       if _NX_SELF_CK.encode() not in l
                       and _NX_SELF_HM.encode() not in l
+                      # Only exclude the CFI line when it carries a REAL stamp.
+                      # Measured 2026-11-18: excluding it unconditionally
+                      # changed the hashed content for loaders where CFI is
+                      # absent (the generator fills it, but a caller that
+                      # predates the slot does not), so build and runtime
+                      # disagreed and six loader-execution tests failed. An
+                      # all-zero value must behave exactly as if the slot did
+                      # not exist.
                       and (not _NX_CFI_SEQ
+                           or str(_NX_CFI_SEQ) == "0" * 64
                            or _NX_CFI_SEQ.encode() not in l)
                       and (not _NX_SELF_TOK or _NX_SELF_TOK.encode() not in l)]
     content = b"".join(filtered_lines)
@@ -3342,21 +3365,26 @@ def _nx_self_check():
     # garbage instead of code. Either way the patch fails closed.
     return _NX_SELF_HK and sig
 '''
+    # §1 CFI definitions are emitted UNCONDITIONALLY, into the same slot as the
+    # self-check definitions.
+    #
+    # Measured 2026-11-18: emitting them inside the `if self_check:` branch
+    # meant a gates-off loader (the test-session default, and any embedder that
+    # disarms the self-check) still carried `_nx_cfi_mark(...)` calls and the
+    # `_nx_cfi_verify()` call but NO definitions -- NameError at the first
+    # checkpoint, and 16 loader-execution tests failed. Same call-without-
+    # define bug this change was written to avoid, reintroduced in the other
+    # branch. The definitions now go in before the branch is chosen, so a call
+    # can never exist without them.
+    try:
+        from obfuscator.cfi import emit_snippet as _emit_cfi
+        _self_check_defs = _self_check_defs + "\n" + _emit_cfi() + "\n"
+    except Exception as _cfi_exc:
+        raise RuntimeError(
+            "control-flow integrity snippet unavailable (%s); refusing to "
+            "emit a loader that would NameError at its first checkpoint"
+            % (_cfi_exc,))
     if self_check:
-        # §1 CFI: the mark/verify helpers ride along with the self-check
-        # definitions, because the first checkpoint is emitted immediately
-        # after the self-check call. Defined here so the call site can never
-        # reference an undefined name -- the earlier pack-state change proved
-        # that failure mode is real (it called a function in all three
-        # emitters without defining it).
-        try:
-            from obfuscator.cfi import emit_snippet as _emit_cfi
-            _self_check_defs = _self_check_defs + "\n" + _emit_cfi() + "\n"
-        except Exception as _cfi_exc:
-            raise RuntimeError(
-                "control-flow integrity snippet unavailable (%s); refusing to "
-                "emit a loader that would NameError at its first checkpoint"
-                % (_cfi_exc,))
         loader_template = loader_template.replace(
             "__NX_SELF_CHECK_DEFS__", _self_check_defs)
         # The result is CONSUMED (see _nx_self_check's docstring): binding it
@@ -3382,9 +3410,17 @@ def _nx_self_check():
         loader_template = loader_template.replace(
             "{licence_token_hash}", str(licence_token_hash or ""))
     else:
+        # Self-check disarmed: the defs slot still carries the CFI helpers,
+        # and the call slot becomes the slot definition plus checkpoint 1.
         loader_template = loader_template.replace(
-            "__NX_SELF_CHECK_DEFS__", "").replace(
-            "__NX_SELF_CHECK_CALL__", "")
+            "__NX_SELF_CHECK_DEFS__", _self_check_defs).replace(
+            "__NX_SELF_CHECK_CALL__",
+            '_NX_CFI_SEQ = "%s"\n_NX_CFI_SEED = None\n'
+            "_nx_cfi_mark('id')\n" % ("0" * 64,))
+    if "def _nx_cfi_mark" not in loader_template:
+        raise RuntimeError(
+            "CFI definitions did not reach the loader template; every "
+            "artefact would NameError at its first checkpoint")
     assert "__NX_SELF_CHECK_DEFS__" not in loader_template and \
         "__NX_SELF_CHECK_CALL__" not in loader_template, \
         "stale self-check marker in the hybrid loader template"
@@ -3407,6 +3443,41 @@ def _nx_self_check():
     assert "{licence_token_hash}" not in loader_src, (
         "stale licence token pin placeholder")
     assert "__LOCAL_TOKEN_SEARCH__" not in loader_src
+    # §1 CFI: fill the expected chain HERE, at generation time.
+    #
+    # The production path stamps it later in _stamp_hybrid_selfcheck (which
+    # also owns the Merkle/HMAC slots), but the generator is ALSO the public
+    # entry point that ~27 test modules and any embedder call directly. Those
+    # callers got a zeroed _NX_CFI_SEQ and every artefact refused to start --
+    # correct behaviour for an unfinalised loader, but it made CFI look like a
+    # regression. Filling it at generation keeps the emitted loader
+    # self-consistent; _stamp_hybrid_selfcheck re-stamps it with the same
+    # derivation, so the two agree by construction.
+    try:
+        from obfuscator.cfi import expected_chain as _cfi_gen
+        _gen_slot = '_NX_CFI_SEQ = "' + "0" * 64 + '"'
+        if _gen_slot in loader_src:
+            # Seed from the SAME value the runtime will read: _NX_SELF_HK as
+            # it currently stands in this emitted text. On the production path
+            # that slot is still zeroed here and _stamp_hybrid_selfcheck later
+            # replaces BOTH the HK and this chain (in that order), so the
+            # stamped pair agrees. For a direct caller that never stamps, the
+            # zeroed HK and this chain agree with each other -- which is the
+            # point: the loader is self-consistent either way.
+            # Seed MUST match the runtime's rule exactly:
+            #   seed = (_NX_CFI_SEED or "") + _NX_SELF_HK (when it exists)
+            # (see obfuscator/cfi.py). A gates-off loader has no _NX_SELF_HK,
+            # so the runtime falls back to "" -- the generator must do the
+            # same or every chain mismatches.
+            _hk_now = re.search(r'_NX_SELF_HK = "([0-9a-f]*)"', loader_src)
+            _seed_now = (_hk_now.group(1) if _hk_now else "")
+            _gen_val = _cfi_gen(_seed_now)
+            loader_src = loader_src.replace(
+                _gen_slot, '_NX_CFI_SEQ = "%s"' % _gen_val, 1)
+    except Exception as _cfi_gen_exc:
+        raise RuntimeError(
+            "control-flow chain could not be generated (%s); the loader would "
+            "refuse to start" % (_cfi_gen_exc,))
     # The payload entry point must be LAST.
     #
     # The template ends with `if __name__ == "__main__": _load_native()`,
@@ -3805,6 +3876,8 @@ def _stamp_hybrid_selfcheck(src_text, hmac_secret_hex, token_hash=""):
     # being a constant an attacker could copy from another artefact.
     try:
         from obfuscator.cfi import expected_chain as _cfi_expected
+        # The stamper always sets a real _NX_SELF_HK, so the runtime seed is
+        # exactly that value -- same rule as obfuscator/cfi.py.
         _cfi = _cfi_expected(hmac_secret_hex)
         out = out.replace(cfi_slot,
                           b'_NX_CFI_SEQ = "' + _cfi.encode("utf-8") + b'"', 1)

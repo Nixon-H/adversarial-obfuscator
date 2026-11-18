@@ -84,8 +84,23 @@ def _nx_cfi_mark(_tag):
     global _NX_CFI_STATE, _NX_CFI_MARKS
     try:
         import hashlib as _c_sh
+        # Once the chain has verified, later marks are ignored: a re-entrant
+        # loader (an embedder or test invoking the fallback again) must not
+        # push the count past the expected value and trip its own gate.
+        if globals().get("_NX_CFI_DONE"):
+            return
         if _NX_CFI_STATE is None:
-            _seed = (_NX_CFI_SEED or "") + _NX_SELF_HK
+            # Seed from _NX_CFI_SEED when present, else fall back to the
+            # self-check key. Measured 2026-11-18: a gates-off loader has no
+            # _NX_SELF_HK at all, so reading it unconditionally raised inside
+            # the try and left _NX_CFI_STATE None -- every chain reported
+            # "not established" and 16 loader tests failed. The seed must be
+            # something that EXISTS in every emitted loader.
+            try:
+                _seed = _NX_SELF_HK
+            except NameError:
+                _seed = ""
+            _seed = (_NX_CFI_SEED or "") + _seed
             _NX_CFI_STATE = _c_sh.sha256(
                 ("__CFI_SCHEMA__:" + _seed).encode()).digest()
         _NX_CFI_STATE = _c_sh.sha256(
@@ -98,17 +113,35 @@ def _nx_cfi_mark(_tag):
 
 
 def _nx_cfi_verify():
-    """Kill the process unless every checkpoint was marked in order."""
+    """Kill the process unless every checkpoint was marked in order.
+
+    ONE-SHOT by design: after a successful verification the chain is disarmed
+    and a second call returns True without re-checking. Two reasons:
+      * a re-entrant loader (the fallback path invoked again by an embedder or
+        a test) must not fail merely because the marks ran twice;
+      * a gate that can be re-evaluated can also be replayed, and replaying
+        it after patching the marks would be a way to probe the expected
+        value. A gate that answers once answers less.
+    """
     try:
+        if globals().get("_NX_CFI_DONE"):
+            return True
         _want = globals().get("__CFI_SLOT__")
         if not _want or _NX_CFI_STATE is None:
             _nx_self_fail("control-flow: chain not established")
-        if _NX_CFI_MARKS != __CFI_COUNT__:
+        if _NX_CFI_MARKS < __CFI_COUNT__:
+            _nx_self_fail(
+                "control-flow: %d checkpoints, expected %d"
+                % (_NX_CFI_MARKS, __CFI_COUNT__))
+        if _NX_CFI_MARKS > __CFI_COUNT__:
+            # More marks than expected means a checkpoint ran twice, which is
+            # a reordered or duplicated path.
             _nx_self_fail(
                 "control-flow: %d checkpoints, expected %d"
                 % (_NX_CFI_MARKS, __CFI_COUNT__))
         if _NX_CFI_STATE.hex() != str(_want):
             _nx_self_fail("control-flow: chain mismatch")
+        globals()["_NX_CFI_DONE"] = True
         return True
     except SystemExit:
         raise
