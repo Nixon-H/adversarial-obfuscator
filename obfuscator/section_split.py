@@ -40,6 +40,8 @@ mapping owns its pages, so it cannot wedge unrelated heap objects.
 
 from __future__ import annotations
 
+from obfuscator.pack_state import state_digest as _state_digest
+
 import ctypes
 import ctypes.util
 import hashlib
@@ -132,6 +134,13 @@ def split_sealed(payload: bytes, *, sections: int = DEFAULT_SECTIONS,
         "total": len(data),
         "key_hint": hashlib.sha256(key).hexdigest()[:16],
         "per_section": True,
+        # Runtime state validation (§1): a digest over the pack's DECLARED
+        # structure, so a hand-edited pack that changes count/total/index
+        # ordering fails on internal inconsistency instead of only on the
+        # per-section tags. The tags already cover the ciphertext; this binds
+        # the metadata those tags are interpreted under, which is the part an
+        # attacker would edit to make the loader mis-slice a pack.
+        "state": _state_digest(out_sections, n, len(data)),
     }
 
 
@@ -544,6 +553,13 @@ LOADER_JOIN_SOURCE = '''def {FUNC}(pack_b85, key):
     try:
         pack = _nx_sj.loads(_nx_sb64.b85decode(pack_b85).decode("utf-8"))
         sections = pack["sections"]
+        # §1 runtime state validation: the declared structure must match the
+        # content it describes. Fails closed on a pack without `state`.
+        if not _nx_pack_state_ok(pack):
+            raise ValueError("section pack state invalid")
+        # §1 runtime state validation (shared check; see pack_state.py).
+        if not _nx_pack_state_ok(pack):
+            raise ValueError("section pack state invalid")
         if len(sections) != pack["count"]:
             raise ValueError("section count mismatch")
         if _nx_sh.sha256(bytes(key)).hexdigest()[:16] != pack.get("key_hint"):
@@ -593,7 +609,8 @@ def emit_loader_snippet(func_name: str = None) -> str:
     closed instead of running a partially joined payload.
     """
     name = func_name or JOIN_FUNC
-    return LOADER_JOIN_SOURCE.replace("{FUNC}", name)
+    from obfuscator.pack_state import emit_state_check_snippet as _esc
+    return _esc() + "\n" + LOADER_JOIN_SOURCE.replace("{FUNC}", name)
 
 
 #: Loader-side MOVING decryption.  Each section is decrypted on demand,
@@ -619,6 +636,9 @@ LOADER_MOVING_SOURCE = '''def {FUNC}(pack_b85, key, sink):
     try:
         pack = _nx_mj.loads(_nx_mb64.b85decode(pack_b85).decode("utf-8"))
         sections = pack["sections"]
+        # §1 runtime state validation (shared check; see pack_state.py).
+        if not _nx_pack_state_ok(pack):
+            return False
         if len(sections) != pack["count"]:
             return False
         # Same key_hint check as the whole-payload join.
@@ -669,7 +689,8 @@ LOADER_MOVING_SOURCE = '''def {FUNC}(pack_b85, key, sink):
 
 def emit_moving_snippet(func_name: str = "_nx_section_walk") -> str:
     """Return the loader-side MOVING-decryption source, ready to embed."""
-    return LOADER_MOVING_SOURCE.replace("{FUNC}", func_name)
+    from obfuscator.pack_state import emit_state_check_snippet as _esc
+    return _esc() + "\n" + LOADER_MOVING_SOURCE.replace("{FUNC}", func_name)
 
 
 #: Loader-side STREAMING decompression.  This is the piece that makes moving
@@ -696,6 +717,9 @@ LOADER_STREAM_SOURCE = '''def {FUNC}(pack_b85, key):
     try:
         pack = _nx_sj.loads(_nx_sb64.b85decode(pack_b85).decode("utf-8"))
         sections = pack["sections"]
+        # §1 runtime state validation (shared check; see pack_state.py).
+        if not _nx_pack_state_ok(pack):
+            return None
         if len(sections) != pack["count"]:
             return None
         if _nx_sh.sha256(bytes(key)).hexdigest()[:16] != pack.get("key_hint"):
@@ -771,4 +795,5 @@ LOADER_STREAM_SOURCE = '''def {FUNC}(pack_b85, key):
 
 def emit_stream_snippet(func_name: str = "_nx_section_stream") -> str:
     """Return the loader-side STREAMING decrypt+decompress source."""
-    return LOADER_STREAM_SOURCE.replace("{FUNC}", func_name)
+    from obfuscator.pack_state import emit_state_check_snippet as _esc
+    return _esc() + "\n" + LOADER_STREAM_SOURCE.replace("{FUNC}", func_name)
