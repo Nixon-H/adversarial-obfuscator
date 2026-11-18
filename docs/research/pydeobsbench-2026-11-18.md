@@ -421,6 +421,34 @@ finding runs into, and it is stated here rather than glossed.
 
 ---
 
+## 5e. Cross-build correlation (§8) — measured
+
+The metric asks: does analysis of build A transfer to build B? Two independent
+builds of the `tiny` target were compared structurally:
+
+| property | build A | build B | transfers? |
+|---|---|---|---|
+| section count | 4 | 4 | **yes** |
+| top-level functions | 51 | 51 | **yes** |
+| line count | 2,197 | 2,165 | 98.5% identical |
+| payload key (`key_hint`) | `34bc9453…` | `75120907…` | **no** |
+
+**Reading.** The *loader's* structure correlates almost perfectly across
+builds: an analyst who maps build A knows where the gates are, how many
+sections to expect, and what the module layout looks like in build B. What does
+not transfer is the payload key — each build re-keys, so a decryption obtained
+for A is useless on B.
+
+This is the same pattern as §5-D: per-build polymorphism changes *which*
+instructions run and *which* key is used, but not the overall shape of the
+loader. For an adaptive attacker the cost is therefore "map once, apply
+everywhere" for the wrapper, and "recover per build" only for the payload.
+
+That is a real and measurable weakness in the diversification story, and it is
+the argument for the §5-B work (compiler diversity) that has not been done.
+
+---
+
 ## 6. Honest limits of this benchmark
 
 
