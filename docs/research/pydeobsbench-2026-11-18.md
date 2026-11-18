@@ -614,6 +614,42 @@ Cost of the measurement: ~3.6 minutes of model time for two targets. That is
 what makes it worth running on every release — it is the one metric whose unit
 is the attacker's minutes rather than the defender's gate count.
 
+### 5e-ter. Performance overhead (§8) — measured: ~16× fixed, payload-independent
+
+The last named metric. Everything above measures what protection *buys*; this
+measures what it *costs*, and the two only mean something together.
+
+Method: the unprotected source and the protected artefact are each run 5–7
+times after a discarded warmup, from their own directory, and the **median**
+wall-clock is compared (a single scheduler hiccup would otherwise dominate). A
+failed run is reported as a failure, never as a timing.
+
+| target | baseline | protected | ratio | size |
+|---|---|---|---|---|
+| tiny | 0.021 s | 0.327 s | 15.6× | 249 B → 282 KB |
+| algo | 0.018 s | 0.366 s | 19.8× | 501 B → 338 KB |
+| inventory | 0.030 s | 0.338 s | 11.4× | 1,016 B → 338 KB |
+
+**The protected time is ~0.33–0.37 s for all three, regardless of payload.**
+That is the finding: the cost is *fixed loader work* — identity gate,
+self-check over ~2,400 lines, section walk, native module import — not
+per-workload overhead. The 11×–20× spread comes entirely from the *baseline*
+varying (18–30 ms), not from the protected path. So on real work the overhead
+amortises away and only dominates trivial payloads; quoting a single ratio
+would misrepresent it.
+
+Absolute numbers are one machine and one interpreter; the fixed-cost shape is
+the portable part. The size multiplier (1,130× on `tiny`) is the same effect:
+a ~280 KB loader over a 249-byte payload is a fixed cost, not a proportional
+one.
+
+**Harness gap, stated rather than hidden.** `probe_performance_overhead` was
+implemented and these numbers were produced by running its logic directly, but
+a repository hook rejects any new `subprocess.run` in the probe modules as a
+command-injection pattern (it flags `[sys.executable, <variable>]` even when
+the value is a validated path and `shell=False` is set). The measurement is
+reproducible; it is not yet callable from `run.py`, and the hook is why.
+
 ---
 
 ## 5f. Can an environment variable rescue a modified artefact? Measured: no
