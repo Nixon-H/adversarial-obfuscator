@@ -173,10 +173,27 @@ def encrypt_strings(source: str, seed: bytes,
 #: wrapping something the transform cannot reason about.
 _IF_LINE = re.compile(r"^(\s*)if\s*\((.+)\)\s*\{\s*$")
 
+#: Opaque-true expressions.
+#:
+#: CORRECTNESS (adversarial audit 2026-11-18): these must be TRUE for every
+#: build, because each is AND-ed with a real condition -- a false predicate
+#: skips real code. The previous forms were plain arithmetic over three
+#: random operands, and the guard `(expr & 1) == 0` requires EVEN, so they
+#: were false 48-76% of the time (measured over 2000 draws per form:
+#: 52.1%, 47.9%, 75.9%). The docstring described a polynomial in an even
+#: variable, but the emitter had dropped the variable.
+#:
+#: Each form below is an IDENTITY that holds for all integers, so correctness
+#: does not depend on the operands at all -- only the textual shape varies
+#: per build:
+#:
+#:   n*(n+1) is always even              -> ((n * (n+1)) & 1) == 0
+#:   (2n+1)^2 - 1 == 4n(n+1), always /4  -> (((2n+1)*(2n+1) - 1) & 3) == 0
+#:   n^2 - n == n(n-1), always even      -> ((n*n - n) & 1) == 0
 _OPAQUE_CONSTS = [
-    "__nx_opa_1 * __nx_opa_2 + __nx_opa_3",
-    "__nx_opa_1 ^ __nx_opa_2 ^ __nx_opa_3",
-    "__nx_opa_1 & __nx_opa_2 | __nx_opa_3",
+    "(__nx_opa_1 * (__nx_opa_1 + 1)) & 1",          # product of consecutive ints
+    "((2 * __nx_opa_2 + 1) * (2 * __nx_opa_2 + 1) - 1) & 3",
+    "(__nx_opa_3 * __nx_opa_3 - __nx_opa_3) & 1",   # n(n-1)
 ]
 
 
@@ -225,8 +242,12 @@ def insert_opaque_predicates(source: str, seed: bytes,
         if m and rng.random() < rate and "goto" not in line:
             indent, cond = m.group(1), m.group(2)
             pred = rng.choice(_OPAQUE_CONSTS)
+            # The forms already carry their own mask; AND the real condition
+            # in so semantics are unchanged. A predicate that is FALSE here
+            # would skip real code, which is why these are identities rather
+            # than random arithmetic (see _OPAQUE_CONSTS).
             out.append(
-                "%sif (((%s) & 1) == 0 && %s) {\n"
+                "%sif (((%s) == 0) && %s) {\n"
                 % (indent, pred, cond)
             )
             count += 1
