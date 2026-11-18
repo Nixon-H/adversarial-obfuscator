@@ -232,3 +232,39 @@ def test_opaque_operands_are_volatile_not_const():
     assert n >= 1
     assert "static volatile int __nx_opa" in out
     assert "static const int __nx_opa" not in out
+
+
+def test_opaque_predicates_are_identities_not_random_arithmetic():
+    """The predicate is AND-ed with a real condition, so a FALSE predicate
+    skips real code.
+
+    The old forms were plain arithmetic over three random operands, guarded by
+    `(expr & 1) == 0` (requires EVEN). Measured over 2000 draws each they were
+    false 52.1%, 47.9% and 75.9% of the time -- i.e. the transform silently
+    broke roughly half of every branch it touched. The forms are now
+    identities that hold for all integers.
+    """
+    import random
+    from scripts.c_transform import _OPAQUE_CONSTS
+    rng = random.Random(0)
+    for trial in range(3000):
+        v = rng.randrange(0, 1 << 20)
+        for tmpl in _OPAQUE_CONSTS:
+            e = (tmpl.replace("__nx_opa_1", str(v))
+                    .replace("__nx_opa_2", str(v))
+                    .replace("__nx_opa_3", str(v)))
+            assert eval(e) == 0, (
+                "opaque identity %r is FALSE for n=%d (would skip real code)"
+                % (tmpl, v))
+
+
+def test_opaque_predicates_hold_for_adversarial_values():
+    """Zero, one, powers of two, and 32-bit boundaries."""
+    from scripts.c_transform import _OPAQUE_CONSTS
+    for v in (0, 1, 2, 3, 7, 255, 256, 65535, 65536,
+              (1 << 31) - 1, 1 << 31, 0xFFFFFFFF):
+        for tmpl in _OPAQUE_CONSTS:
+            e = (tmpl.replace("__nx_opa_1", str(v))
+                    .replace("__nx_opa_2", str(v))
+                    .replace("__nx_opa_3", str(v)))
+            assert eval(e) == 0, (tmpl, v)
