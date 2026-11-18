@@ -298,6 +298,25 @@ made absolutely safe in CPython.* Reducing the window (shorter plaintext
 lifetime, avoiding long-lived secret objects, `mlock`/no-core-dump policy) is
 mitigation, not prevention.
 
+**The mitigation that was added, and its measured limit.** The emitted loader
+now applies `PR_SET_DUMPABLE=0` and `RLIMIT_CORE=0` before the payload is
+decrypted (`obfuscator/memguard.py`; the prctl is verified to make
+`/proc/<pid>/mem` return EACCES even to the parent, `scripts/verify_dumpable.py`).
+Measured A/B on the cipher target, same probe:
+
+| run | bytes read | read failures | secrets recovered |
+|---|---|---|---|
+| before | 2,184,265,728 | 157 | **1/1** |
+| after | 129,351,680 | 13 | **0/1** |
+
+The secret is no longer reachable — but note the 129 MB that *were* read: the
+probe opens the memory fd before the prctl lands, so the early window remains
+observable. A probe that opened the fd after loader startup gets EACCES
+entirely. Stated plainly: this closes the channel for an attacker who attaches
+after startup, and narrows (does not close) it for one who is already attached.
+Payload *names* remain recoverable in the early window; only the secret was
+protected in this measurement.
+
 ---
 
 ## 5c. Binary-level diversity (§5-D) — measured, and the answer is nuanced
