@@ -11,6 +11,7 @@ import bz2
 import json
 import lzma
 import marshal
+import os
 import re
 import subprocess
 import types
