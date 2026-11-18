@@ -111,3 +111,28 @@ def test_system_exit_survives_the_wrapper(tmp_path):
     proc = subprocess.run([sys.executable, str(probe)], capture_output=True,
                           text=True, timeout=60)
     assert proc.returncode == 7, proc.returncode
+
+
+# --- 3. darwin blob importability --------------------------------------------
+
+def test_darwin_blob_extracts_as_so_not_dylib():
+    """CPython's macOS extension suffixes do not include .dylib.
+
+    The loader extracted the darwin native blob as ``.dylib`` and then called
+    ``spec_from_file_location`` with no explicit loader -- on macOS that
+    returns None (.dylib is not in EXTENSION_SUFFIXES), so the darwin blob
+    was dead weight and macOS silently fell back to bytecode.  The artefact
+    must extract as ``.so`` AND pass an explicit ExtensionFileLoader.
+    """
+    src = _loader()
+    assert 'ext = ".so"' in src, "darwin extraction must use the .so suffix"
+    assert 'ext = ".dylib"' not in src, "the broken .dylib extraction is back"
+    assert "ExtensionFileLoader" in src, (
+        "the import must pass an explicit loader so any OS suffix works")
+
+
+def test_windows_and_linux_blob_extracts_are_untouched():
+    """The per-OS naming convention: windows .pyd, linux .so."""
+    src = _loader()
+    assert 'blob_key = "windows"' in src and 'ext = ".pyd"' in src
+    assert 'blob_key = "linux"' in src and 'ext = ".so"' in src
