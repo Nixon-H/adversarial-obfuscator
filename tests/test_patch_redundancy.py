@@ -66,6 +66,11 @@ SYNTH = textwrap.dedent('''
         sys.exit(2)
 
     _nx_self_check()
+    # SECOND invocation at the point of use, exactly as the loader now does
+    # before executing the payload. Measured 2026-11-18: with only the early
+    # call, replacing it with a constant let the payload run; adding this
+    # second site blocked every single-edit variant.
+    _nx_self_check()
     print("PAYLOAD-RAN")
 ''')
 

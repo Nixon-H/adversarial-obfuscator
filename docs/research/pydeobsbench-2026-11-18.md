@@ -368,28 +368,37 @@ if not _NX_SELF_OK:
     _nx_self_fail("self-check did not return a digest")
 ```
 
-Against four attacker variants (`scripts/retest_bypass.py`):
+**Root cause, found while retesting.** Binding the result was not enough: the
+native path — the one that actually ships — returned from `_load_native()`
+*without any point-of-use verification*. The early self-check was the only
+check it ever performed, and that check is one removable line. A late check
+added to `_exec_fallback` was dead code on native builds. The architecture's
+integrity verification guarded the fallback and not the shipped path.
 
-| variant | outcome |
-|---|---|
-| A — delete the call | blocked (`NameError`) |
-| B — substitute a constant | **still runs** |
-| C — neuter the comparison | blocked (HMAC anchor fires) |
-| D — neuter the failure path | blocked (HMAC anchor fires) |
+**The fix.** A second invocation of the same check is now emitted immediately
+before the native module is executed, and before `exec` on the fallback path.
+Two independent invocation sites over the same anchors is the redundancy §1
+asks for: patching the early call no longer helps, because the payload cannot
+run without reaching the second.
 
-**Open, and stated as open.** Variant B still works. I tried feeding the
-digest into `BLOB_KEY` so a fabricated value would derive the wrong payload
-key, but build-time derivation does not include it — the mix was dead code, so
-I reverted it rather than leave it in as false assurance. Closing B requires
-the pack to be sealed against a value the build can compute *and* the runtime
-can only obtain by running the check. That is the next concrete step and it is
-**not done**.
+Re-measured against all four attacker variants *and* the full chain:
 
-**Why this matters more than the numbers above.** Every static metric in §2
-says an analyst recovers nothing — and that is true of the file. But an
-attacker who is willing to edit one line has no integrity gate at all, which
-makes every downstream protection advisory. A protection you can switch off by
-deleting a call is not a gate; it is a speed bump.
+| variant / step | before fix | after fix |
+|---|---|---|
+| A — delete the call | blocked (NameError) | **blocked** |
+| B — substitute a constant | **payload ran** | **blocked** (merkle) |
+| C — neuter the comparison | blocked (HMAC) | **blocked** (HMAC) |
+| D — neuter the failure path | blocked (HMAC) | **blocked** (HMAC) |
+| chain: bypass + tamper | **payload ran** | **blocked** (merkle) |
+
+`No single-edit bypass found` / `No chain: the tampered payload did not run.`
+
+**What this does not claim.** An attacker who patches *both* call sites, or who
+edits the anchors to match a tampered file, still wins — the file is the trust
+root and it is in their hands. Verification raises the number of coordinated
+edits from one to several and removes the free pass; it does not make a
+client-side artefact tamper-proof. That boundary is the same one §4's memory
+finding runs into, and it is stated here rather than glossed.
 
 ---
 
