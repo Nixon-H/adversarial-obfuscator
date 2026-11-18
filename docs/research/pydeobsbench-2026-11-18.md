@@ -298,24 +298,53 @@ made absolutely safe in CPython.* Reducing the window (shorter plaintext
 lifetime, avoiding long-lived secret objects, `mlock`/no-core-dump policy) is
 mitigation, not prevention.
 
-**The mitigation that was added, and its measured limit.** The emitted loader
-now applies `PR_SET_DUMPABLE=0` and `RLIMIT_CORE=0` before the payload is
-decrypted (`obfuscator/memguard.py`; the prctl is verified to make
-`/proc/<pid>/mem` return EACCES even to the parent, `scripts/verify_dumpable.py`).
-Measured A/B on the cipher target, same probe:
+**The mitigation that was added, its measured limit — and a retraction.**
 
-| run | bytes read | read failures | secrets recovered |
+The emitted loader applies `PR_SET_DUMPABLE=0` and `RLIMIT_CORE=0`
+(`obfuscator/memguard.py`; the prctl is verified to make `/proc/<pid>/mem`
+return EACCES even to the parent, `scripts/verify_dumpable.py`). A first
+measurement reported:
+
+| run | bytes read | secrets |
+|---|---|---|
+| before | 2,184,265,728 | 1/1 |
+| after | 129,351,680 | **0/1** |
+
+**That "0/1" was wrong, and it was wrong for the reason this document keeps
+warning about.** The probe's mapping filter still admitted read-only
+file-backed pages, so it was scoring `python3.13`'s own strings as recovered
+payload data:
+
+```
+"can't make main interpreter"
+"3.13.5 (main, Aug 10 2026, 12:06:59) [GCC 14.2.0]"     (version banner)
+"<main program>"                                        (ld-linux)
+```
+
+Every one of those is mapped in any Python process before the artefact starts.
+With the filter corrected (read-only mappings excluded, identifier-boundary
+matching), the *same* "after" build recovered the secret:
+`cipher-master-K_77`, found in `[stack]`, `rw-p`. The previous clean result was
+a measurement artifact, not a defence.
+
+What is true, re-measured after also moving the prctl to the loader's first
+line (was ~900 lines down):
+
+| build | bytes readable | names | secrets |
 |---|---|---|---|
-| before | 2,184,265,728 | 157 | **1/1** |
-| after | 129,351,680 | 13 | **0/1** |
+| prctl mid-loader | 13,594,624 | 1 (`seal`) | **1** (`cipher-master-K_77`) |
+| prctl first line | 1,228,800 | **0** | **0** |
 
-The secret is no longer reachable — but note the 129 MB that *were* read: the
-probe opens the memory fd before the prctl lands, so the early window remains
-observable. A probe that opened the fd after loader startup gets EACCES
-entirely. Stated plainly: this closes the channel for an attacker who attaches
-after startup, and narrows (does not close) it for one who is already attached.
-Payload *names* remain recoverable in the early window; only the secret was
-protected in this measurement.
+`seal` was genuinely recoverable before and is not now, so the ~11× window
+reduction does real work. The readable window was measured at **~225 ms**, and
+that remainder is the interpreter's own start-up before the loader runs at
+all — not something this code controls.
+
+Two honesty notes. `main` is reported as `unmeasurable_names`: a byte scan
+cannot distinguish it from the interpreter strings above, so it is neither
+proven present nor proven absent. And a pre-opened `/proc/<pid>/mem` handle
+does **not** survive the prctl (`EIO` on read, verified) — the channel closes
+for late attach; only the start-up window remains.
 
 ---
 
