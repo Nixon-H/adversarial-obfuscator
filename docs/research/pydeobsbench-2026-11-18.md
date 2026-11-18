@@ -685,9 +685,90 @@ externally, from the shipped blob, instead of trusting a runtime claim.
 
 ---
 
-## 6. Honest limits of this benchmark
-## 6. Honest limits of this benchmark
+## 5g. §3 platform hardening — a real PE was compiled, and it refuted the flag list
 
+The review's constraint for §3 is explicit: *"Don't blindly enable every flag.
+Verify the resulting binary using platform-native inspection tools."* That
+rules out the obvious approach (emit flags, print "hardened"), and on a Linux
+host it also rules out the comfortable one (claim the Windows path is fine).
+
+What was done instead, in three parts.
+
+**1. A parser for the produced object, not for the intention.**
+`obfuscator/native_harden.py` reads the actual header: PE
+`OptionalHeader.DllCharacteristics` for ASLR/DEP/CFG/HIGH_ENTROPY_VA, the
+security and debug directories, and the Mach-O header flags plus the
+`LC_CODE_SIGNATURE` CodeDirectory for Hardened Runtime and library validation.
+It reports booleans and `valid: False` on anything it cannot parse. There is no
+"assume hardened" branch: an unreadable blob fails its own check.
+
+**2. A real cross-compiled PE, because a synthetic header proves nothing about
+a compiler.** This host has `x86_64-w64-mingw32-gcc`, so an actual object could
+be built and read. That is what produced the finding below.
+
+**3. The runner records the verdict in the attestation**, and the controller
+now gates on it (`require_hardening=True`), rather than logging it.
+
+### The finding: the emitted flag list would have broken the Windows build
+
+Two defects, both found by compiling rather than reasoning.
+
+```
+$ x86_64-w64-mingw32-gcc -shared -O2 -o x.dll t.c -NXCOMPAT
+gcc: error: unrecognized command-line option '-NXCOMPAT'
+```
+
+The driver selected the prefix by detecting MSVC and then applied `"-"` to the
+MSVC flag names for everything else. On a mingw runner that is not weak
+hardening — it is a **compile failure**, so "harden the Windows build" would
+have become "the Windows build does not exist". Fixed: the MSVC branch emits
+`/DYNAMICBASE /NXCOMPAT /GUARD:CF /CETCOMPAT /HIGHENTROPYVA /GS`, and the mingw
+branch emits what a gcc front end accepts:
+`-Wl,--dynamicbase -Wl,--high-entropy-va -Wl,--nxcompat`.
+
+Second defect: **CFG is not reachable from a mingw toolchain at all.** GNU ld
+2.44 has no such option (`--guard:cf` is lld-link's; `-Wl,/guard:cf` is read as
+a file name: `cannot find /guard:cf`). Requiring it would fail every mingw
+build forever, so `check()` now takes the toolchain and reports CFG as
+`unavailable` for gcc/mingw — named in the result, not silently satisfied —
+while still failing an MSVC build that omits it.
+
+### What a real mingw object actually carries
+
+| object | DllCharacteristics | ASLR | DEP | HEPA | CFG |
+|---|---|---|---|---|---|
+| `-shared` only (defaults) | `0x160` | yes | yes | yes | **no** |
+| with the §3 link flags | `0x160` | yes | yes | yes | **no** |
+
+This is worth stating plainly instead of quoting the flag list: **on mingw,
+64-bit ASLR, DEP and high-entropy VA are already on by default, and our flags
+change the header by nothing.** The measured contribution of §3 on that
+toolchain is zero bits, and CFG needs MSVC or lld-link. Recording this is the
+point — the earlier architecture's failure mode was a confident log line that
+no one had checked against an object.
+
+### Honest status
+
+| claim | status |
+|---|---|
+| PE parser reads ASLR/DEP/CFG/HEPA/signature/debug dirs | **verified** on a real mingw PE |
+| Mach-O parser reads PIE / heap-exec / stack-exec / CodeDirectory flags | **verified** on synthetic headers — no macOS host or cross-toolchain here |
+| mingw link flags are accepted and the build succeeds | **verified** |
+| mingw PE carries CFG | **no**, and cannot: GNU ld has no CFG option |
+| MSVC flags were exercised | **no** — no MSVC on this host; strings only |
+| macOS Hardened Runtime | **not verified**; it lives in the CodeDirectory and a freshly compiled object is unsigned, so the parser correctly reports `False` |
+| Authenticode | **not present**; signing needs a certificate, and signing with a throwaway key would be worse than not signing. Reported as absent, never as enabled. |
+
+The report deliberately does not claim "Windows/macOS hardening verified": the
+parser and the flag emission are verified, the real objects have not been built
+on those platforms from this machine. That last measurement is what the farm
+runners are for, and their answer now travels in the attestation instead of
+being assumed.
+
+---
+
+
+## 6. Honest limits of this benchmark
 
 1. **The AI was given the artefact text only.** No debugger, no Frida, no
    Ghidra, no angr (not installed). This measures static + LLM reconstruction,
