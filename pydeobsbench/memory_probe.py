@@ -37,10 +37,12 @@ liability):
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import time
 
+_BOUNDARY_CACHE = {}         # needle -> compiled boundary regex
 _READ_CHUNK = 1 << 20        # 1 MiB per read() call
 _MAX_MAP_BYTES = 96 << 20    # cap per mapping so a huge heap does not stall
 
@@ -87,10 +89,18 @@ def _readable_private_maps(pid):
         if "r" not in perms:
             continue
         path = parts[5] if len(parts) >= 6 else ""
-        # Skip the interpreter's own file-backed text: identifiers found there
-        # would be Python's, not the payload's. Keep [heap], [stack], [anon],
-        # and private writable file mappings (where decrypted buffers land).
-        if path.endswith((".so", ".so.1", ".pyd", ".py", ".pyc")) and "w" not in perms:
+        # Exclude ANY read-only file-backed mapping. Measured 2026-11-18: the
+        # old filter only skipped a few extensions, so `/usr/bin/python3.13`
+        # (no extension, r-xp) passed through and its own symbol strings were
+        # counted as recovered payload names. `main` matched `__main__` in the
+        # interpreter's data and `seal` matched interpreter internals, which
+        # made the probe report 2/3 payload names recovered when nothing of the
+        # payload was present. That is the same false-positive class as the
+        # earlier names_from_payload bug (substring matching), and it made an
+        # executing artefact look leakier than it is.
+        # A payload's constants live in writable private memory (heap, [anon],
+        # writable data) -- that is what this probe should measure.
+        if path and "w" not in perms:
             continue
         yield lo, hi, perms, path
 
@@ -107,10 +117,25 @@ def _dump_region(fd, lo, size):
 
 
 def _scan_blob(blob, needles):
-    """Which needles appear in this byte range? Literal bytes only."""
+    """Which needles appear in this byte range, at IDENTIFIER boundaries?
+
+    Word boundaries matter here. Measured 2026-11-18: a plain `n in blob`
+    test reported the payload name `main` whenever the interpreter's `__main__`
+    string was present, which is always. That is the same substring bug as the
+    earlier names_from_payload false positive, and it inflated this probe's
+    recovery count. An identifier is only "recovered" if it appears as a whole
+    token, not as a fragment of unrelated text.
+    """
     hits = set()
     for n in needles:
-        if n and n in blob:
+        if not n:
+            continue
+        pat = _BOUNDARY_CACHE.get(n)
+        if pat is None:
+            pat = re.compile(rb"(?<![A-Za-z0-9_])" + re.escape(n)
+                             + rb"(?![A-Za-z0-9_])")
+            _BOUNDARY_CACHE[n] = pat
+        if pat.search(blob):
             hits.add(n)
     return hits
 
@@ -149,7 +174,20 @@ def probe_memory_extraction(artefact_path, target=None, timeout=180,
     """
     target = target or {}
     secrets = [s.encode() for s in target.get("secrets", []) if s]
-    names = [n.encode() for n in target.get("names", []) if n]
+    # Some ground-truth names are indistinguishable from interpreter vocabulary
+    # and are therefore NOT measurable by a byte scan: `main` matches
+    # python3.13's "can't make main interpreter", the version banner
+    # "3.13.5 (main, ...)" and ld-linux's "<main program>", all of which are
+    # mapped in every Python process before the artefact even runs -- measured
+    # 2026-11-18. Counting those as payload recovery is a false positive of the
+    # same class as the loader-vocabulary bug in ai_probe. They are reported
+    # separately as `unmeasurable_names` rather than silently dropped, so the
+    # denominator stays honest.
+    _AMBIGUOUS = {"main", "init", "run", "test", "setup", "start", "load",
+                  "get", "set", "update", "process", "make", "read", "write"}
+    names = [n.encode() for n in target.get("names", [])
+             if n and n not in _AMBIGUOUS]
+    unmeasurable = [n for n in target.get("names", []) if n in _AMBIGUOUS]
     needles = secrets + names
 
     try:
@@ -291,6 +329,7 @@ def probe_memory_extraction(artefact_path, target=None, timeout=180,
         "names_total": len(names),
         "names_recovered": len(max_name),
         "names_hit": [n.decode() for n in sorted(max_name)],
+        "unmeasurable_names": unmeasurable,
         "note": ("every memory read failed: the process refused inspection "
                  "(anti-dump active). External dump channel closed -- this is "
                  "NOT a clean memory scan." if _all_failed else ""),
