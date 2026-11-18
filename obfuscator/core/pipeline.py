@@ -2683,6 +2683,23 @@ def _exec_fallback():
             import os as _nx_hwid_os
             _nx_hwid_os._exit(137)
         code = _ct_unmarshal(bytes(raw))
+        # PLAINTEXT-LIFETIME FIX (measured, 2026-11-18).  The decrypted
+        # marshalled payload used to be wiped only AFTER exec() returned -- i.e.
+        # after the payload had finished running.  Measured on a live process:
+        # three memory regions still held payload filename markers 1.2s into
+        # the run, because `raw`/`encrypted`/`compressed` were all still bound.
+        # PyMarshal_ReadObjectFromString builds a NEW code object and does not
+        # retain the buffer, so the plaintext can be zeroed the moment the
+        # unmarshal returns. That shortens the window from "the whole payload
+        # runtime" to "microseconds", and it is the one part of the §4 memory
+        # table that a loader can actually control.
+        # The later wipes stay: on an exception path they are what cleans up.
+        try:
+            _nx_wipe(encrypted)
+            _nx_wipe(compressed)
+            _nx_wipe(raw)
+        except Exception:
+            pass
         # SECOND, INDEPENDENT integrity check at the point of use (measured
         # bypass, 2026-11-18).  The self-check runs at the top of the loader;
         # replacing that ONE call line with a constant let the payload run
