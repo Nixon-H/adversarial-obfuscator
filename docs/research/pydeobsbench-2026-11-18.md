@@ -767,6 +767,63 @@ being assumed.
 
 ---
 
+## 5h. §9 remote attestation and secure update — what they do and do not prove
+
+Two mechanisms were missing entirely. Both are decision logic over bytes the
+caller already holds: no network, no auto-execution. That is deliberate — an
+updater that fetches and runs code is a remote-code-execution surface by
+design, and this benchmark cannot measure a claim the code does not make.
+
+### Remote attestation (`obfuscator/remote_attest.py`)
+
+Challenge-response, not "signed blob". The verifier issues a nonce; the artefact
+returns a signed statement containing that nonce, its build id, and the sha256
+of the bytes it is running. Refusals, each tested:
+
+| attack | refused because |
+|---|---|
+| replay a recorded response from an earlier session | nonce mismatch |
+| present a response minted by a different build | build_id + artefact digest are inside the signature |
+| re-point a response at a different verifier | verifier_id inside the signature |
+| serve a response captured long ago | `responded_at` outside ±300 s |
+| edit any field after signing | signature does not verify |
+| hand over an unverified statement | no key supplied is a refusal |
+
+**Honest limit, and it is the important part of this section:** this is not
+hardware attestation. There is no TPM or enclave and no measured boot. The
+signing key ships inside the artefact, so an attacker who can run code in the
+process can forge any statement. What this buys is that impersonating a build
+you do not possess costs work; it cannot make a compromised host honest.
+
+### Secure update (`obfuscator/secure_update.py`)
+
+A signature check alone stops none of the attacks that matter in an updater,
+because a downgrade is validly signed. Refusals, each tested:
+
+| attack | refused because |
+|---|---|
+| downgrade to the previous, vulnerable release | monotonic `sequence` vs the client's installed value |
+| publisher retires a bad release without rotating keys | signed `minimum_sequence` floor |
+| transplant a signed update for another product/channel | product/channel/artefact are inside the signature |
+| serve an update signed by a retired key | `key_id` checked against the accepted set |
+| swap the payload after signing | digest + size of the bytes actually handed over |
+| schedule an update far in the future | `published_at` beyond +900 s |
+| crash mid-install leaves a truncated binary | verify before staging; temp file in the SAME directory, then `os.replace` |
+
+Two behaviours are reported as **warnings** rather than passes, because a check
+that did not run must not read as one that succeeded: a client that supplies no
+`current_sequence` gets "the installed-version downgrade check did not run", and
+an absent `max_age_seconds` gets a freeze-attack warning.
+
+**Honest limit.** Freeze resistance needs a trusted clock; a client without one
+cannot use `max_age_seconds`, and the module says so instead of implying
+protection. There is no update *server* here and no key distribution — those are
+deployment, not code.
+
+Both modules: 41 tests, all built around refusals.
+
+---
+
 
 ## 6. Honest limits of this benchmark
 

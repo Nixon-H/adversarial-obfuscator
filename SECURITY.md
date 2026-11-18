@@ -59,6 +59,44 @@ until one is.)
   and is wired into the hybrid loader as the opt-in `--no-section-split`
   flag; it is not the default.
 
+## Trust boundaries (who is the attacker)
+
+This is the distinction that decides whether a static "path traversal" or
+"SSRF" finding is a defect or a misclassification, so it is stated explicitly.
+The machine-readable form is `.mimosa/security-policy.json`
+(`threatModel.trustBoundaries`).
+
+**The operator is trusted.** `build_dir`, `--output`, `--payload`, the farm repo
+name and the licence-server base URL are supplied by the person running the
+builder, on their own machine, under their own account. A path assembled from
+them (`os.path.join(build_dir, ...)`, `open(output, "w")`) is not an
+attacker-controlled traversal: there is no privilege boundary being crossed,
+because the operator already holds the privileges the write requires. Likewise
+the Cloudflare and GitHub base URLs come from configuration, not from the
+payload or the artefact, so building a request URL from them is not
+server-side request forgery — no untrusted party influences the destination.
+
+**The artefact's holder is untrusted.** An attacker who has the shipped file
+can read it, run it, patch it, and inspect its memory. Every mechanism aimed at
+them lives in the payload: section sealing, the self-check, CFI, memlock, the
+kill ladder, licence replay/revocation, anti-rollback.
+
+**The build runner is untrusted.** It executes our build on someone else's
+machine, so it must attest what it built (`obfuscator/runner_attest.py`) and the
+controller must verify that attestation. A missing attestation is a failure,
+not "no objection".
+
+**The network is untrusted.** Farm downloads and update manifests are verified
+against hashes and signatures the controller computed itself, never against a
+claim made by the responder.
+
+Consequence for reviewers: a report of the form "user-controlled path reaches
+`open()`" in `obfuscator/core/pipeline.py` is in scope only if the path can be
+influenced by the *artefact's holder* or by a *remote party* — not by the
+operator. Findings of that shape in the build CLI are documented here as
+out-of-boundary rather than silently suppressed: the scanner keeps reporting
+them, and they are triaged against this section instead of ignored.
+
 ## Enforceable rules (security invariants)
 
 These are encoded as tests in `tests/test_security_invariants.py` and
