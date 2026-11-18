@@ -3986,6 +3986,22 @@ def build_project(args):
                     except Exception as _farm_exc:
                         UI.warn(f"Cython farm build failed: {_farm_exc} "
                                 "(other OSes fall back to bytecode)")
+                    finally:
+                        # --public / "Flash Mode": --public has advertised
+                        # "Nukes repo after build" since it was added, and was
+                        # parsed and never read, so every cloud build left a
+                        # repo holding the payload source.  Delete it once the
+                        # blobs are downloaded -- always, even if the run
+                        # failed, because a failed run leaves the source up
+                        # too.  --skip-cloud already implies no farm, so this
+                        # only fires when a repo was actually created.
+                        if getattr(args, 'public', False):
+                            try:
+                                _farm.delete_repo()
+                            except Exception as _del_exc:
+                                UI.warn("repo cleanup failed: %s (the build "
+                                        "repo still holds the payload "
+                                        "source)" % (_del_exc,))
         with UI.Task("Hybrid Loader", "Compiling Universal Fallback...") as t:
             # NOTE: 'ast_options' is assigned later in this function, so it
             # is never in locals() here — the literal below is the live
