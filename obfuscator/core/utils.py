@@ -837,6 +837,30 @@ class GitHubBuildFarm:
             return True
         print(f" [!] Repo creation failed: {r.text}")
         return False
+    def delete_repo(self):
+        """Delete the build repo. Returns True when it is gone (or absent).
+
+        --public advertises "Nukes repo after build" and nothing implemented
+        it: the flag was parsed and never read, so every cloud build left a
+        repo holding the payload source behind.  That is a supply-chain
+        finding, not a cosmetic one -- the source is the thing the protection
+        exists to withhold, and the farm's copy survives after the artefact is
+        downloaded.
+        """
+        import requests
+        url = f"{self.base_url}/repos/{self.username}/{self.repo_name}"
+        try:
+            r = requests.delete(url, headers=self.headers,
+                                proxies=self.proxies, verify=True,
+                                timeout=_GITHUB_REQUEST_TIMEOUT)
+        except Exception as exc:
+            print(f" [!] Repo delete failed: {exc}")
+            return False
+        if r.status_code in (204, 404):
+            print(f"    [+] Build repo deleted: {self.repo_name}")
+            return True
+        print(f" [!] Repo delete returned {r.status_code}: {r.text[:160]}")
+        return False
     def upload_file(self,local_path,remote_name):
         import requests
         with open(local_path,"rb")as f:content=base64.b64encode(f.read()).decode()
