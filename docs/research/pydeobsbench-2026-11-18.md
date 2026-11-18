@@ -340,6 +340,19 @@ reduction does real work. The readable window was measured at **~225 ms**, and
 that remainder is the interpreter's own start-up before the loader runs at
 all — not something this code controls.
 
+Combined with the plaintext-lifetime fix (wipe after unmarshal instead of after
+`exec`), the fully-fixed build measures:
+
+| build | bytes readable | names | secrets |
+|---|---|---|---|
+| plaintext live until exec returns | 74,539,008 | 1 (`seal`) | **1** |
+| + wipe after unmarshal | 9,629,696 | 1 (`seal`) | **0** |
+| + prctl as the first loader line | **1,318,912** | **0** | **0** |
+
+The lifetime fix also held up under the corrected probe (1 → 0 secrets), so
+that one was not an artifact. The 1.32 MB that remains is the interpreter's
+own start-up; no loader change can shorten it.
+
 Two honesty notes. `main` is reported as `unmeasurable_names`: a byte scan
 cannot distinguish it from the interpreter strings above, so it is neither
 proven present nor proven absent. And a pre-opened `/proc/<pid>/mem` handle
