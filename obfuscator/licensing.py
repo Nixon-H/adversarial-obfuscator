@@ -86,6 +86,16 @@ class Licence:
     # not in the artefact, a patched artefact cannot re-stamp itself: the
     # attacker would have to forge the issuer's signature.
     artifact_digest: Optional[str] = None
+    # §2 key versioning: which key generation sealed the builds this token is
+    # valid for. SIGNED (it goes through to_payload/canonical), because an
+    # unsigned version number would be an attacker-editable label rather than
+    # a constraint. None = unversioned token (pre-versioning builds).
+    key_version: Optional[int] = None
+    # §2 replay protection: a per-token random value, signed, so every issued
+    # token has a distinct identity the runtime can remember. Without it a
+    # token's identity would have to be its whole body, which cannot
+    # distinguish two legitimately identical re-issues.
+    nonce: Optional[str] = None
 
     def to_payload(self) -> dict:
         payload = {
@@ -108,6 +118,10 @@ class Licence:
             payload["key_material"] = self.key_material
         if self.artifact_digest:
             payload["artifact_digest"] = self.artifact_digest
+        if self.key_version is not None:
+            payload["key_version"] = int(self.key_version)
+        if self.nonce:
+            payload["nonce"] = self.nonce
         return payload
 
     @classmethod
@@ -125,6 +139,10 @@ class Licence:
                 chain=payload.get("chain"),
                 key_material=payload.get("key_material"),
                 artifact_digest=payload.get("artifact_digest"),
+                key_version=(int(payload["key_version"])
+                             if payload.get("key_version") is not None
+                             else None),
+                nonce=payload.get("nonce"),
             )
         except (KeyError, TypeError, ValueError) as e:
             raise LicenceError(f"malformed licence payload: {e}") from e
@@ -245,8 +263,24 @@ def verify(
     now: Optional[float] = None,
     hwid: Optional[str] = None,
     required_features: Iterable[str] = (),
+    required_key_version: Optional[int] = None,
+    replay_ledger=None,
 ) -> Licence:
-    """Verify a token or raise LicenceError saying exactly why."""
+    """Verify a token or raise LicenceError saying exactly why.
+
+    ``required_key_version`` (§2 key versioning): when set, a token sealed for
+    a different key generation is refused. The version lives in the SIGNED
+    payload, so it cannot be edited to satisfy this check.
+
+    ``replay_ledger`` (§2 replay protection): an object with
+    ``check_and_record(identity) -> bool``. When supplied, a token whose
+    identity was already presented inside the ledger's window is refused.
+    Pass ``obfuscator.licence_replay.ReplayLedger()`` for the on-disk default.
+
+    Both are OPT-IN so existing callers keep their behaviour; the loader turns
+    them on. Neither is a server-side guarantee -- see licence_replay's
+    docstring for what a client-side ledger can and cannot do.
+    """
     try:
         doc = json.loads(token)
         payload = doc["payload"]
@@ -295,6 +329,26 @@ def verify(
     missing = sorted(set(required_features) - set(licence.features))
     if missing:
         raise LicenceError(f"licence does not grant: {', '.join(missing)}")
+    # §2 key versioning. Checked AFTER the signature so the value is trusted.
+    if required_key_version is not None:
+        from obfuscator.licence_replay import check_key_version
+        try:
+            check_key_version(licence.key_version, required_key_version)
+        except ValueError as exc:
+            raise LicenceError(str(exc)) from exc
+    # §2 replay protection. Identity is the signed nonce, so two distinct
+    # tokens never collide; a re-presented token does.
+    if replay_ledger is not None:
+        from obfuscator.licence_replay import token_identity
+        identity = token_identity(payload)
+        try:
+            fresh = replay_ledger.check_and_record(identity, now=moment)
+        except TypeError:
+            fresh = replay_ledger.check_and_record(identity)
+        if not fresh:
+            raise LicenceError(
+                "licence token replayed: this token was already presented "
+                "inside the ledger window")
     return licence
 
 
