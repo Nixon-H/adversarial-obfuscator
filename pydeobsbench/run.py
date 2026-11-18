@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -83,9 +84,28 @@ def score(target, probes):
     tmp = probes.get("temp_files", {})
 
     joined = pstr.get("joined_text", "") or ""
+
+    # Payload-text matching must be EXACT and loader-aware. Measured
+    # 2026-11-18: a naive `n in joined` reported `seal` (matched the loader's
+    # own string "bad string seal") and `main` (matched "__main__") as
+    # recovered payload names, which made the stronger ABSOLUTE profile look
+    # worse than MAX. Two guards:
+    #   * word boundaries, not substrings;
+    #   * the loader strings that travel with every payload are excluded.
+    _loader_strings = ("bad string seal", "string seal authentication failed",
+                       "little", "utf-8", "utf8", "ascii", "latin-1",
+                       "section-", "nx-", "_nx_", "__main__", "__mp_main__")
+
+    def _payload_hit(name, text):
+        for ls in _loader_strings:
+            if name == ls or name in ls:
+                return False
+        return re.search(
+            r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])",
+            text) is not None
+
     payload_secrets = [s for s in target["secrets"] if s in joined]
-    payload_names = [n for n in target["names"]
-                     if n in joined]
+    payload_names = [n for n in target["names"] if _payload_hit(n, joined)]
 
     runtime_leak = 0
     for s in target["secrets"]:

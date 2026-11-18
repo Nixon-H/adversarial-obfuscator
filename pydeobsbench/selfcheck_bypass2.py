@@ -15,10 +15,7 @@ Three surgical attacks:
 Attack B is the one that matters: if an attacker can recompute the anchor,
 the self-check is only a speed bump.
 """
-import base64
 import hashlib
-import hmac
-import json
 import os
 import re
 import shutil

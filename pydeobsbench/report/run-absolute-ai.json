@@ -1,0 +1,242 @@
+{
+  "profile": "absolute",
+  "work_root": "/tmp/pydeobs-absolute-r4j74ip2",
+  "results": [
+    {
+      "target": "inventory",
+      "profile": "absolute",
+      "artefact": "/tmp/pydeobs-absolute-r4j74ip2/inventory/dist/inventory_protected.py",
+      "artefact_bytes": 107590,
+      "build_seconds": 6.3,
+      "score": {
+        "source_reconstruction": {
+          "names_from_payload": 1,
+          "names_from_ai": 0,
+          "names_total": 5
+        },
+        "secret_recovery": {
+          "from_plaintext": 0,
+          "from_decrypted_payload": 0,
+          "from_ai": 0,
+          "from_runtime_output": 0,
+          "total": 4
+        },
+        "algorithm_recovery": {
+          "ai_overlap": 0.4,
+          "ground_truth": "reconcile: delta = counted - ledger_count; ok = (delta == 0). audit signature: SHA-256 over (salt || canonical-JSON(payload))"
+        },
+        "patch_resistance": {
+          "section_pack_derivable": true
+        },
+        "leakage": {
+          "elf_symbols_found": false,
+          "temp_files": []
+        }
+      },
+      "probes": {
+        "plaintext": {
+          "probe": "plaintext",
+          "secrets_recovered": 0,
+          "secrets_total": 4,
+          "secrets_hit": [],
+          "names_recovered": 0,
+          "names_total": 5,
+          "names_hit": []
+        },
+        "section_decrypt": {
+          "probe": "section_decrypt",
+          "applicable": true,
+          "derived": true,
+          "payload_bytes": 5201,
+          "decompressed_bytes": 10179,
+          "reason": "all 8 sections verified and joined offline"
+        },
+        "payload_strings": {
+          "probe": "payload_strings",
+          "applicable": true,
+          "derived": true,
+          "payload_strings": [
+            "bad string seal",
+            "string seal authentication failed",
+            "little",
+            "utf-8",
+            "9144874d9908f29fbecfa8e42405547640ae00efb1221e971c2fda57e09cbe14e616034b185229abd4ccc2906004fd4ffccc62341c7e903f93c74427546277a0cfa1dfa2335f76cd86bf612c16b188",
+            "7962f306a296358183346358003c14271b847941a3a551f6c760bfef10ab84519d0bbe9ed82ce23e56884d0980a3e765",
+            "0355d10897d05cdb5575f9f7213d393473e071c5aa0d999d21f173806933443a1aecbdc920ecf33b3a202258c0758f444ed2e2346bbaf9d8",
+            "159fda6da7db75e4622bf7341536f19a6f89189376316c4378824d6a70b607bbfefa5bb870c75eb91bda5fbe440eb0ce86cce096ee4f90c34a6ce3a8",
+            "50c53c022675d39625ac725ef22569d41a370dd5271a3088754435718e8c57e311c21fbcc4bed63899dc609f",
+            "7620c6663ebc74316fca5c28a17bd7a2a7f99ec698c158a77658ae625e494280bf79a391",
+            "f7766a8cffc13de3631a747b2fc793e8ecd210b5a475c379443163953c14b3",
+            "7809e182b3243696cd5b71c1f38f3e117ac0fc42cb4f689a6508f8538f438995a7",
+            "20e6087cebb00adefe03d5d38f25076278c30ad73edce854c6fbcb4ad186bc33633fc937bb",
+            "4242d2016fe29bf89bd74a1082184bac098189de1a67473c1e2cace3c0e21102dc",
+            "829045a0a25273388decd717f985d871af4eddf86b234857cfd46322acf2",
+            "aebbb15533ee12df6bfacbca7fa6cd03f3e284e989a98119ddfb86bd513d94f7a2",
+            "7d4ef8b49601bb9a791978f85af6a7e811ed1ce8e2d63a37839a8b3aec7d96dcc504b974",
+            "\u0415\u0415\u0412D\u0415F\u0415\u0414\u0413\u0415\u0410\u0413\u0412\u0419\u0415\u0418\u0415\u0418\u0410\u0414\u0415\u0417\u0416\u0418\u0413\u0411\u0414\u0417\u0412\u0414\u0410\u0415",
+            "\u0415\u0415\u0412D\u0415F\u0415\u0414\u0413\u0415\u0410\u0413\u0412\u0419\u0415\u0418\u0415\u0418\u0410\u0414\u0415\u0417\u0416\u0418\u0413\u0411\u0414\u0417\u0412\u0414\u0410\u0415",
+            "__main__"
+          ],
+          "joined_text": "bad string seal\nstring seal authentication failed\nlittle\nutf-8\n9144874d9908f29fbecfa8e42405547640ae00efb1221e971c2fda57e09cbe14e616034b185229abd4ccc2906004fd4ffccc62341c7e903f93c74427546277a0cfa1dfa2335f76cd86bf612c16b188\n7962f306a296358183346358003c14271b847941a3a551f6c760bfef10ab84519d0bbe9ed82ce23e56884d0980a3e765\n0355d10897d05cdb5575f9f7213d393473e071c5aa0d999d21f173806933443a1aecbdc920ecf33b3a202258c0758f444ed2e2346bbaf9d8\n159fda6da7db75e4622bf7341536f19a6f89189376316c4378824d6a70b607bbfefa5bb870c75eb91bda5fbe440eb0ce86cce096ee4f90c34a6ce3a8\n50c53c022675d39625ac725ef22569d41a370dd5271a3088754435718e8c57e311c21fbcc4bed63899dc609f\n7620c6663ebc74316fca5c28a17bd7a2a7f99ec698c158a77658ae625e494280bf79a391\nf7766a8cffc13de3631a747b2fc793e8ecd210b5a475c379443163953c14b3\n7809e182b3243696cd5b71c1f38f3e117ac0fc42cb4f689a6508f8538f438995a7\n20e6087cebb00adefe03d5d38f25076278c30ad73edce854c6fbcb4ad186bc33633fc937bb\n4242d2016fe29bf89bd74a1082184bac098189de1a67473c1e2cace3c0e21102dc\n829045a0a25273388decd717f985d871af4eddf86b234857cfd46322acf2\naebbb15533ee12df6bfacbca7fa6cd03f3e284e989a98119ddfb86bd513d94f7a2\n7d4ef8b49601bb9a791978f85af6a7e811ed1ce8e2d63a37839a8b3aec7d96dcc504b974\n\u0415\u0415\u0412D\u0415F\u0415\u0414\u0413\u0415\u0410\u0413\u0412\u0419\u0415\u0418\u0415\u0418\u0410\u0414\u0415\u0417\u0416\u0418\u0413\u0411\u0414\u0417\u0412\u0414\u0410\u0415\n\u0415\u0415\u0412D\u0415F\u0415\u0414\u0413\u0415\u0410\u0413\u0412\u0419\u0415\u0418\u0415\u0418\u0410\u0414\u0415\u0417\u0416\u0418\u0413\u0411\u0414\u0417\u0412\u0414\u0410\u0415\n__main__"
+        },
+        "elf_symbols": {
+          "probe": "elf_symbols",
+          "found_elf": false,
+          "symbols": []
+        },
+        "runtime_output": {
+          "probe": "runtime_output",
+          "returncode": 0,
+          "stdout": "AUDIT 19487c7b06691c76\n",
+          "stderr": "",
+          "timed_out": false
+        },
+        "temp_files": {
+          "probe": "temp_files",
+          "new_files": []
+        },
+        "memory_maps": {
+          "probe": "memory_maps",
+          "max_maps": 139,
+          "rwx_mappings": 0
+        },
+        "ai": {
+          "probe": "ai",
+          "model": "mistral/deepseek-v4-1-flash-1017",
+          "truncated": true,
+          "names_recovered": 0,
+          "names_total": 5,
+          "names_hit": [],
+          "secrets_recovered": 0,
+          "secrets_total": 4,
+          "secrets_hit": [],
+          "algorithm_overlap": 0.4,
+          "payload_markers_found": [
+            "256"
+          ],
+          "loader_reversed": true,
+          "algorithm_text": "Python obfuscator-protected artefact (a self-defending loader: the truncated source is the runtime boot stub; the actual user payload is a marshalled/NYSER1 code object that is decrypted, decompressed and exec'd at the end). The loader's computation, step by step: (1) Execution-identity gate: refuse to run unless __name__ is the running module ('__main__' or '__mp_main__') and os.path.abspath(__file__) == os.path.abspath(sys.argv[0]); write '[BLOCKED] identity...' to stderr and sys.exit(2) on mismatch. (2) Self-integrity check: read the file's own line and verifies a Merkle tree over it. All lines containing any of three literal strings (the expected-check hash, the expected HMAC, and an optional token string) are stripped, and the remaining lines are concatenated as bytes. That byte string is split into 1024-byte chunks; each chunk is SHA-256-hexdigested; then hashes are pairwise folded: while len>1, if odd duplicate the last, then each pair becomes sha256((hex_i+hex_i+1).encode()).hexdigest(); the single remaining root hex is compared (constant-time) to _NX_SELF_CK; additionally HMAC-SHA256 with key bytes.fromhex(_NX_SELF_HK) over the same content must equal _NX_SELF_HM. Any fail",
+          "refused": false,
+          "content_head": "I'll read the prompt file first.\n{\"names\": [\"constant_time_compare\", \"_nx_self_fail\", \"_nx_self_check\", \"_nx_licence_key\", \"_nx_wipe\", \"_nx_customer_mask\", \"_nx_key_reconstruct\", \"_xor_decrypt\", \"_ct_unmarshal\", \"_nyser_loads\", \"_exec_fallback\", \"_load_native\", \"_nx_purge_stale\", \"_nx_secure_write\", \"_nx_cleanup\", \"_nx_run_bounded\", \"_nx_has_cpu_hypervisor\", \"_nx_has_vm_processes\", \"_nx_has_dmi_strings\", \"_nx_has_vm_mac\", \"_nx_has_vm_drivers\", \"_nx_has_vm_fs\", \"_nx_has_vm_net\", \"_nx_has_vm_services\", \"_nx_has_steal_time\", \"_nx_has_sysvirt\", \"_nx_has_hw_constraints\", \"_nx_has_clock_bias\", \"_nx_",
+          "measurement_failed": false
+        }
+      }
+    },
+    {
+      "target": "cipher",
+      "profile": "absolute",
+      "artefact": "/tmp/pydeobs-absolute-r4j74ip2/cipher/dist/cipher_protected.py",
+      "artefact_bytes": 108259,
+      "build_seconds": 6.3,
+      "score": {
+        "source_reconstruction": {
+          "names_from_payload": 2,
+          "names_from_ai": 0,
+          "names_total": 3
+        },
+        "secret_recovery": {
+          "from_plaintext": 0,
+          "from_decrypted_payload": 0,
+          "from_ai": 0,
+          "from_runtime_output": 0,
+          "total": 1
+        },
+        "algorithm_recovery": {
+          "ai_overlap": 0.333,
+          "ground_truth": "keystream: SHA-256(KEY || seed || counter_be32) concatenated; seal: XOR body, HMAC-SHA256(KEY || nonce, body)[:16] prefixed"
+        },
+        "patch_resistance": {
+          "section_pack_derivable": true
+        },
+        "leakage": {
+          "elf_symbols_found": false,
+          "temp_files": []
+        }
+      },
+      "probes": {
+        "plaintext": {
+          "probe": "plaintext",
+          "secrets_recovered": 0,
+          "secrets_total": 1,
+          "secrets_hit": [],
+          "names_recovered": 1,
+          "names_total": 3,
+          "names_hit": [
+            "seal"
+          ]
+        },
+        "section_decrypt": {
+          "probe": "section_decrypt",
+          "applicable": true,
+          "derived": true,
+          "payload_bytes": 5473,
+          "decompressed_bytes": 13175,
+          "reason": "all 8 sections verified and joined offline"
+        },
+        "payload_strings": {
+          "probe": "payload_strings",
+          "applicable": true,
+          "derived": true,
+          "payload_strings": [
+            "bad string seal",
+            "string seal authentication failed",
+            "little",
+            "utf-8",
+            "2aa14a4c25ec4770d0988e6a1a0af731e880c40c85b74528591076b43793d7d4b4e67504",
+            "038f06706b529144e9f87c349e785630526c08b1258ab008e2c510218ab389f8ce2c106ddf37e5afcf4064a2fe9e8199fe948380e0e83624924da3e221ecbb69",
+            "fcaf977f20e09bbeacadb70a11c3e0918c30ff5b1ab5193b8a49d4b5bb175ecfeec7ae6c1d",
+            "6cf7fac7a3108b0be50f643cf06fdc1b6b7d16351d9e1146c77ab3caed515d",
+            "556fe5d3531b3e7b5ea72e5310a7ec46a4bc5abdb42e7c8e21be8dad6d89f44f6eda2b3a6c",
+            "7fcc89f3c68b839c1c3badc548dc0d39bd3867243d207ba741c1b12fe642b9ce8a396f8150",
+            "8ea38e998b6a5627f12a00c0433a575f0c74677b10b15d3e2aa33521df75c72d5e06a4f925",
+            "2ae5510ecf9881b943fdf7b38921f7cba6267ee474777bcb4be7340ec1ac2210e434",
+            "043ab23e1e797832f5c6a7baa46a028860f693d04352b32a1c7ae454efaa6ed9dc1e3e20923f389255cb20ae230ac7b3b6094268d116eff8",
+            "__main__"
+          ],
+          "joined_text": "bad string seal\nstring seal authentication failed\nlittle\nutf-8\n2aa14a4c25ec4770d0988e6a1a0af731e880c40c85b74528591076b43793d7d4b4e67504\n038f06706b529144e9f87c349e785630526c08b1258ab008e2c510218ab389f8ce2c106ddf37e5afcf4064a2fe9e8199fe948380e0e83624924da3e221ecbb69\nfcaf977f20e09bbeacadb70a11c3e0918c30ff5b1ab5193b8a49d4b5bb175ecfeec7ae6c1d\n6cf7fac7a3108b0be50f643cf06fdc1b6b7d16351d9e1146c77ab3caed515d\n556fe5d3531b3e7b5ea72e5310a7ec46a4bc5abdb42e7c8e21be8dad6d89f44f6eda2b3a6c\n7fcc89f3c68b839c1c3badc548dc0d39bd3867243d207ba741c1b12fe642b9ce8a396f8150\n8ea38e998b6a5627f12a00c0433a575f0c74677b10b15d3e2aa33521df75c72d5e06a4f925\n2ae5510ecf9881b943fdf7b38921f7cba6267ee474777bcb4be7340ec1ac2210e434\n043ab23e1e797832f5c6a7baa46a028860f693d04352b32a1c7ae454efaa6ed9dc1e3e20923f389255cb20ae230ac7b3b6094268d116eff8\n__main__"
+        },
+        "elf_symbols": {
+          "probe": "elf_symbols",
+          "found_elf": false,
+          "symbols": []
+        },
+        "runtime_output": {
+          "probe": "runtime_output",
+          "returncode": 0,
+          "stdout": "SEALED 8771940273853809a401795ec7699cdc\n",
+          "stderr": "",
+          "timed_out": false
+        },
+        "temp_files": {
+          "probe": "temp_files",
+          "new_files": []
+        },
+        "memory_maps": {
+          "probe": "memory_maps",
+          "max_maps": 140,
+          "rwx_mappings": 0
+        },
+        "ai": {
+          "probe": "ai",
+          "model": "mistral/deepseek-v4-1-flash-1017",
+          "truncated": true,
+          "names_recovered": 0,
+          "names_total": 3,
+          "names_hit": [],
+          "secrets_recovered": 0,
+          "secrets_total": 1,
+          "secrets_hit": [],
+          "algorithm_overlap": 0.333,
+          "payload_markers_found": [
+            "256"
+          ],
+          "loader_reversed": true,
+          "algorithm_text": "This is not a computational algorithm but a self-protecting CPython loader (pydeob 'Nixon' packer runtime). Execution order: (1) Identity gate - refuse unless __name__ is '__main__' or '__mp_main__' and abspath(__file__) == abspath(sys.argv[0]), else write '[BLOCKED] identity' to stderr and sys.exit(2). (2) Self-integrity: read its own file bytes, drop any line containing the literal constants _NX_SELF_CK, _NX_SELF_HM or _NX_SELF_TOK, concatenate the rest, split into 1024-byte chunks, SHA-256 each chunk, then repeatedly pair up hex digests (duplicating the last one when the count is odd), hash the concatenated pair strings, until one root digest remains (a Merkle root). Compare it constant-time (len check + XOR accumulation over zip) against _NX_SELF_CK; also compute HMAC-SHA256 over the same filtered content keyed by bytes.fromhex(_NX_SELF_HK) and compare to _NX_SELF_HM. On mismatch print a 'Self-check error' reason and os._exit(137). (3) Install a quiet excepthook/sys.tracebacklimit=0 unless NIXON_TRACEBACKS=1. (4) Key reconstruction: base64-decode two XOR shares _BLOB_S0/_BLOB_S1 into bytearrays, XOR them byte-wise, then XOR the result with a repeating mask of sha256(_NX_BUILD_I",
+          "refused": false,
+          "content_head": "I'll read that file first.\n{\"names\": [\"_nx_licence_key\", \"_nx_wipe\", \"_nx_customer_mask\", \"_nx_key_reconstruct\", \"_xor_decrypt\", \"_ct_unmarshal\", \"_nyser_loads\", \"_exec_fallback\", \"_load_native\", \"_nx_purge_stale\", \"_nx_secure_write\", \"_nx_cleanup\", \"_nx_run_bounded\", \"_nx_has_cpu_hypervisor\", \"_nx_has_vm_processes\", \"_nx_has_dmi_strings\", \"_nx_has_vm_mac\", \"_nx_has_vm_drivers\", \"_nx_has_vm_fs\", \"_nx_has_vm_net\", \"_nx_has_vm_services\", \"_nx_has_steal_time\", \"_nx_has_sysvirt\", \"_nx_has_hw_constraints\", \"_nx_has_clock_bias\", \"_nx_kill\", \"vm_check\", \"vm_score_percent\", \"_nx_driver_stem\", \"_nx_dri",
+          "measurement_failed": false
+        }
+      }
+    }
+  ]
+}
