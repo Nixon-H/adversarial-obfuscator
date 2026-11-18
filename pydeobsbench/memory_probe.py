@@ -173,6 +173,8 @@ def probe_memory_extraction(artefact_path, target=None, timeout=180,
     map_counts = []
     regions_seen = set()
     samples_taken = 0
+    read_bytes = 0
+    read_failures = 0
     # A payload that exits in a few milliseconds yields ONE sample, which is
     # exactly the situation a moving-decryption scheme would be scored clean
     # in by accident. Measured 2026-11-18: a 3-line plain payload produced
@@ -181,6 +183,14 @@ def probe_memory_extraction(artefact_path, target=None, timeout=180,
     # result: a single-sample measurement is visible as low confidence rather
     # than passing as a clean sweep.
     try:
+        # The fd is opened ONCE and reused, which is what an attacker would
+        # do -- but that means a prctl that lands AFTER the open does not
+        # block us, it only makes every pread fail. Measured 2026-11-18: after
+        # adding PR_SET_DUMPABLE=0 to the loader the probe reported
+        # samples=150, blocked=None, 0 secrets -- a FALSE clean result, because
+        # every read returned b"" and nothing recorded that. A successful read
+        # is therefore counted, and `blocked` is derived from reads that all
+        # failed rather than only from the open() call.
         with open(_proc(proc.pid, "mem"), "rb", buffering=0) as mem:
             memfd = mem.fileno()
             for _ in range(samples):
@@ -198,7 +208,9 @@ def probe_memory_extraction(artefact_path, target=None, timeout=180,
                         want = min(_READ_CHUNK, size - off)
                         blob = _dump_region(memfd, lo + off, want)
                         if not blob:
+                            read_failures += 1
                             break
+                        read_bytes += len(blob)
                         found = _scan_blob(blob, needles)
                         for f in found:
                             (max_secret if f in secrets else max_name).add(f)
@@ -224,9 +236,35 @@ def probe_memory_extraction(artefact_path, target=None, timeout=180,
                 pass
     except (OSError, PermissionError) as exc:
         proc.kill()
-        return {"probe": "memory_extraction", "ran": True,
-                "error": "%s: %s" % (type(exc).__name__, exc),
-                "note": "could not read /proc/<pid>/mem; treat as NOT MEASURED"}
+        try:
+            proc.wait(timeout=10)
+        except Exception:
+            pass
+        # EACCES here is the §4 anti-dump control WORKING, not a probe
+        # failure: PR_SET_DUMPABLE=0 makes /proc/<pid>/mem unreadable to any
+        # other process, this one included. Report it as `blocked` so a clean
+        # secret count is never inferred from an unreadable process -- the
+        # distinction matters, because otherwise hardening and a broken probe
+        # produce the same "0 secrets" line.
+        _blocked = isinstance(exc, PermissionError) or \
+            getattr(exc, "errno", None) == 13
+        return {
+            "probe": "memory_extraction",
+            "ran": True,
+            "blocked": bool(_blocked),
+            "samples": samples_taken,
+            "secrets_total": len(secrets),
+            "secrets_recovered": 0,
+            "names_total": len(names),
+            "names_recovered": 0,
+            "secrets_hit": [],
+            "names_hit": [],
+            "error": "%s: %s" % (type(exc).__name__, exc),
+            "note": ("process refused memory reads (anti-dump active); "
+                     "external dump channel closed, NOT a clean memory scan"
+                     if _blocked else
+                     "could not read /proc/<pid>/mem; treat as NOT MEASURED"),
+        }
     finally:
         try:
             proc.wait(timeout=30)
@@ -234,10 +272,17 @@ def probe_memory_extraction(artefact_path, target=None, timeout=180,
             proc.kill()
             proc.wait()
 
+    # A run where every pread failed proves nothing about what memory holds:
+    # it means the process stopped letting us look. Report that as `blocked`
+    # so the caller can never read it as "0 secrets recovered".
+    _all_failed = read_bytes == 0 and read_failures > 0
     return {
         "probe": "memory_extraction",
         "ran": True,
+        "blocked": bool(_all_failed),
         "samples": samples_taken,
+        "bytes_read": read_bytes,
+        "read_failures": read_failures,
         "max_mapped_regions": max(map_counts) if map_counts else 0,
         "region_kinds": sorted(r for r in regions_seen)[:20],
         "secrets_total": len(secrets),
@@ -246,6 +291,9 @@ def probe_memory_extraction(artefact_path, target=None, timeout=180,
         "names_total": len(names),
         "names_recovered": len(max_name),
         "names_hit": [n.decode() for n in sorted(max_name)],
+        "note": ("every memory read failed: the process refused inspection "
+                 "(anti-dump active). External dump channel closed -- this is "
+                 "NOT a clean memory scan." if _all_failed else ""),
         "evidence": "literal byte match in a readable private mapping or "
                     "regular-file fd of the LIVE process; max across samples",
     }

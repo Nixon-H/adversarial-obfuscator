@@ -1757,6 +1757,20 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         _phase4_suffix += _emit_st() + "\n"
     except Exception:
         pass
+    # §4 runtime memory hardening (2026-11-18). Emitted for EVERY artefact and
+    # positioned FIRST in the suffix so it takes effect before the payload is
+    # decrypted: PR_SET_DUMPABLE=0 makes /proc/<pid>/mem unreadable to other
+    # processes (measured EACCES against the parent, see
+    # scripts/verify_dumpable.py) and RLIMIT_CORE=0 stops a crash writing a
+    # heap image to disk. The PyDeObsBench memory probe recovered 4/4 secrets
+    # through exactly this channel, so closing it is the control with measured
+    # effect. It is NOT claimed to make memory unrecoverable -- a process can
+    # still read its own memory -- only to remove the external dump path.
+    try:
+        from obfuscator.memguard import emit_snippet as _emit_mg
+        _phase4_suffix += _emit_mg() + "\n"
+    except Exception:
+        pass
     try:
         from obfuscator.vm_score import emit_loader_snippet as _emit_vm
         _phase4_suffix += _emit_vm(_vm_thr, bool(kod)) + "\n"
@@ -2688,7 +2702,22 @@ def _exec_fallback():
         # re-raise it untouched.  KeyboardInterrupt likewise propagates.
         if isinstance(e, SystemExit):
             raise
-        import traceback; traceback.print_exc()
+        # §4 exception-path leak: the loader installs a quiet excepthook
+        # (see the snippet above) so an uncaught traceback does not print host
+        # paths and loader internals. This handler BYPASSED it by calling
+        # traceback.print_exc() directly, which formats the whole frame stack
+        # to stderr -- including locals on the paths that reach here. Route it
+        # through the same filter instead, and print the exception type only
+        # when the quiet hook is unavailable.
+        try:
+            import traceback as _nx_tb
+            _fmt = "".join(_nx_tb.format_exception_only(type(e), e))
+            _fmt = _fmt.strip().splitlines()[0][:200] if _fmt.strip() else ""
+            if _fmt:
+                sys.stderr.write("[protected] %s\n" % (_fmt,))
+                sys.stderr.flush()
+        except Exception:
+            pass
         sys.exit(1)
 def _load_native():
     system = platform.system().lower()
