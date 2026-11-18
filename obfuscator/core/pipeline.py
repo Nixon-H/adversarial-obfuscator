@@ -1533,6 +1533,14 @@ def build_local_cython(source_content, target_python=None, ast_opts=None):
             print("    [!] Refusing to ship untransformed C (fail closed).")
             return None, None
         print(f"    [+] C transform: {_ct.transforms_applied}")
+        # Record what was applied so the §7 build manifest can state it. The
+        # list is per-build state; build_local_cython returns (bytes, name)
+        # and changing that signature would ripple through every caller and
+        # the golden tests, so it is published here instead.
+        try:
+            globals()["_NIXON_LAST_TRANSFORMS"] = list(_ct.transforms_applied)
+        except Exception:
+            pass
         # NATIVE HARDENING, VERIFIED (audit 2026-11-18).  The shipped blob was
         # measured with `readelf`/`nm` and had NONE of these: 355 static
         # symbols (full Cython function-name map), no GNU_RELRO bind-now, no
@@ -6667,6 +6675,55 @@ def main():
                         "sectioned artefact write/stamp failed: %s"
                         % (traceback.format_exc(limit=3),))
             UI._out(f" {UI.CYAN}ℹ Artifacts moved to: {dist_dir}{UI.RESET}")
+            # §7 SIGNED BUILD MANIFEST (2026-11-18).  Artefacts were signed
+            # per-file but nothing recorded WHAT produced them, so a swapped
+            # local compiler or a silently dropped flag was undetectable --
+            # the review's "a compromised build runner bypasses every
+            # protection in the compiler".  Write a manifest beside the
+            # artefact recording the artefact+source hashes, the gcc/ld/
+            # Cython/Python identity, the transforms applied and the native
+            # module hash, then sign it with Ed25519 when a key is set.
+            try:
+                from obfuscator.build_manifest import write_manifest as _wm
+                _bf_key = None
+                try:
+                    _kseed = os.environ.get("NIXON_BUILD_MANIFEST_KEY", "")
+                    if _kseed:
+                        from cryptography.hazmat.primitives.asymmetric.ed25519 \
+                            import Ed25519PrivateKey as _Ed
+                        _bf_key = _Ed.from_private_bytes(bytes.fromhex(_kseed))
+                except Exception:
+                    _bf_key = None
+                _ma_written = 0
+                for _ma_name in os.listdir(dist_dir):
+                    if not _ma_name.endswith("_protected.py"):
+                        continue
+                    _ma_art = os.path.join(dist_dir, _ma_name)
+                    _ma_path = _wm(
+                        _ma_art, args.source, private_key=_bf_key,
+                        transforms=list(
+                            globals().get("_NIXON_LAST_TRANSFORMS") or []),
+                        seed_classes={
+                            "reproducible": "sha256(payload) [logged]",
+                            "diversified": "sha256(repro + urandom + machine)",
+                        },
+                        build_id=str(getattr(args, "_build_id", "") or ""),
+                    )
+                    if _ma_path:
+                        _ma_written += 1
+                if _ma_written:
+                    UI._out(" %sℹ Build manifest: %d signed=%s%s"
+                            % (UI.CYAN, _ma_written, bool(_bf_key), UI.RESET))
+            except Exception as _ma_exc:
+                # Fail closed on the manifest only when signing was requested:
+                # an unsigned build should not die because the manifest step
+                # hit an odd filesystem, but a build that was asked to prove
+                # its provenance must not silently ship without it.
+                if os.environ.get("NIXON_BUILD_MANIFEST_KEY"):
+                    raise SystemExit(
+                        "build manifest failed with a signing key set: %s"
+                        % (_ma_exc,))
+                UI.warn("build manifest skipped: %s" % (_ma_exc,))
             # Clean-staging audit.  The 2026-11-14 benchmark lost the entire
             # symbol table to a .renamelog left beside the payload, and ~850 MB
             # of _stego/_Packed intermediates stayed in the source directory.
