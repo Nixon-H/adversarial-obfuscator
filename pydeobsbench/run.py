@@ -42,8 +42,44 @@ PROFILES = {
     ],
 }
 
+#: Profiles that bind the payload key to a licence token. The token's key
+#: material becomes the seal mask and is NOT written into the artefact, so
+#: offline derivation must fail -- which is the property that separates a
+#: "protected" artefact from a merely obfuscated one. Measured 2026-11-18:
+#: section_decrypt reports "HMAC failed on 4/4 sections (key not derivable)"
+#: for a token-bound build, while every unbound profile is fully derivable.
+LICENCE_PROFILES = {"absolute-licensed"}
 
-def build(target_name, profile, work_root):
+#: An extra profile that is the ABSOLUTE recipe bound to a licence token.
+PROFILES["absolute-licensed"] = PROFILES["absolute"]
+
+
+def _issue_licence(work_root):
+    """Issue a throwaway licence token; returns (token_path, pubkey_hex)."""
+    import secrets as _secrets
+    import time as _time
+    sys.path.insert(0, REPO)
+    from obfuscator.licensing import (
+        Licence, issue as _issue, public_key_hex, resolve_private_key,
+    )
+    seed = _secrets.token_hex(32)
+    key = resolve_private_key(seed)
+    now = _time.time()
+    lic = Licence(
+        licence_id="pydeobs-%s" % _secrets.token_hex(4),
+        customer="pydeobsbench",
+        issued_at=now,
+        expires_at=now + 7 * 86400,
+        features=("pro",),
+        key_material=_secrets.token_hex(32),
+    )
+    tok = os.path.join(work_root, "harness.licence")
+    with open(tok, "w", encoding="utf-8") as fh:
+        fh.write(_issue(lic, key))
+    return tok, public_key_hex(key)
+
+
+def build(target_name, profile, work_root, licence=None, pubkey=None):
     """Build one protected artefact. Returns (path, build_seconds, log)."""
     src = os.path.join(work_root, target_name + ".py")
     os.makedirs(work_root, exist_ok=True)
@@ -52,8 +88,13 @@ def build(target_name, profile, work_root):
     env = dict(os.environ, NIXON_LOG_REDIRECT="0",
                PYTHONPATH=REPO + os.pathsep + os.environ.get("PYTHONPATH", ""),
                TMPDIR=work_root)
+    if pubkey:
+        env["NIXON_LICENCE_PUBLIC_KEY"] = pubkey
     cmd = [sys.executable, "-m", "obfuscator.core.pipeline", "build", src,
            "--skip-cloud", "--in-place"] + PROFILES[profile]
+    if profile == "absolute-licensed" and licence:
+        # --licence is nargs="+": the sub-options must be SEPARATE argv items.
+        cmd += ["--licence", "token=%s" % licence, "env-only"]
     t0 = time.perf_counter()
     p = subprocess.run(cmd, cwd=work_root, capture_output=True, text=True,
                        timeout=5400, env=env)
@@ -142,12 +183,22 @@ def score(target, probes):
 
 def run(targets, profile, do_ai, out_path):
     work_root = tempfile.mkdtemp(prefix="pydeobs-%s-" % profile)
+    licence = pubkey = None
+    if profile in LICENCE_PROFILES:
+        try:
+            licence, pubkey = _issue_licence(work_root)
+            print("  issued throwaway licence token", flush=True)
+        except Exception as exc:
+            print("  licence issue failed: %s (build will be unbound)" % exc,
+                  flush=True)
     results = []
     try:
         for name in targets:
             tgt = T.get(name)
             print("\n=== %s / %s ===" % (profile, name), flush=True)
-            art, secs, log = build(name, profile, os.path.join(work_root, name))
+            art, secs, log = build(name, profile,
+                                   os.path.join(work_root, name),
+                                   licence=licence, pubkey=pubkey)
             if not art:
                 print("  BUILD FAILED:", log[-300:], flush=True)
                 results.append({"target": name, "profile": profile,
