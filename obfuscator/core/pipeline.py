@@ -2428,13 +2428,17 @@ def _nx_customer_mask(_key):
 def _nx_key_reconstruct():
     """Recombine XOR shares + apply the build-id salt. Wipes intermediates.
 
-    The self-check digest is folded into the derivation when the self-check is
-    armed, so the payload key depends on the integrity check having RUN and
-    succeeded. Deleting the call leaves `_NX_SELF_OK` unbound (NameError at
-    import); fabricating a value derives a different key and the section walk
-    fails its HMAC -- either way the artefact dies instead of running
-    unverified. Measured bypass this closes: replacing `_nx_self_check()` with
-    `pass` ran the payload normally (2026-11-18).
+    NOTE: this does NOT depend on the self-check result. An earlier revision of
+    this docstring claimed the self-check digest was folded in here, so that a
+    fabricated ``_NX_SELF_OK`` would derive a wrong key. That mixing was tried
+    and REVERTED: build-time key derivation does not include it, so the mix was
+    dead code and every fabricated value still decrypted correctly. Claiming
+    otherwise would have been false assurance.
+
+    What actually blocks the self-check bypass is a second verification at the
+    point of use (before the native module is executed and before exec), so the
+    payload cannot run without passing a check. See the loader's _load_native
+    and _exec_fallback.
     """
     _s0 = bytearray(base64.b64decode(_BLOB_S0))
     _s1 = bytearray(base64.b64decode(_BLOB_S1))
