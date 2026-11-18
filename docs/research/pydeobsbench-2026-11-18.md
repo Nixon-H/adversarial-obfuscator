@@ -330,6 +330,69 @@ available for all three platforms from this machine.
 
 ---
 
+## 5d. The integrity system was bypassable with one line — CRITICAL
+
+The review's §1 asked for anti-patching redundancy: *"one patched check must
+not disable all checks."* Building a probe for that question found the
+opposite of what the architecture assumed.
+
+**The defect.** The loader called its self-check as a bare statement:
+
+```python
+_nx_self_check()
+```
+
+Replacing that single line with `pass` removed the entire Merkle + HMAC
+integrity gate, and the payload ran normally. Nothing verified that the check
+had executed. Independently reproduced (`scripts/reproduce_bypass.py`):
+identical output, rc 0, every integrity check disabled.
+
+**The full chain** (`scripts/attack_chain.py`, real artefact):
+
+| step | result |
+|---|---|
+| control | rc 0, payload ran |
+| tamper the section pack only | **rc 137** — caught by the Merkle self-check |
+| bypass the self-check only | **rc 0, payload ran** |
+| bypass + tamper | **rc 0, payload ran** |
+
+So section-pack integrity was enforced *only* by the check a one-line edit
+removes. Tampering the payload used to be caught; after one edit it is not.
+
+**Partial mitigation (measured, incomplete).** The call now binds and consumes
+its result, and returns the verified digest:
+
+```python
+_NX_SELF_OK = _nx_self_check()
+if not _NX_SELF_OK:
+    _nx_self_fail("self-check did not return a digest")
+```
+
+Against four attacker variants (`scripts/retest_bypass.py`):
+
+| variant | outcome |
+|---|---|
+| A — delete the call | blocked (`NameError`) |
+| B — substitute a constant | **still runs** |
+| C — neuter the comparison | blocked (HMAC anchor fires) |
+| D — neuter the failure path | blocked (HMAC anchor fires) |
+
+**Open, and stated as open.** Variant B still works. I tried feeding the
+digest into `BLOB_KEY` so a fabricated value would derive the wrong payload
+key, but build-time derivation does not include it — the mix was dead code, so
+I reverted it rather than leave it in as false assurance. Closing B requires
+the pack to be sealed against a value the build can compute *and* the runtime
+can only obtain by running the check. That is the next concrete step and it is
+**not done**.
+
+**Why this matters more than the numbers above.** Every static metric in §2
+says an analyst recovers nothing — and that is true of the file. But an
+attacker who is willing to edit one line has no integrity gate at all, which
+makes every downstream protection advisory. A protection you can switch off by
+deleting a call is not a gate; it is a speed bump.
+
+---
+
 ## 6. Honest limits of this benchmark
 
 
