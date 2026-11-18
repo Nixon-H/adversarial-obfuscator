@@ -95,10 +95,34 @@ def probe_ai(target, artefact_text, max_chars=60000):
                               + r"(?![A-Za-z0-9_])", declared)]
     sec_hit = [s for s in target["secrets"] if s in content]
 
-    # algorithm recovery: keyword overlap with the ground-truth description
-    gt_terms = set(re.findall(r"[a-z]{4,}", target["algorithms"].lower()))
-    algo_terms = set(re.findall(r"[a-z]{4,}", algo.lower()))
-    overlap = len(gt_terms & algo_terms) / max(1, len(gt_terms))
+    # PAYLOAD-algorithm recovery, with the loader's own vocabulary excluded.
+    # Measured 2026-11-18: a naive keyword overlap scored 0.33-0.60 while the
+    # model had recovered NOTHING of the payload -- it was describing the
+    # loader (identity gate, self-check, string seal), whose vocabulary
+    # overlaps generic crypto words like "sha", "hash", "key". Counting that
+    # as algorithm recovery is exactly the proxy the review warned about, so
+    # the loader terms are stripped before scoring.
+    loader_vocab = set("""
+        identity gate blocked main mp_main argv abspath file name exit
+        self check integrity merkle hmac anchor token lines filtered
+        constant expected value own source read traceback suppress
+        excepthook limit stderr environment detections strict sandbox
+        loader stub launcher self-extracting self-decrypting runtime
+        packer obfuscator stub engine phase decrypt encrypted decrypt
+        whole payload section sections sealed join stream moving buffer
+        wipe zero memory key derived build id shares reconstruct xor
+        base64 b64 lzma zlib compress envelope backend stream ython
+    """.split())
+    gt_terms = set(re.findall(r"[a-z0-9_]{4,}", target["algorithms"].lower()))
+    algo_terms = set(re.findall(r"[a-z0-9_]{4,}", algo.lower()))
+
+    # also require the specific numeric/structural markers of the payload
+    markers = set(re.findall(r"0x[0-9A-Fa-f]{4,}|\b\d{3,}\b", target["algorithms"]))
+    marker_hits = [m for m in markers if m.lower() in algo.lower()]
+
+    payload_terms = (gt_terms - loader_vocab)
+    overlap = (len(payload_terms & (algo_terms - loader_vocab))
+               / max(1, len(payload_terms)))
 
     return {
         "probe": "ai",
@@ -111,7 +135,10 @@ def probe_ai(target, artefact_text, max_chars=60000):
         "secrets_total": len(target["secrets"]),
         "secrets_hit": sec_hit,
         "algorithm_overlap": round(overlap, 3),
-        "algorithm_text": algo[:800],
+        "payload_markers_found": marker_hits,
+        "loader_reversed": bool(re.search(
+            r"identity gate|self[- ]check|self[- ]integrity", algo, re.I)),
+        "algorithm_text": algo[:1200],
         "refused": bool(answer.get("refused", False)),
         "content_head": content[:600],
         "measurement_failed": False,
