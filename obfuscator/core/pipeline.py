@@ -4024,6 +4024,46 @@ def build_core_once(source_path):
 
 def build_project(args):
     source = args.source
+    # §7 dependency pinning, checked on the environment that BUILDS the
+    # artefact. requirements.lock already pins the full closure with artifact
+    # hashes and CI installs from it, but nothing compared the INSTALLED
+    # packages against it -- so a build could run against a substituted version
+    # and the drift would only appear in the manifest afterwards.
+    # Measured 2026-11-18 on the development machine: cython 3.2.1 vs the
+    # locked 3.0.12, requests 2.34.2 vs 2.33.0, setuptools 84.2.1 vs 84.2.0 --
+    # all silent. A different Cython emits different C, so an artefact built
+    # here has unverifiable provenance unless the drift is recorded.
+    #
+    # WARN by default, REFUSE only when asked: hard-failing on a patch-level
+    # bump would make the build unusable on any machine whose distro ships a
+    # slightly newer wheel, and this project's own tests run in exactly such an
+    # environment. NIXON_REQUIRE_DEP_LOCK=1 makes it fatal; the drift is
+    # attached to the build for the manifest either way.
+    try:
+        from obfuscator.dep_guard import check_installed as _dep_check
+        _dep_report = _dep_check(packages=(
+            "cryptography", "cython", "requests", "setuptools"))
+        if not _dep_report["ok"]:
+            _dep_lines = ["%s: lock %s, installed %s"
+                          % (r["name"], r["want"], r["have"])
+                          for r in _dep_report["mismatched"]]
+            _dep_lines += ["%s: %s" % (r.get("name"), r.get("reason"))
+                           for r in _dep_report["missing"]]
+            _dep_msg = "; ".join(_dep_lines[:6])
+            if os.environ.get("NIXON_REQUIRE_DEP_LOCK") == "1":
+                raise SystemExit(
+                    "dependency drift and NIXON_REQUIRE_DEP_LOCK=1: %s"
+                    % (_dep_msg,))
+            UI.warn("dependency drift vs requirements.lock: %s "
+                    "(recorded in the build manifest)" % (_dep_msg,))
+        try:
+            args._dep_drift = _dep_report
+        except Exception:
+            pass
+    except SystemExit:
+        raise
+    except Exception as _dep_exc:
+        UI.warn("dependency check skipped: %s" % (_dep_exc,))
     if getattr(args, "pin_structure", False):
         import random as _r
         random.seed(0x5EED)
@@ -7023,6 +7063,18 @@ def main():
                             "diversified": "sha256(repro + urandom + machine)",
                         },
                         build_id=str(getattr(args, "_build_id", "") or ""),
+                        # §7: the environment that produced this artefact,
+                        # including any drift from requirements.lock. Recorded
+                        # in the SIGNED manifest so "which Cython built this"
+                        # is answerable from the artefact rather than from
+                        # nobody's memory.
+                        extra={
+                            "dependency_lock": {
+                                "ok": (getattr(args, "_dep_drift", {}) or {}).get("ok"),
+                                "mismatched": (getattr(args, "_dep_drift", {}) or {}).get("mismatched", []),
+                                "missing": (getattr(args, "_dep_drift", {}) or {}).get("missing", []),
+                            },
+                        },
                     )
                     if _ma_path:
                         _ma_written += 1
