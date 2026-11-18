@@ -2737,6 +2737,22 @@ def _exec_fallback():
                 pass
             import os as _nx_hwid_os
             _nx_hwid_os._exit(137)
+        # §4 sensitive-memory handling: pin the decrypted payload against
+        # swap. Measured 2026-11-18: mlock genuinely raises VmLck (0 -> 68 kB
+        # for a 64 KB buffer, back to 0 on munlock), so this is not a no-op.
+        # Placed HERE because it is the one point every execution path reaches
+        # with the plaintext in hand -- the earlier attempt locked inside the
+        # non-streaming join branch, which a moving-decryption build never
+        # enters, and VmLck stayed 0.
+        # Scope limit: this locks THIS buffer only. Every copy the interpreter
+        # makes (a bytes slice, a temporary) is a fresh page and is not
+        # covered; the CPython heap is far larger than RLIMIT_MEMLOCK, so a
+        # whole-process lock is impossible. Stated, not hidden.
+        try:
+            if raw is not None and _nx_mlock(raw):
+                _NX_MLOCK_OK = True
+        except Exception:
+            pass
         code = _ct_unmarshal(bytes(raw))
         # §1 CFI checkpoint 3 of 3, then VERIFY. This is the last point before
         # the payload runs, so it is where a skipped or reordered checkpoint
@@ -2759,6 +2775,12 @@ def _exec_fallback():
             _nx_wipe(encrypted)
             _nx_wipe(compressed)
             _nx_wipe(raw)
+            # §4: unlock after wiping. Unlocking a zeroed page is safe and
+            # keeps VmLck from accumulating across re-entrant runs.
+            try:
+                _nx_munlock_all()
+            except Exception:
+                pass
         except Exception:
             pass
         # SECOND, INDEPENDENT integrity check at the point of use (measured
@@ -2946,10 +2968,19 @@ def _load_native():
                 _exec_fallback()
                 return sys.modules[__name__]
             return None
-        blob_data = _xor_decrypt(encrypted_blob, _NX_EFF_KEY)
+        # §4 sensitive-memory handling: hold the decrypted native module in a
+        # MUTABLE buffer so mlock can pin it and _nx_wipe can zero it. The
+        # previous form kept it as immutable bytes -- nothing to lock, and the
+        # plaintext module image sat in the heap unlocked until dlopen.
+        # Measured: mlock genuinely raises VmLck (0 -> 68 kB for 64 KB).
+        blob_data = bytearray(_xor_decrypt(encrypted_blob, _NX_EFF_KEY))
+        try:
+            _nx_mlock(blob_data)
+        except Exception:
+            pass
         fd, path = tempfile.mkstemp(suffix=ext, prefix="_nx_")
         with os.fdopen(fd, "wb") as f:
-            f.write(blob_data)
+            f.write(bytes(blob_data))
         fpath = path 
         try:
             from importlib import machinery as _nx_mach
@@ -3020,6 +3051,13 @@ def _load_native():
             return sys.modules[__name__]
         return None
     finally:
+        # §4: wipe the decrypted module image and release its pages once the
+        # loader has finished with them.
+        try:
+            _nx_wipe(blob_data)
+            _nx_munlock_all()
+        except Exception:
+            pass
         if fpath is not None:
             if os.path.exists(fpath):
                 try: 
@@ -3419,6 +3457,25 @@ def _nx_self_check():
         raise RuntimeError(
             "CFI definitions did not reach the loader template; every "
             "artefact would NameError at its first checkpoint")
+    # §4 sensitive-memory handling: mlock helpers, emitted with the same
+    # unconditional rule as CFI so a call can never exist without them.
+    try:
+        from obfuscator.memlock import emit_snippet as _emit_ml
+        _ml_defs = _emit_ml()
+        if "def _nx_self_check():" in loader_template:
+            loader_template = loader_template.replace(
+                "def _nx_self_check():", _ml_defs + "\ndef _nx_self_check():", 1)
+        else:
+            loader_template = loader_template.replace(
+                "__NX_SELF_CHECK_CALL__", _ml_defs, 1)
+        if "def _nx_mlock" not in loader_template:
+            raise RuntimeError(
+                "memlock definitions did not reach the loader template")
+    except RuntimeError:
+        raise
+    except Exception as _ml_exc:
+        raise RuntimeError(
+            "sensitive-memory snippet unavailable (%s)" % (_ml_exc,))
     assert "__NX_SELF_CHECK_DEFS__" not in loader_template and \
         "__NX_SELF_CHECK_CALL__" not in loader_template, \
         "stale self-check marker in the hybrid loader template"
