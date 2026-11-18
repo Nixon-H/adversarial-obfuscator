@@ -795,3 +795,89 @@ Operator decision: **remove Nuitka**, and make the native path
 * What could NOT be verified locally: an actual farm run (needs GitHub
   credentials and network). The workflow YAML and the blob-embedding path
   are code-reviewed and parse-verified only.
+
+
+---
+
+# Part 7 — The farm, verified live (2026-11-18)
+
+Operator supplied a GitHub token. The three maximum commands were then run
+for real, which surfaced **five bugs that only a live run could find**.
+Final state: **all three OS blobs build and embed.**
+
+## 7.1 Bugs found by the live run
+
+| # | bug | symptom | fix |
+|---|---|---|---|
+| 20 | `_make_farm` passed `is_public=` to `GitHubBuildFarm` | `TypeError` swallowed by the broad except; farm silently degraded on EVERY build | pass only `token, use_tor, tor_proxy` |
+| 21 | `c_transform.py` path was `obfuscator/scripts/…` | `ENOENT` on upload, farm never triggered | three `dirname()` calls, not two |
+| 22 | `upload_file` never sent the blob `sha` | `422 "sha wasn't supplied"` on the second build (repo is reused) | GET the current sha, include it on update |
+| 23 | Windows: Cython metadata block rejected by MSVC | `payload.c(7): C2449 '{' at file scope`, `C37: C4138 '*/' outside comment` | strip the `/* BEGIN: Cython Metadata … */` block before compiling |
+| 24 | farm `trigger_and_wait` polls for a run id only 30× at 10 s | a slow matrix returns "no id" and degrades | (still 5 min — acceptable for a 3-OS matrix) |
+
+Bugs 20-22 are the same *class* the whole audit keeps finding: **a control
+that validates its input and then silently no-ops.** Every one degraded to
+"bytecode fallback" instead of failing, so the build looked successful.
+
+## 7.2 Verified results (live)
+
+Farm run `44218449500`, all jobs green:
+
+| OS | artifact | size | job |
+|---|---|---|---|
+| windows-latest | `blob-payload.pyd` | 20,878 B | success |
+| ubuntu-22.04 | `blob-payload.so` | 125,251 B | success |
+| macos-latest | `blob-payload.dylib` | 50,975 B | success |
+
+Full ABSOLUTE build with those blobs:
+
+```
+C transform: ['junk-functions(3)', 'opaque-predicates(83)', 'dead-blocks(3)',
+              'subset-sum(3)', 'mba-substitution(4)']
+[*] [Cloud] Ensuring private repo exists: nixon-build-farm-native...
+ Native blob : windows [EMBEDDED (farm)]
+ Native blob : darwin  [EMBEDDED (farm)]
+```
+
+The artefact then **ran correctly** on Linux with licence + shard
+(`AUDIT f3a53b0870bbcf1a`), and refused without the licence token.
+
+So the pinnacle the operator asked for is real and measured:
+
+* Cython → C transform → native blob, on all three OSes;
+* the local blob for the build OS, farm blobs for the others;
+* both merged into one loader;
+* the licence gate and the seal shard enforced at run time.
+
+## 7.3 The Windows C bug in detail
+
+Not a transform bug — a Cython output quirk. Cython 3.x emits a
+`/* BEGIN: Cython Metadata` block containing JSON:
+
+```c
+/* BEGIN: Cython Metadata
+{
+    "distutils": { "name": "payload", "sources": ["payload.py"] },
+    "module_name": "payload"
+}
+END: Cython Metadata */
+```
+
+gcc and clang accept it. **MSVC does not**: it reads the `{` on line 7 as
+file-scope code and the `*/` on line 37 as an unmatched terminator. The
+block is pure metadata, so the farm driver now strips it before compiling.
+Verified locally: the stripped file still passes `gcc -fsyntax-only`.
+
+## 7.4 Residual
+
+* The farm's `trigger_and_wait` gives the matrix 5 minutes. A cold matrix
+  (three runners provisioning) can exceed that; the run still completes on
+  GitHub, but the build degrades to bytecode for the other OSes. Raising
+  `_GITHUB_WAIT_DEADLINE` fixes it for slow accounts.
+* `--package all` still writes the `_Packed`/`_Stego` variants beside the
+  payload while `dist/` receives the sectioned loader — the placement quirk
+  documented in Part 3, unchanged.
+* The farm driver seals strings with the INLINE key: the keyless
+  `string-key-env` shard is applied to the fallback source, not threaded
+  through the farm driver. A farm blob's strings are therefore protected by
+  the C transform + inline seal, not by the shard.

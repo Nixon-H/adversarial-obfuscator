@@ -842,6 +842,21 @@ class GitHubBuildFarm:
         with open(local_path,"rb")as f:content=base64.b64encode(f.read()).decode()
         url=f"{self.base_url}/repos/{self.username}/{self.repo_name}/contents/{remote_name}"
         data={"message":f"Upload {remote_name}","content":content}
+        # GitHub's contents API requires the CURRENT blob sha to UPDATE an
+        # existing file; without it every re-upload returns
+        # 422 "sha wasn't supplied".  The farm repo is auto_init=True and
+        # reused across builds, so on the SECOND build every upload failed
+        # and the farm silently degraded to bytecode (caught by the live
+        # ABSOLUTE run, 2026-11-18).  Probe first; create (no sha) or update.
+        try:
+            _get = requests.get(url, headers=self.headers, proxies=self.proxies,
+                                verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
+            if getattr(_get, 'status_code', None) == 200:
+                _sha = (_get.json() or {}).get('sha')
+                if _sha:
+                    data['sha'] = _sha
+        except Exception:
+            pass
         r=requests.put(url,headers=self.headers,json=data,proxies=self.proxies,verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
         # Rate-limit resilience: wait out the server's Retry-After and retry
         # once (ported from the removed Nuitka farm).
@@ -911,6 +926,22 @@ import c_transform
 _seed = hashlib.sha256(open("{payload_filename}", "rb").read()).digest()
 _res = c_transform.transform_file("payload.c", _seed)
 print("C transform:", _res.transforms_applied)
+# Strip the Cython metadata comment block before compiling. It is pure
+# metadata (JSON inside a C comment) and MSVC rejected it as code --
+# C2449 "found an open brace at file scope" on line 7 and C4138
+# "comment terminator found outside of comment" on line 37. gcc and clang
+# accept it; MSVC does not; nothing needs it to compile.
+try:
+    _txt = open("payload.c", encoding="utf-8", errors="replace").read()
+    _a = _txt.find("/* BEGIN: Cython Metadata")
+    _b = _txt.find("END: Cython Metadata */")
+    if _a >= 0 and _b > _a:
+        _end = _b + len("END: Cython Metadata */")
+        with open("payload.c", "w", encoding="utf-8") as _mw:
+            _mw.write(_txt[:_a] + _txt[_end:])
+        print("stripped Cython metadata block (MSVC compatibility)")
+except Exception as _strip_exc:
+    print("metadata strip skipped:", _strip_exc)
 # 3. Compile the TRANSFORMED C into the per-OS native blob
 from setuptools import setup
 setup(
