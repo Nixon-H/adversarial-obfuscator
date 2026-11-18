@@ -57,17 +57,65 @@ resolved arguments — not inferred from flag names.
 | `anti_rea_cognitive_armor` | ON |
 | `anti_rea_classifier_bait` | ON |
 
-### C transformation layer (native path) — all 7 ON
+### The Cython + custom-C layer (native path) — ON by default
 
-Runs between Cython's `.c` and gcc:
+This is the layer that sits *between* Python and the machine code, and it is
+the one that makes the artefact expensive to reverse. It runs in three
+stages, and stage 2 is the custom layer this project built.
 
-`string encryption` · `opaque predicates` · `junk functions` ·
-`shuffle locals` · `dead blocks` · **`subset-sum predicates (NP-hard)`** ·
-**`multi-round MBA`**
+```
+payload.py
+   │
+   │  1. CYTHON  (python -m cython -3)
+   │     language_level=3, embedsignature=False, emit_code_comments=False
+   ▼
+payload.c                       <- Cython-generated C
+   │
+   │  2. C TRANSFORM LAYER  (scripts/c_transform.py)  ** custom **
+   │     7 transforms, polymorphic per build, all ON
+   ▼
+payload.c  (transformed)
+   │
+   │  3. gcc -shared -O3 -flto -fvisibility=hidden
+   │     -fvisibility-inlines-hidden -fno-semantic-interposition
+   ▼
+payload_module.so / .pyd / .dylib
+```
 
-Measured on a default build: `junk-functions(3), opaque-predicates(45),
-dead-blocks(3), subset-sum(3), mba-substitution(3)`. **Fails closed** — an
-empty or failed transform aborts the build.
+**Stage 2 is the important one.** An analyst who decompiles the `.so` finds
+*transformed* C, not Cython's output: the Cython idioms they would
+pattern-match against are gone.
+
+| # | C transform | what it does to the C | measured on a default build |
+|---|---|---|---|
+| 1 | **string encryption** | XOR-seals every `__pyx_k_*` string array and emits a decrypt loop; skipped cleanly if the file has no Cython string table | applied |
+| 2 | **opaque predicates** | wraps selected `if` conditions with an always-true algebraic expression (e.g. `((x*x+3*x+7) & 1) == 0` with `x` fixed even), AND-ed with the real condition so semantics are unchanged | **45** predicates |
+| 3 | **junk functions** | injects static C functions that look real, are never called, and must each be reversed to prove dead — they appear alongside real code in Ghidra/IDA | **3** |
+| 4 | **shuffle locals** | renames Cython's `locals_N` declarations to per-build names, breaking cross-build pattern matching | applied |
+| 5 | **dead blocks** | inserts self-contained computation blocks inside function bodies that feed nothing — **function outlining / interprocedural obfuscation**, so real block boundaries are indistinguishable | **3** |
+| 6 | **subset-sum predicates (NP-hard)** | embeds a random subset-sum instance; the C verifies it at run time via a 4096-entry DP table. Proving the branch is always-taken requires **solving the subset-sum instance** | **3** |
+| 7 | **multi-round MBA** | replaces integer constants with nested mixed-boolean-arithmetic expressions that expand exponentially to simplify | **3** |
+
+Measured output on a real default build:
+
+```
+C transform: ['junk-functions(3)', 'opaque-predicates(45)', 'dead-blocks(3)',
+              'subset-sum(3)', 'mba-substitution(3)']
+```
+
+On the ABSOLUTE build: `opaque-predicates(83), mba-substitution(4)` — the
+counts vary per build because the transforms are **polymorphic by seed**.
+
+**Fails closed** (audit 2026-11-17): the C transform used to swallow its own
+exceptions and continue, shipping untransformed C with only a log line. It
+now aborts the build on either a transform failure or an empty transform
+list, so an artefact never ships with this layer silently missing.
+
+**The same layer runs on the farm.** `scripts/c_transform.py` is uploaded to
+each runner, and the generated driver does `cythonize` -> `transform_file`
+-> `setup(build_ext)`, seeded from the payload hash so all three OSes apply
+the *same* transform. Verified live: the Windows runner reported
+`opaque-predicates(62)`, macOS `opaque-predicates(59)`.
 
 ### Native packaging — default
 
@@ -151,6 +199,7 @@ change; nothing is turned off.**
 | licence token gate | off | **ON** |
 | one-shot | off | off (deliberately excluded) |
 | native blobs | current OS | **win + mac + linux** |
+| C transform | all 7, per-OS | **all 7, on all 3 OS runners** |
 
 ---
 
