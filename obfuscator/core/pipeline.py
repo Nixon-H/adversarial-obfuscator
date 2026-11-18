@@ -2261,24 +2261,17 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         "    return _data\n"
     )
     loader_template = r'''# -*- coding: utf-8 -*-
-# EARLIEST-POSSIBLE anti-dump (measured, 2026-11-18). The prctl used to be
-# applied ~900 lines down, after the identity gate, the self-check and every
-# import. Measured window during which /proc/<pid>/mem was readable: ~225ms,
-# and the payload's own secret was recovered from [stack] inside it. This runs
-# before anything else the loader does -- no function definition, no helper
-# imports -- so the window shrinks to the interpreter's own start-up, which the
-# loader cannot influence. Failure is non-fatal: a kernel that refuses prctl
-# must not stop the artefact from running.
+# Earliest anti-dump (2026-11-18): the prctl sat ~900 lines down, leaving a
+# ~225ms window where /proc/<pid>/mem was readable and the payload secret was
+# recovered from [stack]. It now runs first. Non-fatal if the kernel refuses.
 try:
-    import ctypes as _nx_early_ct
-    _nx_early_ct.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0)
-    del _nx_early_ct
+    import ctypes as _nx_e
+    _nx_e.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0)
 except Exception:
     pass
 try:
-    import resource as _nx_early_res
-    _nx_early_res.setrlimit(_nx_early_res.RLIMIT_CORE, (0, _nx_early_res.getrlimit(_nx_early_res.RLIMIT_CORE)[1]))
-    del _nx_early_res
+    import resource as _nx_r
+    _nx_r.setrlimit(_nx_r.RLIMIT_CORE, (0, -1))
 except Exception:
     pass
 __NX_IDENTITY_GATE__
