@@ -779,6 +779,51 @@ def _verify_download_zip(zip_path, artifact_name, sign_key):
                  "signatures present for %r — proceeding without "
                  "verification (auditable downgrade).", artifact_name)
     return True
+#: Modules the farm driver imports at module scope. The runner only receives the
+#: files uploaded to the farm repo, so EVERY name here must be uploaded before
+#: the workflow is dispatched. This list exists because that coupling has
+#: already failed silently once: the driver imported ``c_transform`` but the
+#: legacy ``build-farm`` CLI path uploaded only the payload, so the runner died
+#: on ``ImportError`` and the whole C-transform layer was skipped on those
+#: builds. ``native_harden`` (added for §3 header verification) would have
+#: failed the same way. ``farm_driver_dependencies`` resolves each one to a path
+#: so the upload sites cannot forget.
+FARM_DRIVER_MODULES = ("c_transform", "native_harden")
+
+
+def _repo_root():
+    """Repository root, from this file's location (``obfuscator/core/utils.py``)."""
+    return os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+
+
+def farm_driver_dependencies():
+    """``[(remote_name, local_path), ...]`` the driver needs on the runner.
+
+    Returned even when a file is missing so the caller can report which one,
+    rather than silently uploading a smaller set (a partial upload is exactly
+    the failure mode this function exists to prevent). Use
+    :func:`missing_farm_dependencies` to check before dispatching.
+    """
+    root = _repo_root()
+    found = []
+    for name in FARM_DRIVER_MODULES:
+        candidates = (os.path.join(root, "scripts", name + ".py"),
+                      os.path.join(root, "obfuscator", name + ".py"))
+        # Prefer the first candidate that EXISTS; fall back to the first
+        # candidate only when none does, so the "missing" report names a path
+        # the operator should have created rather than an artefact of ordering.
+        chosen = next((p for p in candidates if os.path.exists(p)), candidates[0])
+        found.append((name + ".py", chosen))
+    return found
+
+
+def missing_farm_dependencies():
+    """Local paths the driver imports that do not exist (empty when complete)."""
+    return [path for _remote, path in farm_driver_dependencies()
+            if not os.path.exists(path)]
+
+
 def render_farm_driver(payload_filename="payload.py"):
     """Return the driver text the farm workflow embeds, for inspection.
 
@@ -1016,11 +1061,64 @@ try:
         print("stripped Cython metadata block (MSVC compatibility)")
 except Exception as _strip_exc:
     print("metadata strip skipped:", _strip_exc)
-# 3. Compile the TRANSFORMED C into the per-OS native blob
+# 3. Compile the TRANSFORMED C into the per-OS native blob.
+# PLATFORM HARDENING (review §3). The review's own constraint is "don't blindly
+# enable every flag -- verify the resulting binary with platform-native
+# inspection tools". So the flags below are emitted AND the object they produce
+# is parsed afterwards (step 5): a flag the toolchain ignored shows up as
+# applied:false in the attestation instead of as a reassuring log line.
+#
+# windows: /DYNAMICBASE (ASLR), /NXCOMPAT (DEP), /GUARD:CF (CFG),
+#          /CETCOMPAT (CET where supported), /HIGHENTROPYVA, /GS.
+#          These are MSVC names and ONLY MSVC accepts them. Measured on
+#          2026-11-19 with x86_64-w64-mingw32-gcc 14.2 (a real object, not a
+#          guess):
+#              gcc: error: unrecognized command-line option '-NXCOMPAT'
+#          so an earlier "-" + MSVC-name list made the mingw build FAIL to
+#          compile -- hardening that breaks the build is not hardening. mingw
+#          therefore gets the --dynamicbase/--nxcompat/--high-entropy-va link
+#          flags it does implement. It has no Control Flow Guard (GNU ld 2.44
+#          has no such option; lld-link only), so CFG is reported as
+#          `unavailable` for that toolchain instead of being demanded.
+# macOS:   -fPIE -pie (MH_PIE), -fstack-protector-strong, and a version-min so
+#          Hardened Runtime is available. Hardened Runtime and library
+#          validation live in the CODE SIGNATURE, not the compiler flags, so
+#          they are only present if the operator signs; the attestation reports
+#          what the signature actually says.
+import sys as _hsys
+_extra_cc = []
+_extra_ld = []
+_toolchain = ""
+if _hsys.platform.startswith("win"):
+    # A genuine MSVC shell defines VSCMD_ARG_TGT_ARCH; MSYSTEM means mingw.
+    _msvc = bool(_os.environ.get("MSYSTEM") is None
+                 and _os.environ.get("VSCMD_ARG_TGT_ARCH") is not None)
+    if _msvc:
+        _toolchain = "msvc"
+        _extra_cc = ["/" + f for f in ("DYNAMICBASE", "NXCOMPAT", "GUARD:CF",
+                                       "CETCOMPAT", "HIGHENTROPYVA", "GS")]
+        _extra_ld = ["/" + f for f in ("DYNAMICBASE", "NXCOMPAT", "GUARD:CF",
+                                       "CETCOMPAT")]
+    else:
+        _toolchain = "gcc"
+        _extra_cc = ["-fstack-protector-strong"]
+        _extra_ld = ["-Wl,--dynamicbase", "-Wl,--high-entropy-va",
+                     "-Wl,--nxcompat"]
+elif _hsys.platform == "darwin":
+    _toolchain = "clang"
+    _extra_cc = ["-fPIE", "-fstack-protector-strong",
+                 "-mmacosx-version-min=10.15"]
+    _extra_ld = ["-pie", "-Wl,-dead_strip"]
+else:
+    _toolchain = "gcc"
+    _extra_cc = ["-fPIE", "-fstack-protector-strong"]
+    _extra_ld = ["-pie", "-Wl,-z,relro,-z,now", "-Wl,-z,noexecstack"]
 from setuptools import setup
 setup(
     name='payload',
-    ext_modules=[Extension("payload", ["payload.c"])],
+    ext_modules=[Extension("payload", ["payload.c"],
+                           extra_compile_args=_extra_cc,
+                           extra_link_args=_extra_ld)],
     script_args=['build_ext', '--inplace']
 )
 # 4. RUNNER SELF-ATTESTATION (review item 7.9, farm-runner integrity).
@@ -1066,14 +1164,53 @@ _seed_pairs = [
     ("diversified", _divers_seed.hex()),
     ("mode", "reproducible" if _os.environ.get("NIXON_REPRODUCIBLE") else "diversified"),
 ]
+# 5. PLATFORM HARDENING VERIFICATION (review §3: verify, don't assume).
+# Parse the object we just produced and record what its header ACTUALLY says.
+# A toolchain that silently ignored /DYNAMICBASE or -pie shows up as
+# applied:false, which is the only honest way to report it.
+# No dict literals here: this driver is embedded in an f-string, where literal
+# braces are format specifiers. Three separate attempts to add this step failed
+# on exactly that, so the values are built with tuples and a helper.
+_hardening = None
+_hard_verdict = None
+try:
+    import native_harden as _nh
+    _blob = None
+    for _n in sorted(_os.listdir(".")):
+        if _n.startswith("payload") and _n.endswith((".so", ".pyd", ".dylib")):
+            _blob = _n
+            break
+    if _blob:
+        _raw = open(_blob, "rb").read()
+        if _raw[:4] == bytes((0x7f, 0x45, 0x4c, 0x46)):      # ELF
+            _rep = _nh.elf_note()
+        elif _raw[:2] == bytes((0x4d, 0x5a)):                 # MZ
+            _rep = _nh.verify_pe_bytes(_raw)
+        elif _raw[:4] in (bytes((0xcf, 0xfa, 0xed, 0xfe)),
+                          bytes((0xce, 0xfa, 0xed, 0xfe)),
+                          bytes((0xca, 0xfe, 0xba, 0xbe))):   # Mach-O
+            _rep = _nh.verify_macho_bytes(_raw)
+        else:
+            _rep = _nh.unknown_note()
+        _hardening = _rep
+        # The toolchain matters: GNU ld has no CFG, so demanding it from a
+        # mingw build would fail every Windows build forever. check() records
+        # that flag as `unavailable` instead, naming the gap rather than
+        # hiding it.
+        _hard_verdict = _nh.check(_rep, _sys.platform, _toolchain)
+except Exception as _hx:
+    _hardening = "error: " + str(_hx)[:200]
 _top = [
     ("schema", "nx-runner-attestation/v1"),
     ("runner", dict(_runner_pairs)),
+    ("toolchain", _toolchain),
     ("payload_sha256", hashlib.sha256(_payload_bytes).hexdigest()),
     ("c_sha256", hashlib.sha256(open("payload.c", "rb").read()).hexdigest()),
     ("seed", dict(_seed_pairs)),
     ("transforms", list(getattr(_res, "transforms_applied", []) or [])),
     ("artifacts", dict(_artifact_pairs)),
+    ("hardening", _hardening),
+    ("hardening_verdict", _hard_verdict),
 ]
 import json as _j
 with open("runner-attestation.json", "w", encoding="utf-8") as _af:

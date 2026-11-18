@@ -4287,15 +4287,6 @@ def build_project(args):
                     try:
                         _farm = _make_farm(args, _gh_token)
                         if _farm.create_disposable_repo():
-                            # __file__ is obfuscator/core/pipeline.py: the
-                            # REPO ROOT is three dirnames up, not two -- with
-                            # two this resolved to obfuscator/scripts/... and
-                            # the farm upload failed with ENOENT (caught by
-                            # the live ABSOLUTE run, 2026-11-18).
-                            _ct_src = os.path.join(os.path.dirname(
-                                os.path.dirname(os.path.dirname(
-                                    os.path.abspath(__file__)))),
-                                "scripts", "c_transform.py")
                             # FARM/LOCAL PARITY (audit 2026-11-18).  This used
                             # to upload the RAW source while the local build
                             # compiled an AST-obfuscated one, so the two
@@ -4343,7 +4334,21 @@ def build_project(args):
                             try:
                                 if not _farm.upload_file(_farm_src, "payload.py"):
                                     raise RuntimeError("payload upload failed")
-                                _farm.upload_file(_ct_src, "c_transform.py")
+                                # The driver imports c_transform and (for §3
+                                # header verification) native_harden at module
+                                # scope. Upload both, or the runner dies on
+                                # ImportError and the C-transform/hardening
+                                # steps are skipped without failing the run.
+                                from obfuscator.core.utils import (
+                                    farm_driver_dependencies as _wedge_deps)
+                                for _remote, _local in _wedge_deps():
+                                    if not os.path.exists(_local):
+                                        UI.warn("farm: driver dependency "
+                                                "missing locally: %s" % _local)
+                                        continue
+                                    if not _farm.upload_file(_local, _remote):
+                                        raise RuntimeError(
+                                            "%s upload failed" % _remote)
                                 # create_workflow takes the payload's
                                 # FILENAME for its regex guard; the farm
                                 # resolves the file by name inside the repo,
@@ -4407,7 +4412,16 @@ def build_project(args):
                                                              _ra_name))))
                                     _ra_res = _ra_verify(
                                         _ra_doc, _ra_expect, _ra_dl,
-                                        require_artifacts=bool(_ra_dl))
+                                        require_artifacts=bool(_ra_dl),
+                                        # §3: the platform header check must
+                                        # PASS, not merely be present. A
+                                        # runner on Windows brought back an
+                                        # object with no ASLR and said so --
+                                        # that is a failure, and the earlier
+                                        # behaviour (record and continue) used
+                                        # the evidence as a log line rather
+                                        # than a gate.
+                                        require_hardening=True)
                                     if _ra_res["ok"]:
                                         UI.item("Farm attestation",
                                                 _ra_summary(_ra_doc), "VERIFIED")
@@ -7270,6 +7284,22 @@ def main():
                     sys.exit(1)
                 if farm.create_disposable_repo():
                     farm.upload_file(payload, "payload.py")
+                    # The driver imports c_transform and native_harden at module
+                    # scope; this path used to upload only the payload, so the
+                    # runner raised ImportError and the C-transform layer
+                    # silently never ran on builds started this way.
+                    from obfuscator.core.utils import (
+                        farm_driver_dependencies as _deploy_deps)
+                    _deploy_missing = []
+                    for _remote, _local in _deploy_deps():
+                        if not os.path.exists(_local):
+                            _deploy_missing.append(_local)
+                            continue
+                        if not farm.upload_file(_local, _remote):
+                            raise RuntimeError("%s upload failed" % _remote)
+                    if _deploy_missing:
+                        UI.warn("farm: driver dependencies missing locally: %s"
+                                % ", ".join(_deploy_missing))
                     # The matrix builds Cython blobs for every OS
                     # (.pyd/.so/.dylib) -- no Nuitka.
                     farm.create_workflow("payload.py")

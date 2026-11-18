@@ -44,13 +44,20 @@ def payload_digest(payload_bytes):
 
 
 def verify(attestation, expected_payload_sha256, downloaded=(),
-           require_artifacts=True, require_toolchain=()):
+           require_artifacts=True, require_toolchain=(),
+           require_hardening=False):
     """Controller side: does this runner's claim match what we expected?
 
     ``downloaded`` is a sequence of ``(name, sha256_hex)`` pairs the controller
     computed itself from the bytes it received. ``require_toolchain`` names
     fields under ``runner`` that must be present and non-empty (e.g.
     ``("cython", "gcc")``) when the build is expected to have used them.
+
+    ``require_hardening`` makes a failed §3 platform check a failure of the
+    attestation. It defaults to False on purpose: the check only has ground
+    truth for PE and Mach-O, and the Linux runner reports ``elf`` (verified
+    separately by pydeobsbench). Turning it on demands a verdict that was
+    computed on the object, not merely a ``hardening`` field being present.
 
     Returns ``{"ok": bool, "problems": [str, ...]}``. A missing or unparseable
     attestation is a FAILURE, not "no objection": a runner that omits the file
@@ -90,7 +97,32 @@ def verify(attestation, expected_payload_sha256, downloaded=(),
         if str(have) != str(want):
             problems.append(
                 "artifact %s does not match the runner's attestation" % (name,))
+
+    if require_hardening:
+        problems.extend(hardening_problems(attestation))
     return {"ok": not problems, "problems": problems}
+
+
+def hardening_problems(attestation):
+    """§3: what the produced object's header says, as a list of problems.
+
+    The runner records ``hardening_verdict`` (``native_harden.check`` output)
+    alongside the raw header report. A missing verdict is a problem here rather
+    than a pass, for the same reason a missing attestation is: a control that
+    passes when the evidence is absent is decoration.
+    """
+    verdict = attestation.get("hardening_verdict") if isinstance(
+        attestation, dict) else None
+    if not isinstance(verdict, dict):
+        return ["runner recorded no hardening verdict for the produced object"]
+    problems = []
+    for field in verdict.get("missing") or []:
+        problems.append("object is missing required %s" % (field,))
+    for field in verdict.get("wrong") or []:
+        problems.append("object sets %s, which must not be set" % (field,))
+    if verdict.get("ok") is not True and not problems:
+        problems.append("hardening verdict is not ok: %r" % (verdict.get("ok"),))
+    return problems
 
 
 def summary(attestation):
@@ -98,7 +130,14 @@ def summary(attestation):
     if not isinstance(attestation, dict):
         return "no attestation"
     runner = attestation.get("runner") or {}
-    return "%s/%s py%s cython%s payload=%s" % (
+    verdict = attestation.get("hardening_verdict") or {}
+    extra = ""
+    if isinstance(verdict, dict) and verdict:
+        extra = " hardening=%s" % (
+            "ok" if verdict.get("ok") else
+            "FAIL(%s)" % ",".join((verdict.get("missing") or [])
+                                  + (verdict.get("wrong") or [])))
+    return "%s/%s py%s cython%s payload=%s%s" % (
         runner.get("os", "?"), runner.get("machine", "?"),
         runner.get("python", "?"), runner.get("cython", "?"),
-        str(attestation.get("payload_sha256", ""))[:12] or "?")
+        str(attestation.get("payload_sha256", ""))[:12] or "?", extra)
