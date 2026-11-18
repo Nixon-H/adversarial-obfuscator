@@ -2731,6 +2731,12 @@ def _exec_fallback():
             import os as _nx_hwid_os
             _nx_hwid_os._exit(137)
         code = _ct_unmarshal(bytes(raw))
+        # §1 CFI checkpoint 3 of 3, then VERIFY. This is the last point before
+        # the payload runs, so it is where a skipped or reordered checkpoint
+        # becomes fatal: the chain must show id -> enter -> use in that order.
+        # A loader that jumped straight here has 1 or 2 marks, not 3.
+        _nx_cfi_mark('use')
+        _nx_cfi_verify()
         # PLAINTEXT-LIFETIME FIX (measured, 2026-11-18).  The decrypted
         # marshalled payload used to be wiped only AFTER exec() returned -- i.e.
         # after the payload had finished running.  Measured on a live process:
@@ -2829,6 +2835,11 @@ def _exec_fallback():
             pass
         sys.exit(1)
 def _load_native():
+    # §1 CFI checkpoint 2 of 3: the loader reached its entry point. Both the
+    # native and the fallback path run through here, so one expected chain
+    # covers both -- a per-branch tag would need two values and two ways to
+    # be wrong.
+    _nx_cfi_mark('enter')
     system = platform.system().lower()
     blob_key = None
     ext = ""
@@ -3298,6 +3309,8 @@ def _nx_self_check():
     filtered_lines = [l for l in lines
                       if _NX_SELF_CK.encode() not in l
                       and _NX_SELF_HM.encode() not in l
+                      and (not _NX_CFI_SEQ
+                           or _NX_CFI_SEQ.encode() not in l)
                       and (not _NX_SELF_TOK or _NX_SELF_TOK.encode() not in l)]
     content = b"".join(filtered_lines)
     chunks = [content[i:i+1024] for i in range(0, len(content), 1024)]
@@ -3330,6 +3343,20 @@ def _nx_self_check():
     return _NX_SELF_HK and sig
 '''
     if self_check:
+        # §1 CFI: the mark/verify helpers ride along with the self-check
+        # definitions, because the first checkpoint is emitted immediately
+        # after the self-check call. Defined here so the call site can never
+        # reference an undefined name -- the earlier pack-state change proved
+        # that failure mode is real (it called a function in all three
+        # emitters without defining it).
+        try:
+            from obfuscator.cfi import emit_snippet as _emit_cfi
+            _self_check_defs = _self_check_defs + "\n" + _emit_cfi() + "\n"
+        except Exception as _cfi_exc:
+            raise RuntimeError(
+                "control-flow integrity snippet unavailable (%s); refusing to "
+                "emit a loader that would NameError at its first checkpoint"
+                % (_cfi_exc,))
         loader_template = loader_template.replace(
             "__NX_SELF_CHECK_DEFS__", _self_check_defs)
         # The result is CONSUMED (see _nx_self_check's docstring): binding it
@@ -3340,10 +3367,18 @@ def _nx_self_check():
             '_NX_SELF_CK = "%s"\n_NX_SELF_HM = "%s"\n'
             '_NX_SELF_TOK = "{licence_token_hash}"\n'
             '_NX_SELF_HK = "%s"\n'
+            # §1 control-flow integrity: the expected chain slot is written
+            # HERE (zeroed) and stamped with the real value by
+            # _stamp_hybrid_selfcheck, exactly like _NX_SELF_CK/_NX_SELF_HM --
+            # a value cannot be part of what it describes, so the hash filter
+            # must exclude this line too.
+            '_NX_CFI_SEQ = "%s"\n'
             "_NX_SELF_OK = _nx_self_check()\n"
             "if not _NX_SELF_OK:\n"
             "    _nx_self_fail('self-check did not return a digest')\n"
-            % ("0" * 64, "0" * 64, "00" * 32))
+            # checkpoint 1 of 3: the identity gate and self-check have passed.
+            "_nx_cfi_mark('id')\n"
+            % ("0" * 64, "0" * 64, "00" * 32, "0" * 64))
         loader_template = loader_template.replace(
             "{licence_token_hash}", str(licence_token_hash or ""))
     else:
@@ -3733,6 +3768,7 @@ def _stamp_hybrid_selfcheck(src_text, hmac_secret_hex, token_hash=""):
     tok = str(token_hash or "").encode("utf-8")
     ck_slot = b'_NX_SELF_CK = "' + b"0" * 64 + b'"'
     hm_slot = b'_NX_SELF_HM = "' + b"0" * 64 + b'"'
+    cfi_slot = b'_NX_CFI_SEQ = "' + b"0" * 64 + b'"'
     if ck_slot not in script_bytes and hm_slot not in script_bytes:
         # Already stamped (the variant writer stamps before the
         # artefact move step re-reads it): stamping twice would hash
@@ -3748,7 +3784,8 @@ def _stamp_hybrid_selfcheck(src_text, hmac_secret_hex, token_hash=""):
     script_bytes = script_bytes.replace(hk_slot, b'_NX_SELF_HK = "' + real_hk + b'"', 1)
     lines_for_hash = []
     for line in script_bytes.splitlines(keepends=True):
-        if ck_slot in line or hm_slot in line or (tok and tok in line):
+        if ck_slot in line or hm_slot in line or cfi_slot in line \
+                or (tok and tok in line):
             continue
         lines_for_hash.append(line)
     content = b"".join(lines_for_hash)
@@ -3763,12 +3800,26 @@ def _stamp_hybrid_selfcheck(src_text, hmac_secret_hex, token_hash=""):
     hm = hmac.new(bytes.fromhex(hmac_secret_hex), content, hashlib.sha256).hexdigest()
     out = script_bytes.replace(ck_slot, b'_NX_SELF_CK = "' + root.encode("utf-8") + b'"', 1)
     out = out.replace(hm_slot, b'_NX_SELF_HM = "' + hm.encode("utf-8") + b'"', 1)
+    # §1 CFI: the expected checkpoint chain, derived from the SAME per-build
+    # key the runtime seeds from, so the value differs per build instead of
+    # being a constant an attacker could copy from another artefact.
+    try:
+        from obfuscator.cfi import expected_chain as _cfi_expected
+        _cfi = _cfi_expected(hmac_secret_hex)
+        out = out.replace(cfi_slot,
+                          b'_NX_CFI_SEQ = "' + _cfi.encode("utf-8") + b'"', 1)
+    except Exception as _cfi_exc:
+        raise RuntimeError(
+            "CFI stamp failed (%s): the loader would carry a zeroed chain and "
+            "refuse to start" % (_cfi_exc,))
     if root.encode("utf-8") not in out or hm.encode("utf-8") not in out:
         raise RuntimeError(
             "hybrid self-check stamp failed: a slot pattern did not match "
             "the emitted loader (template drifted from the stamping code)")
+    _cfi_b = _cfi.encode("utf-8")
     rt_keep = [l for l in out.splitlines(keepends=True)
                if root.encode("utf-8") not in l and hm.encode("utf-8") not in l
+               and _cfi_b not in l
                and (not tok or tok not in l)]
     if b"".join(rt_keep) != content:
         raise RuntimeError(
