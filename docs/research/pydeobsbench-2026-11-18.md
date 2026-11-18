@@ -300,6 +300,36 @@ mitigation, not prevention.
 
 ---
 
+## 5c. Binary-level diversity (§5-D) — measured, and the answer is nuanced
+
+The review's point: counting transform counters is not the same as the machine
+code differing. Two independent builds of the same target
+(`cipher`, `layers=25 zips=3`, native path) were extracted from their
+artefacts and compared at the instruction level:
+
+| metric | value | reading |
+|---|---|---|
+| blob size | 189,632 vs 181,472 bytes (Δ 8,160) | layouts differ |
+| sha256 | different | not a reproducible rebuild |
+| instruction count | 32,988 vs 29,303 | different code volume |
+| **opcode-distribution cosine** | **0.9987** | the instruction MIX is nearly identical |
+| trigram Jaccard | 0.6794 | sequence arrangement genuinely differs |
+
+So: diversification is real at the *arrangement* level (a third of 3-gram
+sequences are unique to one build) but almost nil at the *opcode-mix* level.
+An analyst who models the target as "this distribution of instructions with
+this call structure" transfers that model across builds; one who needs exact
+offsets does not. This is the honest reading of "binary-level diversity" and
+it is weaker than a transform-count would suggest.
+
+Cause: the polymorphism comes from the C transform (opaque predicates,
+subset-sum blocks, MBA), which changes *which* instructions run but not the
+compiler's overall lowering of Cython's generated code. Changing the mix would
+require compiler diversity (gcc vs clang vs MSVC backends, §5-B), which is not
+available for all three platforms from this machine.
+
+---
+
 ## 6. Honest limits of this benchmark
 
 
