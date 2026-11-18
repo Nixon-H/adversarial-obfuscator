@@ -2588,7 +2588,12 @@ def _load_native():
              ext = ".so"
     elif "darwin" in system:
         blob_key = "darwin"
-        ext = ".dylib"    
+        # .so, not .dylib: CPython's macOS extension suffixes are
+        # .cpython-XXX-darwin.so / .abi3.so / .so -- .dylib is not one of
+        # them, so spec_from_file_location returned None on macOS and the
+        # darwin blob was dead weight (the artefact silently fell back to
+        # bytecode). Audit 2026-11-18.
+        ext = ".so"
     # Batch-3 CI scope (additive): the SKIP bypass only applies when the
     # CI gate var is ALSO set (NIXON_CI or NIXON_ALLOW_SKIP). Prod artifacts
     # hold the gate with SKIP alone. Single helper keeps all five sites
@@ -2626,7 +2631,10 @@ def _load_native():
             f.write(blob_data)
         fpath = path 
         try:
-            spec = importlib.util.spec_from_file_location("payload_native", path)
+            from importlib import machinery as _nx_mach
+            _nx_loader = _nx_mach.ExtensionFileLoader("payload_native", path)
+            spec = importlib.util.spec_from_file_location(
+                "payload_native", path, loader=_nx_loader)
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)

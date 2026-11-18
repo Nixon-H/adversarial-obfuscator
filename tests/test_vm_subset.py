@@ -285,6 +285,18 @@ def test_end_to_end_consistent_with_build_time(monkeypatch):
     monkeypatch.setattr(ns["_subprocess"], "run", _stub_run(b""))
     orig_fs = ns["_nx_has_vm_fs"]
     ns["_nx_has_vm_fs"] = lambda _p=None: orig_fs(["/nonexistent-nx-vm-probe"])
+    # Deterministic (full-suite flake, 2026-11-18): the runtime percent and
+    # the build-time expectation each call the probes, and on a LOADED host
+    # (a running suite spawns processes, timing jitter changes) the two calls
+    # can disagree -> pct != expected.  Stub EVERY probe to a constant so
+    # both sides compute the same answer regardless of host state.
+    for _probe in ("_nx_has_cpu_hypervisor", "_nx_has_vm_processes",
+                   "_nx_has_dmi_strings", "_nx_has_vm_mac",
+                   "_nx_has_vm_drivers", "_nx_has_vm_fs", "_nx_has_vm_net",
+                   "_nx_has_vm_services", "_nx_has_steal_time",
+                   "_nx_has_sysvirt", "_nx_has_hw_constraints",
+                   "_nx_has_clock_bias"):
+        ns[_probe] = (lambda *_a, **_k: False)
     pct = ns["vm_score_percent"]()
     assert 0.0 <= pct <= 100.0
     result = ns["vm_check"]()
