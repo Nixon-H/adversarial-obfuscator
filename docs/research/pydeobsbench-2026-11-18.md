@@ -386,8 +386,44 @@ it is weaker than a transform-count would suggest.
 Cause: the polymorphism comes from the C transform (opaque predicates,
 subset-sum blocks, MBA), which changes *which* instructions run but not the
 compiler's overall lowering of Cython's generated code. Changing the mix would
-require compiler diversity (gcc vs clang vs MSVC backends, §5-B), which is not
-available for all three platforms from this machine.
+require compiler diversity (gcc vs clang vs MSVC backends, §5-B).
+
+### §5-B follow-up: clang backend added, and it barely helps — with the reason
+
+clang 19.1.7 is installed here, so the backend was added
+(`NIXON_NATIVE_CC=gcc|clang`; otherwise the build alternates off the build id so
+successive releases differ; falls back loudly when one backend is absent). Both
+backends build the same target and produce **identical output**
+(`SEALED 8771940273853809a401795ec7699cdc`), so correctness is preserved.
+
+Measured on two full protected artefacts, one per backend:
+
+| metric | two gcc builds | gcc vs clang |
+|---|---|---|
+| instruction count | 32,988 / 29,303 | 33,201 / 32,898 |
+| opcode-distribution cosine | 0.9987 | **0.9869** |
+| trigram Jaccard | 0.6794 | **0.2772** |
+
+Trigram Jaccard more than halves — sequence arrangement genuinely diverges. The
+opcode cosine barely moves, and per-function analysis explains why:
+
+* **135** functions appear in both binaries;
+* the median function's cosine is **1.0000** — identical instruction mix;
+* almost all code is inside a single `PyInit_payload` symbol with **30,100**
+  instructions, cosine 0.986.
+
+Cython inlines the payload into one module-init function, so there is no
+per-function surface for the backends to differ on. The only functions that
+diverge at all are 2–3 instruction PLT stubs. On a small hand-written C probe
+the same two compilers gave cosine 0.9296 / Jaccard 0.1667 — the diversity is
+real, but Cython's code shape keeps the payload concentrated in one place.
+
+**What this means for the objective.** Compiler diversity is implemented and
+measurable, and it halves structural similarity. It does not move the opcode
+mix on this code shape, and no amount of adding MSVC or more flags would
+change that, because the limitation is Cython's single-symbol output, not the
+compiler choice. Moving the mix would require compiling the payload as
+separate translation units — a restructuring, not a backend flag.
 
 ---
 

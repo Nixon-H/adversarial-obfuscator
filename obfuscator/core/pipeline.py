@@ -1562,13 +1562,48 @@ def build_local_cython(source_content, target_python=None, ast_opts=None):
             "-Wl,-z,relro,-z,now",
             "-Wl,-z,noexecstack",
         ]
-        _gcc_argv = ["gcc", "-shared", "-O3", "-flto",
+        # §5-B COMPILER DIVERSITY.  The same flags, two backends. Measured
+        # 2026-11-18 on an identical source: gcc 51 instructions vs clang 68,
+        # opcode-distribution cosine 0.9296, trigram Jaccard 0.1667 -- versus
+        # 0.9987 / 0.679 for two gcc builds of the same target. So the backend
+        # is what moves the instruction MIX, which per-build polymorphism
+        # cannot. Selection: NIXON_NATIVE_CC=gcc|clang, else alternate per
+        # build so successive releases do not share a backend. Falls back to
+        # gcc when clang is absent, and the fallback is reported rather than
+        # silent, because "diversified" that silently resolves to one backend
+        # is worse than no claim at all.
+        _cc_pref = (os.environ.get("NIXON_NATIVE_CC", "") or "").strip().lower()
+        _cc_avail = [c for c in ("gcc", "clang") if shutil.which(c)]
+        if not _cc_avail:
+            print("    [!] no C compiler found (gcc/clang); native build cannot run")
+            return None, None
+        if _cc_pref in _cc_avail:
+            _cc = _cc_pref
+        elif _cc_pref:
+            print("    [!] NIXON_NATIVE_CC=%r unavailable; using %s"
+                  % (_cc_pref, _cc_avail[0]))
+            _cc = _cc_avail[0]
+        elif len(_cc_avail) > 1:
+            # Alternate deterministically off the build id so a rebuild of the
+            # same artefact is stable, but successive releases differ.
+            try:
+                import hashlib as _cc_h
+                _pick = int(_cc_h.sha256(
+                    str(ast_opts.get("build_id", "")).encode()).hexdigest(), 16)
+            except Exception:
+                _pick = 0
+            _cc = _cc_avail[_pick % len(_cc_avail)]
+        else:
+            _cc = _cc_avail[0]
+        print("    [+] Native backend: %s%s"
+              % (_cc, "" if len(_cc_avail) > 1 else " (the only one installed)"))
+        _gcc_argv = [_cc, "-shared", "-O3", "-flto",
                      "-fvisibility=hidden", "-std=c99"] + _hard_flags + [
                      "-I", __import__("sysconfig").get_paths()["include"],
                      "-I", ".", "-o", "payload_module.so", "payload.c"]
-        # Invoke gcc DIRECTLY so its diagnostics reach us.  The previous
-        # form ran gcc inside `python -c` + check_call, which printed a
-        # Python traceback and DISCARDED gcc's message -- the build then
+        # Invoke the compiler DIRECTLY so its diagnostics reach us.  The
+        # previous form ran gcc inside `python -c` + check_call, which printed
+        # a Python traceback and DISCARDED gcc's message -- the build then
         # degraded to "Native compilation failed, using Python mode" and
         # every benchmark would have been measuring the fallback.
         gcc_result = subprocess.run(_gcc_argv, cwd=build_dir,
@@ -1582,7 +1617,7 @@ def build_local_cython(source_content, target_python=None, ast_opts=None):
             # The mandatory ones (stack protector, RELRO, NX) stay.
             _core_flags = ["-fPIC", "-fstack-protector-strong",
                            "-Wl,-z,relro,-z,now", "-Wl,-z,noexecstack"]
-            _gcc_retry = ["gcc", "-shared", "-O3", "-flto",
+            _gcc_retry = [_cc, "-shared", "-O3", "-flto",
                           "-fvisibility=hidden", "-std=c99"] + _core_flags + [
                           "-I", __import__("sysconfig").get_paths()["include"],
                           "-I", ".", "-o", "payload_module.so", "payload.c"]
