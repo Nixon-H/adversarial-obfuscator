@@ -25,6 +25,7 @@ from .dynamic_probes import (
     probe_memory_maps, probe_runtime_output, probe_temp_files,
 )
 from .memory_probe import probe_memory_extraction
+from .timing_probe import time_to_recovery
 from .static_probes import (
     probe_elf_symbols, probe_native_blob, probe_payload_strings,
     probe_plaintext, probe_section_decrypt,
@@ -126,6 +127,7 @@ def score(target, probes):
     rt = probes.get("runtime_output", {})
     tmp = probes.get("temp_files", {})
     mem = probes.get("memory_extraction", {})
+    tm = probes.get("time_to_recovery", {})
 
     joined = pstr.get("joined_text", "") or ""
 
@@ -178,6 +180,16 @@ def score(target, probes):
             "ai_overlap": ai.get("algorithm_overlap"),
             "ai_overlap_basis": ai.get("overlap_basis"),
             "ai_overlap_note": ai.get("overlap_note", ""),
+            # §8 "time to successful recovery": seconds from artefact handoff
+            # to a CORRECT algorithm description. None means the model never
+            # got there inside the budget -- deliberately not a large number,
+            # because "not recovered" and "recovered slowly" are different
+            # results and a number would conflate them.
+            "time_to_recovery_s": (tm.get("time_to_recovery_s")
+                                   if tm else None),
+            "time_to_recovery_elapsed_s": (tm.get("elapsed_s")
+                                           if tm else None),
+            "time_to_recovery_measured": bool(tm.get("measured")) if tm else False,
             "ground_truth": target["algorithms"],
         },
         "patch_resistance": {
@@ -260,6 +272,8 @@ def run(targets, profile, do_ai, out_path):
             if do_ai:
                 print("  querying DS 4.1 Flash via Mistral...", flush=True)
                 probes["ai"] = probe_ai(tgt, text)
+                probes["time_to_recovery"] = time_to_recovery(
+                    tgt, text)
                 a = probes["ai"]
                 if a.get("measurement_failed"):
                     print("  AI MEASUREMENT FAILED:", a.get("error"), flush=True)

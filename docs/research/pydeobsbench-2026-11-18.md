@@ -491,6 +491,50 @@ the argument for the §5-B work (compiler diversity) that has not been done.
 
 ---
 
+## 5e-bis. Time to successful recovery (§8) — measured, and the answer is "never"
+
+The review's stated optimisation target was *"time to successful recovery —
+actual attacker effort"*. Every other metric in this harness is a rate; this is
+a cost, and it was the last named metric still unmeasured.
+
+**Definition, fixed before the run** so the number cannot be reinterpreted
+later: seconds from handing the artefact text to the model, to the model
+producing a **correct** algorithm description. "Correct" means at least two
+*distinctive* ground-truth markers — numeric constants (`0x7FEB352D`) or
+specific content words — with generic English and loader vocabulary excluded.
+The gate was sanity-checked first: the exact ground truth scores correct
+(13 hits), a loader-only description scores **not correct (0 hits)**. That
+second case is the false-positive class from §5 finding 18, so it is excluded
+by construction rather than by hope.
+
+| target | model | elapsed | time to recovery | verdict |
+|---|---|---|---|---|
+| algo (max profile) | DS 4.1 Flash via Mistral | **98.58 s** | **null** | 0/13 markers |
+| cipher (max profile) | DS 4.1 Flash via Mistral | **116.73 s** | **null** | 0/6 markers |
+
+`null` is deliberate, not a placeholder: it means *no correct description
+inside the budget*, which is a different result from "recovered slowly". A
+number here would conflate the two.
+
+**What the model produced instead.** Both runs returned a detailed, line-accurate
+description of the **loader** — identity gate, Merkle self-check, HMAC anchor —
+and nothing about the payload's algorithm. The `algo` target's actual content
+(xorshift-multiply finaliser, `0x7FEB352D`/`0x846CA68B`) appears nowhere in the
+answer.
+
+**What this establishes.** For this attacker model — a capable LLM given the
+artefact text, no execution — the recovery cost is not "high", it is
+**unbounded within a 7-minute budget**, on two independent targets. That is the
+strongest positive result this benchmark has produced, and it is also the
+narrowest: the model was never allowed to *run* the artefact, and a local
+attacker can (see §5b, where an executing process yielded its secrets).
+
+Cost of the measurement: ~3.6 minutes of model time for two targets. That is
+what makes it worth running on every release — it is the one metric whose unit
+is the attacker's minutes rather than the defender's gate count.
+
+---
+
 ## 5f. Can an environment variable rescue a modified artefact? Measured: no
 
 The review warns that "an environment variable is not a secure secret boundary
