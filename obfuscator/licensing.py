@@ -265,6 +265,8 @@ def verify(
     required_features: Iterable[str] = (),
     required_key_version: Optional[int] = None,
     replay_ledger=None,
+    key_policy=None,
+    revocation_list=None,
 ) -> Licence:
     """Verify a token or raise LicenceError saying exactly why.
 
@@ -277,9 +279,20 @@ def verify(
     identity was already presented inside the ledger's window is refused.
     Pass ``obfuscator.licence_replay.ReplayLedger()`` for the on-disk default.
 
-    Both are OPT-IN so existing callers keep their behaviour; the loader turns
-    them on. Neither is a server-side guarantee -- see licence_replay's
-    docstring for what a client-side ledger can and cannot do.
+    ``key_policy`` (§2 key rotation): a VERIFIED policy dict (as returned by
+    ``key_lifecycle.read_key_policy``) naming the current and minimum accepted
+    key generations. A token for a retired generation is refused even though
+    its signature still verifies -- the difference between "validly signed" and
+    "currently accepted".
+
+    ``revocation_list`` (§2 licence revocation): a VERIFIED list dict (from
+    ``read_revocation_list``). A token whose id or nonce appears is refused.
+    Pass ``revocation_issued_at`` via the policy's own issued_at to reject a
+    rolled-back list.
+
+    All four are OPT-IN so existing callers keep their behaviour; the loader
+    turns them on. None is a server-side guarantee -- see licence_replay and
+    key_lifecycle for what a client-side check can and cannot do.
     """
     try:
         doc = json.loads(token)
@@ -335,6 +348,21 @@ def verify(
         try:
             check_key_version(licence.key_version, required_key_version)
         except ValueError as exc:
+            raise LicenceError(str(exc)) from exc
+    # §2 key rotation: a signed-but-retired generation is not accepted.
+    if key_policy is not None:
+        from obfuscator.key_lifecycle import KeyPolicyError, check_generation
+        try:
+            check_generation(licence.key_version, key_policy)
+        except KeyPolicyError as exc:
+            raise LicenceError(str(exc)) from exc
+    # §2 licence revocation: checked before replay so a revoked token is
+    # reported as revoked rather than as a replay on its second attempt.
+    if revocation_list is not None:
+        from obfuscator.key_lifecycle import RevocationError, check_revoked
+        try:
+            check_revoked(payload, revocation_list)
+        except RevocationError as exc:
             raise LicenceError(str(exc)) from exc
     # §2 replay protection. Identity is the signed nonce, so two distinct
     # tokens never collide; a re-presented token does.
