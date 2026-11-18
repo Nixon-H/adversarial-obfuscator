@@ -3320,20 +3320,18 @@ def _nx_self_check():
     # The lines that hold the EXPECTED values are excluded from the
     # hash: a value cannot be part of what it describes.  They are
     # identified by the VALUES themselves, not by a marker string.
+    # Exclude by NAME for the CFI slot, not by value.
+    # Measured 2026-11-18: value-based exclusion cannot work, because the value
+    # changes at stamp time -- the build filter excludes the zeroed slot line,
+    # then stamping rewrites that line, so a value-based runtime filter no
+    # longer recognises it and the hashed content diverges from the build's.
+    # That desync made every shipped artefact die with a merkle mismatch.
+    # The build filter excludes the slot by its pre-stamp bytes and the runtime
+    # excludes it by its variable name; both identify the same physical line.
     filtered_lines = [l for l in lines
                       if _NX_SELF_CK.encode() not in l
                       and _NX_SELF_HM.encode() not in l
-                      # Only exclude the CFI line when it carries a REAL stamp.
-                      # Measured 2026-11-18: excluding it unconditionally
-                      # changed the hashed content for loaders where CFI is
-                      # absent (the generator fills it, but a caller that
-                      # predates the slot does not), so build and runtime
-                      # disagreed and six loader-execution tests failed. An
-                      # all-zero value must behave exactly as if the slot did
-                      # not exist.
-                      and (not _NX_CFI_SEQ
-                           or str(_NX_CFI_SEQ) == "0" * 64
-                           or _NX_CFI_SEQ.encode() not in l)
+                      and b"_NX_CFI_SEQ = " not in l
                       and (not _NX_SELF_TOK or _NX_SELF_TOK.encode() not in l)]
     content = b"".join(filtered_lines)
     chunks = [content[i:i+1024] for i in range(0, len(content), 1024)]
@@ -3855,7 +3853,7 @@ def _stamp_hybrid_selfcheck(src_text, hmac_secret_hex, token_hash=""):
     script_bytes = script_bytes.replace(hk_slot, b'_NX_SELF_HK = "' + real_hk + b'"', 1)
     lines_for_hash = []
     for line in script_bytes.splitlines(keepends=True):
-        if ck_slot in line or hm_slot in line or cfi_slot in line \
+        if ck_slot in line or hm_slot in line or b"_NX_CFI_SEQ = " in line \
                 or (tok and tok in line):
             continue
         lines_for_hash.append(line)
@@ -3890,9 +3888,10 @@ def _stamp_hybrid_selfcheck(src_text, hmac_secret_hex, token_hash=""):
             "hybrid self-check stamp failed: a slot pattern did not match "
             "the emitted loader (template drifted from the stamping code)")
     _cfi_b = _cfi.encode("utf-8")
+    # Mirror the RUNTIME filter exactly: exclude by variable name, not value.
     rt_keep = [l for l in out.splitlines(keepends=True)
                if root.encode("utf-8") not in l and hm.encode("utf-8") not in l
-               and _cfi_b not in l
+               and b"_NX_CFI_SEQ = " not in l
                and (not tok or tok not in l)]
     if b"".join(rt_keep) != content:
         raise RuntimeError(
