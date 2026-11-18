@@ -497,6 +497,51 @@ edits from one to several and removes the free pass; it does not make a
 client-side artefact tamper-proof. That boundary is the same one §4's memory
 finding runs into, and it is stated here rather than glossed.
 
+### 5d-bis. §1 control-flow integrity — implemented, and it catches deviations
+
+Content hashes and pack-structure checks both miss one thing: a change in
+**which code runs**. Replacing a check with `pass`, or jumping past it, leaves
+every hash intact.
+
+`obfuscator/cfi.py` adds a checkpoint chain. Three marks — `id` after the
+identity gate and self-check, `enter` at `_load_native`'s entry, `use`
+immediately before the payload executes — fold fixed tags into a digest seeded
+from the per-build HMAC key. The final value is compared against one stamped at
+build time, in its own slot excluded from the file hash.
+
+Measured on the real stamped values from a built artefact, with the hash
+anchors out of the picture so CFI is tested on its own:
+
+| deviation | result |
+|---|---|
+| in order | **accepted** |
+| one mark missing | rejected — `2 checkpoints, expected 3` |
+| two marks reordered | rejected — `chain mismatch` |
+| one mark duplicated | rejected — `4 checkpoints, expected 3` |
+| no marks | rejected — `chain not established` |
+| zeroed slot (unstamped) | rejected — fails **closed** |
+
+**Two silent-failure bugs found while building it**, both the same class this
+document keeps recording:
+
+1. The schema constant was substituted *without quotes*, producing a
+   `NameError` inside `_nx_cfi_mark` that its broad `except` swallowed. Every
+   mark was a no-op and every chain unmatchable — the gate looked installed and
+   did nothing. Caught only because the test asserts the in-order case
+   **accepts**; a test that only checked rejections would have passed.
+2. The first wiring emitted `_nx_cfi_mark(...)` calls while defining the
+   helpers only in the self-check branch, so a build with the self-check
+   disarmed would have `NameError`'d. The definition now rides with the call
+   block and its absence raises at *build* time.
+
+**Honest limit, recorded in the module and the tests.** An attacker who reads
+the file sees the tags and the expected digest, so a forged chain that skips
+real work still matches. This raises the number of coordinated edits from one
+to several and catches naive removal; it is not a wall. On a full artefact
+these edits are *also* caught by the Merkle anchor — CFI's independent value is
+that it still fires when the anchor is patched away, which is exactly what the
+isolated test demonstrates.
+
 ---
 
 ## 5e. Cross-build correlation (§8) — measured
