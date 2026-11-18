@@ -24,6 +24,7 @@ from .ai_probe import probe_ai
 from .dynamic_probes import (
     probe_memory_maps, probe_runtime_output, probe_temp_files,
 )
+from .memory_probe import probe_memory_extraction
 from .static_probes import (
     probe_elf_symbols, probe_native_blob, probe_payload_strings,
     probe_plaintext, probe_section_decrypt,
@@ -124,6 +125,7 @@ def score(target, probes):
     nblob = probes.get("native_blob", {})
     rt = probes.get("runtime_output", {})
     tmp = probes.get("temp_files", {})
+    mem = probes.get("memory_extraction", {})
 
     joined = pstr.get("joined_text", "") or ""
 
@@ -197,6 +199,18 @@ def score(target, probes):
                 "symtab": nblob.get("symtab_present"),
                 "comment": nblob.get("comment_present"),
             },
+            # Runtime memory: measured on the LIVE process, not the artefact.
+            # `samples` travels with the result because a 1-sample reading is
+            # weak evidence and must not be mistaken for a clean sweep.
+            "memory_extraction": {
+                "measured": bool(mem.get("ran")) and not mem.get("error"),
+                "samples": mem.get("samples", 0),
+                "secrets_recovered": mem.get("secrets_recovered", 0),
+                "names_recovered": mem.get("names_recovered", 0),
+                "secrets_hit": mem.get("secrets_hit", []),
+                "names_hit": mem.get("names_hit", []),
+                "error": mem.get("error"),
+            },
         },
     }
 
@@ -238,6 +252,10 @@ def run(targets, profile, do_ai, out_path):
                 "runtime_output": probe_runtime_output(art),
                 "temp_files": probe_temp_files(art),
                 "memory_maps": probe_memory_maps(art),
+                # The only measurement that tests the review's actual claim:
+                # an attacker who EXECUTES the artefact and dumps its memory.
+                # Everything else in this harness is static.
+                "memory_extraction": probe_memory_extraction(art, tgt),
             }
             if do_ai:
                 print("  querying DS 4.1 Flash via Mistral...", flush=True)
