@@ -788,7 +788,7 @@ def _verify_download_zip(zip_path, artifact_name, sign_key):
 #: builds. ``native_harden`` (added for §3 header verification) would have
 #: failed the same way. ``farm_driver_dependencies`` resolves each one to a path
 #: so the upload sites cannot forget.
-FARM_DRIVER_MODULES = ("c_transform", "native_harden")
+FARM_DRIVER_MODULES = ("c_transform", "native_harden", "authenticode")
 
 #: DATA files the driver needs on the runner, as (remote_name, repo-relative
 #: path or None when platform-specific). Kept separate from the module list
@@ -1228,6 +1228,32 @@ try:
             _blob = _n
             break
     if _blob:
+        # AUTHENTICODE (§3). Signing is gated on an operator-supplied
+        # certificate, read from the environment -- never embedded. With a
+        # certificate the PE gains a real WIN_CERTIFICATE and
+        # verify_pe_bytes reports authenticode: True; without one the artefact
+        # is reported unsigned rather than pretending.
+        try:
+            import authenticode as _nac
+            _creds = _nac.credentials_from_env()
+            if _creds:
+                _before = open(_blob, "rb").read()
+                if _before[:2] == bytes((0x4d, 0x5a)):
+                    _after = _nac.sign_pe(
+                        _before, _creds["cert"], _creds["key"],
+                        _creds.get("password"))
+                    with open(_blob, "wb") as _sf:
+                        _sf.write(_after)
+                    print("authenticode: signed", _blob,
+                          "(%d -> %d bytes)" % (len(_before), len(_after)))
+                else:
+                    print("authenticode: skipped (not a PE)")
+            else:
+                print("authenticode: no certificate in the environment "
+                      "(NIXON_AUTHENTICODE_CERT / _KEY); artefact is unsigned")
+        except Exception as _ac_exc:
+            print("authenticode: FAILED:", str(_ac_exc)[:200])
+            raise
         _raw = open(_blob, "rb").read()
         if _raw[:4] == bytes((0x7f, 0x45, 0x4c, 0x46)):      # ELF
             _rep = _nh.elf_note()

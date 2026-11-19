@@ -202,21 +202,54 @@ absent.
 
 ### 2. Authenticode
 
-**State: NOT POSSIBLE HERE.** `signtool` exists but is the NSS build and fails
-with `SEC_ERROR_BAD_DATABASE`; there is no certificate store on a POSIX host.
+**State: IMPLEMENTED, gated on an operator-supplied certificate.**
 
-A self-signed certificate *can* be generated (OpenSSL 3.5 and `cryptography`'s
-PKCS#7 builder are present). It is deliberately not used: Windows does not trust
-a self-signed Authenticode signature, so the artefact would carry a signature
-that verifies to anyone who checks only the format and to no OS that enforces
-it. That is the "looks protected, enforces nothing" failure this project has had
-to retract four times, and producing it would be a fifth.
+The earlier entry said "not possible here", which was correct about the
+CERTIFICATE and wrong to leave the MECHANISM unimplemented. That distinction is
+now closed: `obfuscator/authenticode.py` produces a real Authenticode signature,
+and the farm driver applies it when the operator supplies credentials.
 
-**Missing capability:** a CA-issued code-signing certificate and a working
-Authenticode tool (`osslsigncode`, or `signtool` on Windows).
-**Verification that would follow:** `native_harden.verify_pe_bytes` reports
-`authenticode: True` (security directory non-empty), plus an out-of-band
-`signtool verify /pa` on Windows.
+    NIXON_AUTHENTICODE_CERT   path to a PEM/DER certificate (+ chain)
+    NIXON_AUTHENTICODE_KEY    path to the matching private key
+    NIXON_AUTHENTICODE_PASS   optional passphrase
+
+With those set, the Windows runner signs `payload.pyd` before the attestation is
+written, and `native_harden.verify_pe_bytes` reports `authenticode: True` from
+the resulting security directory. Without them the artefact is reported
+unsigned — never "signed" on the strength of a flag.
+
+What was measured on this host, 2026-11-19, against a real PE:
+
+| property | result |
+|---|---|
+| digest identical before and after signing | **yes** — the property that makes a signature verifiable |
+| security directory populated | 1360 bytes at the appended offset |
+| WIN_CERTIFICATE header | `dwLength=0x550, wRevision=0x0200, wType=0x0002` |
+| PKCS#7 payload parses | yes, carrying the signer's certificate |
+| 8-byte alignment | 6 bytes of zero padding, as the spec requires |
+
+Two defects were found by the digest-identity assertion, and both would have
+produced a signature no verifier accepts:
+
+* writing `SizeOfImage` during signing — it is **not** one of the three excluded
+  regions (checksum, security directory entry, certificate table), so changing
+  it invalidated the digest;
+* **zeroing** the certificate table instead of **skipping** it — the table is
+  appended past the original EOF, so hashing its zeroed length added 1360 bytes
+  the original image never had.
+
+**What remains the operator's:** a certificate Windows will trust. A self-signed
+one is still deliberately not used — it would verify to anyone checking only the
+format and to no OS that enforces it, which is the "looks protected, enforces
+nothing" failure this project has already had to retract four times. The
+mechanism is ready; the supply chain is not something a build tool can supply.
+
+**Also not implemented, and stated rather than implied:** RFC 3161 timestamping.
+An un-timestamped signature stops validating when the certificate expires. That
+is an out-of-band step for the operator.
+
+**Verification that would follow a real certificate:** `signtool verify /pa` on
+Windows, plus the `authenticode: True` this module already reports.
 
 ### 3. macOS Hardened Runtime, code signing, library validation
 
