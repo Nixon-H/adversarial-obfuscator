@@ -220,6 +220,41 @@ def measure_overhead(source_path, artefact_path, runs=5, warmup=1, timeout=180):
     return result
 
 
+def _semantic_block(target_name, target):
+    """§8 semantic reconstruction: behaviour compared, source kept separate.
+
+    `equivalent_output` is what the independently written implementation in
+    ``pydeobsbench/equivalents.py`` prints; `target_output` is the ORIGINAL's
+    recorded stdout. Equality between them is the semantic result.
+
+    `source_overlap` is the Jaccard similarity of top-level identifiers between
+    the original and the equivalent. It is reported BESIDE the semantic result
+    because the two together are the finding: behaviour reproduced with zero
+    shared naming means semantic recovery is genuinely measurable here, and a
+    high overlap would mean the comparison was really textual.
+
+    Nothing here is inferred. If no equivalent exists, `coverage` says so and
+    `equivalent_matches_target` is None -- not False, because "unmeasured" and
+    "measured and different" are different results and a boolean would conflate
+    them.
+    """
+    try:
+        from . import equivalents as eq
+    except Exception as exc:                       # pragma: no cover - defensive
+        return {"error": str(exc)[:160], "equivalent_matches_target": None}
+    observed = eq.observe(target_name)
+    expected = eq.EXPECTED_OUTPUT.get(target_name)
+    return {
+        "equivalent_output": observed,
+        "target_output": expected,
+        "equivalent_matches_target": (None if observed is None or expected is None
+                                      else observed == expected),
+        "source_overlap": eq.source_overlap(target.get("source") or "",
+                                            eq.equivalent_source()),
+        "coverage": eq.COVERAGE.get(target_name, "none"),
+    }
+
+
 def score(target, probes):
     """Turn probe results into the metrics the reviewer listed."""
     plain = probes.get("plaintext", {})
@@ -296,6 +331,13 @@ def score(target, probes):
                                            if tm else None),
             "time_to_recovery_measured": bool(tm.get("measured")) if tm else False,
             "ground_truth": target["algorithms"],
+            # §8 semantic reconstruction, made measurable. The review asks for
+            # semantic recovery as DISTINCT from source recovery, and that
+            # distinction needs an artifact written from the SPEC rather than
+            # from the original source: pydeobsbench/equivalents.py. Reported
+            # here rather than only in the test suite so the report shows the
+            # comparison the score is based on.
+            "semantic": _semantic_block(name, target),
         },
         "patch_resistance": {
             "section_pack_derivable": sec.get("derived", False),

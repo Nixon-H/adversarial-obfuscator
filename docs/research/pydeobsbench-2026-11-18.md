@@ -824,6 +824,102 @@ Both modules: 41 tests, all built around refusals.
 
 ---
 
+## 5i. §8 semantic reconstruction — the last unmeasured metric, now measured
+
+Every earlier section measured SOURCE recovery: strings, names, algorithm
+overlap. The review asks for **semantic** reconstruction as a separate thing,
+and until now nothing in the harness could tell them apart. Any comparison ran
+against the original, so a perfect behavioural copy written in a different style
+scored as a failure and a verbatim copy of the comments scored as a success.
+
+`pydeobsbench/equivalents.py` closes that. Each target's `algorithms` spec
+string was reimplemented from the SPEC, not from the source, and each
+implementation deliberately uses different naming and control flow:
+
+| target | equivalent | target output | match | identifier Jaccard |
+|---|---|---|---|---|
+| tiny | `tiny_sign()` | `TINY 9e8b029a65070dbd` | **yes** | 0.00 |
+| inventory | `inventory_reconcile()` + `inventory_audit_signature()` | `AUDIT 19487c7b06691c76` | **yes** | 0.00 |
+| algo | `_avalanche()` / `_rotate_left()` / `algo_derive()` | `DERIVE 3249269004` | **yes** | 0.00 |
+| cipher | `_stream()` / `cipher_seal()` | `SEALED 8771940273853809a401795ec7699cdc` | **yes** | 0.00 |
+
+The two columns matter together. **Behaviour reproduced exactly, identifiers
+shared not at all** — that is semantic equivalence established independently of
+text, and it is the only form in which the claim means anything. The overlap is
+part of the score block (`algorithm_recovery.semantic.source_overlap`) so the
+report cannot show the match without also showing that the comparison was not
+textual.
+
+What this establishes and what it does not:
+
+* **Establishes** that all four ground-truth specs determine their target's
+  observable behaviour. If a spec had been vague or incomplete, an independent
+  implementation could not have reproduced the output, and the finding would
+  have been in the benchmark's ground truth rather than in the protection.
+* **Does not establish** that a *recovered* implementation would match. The
+  equivalent is written by someone with the spec in hand; the attacker has only
+  the artefact. Semantic reconstruction of the shipped artefact remains
+  unmeasured for the same reason §5e-bis records: the model recovered no
+  algorithm to compare.
+
+The `equivalent_matches_target` field is `None` when no equivalent exists rather
+than `False`, because "unmeasured" and "measured and different" are different
+results and a boolean would collapse them.
+
+---
+
+## 5j. §2 authenticated encryption — what was already there, and what was added
+
+The review asks for *"authenticated encryption using AES-256-GCM or
+ChaCha20-Poly1305"*. Checking before adding anything turned up two different
+answers depending on which path is meant, and the distinction matters.
+
+**In the shipped artefact path: authentication was already present.** The
+section pack (`obfuscator/section_split.py`) seals each section under its own
+derived key and prefixes an **HMAC-SHA256 tag over the plaintext**, verified with
+`hmac.compare_digest` before the bytes are used (`section_split.py:122`,
+`:175`). That is encrypt-then-MAC with per-section keys — the property the
+requirement names, achieved without a dependency the stdlib-only loader cannot
+import. What was missing was not authentication; it was a *record* that this is
+what the artefact does, and a GCM primitive for callers outside the artefact.
+
+**What was genuinely absent: an AEAD primitive.** `encrypt_payload` offered
+AES-**CTR** (confidential, unauthenticated) or the XOR stream, and nothing else.
+It was reachable only through `use_aes_ctr=True`, which no artefact path uses —
+the artefact deliberately forces the XOR/CTR stream because the loader must stay
+stdlib-only. So the module had no way to seal data with a checked tag in any
+context that could afford the dependency.
+
+Added `seal_aead` / `open_aead` (`pipeline.py`), AES-256-GCM with two design
+decisions that are the whole point:
+
+| property | why |
+|---|---|
+| the nonce is stored **inside** the envelope | GCM nonce reuse leaks the authentication key, so the public API must have no caller-supplied nonce to reuse. `nonce=` exists only for seeded reproducible builds. |
+| AAD binds context | a ciphertext sealed for `section-3` does not open as `section-4`; verified by test. |
+| the AEAD key uses its own KDF label | the GCM key and the CTR/XOR stream key are different values from the same build secret, which is the "cryptographic separation between build-time and runtime secrets" the review asks for. |
+| every failure is `ValueError` | `cryptography` raises `InvalidTag` (not a `ValueError`) while pycryptodome raises `ValueError`; a caller catching the documented type would otherwise silently miss one backend's tamper signal. |
+
+Measured on this host (CPython 3.13, `cryptography` backend):
+
+| case | result |
+|---|---|
+| round trip | plaintext recovered exactly |
+| ciphertext bit flipped | **rejected** |
+| nonce bit flipped | **rejected** |
+| tag truncated | **rejected** |
+| wrong key | **rejected** |
+| wrong AAD / AAD missing / AAD added | **rejected** |
+| 50 consecutive seals | 50 distinct nonces; identical plaintexts produce different ciphertexts |
+
+**Honest limit.** This primitive is not on the artefact's load path — the loader
+is stdlib-only by design, and moving it to GCM would mean shipping a crypto
+dependency into every artefact. The artefact's authentication remains the
+per-section HMAC described above. `seal_aead` is for tooling (licence envelopes,
+dispersal, update manifests) where `cryptography` is available at build time.
+
+---
+
 
 ## 6. Honest limits of this benchmark
 
