@@ -163,8 +163,25 @@ _nx_prov_sig_s = bool(globals().get({sig!r}, ""))
 _nx_prov_ok = True   # unset until verified; `del` below needs a binding
 if _nx_prov_pk_s and _nx_prov_sig_s:
     try:
+        # The build may prefix the key with a fingerprint of itself:
+        # `_NX_PROV_PK = "<sha256[:16]>: <base64>"`. A re-signed artefact
+        # carries a DIFFERENT key, so the fingerprint no longer matches the
+        # one the build computed over ITS key -- and the fingerprint constant
+        # is a fourth coordinated edit the attacker must also make. Parse
+        # defensively: an unprefixed slot is a plain key.
+        _nx_prov_pk_raw = {pk}
+        _nx_prov_sep = _nx_prov_pk_raw.find(": ")
+        _nx_prov_pk_b = _nx_prov_b64.b64decode(
+            _nx_prov_pk_raw[_nx_prov_sep + 2:] if _nx_prov_sep == 16
+            else _nx_prov_pk_raw)
+        if _nx_prov_sep == 16:
+            import hashlib as _nx_prov_h
+            if (_nx_prov_h.sha256(_nx_prov_pk_b).hexdigest()[:16]
+                    != _nx_prov_pk_raw[:_nx_prov_sep]):
+                {fail}("provenance: key fingerprint does not match its own "
+                       "prefix (artefact re-signed with a different key)")
         _nx_prov_ok = _nx_prov_verify(
-            _nx_prov_b64.b64decode({pk}),
+            _nx_prov_pk_b,
             _nx_prov_b64.b64decode({sig}),
             _nx_prov_msg())
     except Exception:

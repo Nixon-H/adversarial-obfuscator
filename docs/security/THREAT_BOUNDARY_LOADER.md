@@ -310,3 +310,74 @@ certificate; a macOS runner has `codesign`). Their attestation records
 than assumed — which is the same arrangement §7.9 uses for runner integrity.
 
 
+
+---
+
+## §9 audit (2026-11-19): three "never verified" items audited, two wired
+
+The review's §9 names function-level virtualisation, instruction-set
+diversification and crash-forensics protection as items to "still consider
+adding". The audit found all three ALREADY IMPLEMENTED — and two of them
+unreachable in every real build, which is the same "tested but unreachable"
+defect the crash-suppress header had.
+
+### 1. Function-level virtualisation — EXISTED, WAS UNREACHABLE, NOW REACHABLE
+
+`obfuscator/vm_dispatch.py` (756 lines) compiles eligible Python functions to a
+per-seed stack VM with TWO dispatcher families (VM-A switch chain, VM-B threaded
+handler table), opcode numbering shuffled per seed. 12 tests cover correctness
+(fib/gcd/factorial through the VM), range/edge cases, and per-seed variety.
+
+**Audit finding: nothing set `options['vm_dispatch']`** — the only reference
+was `sources.py`'s gate, and the sole setter was the transfer-experiment
+harness. So the VM never ran in any real build; it was reachable only by
+writing an experiment script by hand.
+
+**Fixed:** `NIXON_VM_DISPATCH=a|b|alternate` reaches the native path's option
+dict (pipeline.py), fails closed on an unknown value, and stays off by default
+because the allowlist only virtualises simple numeric functions — an operator
+enables it per artefact rather than the build silently transforming everything.
+
+### 2. Instruction-set diversification — WIRED, and layered three ways
+
+`scripts/phases/phase_state_isa.py` was already called from `build.py`
+(state-dependent opcode configuration for the emitted VM). Added to it:
+
+  * VM-A vs VM-B dispatcher family per build (`--vm-dispatch alternate`);
+  * per-seed opcode renumbering inside each family;
+  * §5's compiler diversity (gcc / clang / MSVC ABI) at the native level.
+
+Three independent layers, each measured: VM opcode map differs per seed
+(`test_encoding_differs_per_seed`), dispatcher family differs per build
+(`test_determinism_and_variety`), and native instruction mix differs per
+backend (§5-B: trigram Jaccard 0.277).
+
+### 3. Crash-forensics protection — EXISTED, WAS UNLINKED, NOW WIRED
+
+`native/crash_suppress.h` suppresses the Windows crash dialog / abort prompt
+(`SetErrorMode`, `_set_abort_behavior`) and routes POSIX fatal signals
+(SIGABRT/SIGSEGV/SIGILL/SIGFPE/SIGBUS) to a silent `_exit(137)` — matching the
+kill ladder's code. 27 tests covered the header.
+
+**Audit finding: no native source included it.** The header was compiled by
+nothing, so every native hard failure raised an OS dialog handing the analyst
+a register state and backtrace — the exact leak §4's core-dump policy exists to
+prevent.
+
+**Fixed:** `native/core.cpp` includes the header and calls
+`nixon_suppress_crash_dialogs()` at `CompileToMarshal`, the entry the loader
+actually calls. Verified: compiles clean with `-DCORE_HAVE_PYTHON_H`
+(126 KB object). `tests/test_crash_suppression.py` (27 tests) already covered
+the handler semantics.
+
+### Honest scope of all three
+
+None of the three hides the WRAPPER (see the loader boundary above). The VM
+hides payload *function bodies* behind a bytecode interpreter — the recovered
+loader description in §5l did not include any VM internals because the VM only
+runs on opted-in functions. Crash suppression prevents *forensic leakage* from
+native failures; it does not stop an attacker from setting their own handlers
+after load. ISA diversification raises disassembly cost; it does not make
+static analysis impossible. All three are measured contributions to analyst
+cost, and all three are recorded here with their limits rather than as
+unqualified wins.

@@ -4550,9 +4550,25 @@ def build_project(args):
                 'obf_calls': True,
                 'exception_flow': True,
                 'residue_random': True,
+                # §9 FUNCTION-LEVEL VIRTUALISATION (audit 2026-11-19). The VM
+                # transformer existed, was tested (12 tests), and was wired in
+                # sources.py — but NO caller ever set options['vm_dispatch'],
+                # so it was unreachable in every real build. Gated on
+                # NIXON_VM_DISPATCH because the conservative allowlist only
+                # virtualises simple numeric functions: an operator turns it
+                # on per artefact, and 'alternate' picks the dispatcher family
+                # from the build id so successive releases do not share one.
+                # An unknown value fails closed below rather than silently
+                # shipping an unvirtualised blob.
+                'vm_dispatch': (str(os.environ.get('NIXON_VM_DISPATCH', '')).strip().lower()
+                                or None),
                 'hwid': str(getattr(args, 'hwid', '') or ''),
                 'trial_seconds': None,
             }
+            if _native_ast_opts.get('vm_dispatch') not in (None, 'a', 'b', 'alternate'):
+                raise SystemExit(
+                    "NIXON_VM_DISPATCH=%r is not one of a|b|alternate; "
+                    "refusing to guess" % (_native_ast_opts['vm_dispatch'],))
             blob_data, blob_name = build_local_cython(
                 open(source, 'r').read(), target_python=target_py,
                 ast_opts=_native_ast_opts)
@@ -5420,9 +5436,36 @@ def _VERIFY_INTEGRITY():
                 if _prov_key_hex:
                     try:
                         from obfuscator.attestation import stamp_artefact
-                        from obfuscator.licensing import private_key_from_hex
-                        _candidate = stamp_artefact(
-                            _candidate, private_key_from_hex(_prov_key_hex))
+                        from obfuscator.licensing import (
+                            private_key_from_hex, public_key_hex)
+                        _prov_priv = private_key_from_hex(_prov_key_hex)
+                        _candidate = stamp_artefact(_candidate, _prov_priv)
+                        # KEY FINGERPRINT (double-stamp fix, 2026-11-19). The
+                        # measured attack re-signed the artefact with the
+                        # attacker's own key and recomputed BOTH anchors, and
+                        # the check passed because it verified the file against
+                        # itself. Embedding a fingerprint of the EXPECTED
+                        # public key adds a fourth coordinated edit: re-signing
+                        # with a different key changes the embedded key, the
+                        # fingerprint check catches it, and the attacker must
+                        # ALSO rewrite the fingerprint constant. That is cost
+                        #-raising, not a closure — the boundary document says
+                        # so — but it turns a two-line edit into a four-point
+                        # coordinated one and makes a missed step detectable.
+                        import hashlib as _prov_h
+                        from cryptography.hazmat.primitives import (
+                            serialization as _prov_ser)
+                        # Hash the RAW key bytes: the loader hashes
+                        # base64-decoded bytes, so hashing the hex STRING here
+                        # would produce a fingerprint it could never reproduce
+                        # (measured: fingerprint match False on first test).
+                        _pk_raw = _prov_priv.public_key().public_bytes(
+                            encoding=_prov_ser.Encoding.Raw,
+                            format=_prov_ser.PublicFormat.Raw)
+                        _pk_fp = _prov_h.sha256(_pk_raw).hexdigest()[:16]
+                        _candidate = _candidate.replace(
+                            '_NX_PROV_PK = "', '_NX_PROV_PK = "'
+                            + _pk_fp + ':', 1)
                         UI.item("Provenance", "artefact signed",
                                 "VERIFIABLE AT LOAD")
                     except Exception as _prov_exc:
