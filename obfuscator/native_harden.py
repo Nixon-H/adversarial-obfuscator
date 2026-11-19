@@ -70,6 +70,53 @@ MH_ALLOW_STACK_EXECUTION = 0x00020000
 CS_RESTRICT = 0x00000800
 CS_RUNTIME = 0x00010000
 
+#: IMAGE_LOAD_CONFIG_DIRECTORY64 GuardFlags bits that decide whether CFG is a
+#: real control or a declaration. Measured 2026-11-19 (lld-link 19, real object
+#: with a supplied `_load_config_used`): GuardFlags came out 0x100 — instrumented
+#: but with NO function table, so indirect calls cannot be validated.
+PE_GUARD_CF_INSTRUMENTED = 0x00000100
+PE_GUARD_CFW_INSTRUMENTED = 0x00000200
+PE_GUARD_CF_FUNCTION_TABLE_PRESENT = 0x00000400
+
+#: Offset of GuardFlags inside IMAGE_LOAD_CONFIG_DIRECTORY64, computed from the
+#: field layout rather than assumed: the naive 0x70 this module first used is
+#: the CFCheckFunctionPointer, so it read zero and would have reported every
+#: object's GuardFlags as 0. Verified against the windows-sys binding layout.
+LOAD_CONFIG_GUARD_FLAGS_OFFSET = 0x90
+
+
+def _read_guard_flags(data, num_sections, section_table, lc_va, lc_size):
+    """GuardFlags from the load config, or 0 when it cannot be located.
+
+    The data directory stores an RVA, so it must be translated through the
+    section table before reading. Returning 0 on any failure is deliberate: an
+    unreadable table is reported as "no guard flags", never as a pass.
+
+    ``section_table`` is passed in rather than derived here: the first version
+    re-derived it as ``opt - 16 + 2``, which reads the wrong offset and produced
+    a garbage GuardFlags (0xE020B) that looked plausible.
+    """
+    if lc_size < LOAD_CONFIG_GUARD_FLAGS_OFFSET + 4:
+        return 0
+    try:
+        for index in range(min(num_sections, 96)):
+            entry = section_table + index * 40
+            # Section header layout: name(8) vsize(4) vaddr(4) rawsize(4)
+            # rawptr(4). So +8 gives (vsize, vaddr) and +16 gives
+            # (raw_size, raw_ptr). Reading +20 returns (raw_ptr, 0) and made
+            # every lookup land at file offset 0 — measured, and it produced a
+            # garbage GuardFlags (0xE020B) that looked plausible enough to
+            # nearly be reported as fact.
+            vsize, vaddr = struct.unpack_from("<II", data, entry + 8)
+            raw_size, raw_ptr = struct.unpack_from("<II", data, entry + 16)
+            if vaddr <= lc_va < vaddr + max(vsize, raw_size):
+                file_offset = raw_ptr + (lc_va - vaddr)
+                return struct.unpack_from(
+                    "<I", data, file_offset + LOAD_CONFIG_GUARD_FLAGS_OFFSET)[0]
+    except (struct.error, IndexError):
+        return 0
+    return 0
+
 #: The flags the drivers pass, per platform, for the record and for tests.
 #:
 #: These are NOT interchangeable with the mingw spellings, and getting this
@@ -130,10 +177,26 @@ def verify_pe_bytes(data):
     ``OptionalHeader.DllCharacteristics``. Returns a dict of booleans plus the
     raw value, and ``valid: False`` when the bytes are not a PE at all -- an
     unparseable object must never read as "hardened".
+
+    **CFG needs more than its flag bit.** Measured 2026-11-19 on lld-link 19
+    with ``-guard:cf``: the linker sets ``DllCharacteristics`` bit 0x4000 and
+    prints
+
+        warning: Control Flow Guard is enabled but '_load_config_used' is
+        missing
+
+    and the resulting object has an EMPTY load-config data directory, so no
+    guard function table, no guard flags, nothing for the loader to enforce.
+    The bit alone is a declaration. ``cfg_data`` therefore reports whether the
+    load-config directory actually carries a payload, and ``check`` treats a
+    declared-but-empty CFG as NOT satisfied. A verifier that accepted the bit
+    would be reporting exactly the kind of reassurance this project keeps
+    having to retract.
     """
     out = {"kind": "pe", "valid": False, "dll_characteristics": None,
            "aslr": False, "high_entropy_va": False, "dep": False,
-           "cfg": False, "authenticode": False, "debug_directory": False}
+           "cfg": False, "cfg_data": False, "authenticode": False,
+           "debug_directory": False, "load_config_size": 0}
     if not data or data[:2] != b"MZ":
         return out
     try:
@@ -164,7 +227,8 @@ def verify_pe_bytes(data):
             "dep": bool(dll & PE_NX_COMPAT),
             "cfg": bool(dll & PE_GUARD_CF),
         })
-        # Security directory (index 4) = Authenticode; debug directory = 6.
+        # Security directory (index 4) = Authenticode; debug directory = 6;
+        # load config = 10 (the one that makes CFG real).
         num_dirs = struct.unpack_from("<I", data, num_dirs_off)[0]
         if num_dirs > 4:
             sec_size = struct.unpack_from("<I", data, dirs_off + 4 * 8 + 4)[0]
@@ -172,12 +236,35 @@ def verify_pe_bytes(data):
         if num_dirs > 6:
             dbg_size = struct.unpack_from("<I", data, dirs_off + 6 * 8 + 4)[0]
             out["debug_directory"] = dbg_size > 0
+        if num_dirs > 10:
+            lc_va, lc_size = struct.unpack_from("<II", data,
+                                                dirs_off + 10 * 8)
+            out["load_config_size"] = lc_size
+            # CFG metadata lives in the load config; an empty directory means
+            # the flag is a declaration with nothing behind it.
+            out["cfg_data"] = lc_size > 0
+            if lc_size > 0:
+                # Read GuardFlags from the load config itself. Being present is
+                # NOT the same as being effective: measured 2026-11-19 on
+                # lld-link 19 with a supplied `_load_config_used`, the table is
+                # emitted with GuardFlags = 0x100 (IMAGE_GUARD_CF_INSTRUMENTED)
+                # and no CF_FUNCTION_TABLE_PRESENT bit — CFG checks were
+                # compiled in, but there is no function table for the loader to
+                # validate indirect calls against. That is a weaker state than
+                # full CFG, and reporting only "cfg_data present" would hide it.
+                out["cfg_guard_flags"] = _read_guard_flags(
+                    data, num_sections, opt + opt_size, lc_va, lc_size)
+                flags = out["cfg_guard_flags"]
+                out["cfg_instrumented"] = bool(flags & PE_GUARD_CF_INSTRUMENTED)
+                out["cfg_function_table"] = bool(
+                    flags & PE_GUARD_CF_FUNCTION_TABLE_PRESENT)
         out["sections"] = num_sections
         out["opt_size"] = opt_size
     except (struct.error, IndexError):
         return {"kind": "pe", "valid": False, "dll_characteristics": None,
                 "aslr": False, "high_entropy_va": False, "dep": False,
-                "cfg": False, "authenticode": False, "debug_directory": False}
+                "cfg": False, "cfg_data": False, "authenticode": False,
+                "debug_directory": False, "load_config_size": 0}
     return out
 
 
@@ -308,6 +395,73 @@ TOOLCHAIN_UNAVAILABLE = {
 }
 
 
+def signing_readiness(platform_name):
+    """Can this HOST produce a *trusted* signature for the artefact?
+
+    The review asks for Authenticode on Windows and Hardened Runtime / code
+    signing on macOS. Both are properties of a SIGNATURE, not of a compiler
+    flag, and a signature is only worth anything if the platform trusts its
+    issuer.
+
+    Measured on this host 2026-11-19:
+
+      * Linux: no ``codesign``, no ``rcodesign``, no ``ldid``, no
+        ``osslsigncode``. ``signtool`` exists but is the NSS build and fails
+        with ``SEC_ERROR_BAD_DATABASE``. There is no Windows certificate store.
+      * A self-signed certificate CAN be generated here (OpenSSL 3.5 is
+        present) and PKCS#7 signing is available via ``cryptography``. But a
+        self-signed Authenticode signature is not trusted by Windows and a
+        self-signed Mach-O signature is not accepted by Gatekeeper, so
+        producing one would make the artefact *look* signed while changing
+        nothing an attacker or the OS cares about.
+
+    This function returns what is actually possible, so the build reports the
+    truth instead of either claiming a signature it does not have or silently
+    skipping one it was asked for. It is a capability probe, not a policy
+    decision: an operator with a real certificate and a real signing tool can
+    sign out of band, and this module will verify the result from the bytes.
+
+    Returns ``{"platform", "signing_tool", "trusted_issuer_possible",
+    "reason"}``.
+    """
+    import shutil as _shutil
+
+    canonical = canonical_platform(platform_name)
+    out = {"platform": canonical, "signing_tool": None,
+           "trusted_issuer_possible": False, "reason": ""}
+    if canonical == "windows":
+        # osslsigncode and a working signtool are the two ways to produce an
+        # Authenticode signature on a non-Windows host.
+        if _shutil.which("osslsigncode"):
+            out["signing_tool"] = "osslsigncode"
+            out["trusted_issuer_possible"] = True
+            out["reason"] = ("osslsigncode present; supply a CA-issued "
+                             "certificate to sign")
+        elif _shutil.which("signtool"):
+            out["signing_tool"] = "signtool"
+            out["reason"] = ("signtool present but no certificate store on a "
+                             "POSIX host; verify with `signtool verify` once a "
+                             "certificate is installed")
+        else:
+            out["reason"] = ("no Authenticode signing tool on this host; "
+                             "Authenticode is an OPERATOR step, not a build flag")
+    elif canonical == "darwin":
+        for tool in ("codesign", "rcodesign"):
+            if _shutil.which(tool):
+                out["signing_tool"] = tool
+                out["trusted_issuer_possible"] = True
+                out["reason"] = ("%s present; supply an Apple Developer ID to "
+                                 "sign with Hardened Runtime" % (tool,))
+                break
+        else:
+            out["reason"] = ("no codesign/rcodesign on this host; Hardened "
+                             "Runtime and library validation are OPERATOR "
+                             "steps, not compiler flags")
+    else:
+        out["reason"] = "ELF: code signing is not part of the platform model"
+    return out
+
+
 def _normalise_toolchain(toolchain):
     """Map a compiler string to the key used in :data:`TOOLCHAIN_UNAVAILABLE`."""
     name = (toolchain or "").lower()
@@ -358,16 +512,22 @@ def expected_for(platform_name, toolchain=None):
 def check(object_report, platform_name, toolchain=None):
     """Compare what the object carries against what the build requires.
 
-    Returns ``{"ok", "missing", "wrong", "unavailable", "report"}``.
+    Returns ``{"ok", "missing", "wrong", "unavailable", "inert", "report"}``.
     ``missing`` lists a required-True field that is not True; ``wrong`` lists a
     required-False field that IS set. Both fail. An unparseable object fails
     before either list is considered, because "the parser did not look" is not
     evidence of safety.
 
+    ``inert`` lists flags that are SET but have nothing behind them — measured
+    2026-11-19: lld-link sets the CFG bit while leaving the load-config
+    directory empty, so no guard table exists and the loader has nothing to
+    enforce. A flag with no data is the "blindly enable every flag" failure the
+    review warns about, so it FAILS the check rather than passing it.
+
     ``unavailable`` lists flags this toolchain cannot emit (see
     :data:`TOOLCHAIN_UNAVAILABLE`). They are excluded from the verdict because
-    no flag would change them, but they are named in the result so the gap is
-    recorded rather than silently treated as satisfied.
+    no flag would change them, but they are named so the gap is recorded rather
+    than silently treated as satisfied.
     """
     canonical = canonical_platform(platform_name)
     want = expected_for(platform_name, toolchain)
@@ -377,8 +537,29 @@ def check(object_report, platform_name, toolchain=None):
              if value is False and object_report.get(field)]
     unavailable = [field for field, _value in REQUIRED.get(canonical, ())
                    if field not in want]
-    return {"ok": (not missing and not wrong
+    # SET but unsupported by metadata. Only CFG has a data directory today, so
+    # the pairing is explicit rather than a general rule that could misfire.
+    inert = []
+    if object_report.get("cfg") and not object_report.get("cfg_data"):
+        inert.append("cfg")
+    # PARTIAL CFG, reported rather than hidden. Measured 2026-11-19: an object
+    # with a supplied `_load_config_used` carries GuardFlags 0x100
+    # (CF_INSTRUMENTED) but NOT 0x400 (CF_FUNCTION_TABLE_PRESENT). Checks were
+    # compiled in, so indirect-call sites do verify against the guard check
+    # pointer — that is real protection, and `ok` stays True. But there is no
+    # function table, so calls to addresses that are not statically valid
+    # targets cannot be rejected at load time. A reader deciding whether to
+    # trust the object needs both facts, so the weaker one is named instead of
+    # being collapsed into a boolean.
+    partial = []
+    if object_report.get("cfg") and object_report.get("cfg_data"):
+        if not object_report.get("cfg_instrumented"):
+            partial.append("cfg_not_instrumented")
+        if not object_report.get("cfg_function_table"):
+            partial.append("cfg_no_function_table")
+    return {"ok": (not missing and not wrong and not inert
                    and bool(object_report.get("valid"))),
             "missing": missing, "wrong": wrong,
-            "unavailable": unavailable,
+            "unavailable": unavailable, "inert": inert,
+            "partial": partial,
             "report": object_report}

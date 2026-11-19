@@ -790,6 +790,19 @@ def _verify_download_zip(zip_path, artifact_name, sign_key):
 #: so the upload sites cannot forget.
 FARM_DRIVER_MODULES = ("c_transform", "native_harden")
 
+#: DATA files the driver needs on the runner, as (remote_name, repo-relative
+#: path or None when platform-specific). Kept separate from the module list
+#: because these are not imports: the driver references them by path in the
+#: Extension sources, so a missing file degrades the artefact silently instead
+#: of raising ImportError.
+#:
+#: `native/pe_load_config.c` is what turns the Windows CFG flag into a
+#: mechanism (measured: 288-byte load config, GuardFlags 0x100). Without it the
+#: object keeps the bit and loses the enforcement, and the attestation reports
+#: `inert: ['cfg']`. Uploading it is therefore not optional for a Windows
+#: runner that wants CFG.
+FARM_DRIVER_DATA = (("pe_load_config.c", "native/pe_load_config.c"),)
+
 
 def _repo_root():
     """Repository root, from this file's location (``obfuscator/core/utils.py``)."""
@@ -815,6 +828,8 @@ def farm_driver_dependencies():
         # the operator should have created rather than an artefact of ordering.
         chosen = next((p for p in candidates if os.path.exists(p)), candidates[0])
         found.append((name + ".py", chosen))
+    for remote, relative in FARM_DRIVER_DATA:
+        found.append((remote, os.path.join(root, relative)))
     return found
 
 
@@ -1018,6 +1033,38 @@ sys.path.insert(0, os.getcwd())
 from Cython.Build import cythonize
 from setuptools import Extension
 cythonize([Extension("payload", ["{payload_filename}"])], language_level=3)
+
+# PE LOAD CONFIG (review §3, measured 2026-11-19). A Windows link with
+# /GUARD:CF (or -guard:cf) sets DllCharacteristics bit 0x4000 but, without a
+# `_load_config_used` symbol, warns
+#
+#     warning: Control Flow Guard is enabled but '_load_config_used' is missing
+#
+# and emits an EMPTY load-config directory, so Windows has nothing to enforce
+# and the bit is a declaration. `native/pe_load_config.c` supplies the
+# structure; adding it to the extension's sources makes the linker emit
+# IMAGE_LOAD_CONFIG_DIRECTORY64 with GuardFlags set.
+#
+# Measured: with the file, load config = 288 bytes and GuardFlags = 0x100
+# (CF_INSTRUMENTED). Without it, empty. The runner's attestation records
+# `hardening_verdict`, and native_harden.check distinguishes:
+#   bit only                      -> inert: ['cfg']                 (FAILS)
+#   bit + config, no func table   -> partial: ['cfg_no_function_table']
+#   bit + config + func table     -> full CFG
+#
+# If the file is absent the build still proceeds: a runner without it gets the
+# inert case, which is REPORTED rather than silently accepted.
+#
+# The runner receives this file at the REPO ROOT under its basename (see
+# FARM_DRIVER_DATA in obfuscator/core/utils.py), so the path here is relative to
+# the working directory, not to the package.
+_plc_src = "pe_load_config.c"
+_extra_sources = []
+if _platform.system().lower().startswith("win") and os.path.isfile(_plc_src):
+    _extra_sources = [_plc_src]
+    print("PE load-config: including", _plc_src)
+else:
+    print("PE load-config: not present or not applicable on this runner")
 # 2. The C transform layer, same as the local native build.
 # SEED SEPARATION (review §5, 2026-11-18): this used to be
 # sha256(payload bytes), which is REPRODUCIBLE -- fine for a rebuild of the
@@ -1116,7 +1163,7 @@ else:
 from setuptools import setup
 setup(
     name='payload',
-    ext_modules=[Extension("payload", ["payload.c"],
+    ext_modules=[Extension("payload", ["payload.c"] + _extra_sources,
                            extra_compile_args=_extra_cc,
                            extra_link_args=_extra_ld)],
     script_args=['build_ext', '--inplace']

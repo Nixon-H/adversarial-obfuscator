@@ -30,8 +30,19 @@ from obfuscator import native_harden as nh  # noqa: E402
 
 # ── header builders ──────────────────────────────────────────────────────
 
-def _pe(dll_characteristics, security_size=0, debug_size=0, pe32plus=True):
-    """A minimal PE image: DOS header, PE signature, COFF, optional header."""
+def _pe(dll_characteristics, security_size=0, debug_size=0, pe32plus=True,
+        load_config_size=None):
+    """A minimal PE image: DOS header, PE signature, COFF, optional header.
+
+    ``load_config_size`` defaults to a non-zero value WHENEVER the CFG bit is
+    set, because a CFG flag with an empty load-config directory is a
+    declaration with nothing behind it. Measured 2026-11-19: lld-link 19 with
+    ``-guard:cf`` produces exactly that (``warning: Control Flow Guard is
+    enabled but '_load_config_used' is missing``), and `check()` now rejects it.
+    A fixture that set the bit without the data would be modelling a broken
+    object, so the default models a working one and the broken case is tested
+    explicitly.
+    """
     e_lfanew = 0x80
     head = bytearray(e_lfanew)
     head[0:2] = b"MZ"
@@ -53,6 +64,9 @@ def _pe(dll_characteristics, security_size=0, debug_size=0, pe32plus=True):
         struct.pack_into("<I", opt, dirs_off + 4 * 8 + 4, security_size)
     if debug_size:
         struct.pack_into("<I", opt, dirs_off + 6 * 8 + 4, debug_size)
+    if load_config_size is None:
+        load_config_size = 0x48 if (dll_characteristics & nh.PE_GUARD_CF) else 0
+    struct.pack_into("<II", opt, dirs_off + 10 * 8, 0x3000, load_config_size)
 
     return bytes(head) + b"PE\0\0" + bytes(coff) + bytes(opt)
 
@@ -532,3 +546,83 @@ def test_every_module_the_driver_imports_is_uploaded_to_the_farm():
     remote = {r for r, _local in farm_driver_dependencies()}
     for name in FARM_DRIVER_MODULES:
         assert name + ".py" in remote
+
+
+# ── CFG: the flag bit is a declaration, the load config is the mechanism ──
+
+def test_a_cfg_bit_with_no_load_config_is_rejected():
+    """MEASURED 2026-11-19: lld-link sets the CFG bit and leaves the directory empty.
+
+    ``lld-link -guard:cf`` prints
+
+        warning: Control Flow Guard is enabled but '_load_config_used' is missing
+
+    and produces an object whose load-config data directory is empty — no guard
+    function table, no guard flags, nothing for the loader to enforce. The bit
+    is a declaration. A verifier that accepted it would report exactly the kind
+    of reassurance this project keeps having to retract, so `check` fails it and
+    names it under `inert`.
+    """
+    report = nh.verify_pe_bytes(_pe(PE_HARDENED, load_config_size=0))
+    assert report["cfg"] is True, "the fixture must still declare CFG"
+    assert report["cfg_data"] is False
+    result = nh.check(report, "windows", "msvc")
+    assert result["ok"] is False, "a declared-but-empty CFG must not pass"
+    assert result["inert"] == ["cfg"]
+    assert result["missing"] == [], (
+        "cfg is present, so it is not 'missing' — it is inert, which is a "
+        "different failure and needs a different fix")
+
+
+def test_a_cfg_bit_with_load_config_data_passes():
+    """The mechanism is there, so the requirement is met."""
+    report = nh.verify_pe_bytes(_pe(PE_HARDENED, load_config_size=0x48))
+    assert report["cfg"] is True and report["cfg_data"] is True
+    result = nh.check(report, "windows", "msvc")
+    assert result["ok"] is True, result
+    assert result["inert"] == []
+
+
+def test_the_load_config_directory_is_index_ten():
+    """The parser must read the right slot, or inert-CFG detection is noise.
+
+    Data directory 10 is IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG. Reading a different
+    index would report every object's CFG as inert or none, both wrong.
+    """
+    report = nh.verify_pe_bytes(_pe(PE_HARDENED, load_config_size=0x48))
+    assert report["load_config_size"] == 0x48
+    empty = nh.verify_pe_bytes(_pe(PE_HARDENED, load_config_size=0))
+    assert empty["load_config_size"] == 0
+
+
+# ── signing readiness: what this HOST can actually produce ───────────────
+
+def test_signing_readiness_is_reported_per_platform():
+    """Authenticode and Hardened Runtime are SIGNATURE properties, not flags.
+
+    The build must say what this host can produce rather than either claiming a
+    signature it does not have or silently skipping one it was asked for.
+    """
+    for platform_name in ("windows", "darwin", "linux"):
+        readiness = nh.signing_readiness(platform_name)
+        assert readiness["platform"] == nh.canonical_platform(platform_name)
+        assert isinstance(readiness["reason"], str) and readiness["reason"], (
+            "%s must state WHY, not just whether" % platform_name)
+        assert isinstance(readiness["trusted_issuer_possible"], bool)
+
+
+def test_a_self_signed_certificate_does_not_count_as_trusted():
+    """OpenSSL is present, so a self-signed cert CAN be made here — and it is
+    worthless for Authenticode, because Windows does not trust the issuer.
+
+    The probe must therefore report trusted_issuer_possible=False on this host
+    even though signing machinery exists, or the build would sign with a
+    throwaway key and call the artefact signed.
+    """
+    readiness = nh.signing_readiness("windows")
+    if readiness["signing_tool"] is None:
+        assert readiness["trusted_issuer_possible"] is False
+    # On a host with no CA-issued certificate, the answer must be False. This
+    # asserts the DIRECTION: machinery alone is not trust.
+    assert ("certificate" in readiness["reason"].lower()
+            or "operator" in readiness["reason"].lower()), readiness["reason"]

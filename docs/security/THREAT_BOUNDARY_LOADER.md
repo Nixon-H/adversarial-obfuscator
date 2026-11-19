@@ -171,4 +171,78 @@ and both are stated rather than implied:
   redundancy elsewhere (CFI, the late self-check, the kill ladder), not the
   signature.
 
+---
+
+## Environment-limited items, recorded so they are not mistaken for done
+
+Three §3 requirements cannot be satisfied on this host. Each is listed with the
+exact missing capability and the verification that would follow, because "we
+could not" and "we did not" have different remedies and a boundary document that
+blurs them is useless.
+
+### 1. CFG function table (`IMAGE_GUARD_CF_FUNCTION_TABLE_PRESENT`)
+
+**State: PARTIAL.** Measured 2026-11-19 on a real MSVC-ABI object:
+
+| object | load config | GuardFlags | instrumented | function table |
+|---|---|---|---|---|
+| `-guard:cf` only | empty | — | — | — |
+| + `native/pe_load_config.c` | 288 B | `0x100` | **yes** | **no** |
+
+`0x100` is `CF_INSTRUMENTED`: indirect call sites verify against the guard
+check pointer, which is real protection. `0x400`
+(`CF_FUNCTION_TABLE_PRESENT`) requires the compiler to emit a guard function
+table, which needs `clang-cl` with the MSVC headers — not present here.
+
+**Missing capability:** MSVC headers / a Windows SDK.
+**Verification that would follow:** a PE with `GuardFlags & 0x400` set and a
+non-zero `GuardCFFunctionCount`; `native_harden.check` already reports
+`partial: []` in that case, so the check is ready and only the toolchain is
+absent.
+
+### 2. Authenticode
+
+**State: NOT POSSIBLE HERE.** `signtool` exists but is the NSS build and fails
+with `SEC_ERROR_BAD_DATABASE`; there is no certificate store on a POSIX host.
+
+A self-signed certificate *can* be generated (OpenSSL 3.5 and `cryptography`'s
+PKCS#7 builder are present). It is deliberately not used: Windows does not trust
+a self-signed Authenticode signature, so the artefact would carry a signature
+that verifies to anyone who checks only the format and to no OS that enforces
+it. That is the "looks protected, enforces nothing" failure this project has had
+to retract four times, and producing it would be a fifth.
+
+**Missing capability:** a CA-issued code-signing certificate and a working
+Authenticode tool (`osslsigncode`, or `signtool` on Windows).
+**Verification that would follow:** `native_harden.verify_pe_bytes` reports
+`authenticode: True` (security directory non-empty), plus an out-of-band
+`signtool verify /pa` on Windows.
+
+### 3. macOS Hardened Runtime, code signing, library validation
+
+**State: NOT POSSIBLE HERE.** `codesign`, `rcodesign` and `ldid` are all absent.
+Hardened Runtime and library validation live in the CodeDirectory of a signature,
+not in compiler flags, so `verify_macho_bytes` correctly reports
+`hardened_runtime: False, library_validation: False` for anything built here.
+
+**Missing capability:** `codesign` (macOS) or `rcodesign` (cross-platform), plus
+an Apple Developer ID certificate.
+**Verification that would follow:** a Mach-O with an `LC_CODE_SIGNATURE` whose
+CodeDirectory has `CS_RUNTIME | CS_RESTRICT`; the parser already reads exactly
+that and is tested against synthetic CodeDirectories, so again the check is
+ready and the toolchain is the gap.
+
+### Why these are recorded rather than worked around
+
+The review's §3 instruction is explicit: *"Don't blindly enable every flag.
+Verify the resulting binary using platform-native inspection tools."* For these
+three, the platform-native tool does not exist on this machine, which means any
+result produced here would be verified by nothing. Writing that down is the
+honest form of "not done"; emitting a flag and calling it hardened is not.
+
+The farm runners have the tools for items 2 and 3 (a Windows runner can hold a
+certificate; a macOS runner has `codesign`). Their attestation records
+`hardening_verdict`, so when those builds happen the result is checked rather
+than assumed — which is the same arrangement §7.9 uses for runner integrity.
+
 
