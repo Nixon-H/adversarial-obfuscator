@@ -1,8 +1,16 @@
 # Threat boundary: what the loader can and cannot hide
 
-**Status: accepted.** This file records a limit that was *measured*, not
-assumed, and the decision that follows from it. It exists so the next person to
-open "the loader is readable" does not spend a week renaming symbols.
+**Status: ACCEPTED BY OPERATOR DECISION (2026-11-19).** This file records a
+limit that was *measured*, not assumed, and the decision that follows from it.
+It exists so the next person to open "the loader is readable" does not spend a
+week renaming symbols.
+
+The operator reviewed the §5l measurement (DS 4.1 Flash reconstructed the
+entire enforcement layer; renaming all 187 symbols hid none of it) and chose to
+accept the boundary rather than fund the two alternatives that could change it
+(native-blob enforcement, or off-device attestation — both architecture
+changes, both named below with their costs). Re-opening this decision requires
+new evidence, not a restatement of the old limit.
 
 ## What was measured
 
@@ -90,8 +98,9 @@ are ones where the mechanism is not in the artefact at all:
 2. **Move enforcement off-device.** A licensing/attestation service that the
    artefact must reach; the mechanism then lives on infrastructure the attacker
    does not control. This changes the deployment model, not just the code.
-3. **Accept and price it.** Which is what this document does: the payload holds,
-   the wrapper is transparent, and both are measured.
+3. **Accept and price it.** Which is what this document does — and what the
+   operator decided on 2026-11-19: the payload holds, the wrapper is
+   transparent, and both are measured.
 
 Options 1 and 2 are recorded as future work because neither is a tuning change
 and both have costs the current design deliberately avoids (option 2 requires

@@ -91,7 +91,7 @@ Every option `scripts/build.py` accepts, generated from its own `--help` by
 `scripts/gen_cli_reference.py` and checked by `tests/test_readme_matches_cli.py`,
 so it cannot drift. Editorial notes are marked where a flag is inert or archived.
 
-**30 options.**
+**31 options.**
 
 ### Input, output and build control
 
@@ -130,6 +130,12 @@ so it cannot drift. Editorial notes are marked where a flag is inert or archived
 |---|---|
 | `--sign-key-env SIGN_KEY_ENV` | Env var name holding hex key for artifact signing sidecars (.sig.json; default: '' = disabled) |
 | `--watermark WATERMARK` | Embed semantic watermark string into IR |
+
+### Packaging, loaders, native backends and build farm
+
+| Option | What it does |
+|---|---|
+| `--vm-dispatch {a,b,alternate}` | Function-level virtualisation: compile eligible functions to a per-seed stack VM (a=switch dispatcher, b=threaded handlers, alternate=pick per build). Off by default: the conservative allowlist only virtualises simple numeric functions, so leaving it off is safe, not a gap. |
 
 ### Other
 
