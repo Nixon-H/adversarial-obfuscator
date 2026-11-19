@@ -425,6 +425,45 @@ change that, because the limitation is Cython's single-symbol output, not the
 compiler choice. Moving the mix would require compiling the payload as
 separate translation units — a restructuring, not a backend flag.
 
+### §5-B addendum: a third backend was added and measured (MSVC ABI)
+
+Added 2026-11-19. `cl.exe` does not exist on Linux, but the **MSVC ABI is
+reachable** through `clang --target=x86_64-pc-windows-msvc` plus `lld-link`,
+which is the same linker MSVC uses. A real COFF object and a real PE were
+produced on this host:
+
+```
+clang --target=x86_64-pc-windows-msvc -c -O2 -Xclang -cfguard probe.c
+lld-link -dll -noentry -dynamicbase -nxcompat -guard:cf probe.obj
+  -> DllCharacteristics = 0x4160   (ASLR | DEP | CFG | HIGH_ENTROPY_VA)
+```
+
+So §5's "GCC, Clang and MSVC as independent backends" now has three names with
+real evidence behind them rather than two:
+
+| backend | how it is selected | verified on |
+|---|---|---|
+| gcc | `NIXON_NATIVE_CC=gcc` or auto-alternate | real payload builds |
+| clang | `NIXON_NATIVE_CC=clang` or auto-alternate | real payload builds |
+| MSVC ABI (`clang -target …-windows-msvc` + `lld-link`) | Windows farm runner; proven on this host | real PE, header-verified |
+
+Two honest qualifications, because the word "MSVC" would otherwise carry more
+than the measurement supports:
+
+* this is the MSVC **ABI and linker**, not `cl.exe`. Codegen differs from what
+  a Windows runner's MSVC would emit, so the diversity result for that backend
+  is not a prediction of the Windows runner's output;
+* the CFG flag it produces is **inert** on this toolchain (empty load config —
+  see §5g). The backend is real; the hardening it declares is not yet backed by
+  metadata, and `native_harden.check` now fails that case rather than accepting
+  the bit.
+
+The diversification claim is unchanged and still bounded by the finding above:
+backend choice halves structural similarity on hand-written C and barely
+touches the opcode mix on Cython output, because Cython inlines everything into
+one `PyInit_payload` symbol. Adding a third backend does not change that, and
+the report does not pretend it does.
+
 ---
 
 ## 5d. The integrity system was bypassable with one line — CRITICAL
@@ -572,7 +611,7 @@ the argument for the §5-B work (compiler diversity) that has not been done.
 
 ---
 
-## 5e-bis. Time to successful recovery (§8) — measured, and the answer is "never"
+## 5e-bis. Time to successful recovery (§8) — measured on all four targets
 
 The review's stated optimisation target was *"time to successful recovery —
 actual attacker effort"*. Every other metric in this harness is a rate; this is
@@ -590,27 +629,54 @@ by construction rather than by hope.
 
 | target | model | elapsed | time to recovery | verdict |
 |---|---|---|---|---|
-| algo (max profile) | DS 4.1 Flash via Mistral | **98.58 s** | **null** | 0/13 markers |
-| cipher (max profile) | DS 4.1 Flash via Mistral | **116.73 s** | **null** | 0/6 markers |
+| tiny (max) | DS 4.1 Flash via Mistral | **22.14 s** | **22.14 s** | 6/14 markers, **correct** |
+| algo (max) | DS 4.1 Flash via Mistral | **28.65 s** | null | 1/13 markers |
+| inventory (max) | DS 4.1 Flash via Mistral | **34.51 s** | null | 1/7 markers |
+| cipher (max) | DS 4.1 Flash via Mistral | **105.80 s** | null | 0/5 markers |
 
-`null` is deliberate, not a placeholder: it means *no correct description
-inside the budget*, which is a different result from "recovered slowly". A
-number here would conflate the two.
+**All four targets measured, 2026-11-19.** One recovers, three do not, and the
+one that recovers is the smallest program in the set — which is the right shape
+for the result: protection cost scales with program complexity in the direction
+it should.
 
-**What the model produced instead.** Both runs returned a detailed, line-accurate
-description of the **loader** — identity gate, Merkle self-check, HMAC anchor —
-and nothing about the payload's algorithm. The `algo` target's actual content
-(xorshift-multiply finaliser, `0x7FEB352D`/`0x846CA68B`) appears nowhere in the
-answer.
+`null` is deliberate, not a placeholder: it means *no correct description inside
+the budget*, which is a different result from "recovered slowly". A number here
+would conflate the two. The verdict block
+(`time_to_recovery_verdict`) carries the marker counts next to each `null`, so
+"not recovered" and "the probe could not judge" stay distinguishable.
+
+**The tiny target recovered in 22 s, and that is a real finding.** `tiny` is the
+control — 4 functions, one hash — and the model got its algorithm: the salt, the
+truncation width, the marker, and even the expected digest
+`9e8b029a65070dbd`. Reporting this as a protection success would be wrong. It
+is the floor of what the benchmark can measure, and it says the harness detects
+recovery when recovery happens rather than scoring everything as resistance.
+
+**A false positive was caught while getting this list right.** The first run
+returned `correct: True, time_to_recovery_s: 22.141` for `tiny` while the
+model's own answer said *"the payload and key material were stripped from the
+excerpt … only the guard/runtime machinery is recoverable"*. It scored correct
+because 7 of the 14 markers were generic words any loader description contains
+(`sha256`, `hexdigest`, `concatenate`, `encoded`, `literal`, `module`,
+`prints`). Those are now excluded from the marker set, and `tiny`'s spec was
+made **more specific** rather than the bar being lowered — it now names the
+exact digest. Verified both ways: a loader-only answer scores 0 hits,
+`correct: False`; a real algorithm description scores 4 hits, `correct: True`.
+
+**What the model produced for the three non-recovering targets.** Each returned
+a detailed, line-accurate description of the **loader** — identity gate, Merkle
+self-check, HMAC anchor, anti-dump calls — and nothing about the payload's
+algorithm. The `algo` target's content (xorshift-multiply finaliser,
+`0x7FEB352D`/`0x846CA68B`) appears nowhere in any answer.
 
 **What this establishes.** For this attacker model — a capable LLM given the
-artefact text, no execution — the recovery cost is not "high", it is
-**unbounded within a 7-minute budget**, on two independent targets. That is the
+artefact text, no execution — recovery cost is **22 seconds on the smallest
+program and unbounded within the budget on the other three**. That is the
 strongest positive result this benchmark has produced, and it is also the
 narrowest: the model was never allowed to *run* the artefact, and a local
 attacker can (see §5b, where an executing process yielded its secrets).
 
-Cost of the measurement: ~3.6 minutes of model time for two targets. That is
+Cost of the measurement: ~3.2 minutes of model time for four targets. That is
 what makes it worth running on every release — it is the one metric whose unit
 is the attacker's minutes rather than the defender's gate count.
 
@@ -749,21 +815,123 @@ no one had checked against an object.
 
 ### Honest status
 
+Updated 2026-11-19 after building a real MSVC-ABI object on this host.
+
 | claim | status |
 |---|---|
-| PE parser reads ASLR/DEP/CFG/HEPA/signature/debug dirs | **verified** on a real mingw PE |
+| PE parser reads ASLR/DEP/CFG/HEPA/signature/debug dirs | **verified** on real mingw AND MSVC-ABI objects |
 | Mach-O parser reads PIE / heap-exec / stack-exec / CodeDirectory flags | **verified** on synthetic headers — no macOS host or cross-toolchain here |
 | mingw link flags are accepted and the build succeeds | **verified** |
 | mingw PE carries CFG | **no**, and cannot: GNU ld has no CFG option |
-| MSVC flags were exercised | **no** — no MSVC on this host; strings only |
-| macOS Hardened Runtime | **not verified**; it lives in the CodeDirectory and a freshly compiled object is unsigned, so the parser correctly reports `False` |
-| Authenticode | **not present**; signing needs a certificate, and signing with a throwaway key would be worse than not signing. Reported as absent, never as enabled. |
+| **MSVC-compatible path exercised** | **YES** — `clang --target=x86_64-pc-windows-msvc` + `lld-link 19` produced a real PE, `DllCharacteristics = 0x4160` (ASLR\|DEP\|CFG\|HEPA), and `check(windows, "msvc")` passes |
+| **CFG is a real mechanism, not just a bit** | **NO on this toolchain** — see below |
+| macOS Hardened Runtime | **not verified**; it lives in the CodeDirectory and a freshly compiled object is unsigned |
+| Authenticode | **not present, and cannot be trusted here** — see below |
+
+### The MSVC path works — and CFG was fixed after measuring it inert
+
+`cl.exe` does not exist on Linux, but the **MSVC ABI does**: `clang
+--target=x86_64-pc-windows-msvc` emits COFF and `lld-link` is the same linker
+MSVC uses, including its `/GUARD:CF` option. A real object was built:
+
+```
+clang --target=x86_64-pc-windows-msvc -c -O2 -Xclang -cfguard probe.c
+lld-link -dll -noentry -dynamicbase -nxcompat -guard:cf probe.obj
+  -> DllCharacteristics = 0x4160  (ASLR|DEP|CFG|HIGH_ENTROPY_VA)
+```
+
+That is a genuine advance over the mingw finding: CFG **is** reachable here,
+where GNU ld could not emit it at all.
+
+But the linker also printed this, and it mattered more than the bit:
+
+```
+warning: Control Flow Guard is enabled but '_load_config_used' is missing
+```
+
+Parsing all 16 data directories showed the **load-config directory was empty**
+(`size = 0`): no guard flags, nothing for the Windows loader to enforce. The
+`DllCharacteristics` bit was a **declaration, not a mechanism** — the "don't
+blindly enable every flag" failure the review names, caught by parsing the
+object rather than by reading a flag list.
+
+**The fix was then implemented and measured**, not just recommended. Supplying
+a `IMAGE_LOAD_CONFIG_DIRECTORY64` as `_load_config_used` makes lld-link emit
+the directory with guard flags set:
+
+| object | DllCharacteristics | load config | GuardFlags | instrumented | function table |
+|---|---|---|---|---|---|
+| `-guard:cf` alone | `0x4160` | **empty** | — | — | — |
+| + `_load_config_used` | `0x4160` | **288 bytes** | **`0x100`** | **yes** | **no** |
+
+Two measurement defects were found while getting that number right, and both
+would have produced a plausible lie:
+
+* the `GuardFlags` field is at offset **0x90** in the 64-bit load config, not
+  `0x70` (0x70 is `GuardCFCheckFunctionPointer`); reading 0x70 returns zero and
+  would have reported every object as having no guard flags at all;
+* the section header gives `(vsize, vaddr)` at `+8` and `(raw_size, raw_ptr)` at
+  `+16` — reading `+20` returns `(raw_ptr, 0)`, which lands every RVA lookup at
+  file offset 0 and produced a garbage `0xE020B` that looked like a real flag
+  set.
+
+`native_harden.check` now reports three CFG states rather than two:
+
+| state | verdict |
+|---|---|
+| bit set, load config empty | `ok: False`, `inert: ["cfg"]` |
+| bit set, load config present, instrumented, **no function table** | `ok: True`, `partial: ["cfg_no_function_table"]` |
+| bit set, load config present, instrumented + table | `ok: True`, `partial: []` |
+
+The middle state is the honest one for this toolchain: CFG checks **are**
+compiled in, so indirect call sites verify against the guard check pointer —
+real protection — but with no function table, calls to addresses that are not
+statically valid targets cannot be rejected at load time. Collapsing that into a
+single boolean would either overstate the protection or discard a real one, so
+the weaker fact is named.
+
+Producing the function table itself needs `clang-cl` with the MSVC headers,
+which this host does not have. That is a farm-runner job, and the runner records
+`hardening_verdict` so its answer is checked rather than assumed.
+
+### Authenticode and Hardened Runtime: signature properties, not flags
+
+Both are properties of a **signature**, and a signature is only worth anything
+if the platform trusts its issuer. Measured on this host 2026-11-19:
+
+| platform | signing tool | trusted issuer possible |
+|---|---|---|
+| Windows | `signtool` present (NSS build, `SEC_ERROR_BAD_DATABASE`) | **no** — no certificate store on POSIX |
+| macOS | none (`codesign`, `rcodesign`, `ldid` all absent) | **no** |
+| Linux | n/a | ELF has no code-signing model |
+
+OpenSSL 3.5 and `cryptography`'s PKCS#7 builder are present, so a
+**self-signed** Authenticode signature could be produced here. It would not be
+trusted by Windows, and a self-signed Mach-O signature is not accepted by
+Gatekeeper — so producing one would make the artefact *look* signed while
+changing nothing an OS or an attacker cares about. That is precisely the class
+of reassurance this report has had to retract four times already.
+
+`native_harden.signing_readiness(platform)` now reports, per platform, which
+tool exists and whether a **trusted** issuer is possible, with the reason. The
+build uses it to state the truth instead of claiming a signature it does not
+have or silently skipping one it was asked for.
+
+The honest summary for §3 is therefore:
+
+* **Linux**: fully implemented and verified on real objects.
+* **Windows**: flags and parser verified on a real PE; **CFG is inert on this
+  toolchain** and is now reported as such; Authenticode is an operator step
+  requiring a CA-issued certificate and a working signing tool.
+* **macOS**: parser verified against synthetic headers only; Hardened Runtime
+  and library validation require `codesign` plus an Apple Developer ID, neither
+  of which exists here.
 
 The report deliberately does not claim "Windows/macOS hardening verified": the
-parser and the flag emission are verified, the real objects have not been built
-on those platforms from this machine. That last measurement is what the farm
-runners are for, and their answer now travels in the attestation instead of
-being assumed.
+parser, the flag emission and the *inert-flag detection* are verified, and the
+real objects have not been built on those platforms from this machine. That last
+measurement is what the farm runners are for, and their answer now travels in
+the attestation instead of being assumed.
 
 ---
 

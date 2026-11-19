@@ -178,7 +178,12 @@ def test_no_bare_141_claim_in_code():
                 # inside 10.3390/app14125056.  That is a citation, not an
                 # op-count claim, so strip DOIs before looking.
                 _nodoiline = re.sub(r"10\.\d{4,}/[^\s)\]}]*", "<DOI>", line)
-                if "141" in _nodoiline and "3.14159" not in line:
+                # STANDALONE 141 ONLY. A substring test matches any number
+                # containing those digits: measured 2026-11-19, a report line
+                # reading "time_to_recovery_s: 22.141" was flagged as an
+                # op-count claim because "141" occurs inside the float. The
+                # guard must match the CLAIM, which is 141 as a whole number.
+                if re.search(r"(?<![\d.])141(?![\d.])", _nodoiline):
                     # Allowed only if framed as vendor/unverified history,
                     # as the verified count, or as a file-path reference
                     # to the parity test module itself.

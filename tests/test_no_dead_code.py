@@ -27,7 +27,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 ROOT = Path(__file__).resolve().parent.parent
 
 # Sources that are genuinely compiled, linked or tested by the product.
-KEPT_NATIVE = {"core.cpp", "whitebox_feistel.cpp", "simd_vm.c", "simd_vm_test.c"}
+# Every entry must be reachable from a real build path, or this guard is
+# decoration.
+#
+# `pe_load_config.c` (2026-11-19) supplies IMAGE_LOAD_CONFIG_DIRECTORY64 as
+# `_load_config_used`, which is what makes the Windows CFG flag a mechanism
+# rather than a declaration. The farm driver compiles it into the payload
+# extension when the platform is Windows and the file is present (FARM_DRIVER_DATA
+# in obfuscator/core/utils.py uploads it); its absence is reported as
+# inert: ['cfg'] by native_harden.check.
+KEPT_NATIVE = {"core.cpp", "whitebox_feistel.cpp", "simd_vm.c", "simd_vm_test.c",
+               "pe_load_config.c"}
 
 # What was removed. The code lives in git history (see
 # archive/rust-runtime/README.md and archive/native/README.md for the
@@ -53,6 +63,11 @@ ARCHIVED_NATIVE = {
 BUILD_REFERERS = (
     "Makefile",
     "obfuscator/core/c_core_build.py",
+    # The farm driver is a BUILD FILE: it emits the setup.py that compiles the
+    # Windows payload extension, and it is the only place that references
+    # native/pe_load_config.c (via FARM_DRIVER_DATA). Excluding it from this
+    # list made the guard report a wired source as unreferenced.
+    "obfuscator/core/utils.py",
     "relay/build.rs",
     "relay/Cargo.toml",
     "scripts/build.py",

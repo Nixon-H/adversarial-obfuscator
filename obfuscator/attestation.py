@@ -141,16 +141,34 @@ def _nx_prov_msg():
     return b"".join(
         _l for _l in _lines
         if b"_NX_PROV_SIG" not in _l and b"_NX_PROV_PK" not in _l)
-try:
-    _nx_prov_ok = bool({pk}) and bool({sig}) and _nx_prov_verify(
-        _nx_prov_b64.b64decode({pk}),
-        _nx_prov_b64.b64decode({sig}),
-        _nx_prov_msg())
-except Exception:
-    _nx_prov_ok = False
-if not _nx_prov_ok:
-    {fail}("provenance: signature does not verify")
-del _nx_prov_ok, _nx_prov_msg
+
+# UNSIGNED IS NOT TAMPERED. A build with no signing key emits empty slots; that
+# artefact has no provenance to verify and must still RUN. Failing it here would
+# turn "the operator did not sign" into "every artefact is broken" -- measured:
+# an unsigned hello-world artefact died at load with
+# "provenance: signature does not verify" and eleven unrelated tests failed.
+#
+# So the check is conditional on the slots being populated:
+#   * both empty      -> no provenance claim, skip (the build warns at build time)
+#   * both populated  -> verify, and a failure is fatal
+#   * exactly one      -> malformed, fatal: a half-stamped artefact is a bug and
+#                        silently running it would hide it.
+_nx_prov_pk_s = bool({pk})
+_nx_prov_sig_s = bool({sig})
+_nx_prov_ok = True   # unset until verified; `del` below needs a binding
+if _nx_prov_pk_s and _nx_prov_sig_s:
+    try:
+        _nx_prov_ok = _nx_prov_verify(
+            _nx_prov_b64.b64decode({pk}),
+            _nx_prov_b64.b64decode({sig}),
+            _nx_prov_msg())
+    except Exception:
+        _nx_prov_ok = False
+    if not _nx_prov_ok:
+        {fail}("provenance: signature does not verify")
+elif _nx_prov_pk_s or _nx_prov_sig_s:
+    {fail}("provenance: only one of the two slots is filled")
+del _nx_prov_ok, _nx_prov_msg, _nx_prov_pk_s, _nx_prov_sig_s
 '''
 
 #: Slots carry a zeroed placeholder until the build stamps them, so an unstamped
