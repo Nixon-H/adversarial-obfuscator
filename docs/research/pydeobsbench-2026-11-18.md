@@ -826,7 +826,7 @@ Updated 2026-11-19 after building a real MSVC-ABI object on this host.
 | **MSVC-compatible path exercised** | **YES** — `clang --target=x86_64-pc-windows-msvc` + `lld-link 19` produced a real PE, `DllCharacteristics = 0x4160` (ASLR\|DEP\|CFG\|HEPA), and `check(windows, "msvc")` passes |
 | **CFG is a real mechanism, not just a bit** | **NO on this toolchain** — see below |
 | macOS Hardened Runtime | **not verified**; it lives in the CodeDirectory and a freshly compiled object is unsigned |
-| Authenticode | **not present, and cannot be trusted here** — see below |
+| Authenticode | **IMPLEMENTED and measured** on a real PE: digest identical before/after signing, WIN_CERTIFICATE rev 2.0 / type 0x0002, PKCS#7 parses with the signer cert. Gated on an operator-supplied certificate. |
 
 ### The MSVC path works — and CFG was fixed after measuring it inert
 
