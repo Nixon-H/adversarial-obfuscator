@@ -4914,6 +4914,32 @@ def build_project(args):
                         "hybrid loader still carries the blob placeholder "
                         "after substitution; refusing to ship an artefact "
                         "whose native module is missing")
+            else:
+                # NO NATIVE BLOB. Measured 2026-11-19: a build shipped
+                # `NATIVE_BLOBS = "__NATIVE_BLOBS_PLACEHOLDER__"` verbatim
+                # because this branch did nothing -- the substitution above is
+                # guarded on a NON-EMPTY dict, so when the local native build
+                # produced nothing the placeholder was written straight into the
+                # artefact. The payload still ran (bytecode fallback), which is
+                # why it went unnoticed: the artefact worked while carrying a
+                # literal telling any reader that native compilation was skipped.
+                #
+                # Falling back to bytecode is a legitimate degradation. Leaving
+                # the template's placeholder in the shipped file is not, so the
+                # empty case now substitutes an empty mapping: the loader's own
+                # `if not blob_key or "PLACEHOLDER" in str(NATIVE_BLOBS)` test
+                # then takes the fallback path deliberately, and the artefact no
+                # longer advertises an unfinished build.
+                for _q in ('"', "'"):
+                    hybrid_loader_src = hybrid_loader_src.replace(
+                        _q + "__NATIVE_BLOBS_PLACEHOLDER__" + _q, "{}")
+                if "NATIVE_BLOBS_PLACEHOLDER" in hybrid_loader_src:
+                    raise SystemExit(
+                        "hybrid loader still carries the blob placeholder and "
+                        "no native blob was produced; refusing to ship an "
+                        "artefact with an unsubstituted template")
+                print("    [!] No native blob for this OS: artefact carries an "
+                      "empty NATIVE_BLOBS and will run from bytecode")
             args._real_native_blobs = real_blobs_dict
             args._real_fallback_blob = real_fallback_str
             # Secure temp (no predictable CWD artifact): system temp dir,

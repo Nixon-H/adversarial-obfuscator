@@ -189,20 +189,33 @@ def _declaration_anchor(source: str) -> int:
     fixture starting with ``static int dummy = 0;`` yielded 0 opaque predicates
     and the pass reported success — the transform did nothing and said nothing.
 
-    Resolution order: before the first ``static`` declaration, else before the
-    first ``#include``, else the top of the file. Always a valid offset, so the
-    caller never has to early-return.
+    **FILE SCOPE ONLY.** The naive "first `static `" match lands inside Cython's
+    own templates. Measured 2026-11-19 on a real 312 KB Cython translation unit:
+    the first `static` is inside
+
+        template <class T> struct __PYX_IS_UNSIGNED_IMPL {
+            static const bool value = T(0) < T(-1);
+
+    so splicing there put `static volatile int __nx_opa_N` INSIDE a struct body,
+    the opaque-predicate declarations were truncated, gcc reported
+    "'__nx_opa_2' undeclared" twenty times, and the native build produced
+    nothing — silently falling back to bytecode. Two passes inserting at the
+    same wrong anchor also split each other's declarations.
+
+    So the anchor is now a line that starts at brace depth 0 with `static` and
+    is NOT inside a template/struct. Falls back to before the first `#include`,
+    then the top of the file. Always a valid offset, so no caller early-returns.
     """
-    first_static = source.find("static ")
-    if first_static == 0:
-        return 0
-    if first_static > 0:
-        line_start = source.rfind("\n", 0, first_static)
-        return line_start + 1 if line_start >= 0 else 0
-    include_at = source.find("#include")
-    if include_at > 0:
-        line_start = source.rfind("\n", 0, include_at)
-        return line_start + 1 if line_start >= 0 else 0
+    depth = 0
+    offset = 0
+    for line in source.splitlines(keepends=True):
+        stripped = line.lstrip()
+        if depth == 0 and stripped.startswith("static "):
+            return offset
+        if depth == 0 and stripped.startswith("#include"):
+            return offset
+        depth += line.count("{") - line.count("}")
+        offset += len(line)
     return 0
 
 

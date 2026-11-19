@@ -146,8 +146,36 @@ def probe_ai(target, artefact_text, max_chars=60000):
         some any all every either neither other others they them their
         there here where also then thus hence same else once
     """.split())
+
+    # GENERIC VOCABULARY, removed from the denominator before scoring.
+    #
+    # Measured 2026-11-19 on `tiny` with a widened spec: overlap scored 0.50
+    # while the model's answer was, in its own words, "an obfuscated-Python
+    # runtime LOADER (a self-decrypting stub)" — it had recovered nothing of the
+    # payload. Eight of the twenty basis terms were words any loader description
+    # contains: `hash`, `sha256`, `salt`, `string`, `bytes`, `encoded`,
+    # `module`, `sign`. Those eight alone repay 0.40 of the ratio.
+    #
+    # The loader_vocab blocklist above cannot fix this, because these words are
+    # ALSO legitimately part of the payload's algorithm — that is exactly what
+    # makes them useless as evidence. A term only counts toward recovery if
+    # hearing it tells you something you could not have guessed. Removing them
+    # shrinks the basis, which is why the 4-term floor is re-checked after.
+    _GENERIC_TERMS = set("""
+        hash hashing sha sha1 sha256 sha512 md5 digest hexdigest hex
+        string strings bytes byte character characters encoded encoding
+        encode decode encoded module modules function functions
+        variable constant value values integer int float number numbers
+        salt salting key keys secret secrets sign signing signed
+        call calls print prints output input data file files
+        array list dict map object class method
+        first last next previous start end begin finish
+        loop loops iterate iteration round rounds step steps
+        return returns store stored read reads write writes
+    """.split())
     payload_terms = {t for t in (gt_terms - loader_vocab)
-                     if t not in _STOPWORDS and not t.isdigit()}
+                     if t not in _STOPWORDS and t not in _GENERIC_TERMS
+                     and not t.isdigit()}
     _overlap_basis = sorted(payload_terms)
     if len(payload_terms) < 4:
         # Too few distinctive terms to divide by: report the fact, not a

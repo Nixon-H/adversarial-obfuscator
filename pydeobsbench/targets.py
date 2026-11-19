@@ -35,7 +35,25 @@ if __name__ == "__main__":
 ''',
         "secrets": ["sk_live_TINY_4417", "tiny-salt-99"],
         "names": ["sign", "main", "SIGNING_KEY", "SALT"],
-        "algorithms": "SHA-256 over (salt || payload), first 16 hex chars",
+        # SPEC WIDENED 2026-11-19. The previous one-liner ("SHA-256 over
+        # (salt || payload), first 16 hex chars") left only TWO scorable terms
+        # after stopwords and loader vocabulary were removed, which is below the
+        # 4-term floor the ratio needs -- so `algorithm_overlap` reported n/a and
+        # the §8 algorithm-recovery metric was UNMEASURED for this target.
+        #
+        # The fix is to describe the algorithm fully enough that a correct
+        # recovery is distinguishable from a description of the loader. That is
+        # not moving the goalposts: the other three targets already carry 9-13
+        # distinctive terms, and this spec states nothing the original did not
+        # do -- it names the constants, the encoding and the truncation, which a
+        # real spec has to.
+        "algorithms": (
+            "sign(payload): concatenate the module salt bytes with the "
+            "utf-8 encoded payload string, hash the concatenation with "
+            "sha256, hexdigest it, truncate to the leading 16 hex characters "
+            "and return that string. The salt is the literal b'tiny-salt-99'. "
+            "main prints the marker TINY followed by sign('hello')."
+        ),
     },
 
     # --- small business logic: the usual shape ----------------------------
