@@ -81,6 +81,84 @@ def recompute_self_ck(src):
     return src[:ck.start("val")] + root + src[ck.end("val"):], True
 
 
+HK = re.compile(r"^(?P<lead>[ \t]*)_NX_SELF_HK\s*=\s*(?P<q>['\"])(?P<val>[^'\"]*)(?P=q)", re.M)
+
+
+def restamp_all(src):
+    """Recompute BOTH integrity layers: ``_NX_SELF_CK`` and ``_NX_SELF_HM``.
+
+    This is the "double-stamp" attacker, and it is the honest boundary of §1's
+    anti-patching claim. The loader verifies:
+
+      * a Merkle root over the file's own lines (`_NX_SELF_CK`), and
+      * an HMAC-SHA256 over the same content keyed with `_NX_SELF_HK`.
+
+    Both are derivable from the artefact: the Merkle construction is unkeyed,
+    and the HMAC key is a plaintext literal in the same file. §5m measured that
+    re-stamping only the Merkle root is insufficient — the HMAC catches it —
+    which raised the obvious question this function exists to answer: what
+    happens when the attacker recomputes both?
+
+    Returns ``(new_src, ok)``. ``ok`` is False when an anchor is missing, so a
+    caller never mistakes "this artefact has no self-check" for "the attack was
+    defended against".
+    """
+    import hashlib
+    import hmac
+
+    ck = CK.search(src)
+    hm = HM.search(src)
+    hk = HK.search(src)
+    if not (ck and hm and hk):
+        return src, False
+    ck_v, hm_v, hk_v = ck.group("val"), hm.group("val"), hk.group("val")
+    tok = TOK.search(src)
+    tok_v = tok.group("val") if tok else ""
+
+    def _content(text, ck_value, hm_value):
+        """The exact byte stream the loader hashes."""
+        lines = text.encode("utf-8", "surrogateescape").splitlines(keepends=True)
+        return b"".join(
+            ln for ln in lines
+            if ck_value.encode() not in ln
+            and hm_value.encode() not in ln
+            and b"_NX_CFI_SEQ = " not in ln
+            and (not tok_v or tok_v.encode() not in ln))
+
+    def _merkle(content):
+        chunks = [content[i:i + 1024] for i in range(0, len(content), 1024)]
+        hashes = [hashlib.sha256(b).hexdigest() for b in chunks]
+        while len(hashes) > 1:
+            if len(hashes) % 2 == 1:
+                hashes.append(hashes[-1])
+            hashes = [hashlib.sha256(
+                (hashes[i] + hashes[i + 1]).encode()).hexdigest()
+                for i in range(0, len(hashes), 2)]
+        return hashes[0] if hashes else ""
+
+    # First pass: recompute the Merkle root (the HM anchor is still the old
+    # value, which is what the loader excludes — so the content is stable).
+    root = _merkle(_content(src, ck_v, hm_v))
+    if not root:
+        return src, False
+    out = src[:ck.start("val")] + root + src[ck.end("val"):]
+
+    # Second pass: HMAC over the content with the NEW merkle root in place.
+    # The CK line is excluded by value, and that value just changed, so the
+    # filter must use the new root — otherwise the HMAC covers a stream the
+    # loader will never compute.
+    hm_now = HM.search(out)
+    content = _content(out, root, hm_now.group("val"))
+    try:
+        sig = hmac.new(bytes.fromhex(hk_v), content,
+                       hashlib.sha256).hexdigest()
+    except ValueError:
+        return src, False
+    out = out[:hm_now.start("val")] + sig + out[hm_now.end("val"):]
+    return out, True
+
+
+
 def _flip_pack_byte(src):
     """Corrupt one interior byte of the base85 section pack."""
     m = PACK.search(src)
@@ -161,13 +239,43 @@ def main():
         tampered_then, _ = _flip_pack_byte(base)
         restamped, _ = recompute_self_ck(tampered_then)
         rs_rc, rs_ok, rs2_tail = run(restamped, "tamper_then_restamp.py")
-        print("tamper + restamp       : rc=%-4s payload_ran=%-5s %s"
+        print("tamper + restamp (CK)  : rc=%-4s payload_ran=%-5s %s"
               % (rs_rc, rs_ok, rs2_tail[:60]))
     else:
         rs_ok = None
         print("restamp                : no _NX_SELF_CK anchor in this artefact")
 
+    # ── DOUBLE-STAMP: recompute the Merkle root AND the HMAC ─────────────
+    #
+    # §5m measured that restamping only CK is caught by the HMAC layer. That
+    # left the question this row answers: what if the attacker recomputes BOTH?
+    # The HMAC key `_NX_SELF_HK` is a plaintext literal in the same file, so
+    # nothing prevents it. If this row runs, the integrity control establishes
+    # internal consistency, not provenance — and that is the honest scope of
+    # the claim rather than a defect to be papered over.
+    ds_tampered, did_ds = _flip_pack_byte(base)
+    if did_ds:
+        ds_src, ds_ok_flag = restamp_all(ds_tampered)
+        if ds_ok_flag:
+            ds_rc, ds_ok, ds_tail = run(ds_src, "tamper_double_stamp.py")
+            print("tamper + BOTH stamps   : rc=%-4s payload_ran=%-5s %s"
+                  % (ds_rc, ds_ok, ds_tail[:60]))
+        else:
+            ds_ok = None
+            print("tamper + BOTH stamps   : no anchors (CK/HM/HK) to recompute")
+    else:
+        ds_ok = None
+        print("tamper + BOTH stamps   : no section pack in this artefact")
+
     print()
+    if ds_ok:
+        print("INTEGRITY IS INTERNAL-ONLY: a tampered payload ran once _NX_SELF_CK "
+              "AND _NX_SELF_HM were recomputed. Both layers are derivable from "
+              "the artefact, so the check proves the file is self-consistent, "
+              "not that it came from the publisher. The fix is load-time "
+              "signature verification (obfuscator/attestation.py); see "
+              "docs/security/THREAT_BOUNDARY_LOADER.md.")
+        return 1
     if rs_ok:
         print("SELF-CHECK IS NOT BINDING: a tampered payload ran after the "
               "stamp was recomputed from the artefact's own text. The check "

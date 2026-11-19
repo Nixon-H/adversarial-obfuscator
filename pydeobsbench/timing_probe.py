@@ -61,18 +61,45 @@ _NON_EVIDENCE = set("""
 _WORD = re.compile(r"[a-z0-9_]{4,}")
 
 
+#: Words that appear in ANY description of a loader, or of crypto in general.
+#: They cannot serve as evidence of PAYLOAD recovery, for the same reason the
+#: loader blocklist cannot: they are legitimately part of the payload's
+#: algorithm too, which is what makes them useless as evidence.
+#:
+#: Measured 2026-11-19: `tiny`'s marker set had 14 entries of which 7 were
+#: generic (`sha256`, `hexdigest`, `concatenate`, `encoded`, `literal`,
+#: `module`, `prints`). A model that answered "this is a self-decrypting
+#: loader; the payload and key material were stripped, only the guard machinery
+#: is recoverable" hit all seven and scored correct: True — a false positive of
+#: exactly the kind §5 finding 18 documented for the rate metric.
+_GENERIC = set("""
+    sha sha1 sha256 sha512 md5 hash hashing digest hexdigest hex
+    concatenate concatenation concat encoded encoding encode decode
+    literal literals string strings bytes byte character characters
+    module modules function functions variable constant value values
+    integer int float number numbers salt salting key keys secret secrets
+    sign signing signed call calls print prints output input data file files
+    array list dict map object class method loop loops iterate iteration
+    round rounds step steps return returns store stored read reads write writes
+    leading followed marker
+""".split())
+
+
 def distinctive_markers(target):
     """Return the ground-truth markers that can serve as correctness evidence.
 
     Numbers are strong evidence (a recovered ``0x7FEB352D`` is not a guess);
-    content words are weaker but acceptable when they are specific.
+    content words are weaker and acceptable only when specific. Words any
+    loader or crypto description contains are excluded, because a model
+    describing the WRAPPER would otherwise score as having recovered the
+    PAYLOAD — measured, and exactly the proxy the review warns about.
     """
     algo = str(target.get("algorithms", ""))
     numbers = sorted({m.lower()
                       for m in re.findall(r"0x[0-9A-Fa-f]{4,}", algo)})
     words = sorted({w for w in _WORD.findall(algo.lower())
-                    if w not in _NON_EVIDENCE and not w.isdigit()
-                    and len(w) >= 5})
+                    if w not in _NON_EVIDENCE and w not in _GENERIC
+                    and not w.isdigit() and len(w) >= 5})
     return numbers, words
 
 

@@ -151,3 +151,204 @@ def test_the_document_names_what_would_change_the_answer():
     text = open(DOC, encoding="utf-8").read()
     assert "native blob" in text.lower() or "native" in text.lower()
     assert "off-device" in text.lower() or "service" in text.lower()
+
+
+# ── the double-stamp finding (measured 2026-11-19) ───────────────────────
+
+def test_the_hmac_key_ships_in_plaintext():
+    """The premise of the double-stamp attack, asserted rather than assumed.
+
+    The loader must hold the key to verify, so the key is in the file. That is
+    what makes both integrity layers recomputable by anyone holding the
+    artefact — the finding this file records.
+
+    The ANCHOR NAMES are asserted on the template; the VALUES are a build-time
+    product, so a stamped artefact is checked separately in
+    test_a_stamped_artefact_exposes_its_key.
+    """
+    source = open(os.path.join(REPO, "obfuscator", "core", "pipeline.py"),
+                  encoding="utf-8").read()
+    for anchor in ("_NX_SELF_HK", "_NX_SELF_HM", "_NX_SELF_CK"):
+        assert anchor in source, "%s is not emitted by the loader template" % anchor
+
+
+def test_a_stamped_artefact_exposes_its_key():
+    """A real stamped artefact carries the HMAC key as a plaintext literal."""
+    import glob
+    import re
+    cands = sorted(glob.glob("/tmp/pydeobs-max-*/tiny/dist/tiny_protected.py"),
+                   key=os.path.getmtime)
+    if not cands:
+        pytest.skip("no stamped artefact on disk")
+    text = open(cands[-1], encoding="utf-8", errors="replace").read()
+    match = re.search(r'^_NX_SELF_HK\s*=\s*"([0-9a-f]+)"', text, re.M)
+    assert match, "a shipped artefact must carry _NX_SELF_HK"
+    assert len(match.group(1)) == 64, "expected a 32-byte hex key, got %r" % (
+        match.group(1)[:16],)
+
+
+def test_the_attack_chain_measures_the_double_stamp_route():
+    """The scenario must stay wired, or the finding goes stale silently."""
+    source = open(os.path.join(REPO, "scripts", "attack_chain.py"),
+                  encoding="utf-8").read()
+    assert "def restamp_all" in source, (
+        "the double-stamp helper is gone; the measurement cannot be reproduced")
+    assert "tamper + BOTH stamps" in source, (
+        "the double-stamp row is no longer reported")
+    assert "INTEGRITY IS INTERNAL-ONLY" in source, (
+        "the verdict for a successful double-stamp attack was removed")
+
+
+def test_the_boundary_document_records_the_double_stamp_result():
+    """The measured outcome belongs in the document, not only in the script.
+
+    A successful attack recorded nowhere is a silent regression: the next
+    reader would assume the five-route result means the control holds.
+    """
+    text = open(DOC, encoding="utf-8").read()
+    assert "re-stamp BOTH" in text or "re-stamp both" in text.lower(), (
+        "the document must record that recomputing both layers succeeds")
+    assert "internally consistent" in text.lower(), (
+        "the document must state what the check DOES establish")
+    assert "authentic" in text.lower() or "publisher" in text.lower(), (
+        "the document must state what it does not establish")
+
+
+def test_the_document_names_the_real_fix():
+    """A boundary without a path forward is an excuse. The fix is named."""
+    text = open(DOC, encoding="utf-8").read()
+    assert "ed25519" in text.lower(), (
+        "signature verification is the smallest change with a real effect")
+    assert "licence token" in text.lower() or "license token" in text.lower(), (
+        "deriving the key from token material is the other real option")
+
+
+# ── load-time signature verification (the double-stamp fix) ──────────────
+
+def test_the_provenance_verifier_is_installed():
+    """`obfuscator/attestation.py` must emit a self-contained check.
+
+    This is the fix named for the measured double-stamp attack: the Merkle root
+    and the HMAC are both recomputable from the artefact, so neither binds it to
+    the publisher. A signature checked against an embedded public key does,
+    because the private key never ships.
+    """
+    from obfuscator import attestation as A
+
+    snippet = A.emit_snippet()
+    assert "_nx_prov_verify" in snippet, "no verifier emitted"
+    assert "_NX_PROV_SIG" in snippet, "no signature slot"
+    assert "_NX_PROV_PK" in snippet, "no public-key slot"
+    assert "sha512" in snippet.lower(), "not an Ed25519 construction"
+    # The snippet is pasted into the loader, so it must compile standalone.
+    compile(snippet, "<provenance-snippet>", "exec")
+
+
+def test_the_reference_verifier_agrees_with_cryptography():
+    """The stdlib verifier must match a real Ed25519 implementation.
+
+    The artefact cannot import `cryptography`, which is why a pure-Python
+    verifier exists. If it disagreed, signed artefacts would either refuse to
+    run or — worse — accept a signature they should reject.
+    """
+    pytest.importorskip("cryptography")
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey)
+    from obfuscator import ed25519_verify as reference
+
+    key = Ed25519PrivateKey.generate()
+    other = Ed25519PrivateKey.generate()
+    public = key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw)
+    other_public = other.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw)
+
+    message = b"artefact bytes"
+    signature = key.sign(message)
+    assert reference.verify(public, signature, message) is True
+    assert reference.verify(public, signature, message + b"!") is False
+    assert reference.verify(other_public, signature, message) is False
+    assert reference.verify(public, bytes([signature[0] ^ 1]) + signature[1:],
+                            message) is False
+    assert reference.verify(public, signature[:-1], message) is False
+
+
+def test_the_inline_verifier_matches_the_reference():
+    """The copy that SHIPS is the one that must be tested.
+
+    A reference that agrees with `cryptography` says nothing about a different
+    block of code pasted into every artefact. The inline block is loaded as a
+    module from a temp file rather than executed inline, so this test carries no
+    dynamic-execution sink while still exercising the exact shipped bytes.
+    """
+    pytest.importorskip("cryptography")
+    import importlib.util
+    import tempfile
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey)
+    from obfuscator import attestation as A
+    from obfuscator import ed25519_verify as reference
+
+    handle, path = tempfile.mkstemp(suffix=".py", prefix="nx_inline_")
+    try:
+        os.write(handle, A.VERIFIER_SOURCE.encode("utf-8"))
+        os.close(handle)
+        spec = importlib.util.spec_from_file_location("nx_inline_v", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        inline = module._nx_prov_verify
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+    key = Ed25519PrivateKey.generate()
+    other = Ed25519PrivateKey.generate()
+    public = key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw)
+    other_public = other.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw)
+
+    disagreements = []
+    for message in (b"", b"x", b"artefact bytes", b"z" * 512):
+        signature = key.sign(message)
+        for args in ((public, signature, message),
+                     (public, signature, message + b"!"),
+                     (other_public, signature, message),
+                     (public, bytes([signature[0] ^ 1]) + signature[1:], message),
+                     (public, signature[:-1], message),
+                     (public[:8], signature, message)):
+            if inline(*args) != reference.verify(*args):
+                disagreements.append(message[:8])
+    assert disagreements == [], disagreements
+
+
+def test_the_signed_stream_excludes_the_slots():
+    """The circularity resolves the same way the other anchors resolve it.
+
+    The signature covers the file and lives in the file, so the slot lines are
+    outside the signed stream — a value cannot be part of what it describes.
+    """
+    from obfuscator import attestation as A
+
+    text = b"a\n_NX_PROV_SIG = \"s\"\n_NX_PROV_PK = \"p\"\nb\n"
+    content = A.signed_content(text)
+    assert b"_NX_PROV_SIG" not in content and b"_NX_PROV_PK" not in content
+    assert b"a" in content and b"b" in content
+    assert b"_NX_PROV_SIG" in A.CHECK_SOURCE.encode(), (
+        "the emitted check must name the slot it excludes")
+
+
+def test_the_document_records_the_signature_fix():
+    """The document must point at the implemented fix, not only the problem."""
+    text = open(DOC, encoding="utf-8").read()
+    assert "attestation.py" in text or "signature verification" in text.lower(), (
+        "the boundary document must point at the implemented fix")
