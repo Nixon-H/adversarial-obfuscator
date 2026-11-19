@@ -209,17 +209,35 @@ def probe_native_blob(artefact_path, target=None):
 
     text = _read(artefact_path).decode("utf-8", "replace")
 
-    # NATIVE_BLOBS is a dict literal; parse with ast so a re-quoted or
+    # NATIVE_BLOBS is USUALLY a dict literal; parse with ast so a re-quoted or
     # line-wrapped emission still parses.
+    #
+    # It is not always a dict. Measured 2026-11-19: a build shipped
+    # `NATIVE_BLOBS = "__NATIVE_BLOBS_PLACEHOLDER__"` — a STRING — because the
+    # substitution step never ran. The old code called `blobs.values()` on it
+    # and raised AttributeError, so the finding ("this artefact carries no
+    # native module and the placeholder was never replaced") surfaced as a probe
+    # CRASH. A crash and a clean negative look similar in a report and are not,
+    # so the non-dict case is reported explicitly.
     blobs = None
+    raw_blobs = None
     try:
         for node in ast.parse(text).body:
             if isinstance(node, ast.Assign) and \
                     getattr(node.targets[0], "id", "") == "NATIVE_BLOBS":
-                blobs = ast.literal_eval(node.value)
+                raw_blobs = ast.literal_eval(node.value)
                 break
     except Exception:
-        blobs = None
+        raw_blobs = None
+
+    if isinstance(raw_blobs, dict):
+        blobs = raw_blobs
+    elif isinstance(raw_blobs, str):
+        return {"probe": "native_blob", "applicable": True,
+                "found": False, "placeholder": True,
+                "reason": ("NATIVE_BLOBS was never substituted (value is the "
+                           "string %r); this artefact carries no native module"
+                           % (raw_blobs[:40],))}
     if not blobs or not any(blobs.values()):
         return {"probe": "native_blob", "applicable": True,
                 "found": False, "reason": "no native blob embedded"}
