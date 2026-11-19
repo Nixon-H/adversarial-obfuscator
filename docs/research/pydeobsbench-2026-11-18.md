@@ -938,7 +938,7 @@ Measured 2026-11-19, CPython 3.13, gcc 14.2, sympy 1.14, this host:
 
 | claim | measured | verdict |
 |---|---|---|
-| subset-sum "NP-hard", 4096-entry DP | n = **8**; search space **256**; 200/200 instances solved, worst **0.000114 s** | **NOT A PROTECTION** |
+| subset-sum "NP-hard", 4096-entry DP | at the shipped n=8: 256 subsets, 200/200 solved in **0.000114 s**. At any n: the answer is a compile-time constant | **NOT A PROTECTION — pass removed from the default pipeline** |
 | multi-round MBA "exponential" | up to **2,073 characters**, 5 rounds; sympy recovered the constant in **0.0037 s** | **WHOLLY INEFFECTIVE** |
 | fixed-even opaque predicate at `-O3` | conditional branches in `main`: **3 at -O0, 0 at -O3** | **FOLDED AWAY** |
 
@@ -970,15 +970,51 @@ gone. A predicate the compiler removes is a predicate an analyst never sees.
 
 None of the three claims survives. They are recorded as refuted rather than
 softened, because the objective's instruction is to measure resistance rather
-than assert it. What the transforms still provide is **volume**: they enlarge
-the artefact and increase the number of things an analyst must look at. That is
-a real cost to the attacker, and it is a different claim from the one the
-documentation made. The distinction matters: volume is measurable in bytes, and
-difficulty is measured by solver time — which, here, is negligible.
+than assert it.
 
-The probes are wired so a future change to `n` or to the round count moves the
-numbers, and `summarise()` reports `UNMEASURED` rather than a pass when a probe
-could not run. Three verdicts, three failures, no exemptions.
+**The subset-sum pass was removed from the default pipeline.** Raising `n` was
+attempted first, and it does not work — the measurement says why, and the
+reason is structural rather than a matter of tuning:
+
+| n | defender's verify cost | attacker's MITM cost | protection gained |
+|---|---|---|---|
+| 8 | 0.0001 s | 0.0001 s | none |
+| 24 | 0.006 s | 0.02 s | none |
+| 32 | 0.13 s | 0.05 s | none |
+| 40 | 2.8 s | 1.3 s | none |
+| 48 | **60 s** | > 5 s | none (build unusable) |
+
+Two facts make width-tuning futile. First, the **defender pays the same
+meet-in-the-middle work on every build** that the attacker pays once — raising
+`n` taxes the build. Second, and decisively, **the answer is a compile-time
+constant**: the set and the target are emitted into the C in plaintext, so
+`check(...) == 1` is true by inspection. An analyst does not need a solver at
+any `n`. The `answer_predetermined` field in the probe records exactly this,
+and `summarise()` refuses to mark the claim as holding even when the MITM
+times out.
+
+So `do_subset_sum` defaults to **False**. The pass is kept, tested, and
+available by explicit opt-in — a reflectively honest "this is volume, not
+hardness" — but it is not part of a default build, because a transform that
+provably fails the review's bar while costing build time is the anti-pattern
+the review names.
+
+The verifier itself was rewritten while checking the widths: a DP indexed by a
+40-bit target is not emittable, so it is now meet-in-the-middle, and the table
+is **heap-allocated and freed** rather than a static array (a static 2²⁴ table
+would have added 128 MB to every linked binary and made the first call a
+page-fault stall). Verified end to end: the transformed C compiles at `-O2` and
+returns the same exit status as the original across three seeds.
+
+For the other two transforms the honest description is unchanged: they provide
+**volume**, measured in bytes, not difficulty, measured in solver time — and
+the solver time is still negligible. What the transforms cost the attacker is
+the number of things they must look at, and that is a different claim from the
+one the documentation made.
+
+The probes are wired so a future change to the emitter moves the numbers, and
+`summarise()` reports `UNMEASURED` rather than a pass when a probe could not
+run. Three verdicts, three failures, no exemptions.
 
 ---
 
