@@ -31,6 +31,54 @@ def _validated(path):
 
 CALL = re.compile(r"^([ \t]*)_NX_SELF_OK = _nx_self_check\(\)[ \t]*$", re.M)
 PACK = re.compile(r"_NX_SECTION_PACK\s*=\s*'([^']+)'")
+#: Both quote styles: the loader emits double quotes, older artefacts and tests
+#: use single. Matching only one silently skipped the restamp scenario, which is
+#: the most important row — so it accepts both.
+CK = re.compile(r"^(?P<lead>[ \t]*)_NX_SELF_CK\s*=\s*(?P<q>['\"])(?P<val>[^'\"]*)(?P=q)", re.M)
+HM = re.compile(r"^(?P<lead>[ \t]*)_NX_SELF_HM\s*=\s*(?P<q>['\"])(?P<val>[^'\"]*)(?P=q)", re.M)
+TOK = re.compile(r"^(?P<lead>[ \t]*)_NX_SELF_TOK\s*=\s*(?P<q>['\"])(?P<val>[^'\"]*)(?P=q)", re.M)
+
+
+def recompute_self_ck(src):
+    """Recompute ``_NX_SELF_CK`` from the artefact's own text.
+
+    The self-check is a Merkle root over the file's own lines, excluding the
+    anchor lines — and the exclusion set is DERIVED FROM THE FILE. Nothing in
+    that construction is a secret, so an attacker who edits the payload can
+    recompute the stamp. This function exists to MEASURE that, not to enable
+    it: if it produces a stamp the loader accepts, the integrity check is bound
+    to the file's text rather than to the publisher.
+
+    Returns ``(new_src, ok)``.
+    """
+    import hashlib
+
+    ck = CK.search(src)
+    hm = HM.search(src)
+    tok = TOK.search(src)
+    if not ck:
+        return src, False
+    ck_v = ck.group("val")
+    hm_v = hm.group("val") if hm else ""
+    tok_v = tok.group("val") if tok else ""
+    lines = src.encode("utf-8", "surrogateescape").splitlines(keepends=True)
+    filtered = [ln for ln in lines
+                if ck_v.encode() not in ln
+                and (not hm_v or hm_v.encode() not in ln)
+                and b"_NX_CFI_SEQ = " not in ln
+                and (not tok_v or tok_v.encode() not in ln)]
+    content = b"".join(filtered)
+    chunks = [content[i:i + 1024] for i in range(0, len(content), 1024)]
+    hashes = [hashlib.sha256(b).hexdigest() for b in chunks]
+    while len(hashes) > 1:
+        if len(hashes) % 2 == 1:
+            hashes.append(hashes[-1])
+        hashes = [hashlib.sha256((hashes[i] + hashes[i + 1]).encode()).hexdigest()
+                  for i in range(0, len(hashes), 2)]
+    root = hashes[0] if hashes else ""
+    if not root:
+        return src, False
+    return src[:ck.start("val")] + root + src[ck.end("val"):], True
 
 
 def _flip_pack_byte(src):
@@ -95,7 +143,36 @@ def main():
     print("bypass + tamper        : rc=%-4s payload_ran=%-5s %s"
           % (ch_rc, ch_ok, ch_tail[:60]))
 
+    # ── re-stamp: tamper WITHOUT touching the self-check ─────────────────
+    #
+    # This is the scenario that matters most, because it does not require the
+    # attacker to disable anything. The self-check is a Merkle root over the
+    # file's own lines, and the exclusion set is derived from the file, so a
+    # tampered artefact can carry a consistent stamp. If this row shows the
+    # payload running, the integrity check is bound to the artefact's TEXT, not
+    # to the publisher — and §1's "anti-patching redundancy" reduces to
+    # "recompute one hash".
+    restamped_src, could = recompute_self_ck(base)
+    if could:
+        restamped_only_rc, restamped_only_ok, rs_tail = run(
+            restamped_src, "restamp_only.py")
+        print("restamp (no edit)      : rc=%-4s payload_ran=%-5s %s"
+              % (restamped_only_rc, restamped_only_ok, rs_tail[:60]))
+        tampered_then, _ = _flip_pack_byte(base)
+        restamped, _ = recompute_self_ck(tampered_then)
+        rs_rc, rs_ok, rs2_tail = run(restamped, "tamper_then_restamp.py")
+        print("tamper + restamp       : rc=%-4s payload_ran=%-5s %s"
+              % (rs_rc, rs_ok, rs2_tail[:60]))
+    else:
+        rs_ok = None
+        print("restamp                : no _NX_SELF_CK anchor in this artefact")
+
     print()
+    if rs_ok:
+        print("SELF-CHECK IS NOT BINDING: a tampered payload ran after the "
+              "stamp was recomputed from the artefact's own text. The check "
+              "detects accidental corruption, not a deliberate edit.")
+        return 1
     if t_ok is False and ch_ok is True:
         print("ATTACK CHAIN CONFIRMED: the pack tamper alone is caught, but "
               "after bypassing the self-check the tampered payload RUNS.")
