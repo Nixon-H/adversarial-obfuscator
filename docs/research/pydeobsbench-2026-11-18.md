@@ -1425,6 +1425,34 @@ network availability at runtime).
 
 ---
 
+## 5n-bis. §9 audit — all three "never verified" items existed, two were unreachable
+
+The review lists function-level virtualisation, instruction-set diversification
+and crash-forensics protection as §9 items to "still consider adding". The audit
+found all three ALREADY IMPLEMENTED — and two of them unreachable in every real
+build, which is the "tested but unreachable" defect class this session keeps
+finding.
+
+| §9 item | module | audit finding | action |
+|---|---|---|---|
+| Function-level virtualisation | `vm_dispatch.py` (756 lines, 2 dispatcher families, per-seed opcode shuffling, 12 tests) | **nothing set `options['vm_dispatch']`** — reachable only by hand-writing an experiment script | `NIXON_VM_DISPATCH=a\|b\|alternate` now reaches the native option dict; off by default (conservative allowlist) |
+| Instruction-set diversification | `phase_state_isa.py` + VM-A/B families + §5 backends | **wired** (called from build.py line 2328) | recorded; three layers measured (per-seed opcode map, per-build dispatcher family, per-backend native mix) |
+| Crash-forensics protection | `native/crash_suppress.h` (106 lines, 27 tests) | **no native source included it** — every native hard failure raised an OS dialog | `native/core.cpp` includes it and calls `nixon_suppress_crash_dialogs()` at `CompileToMarshal`; compiles clean with `-DCORE_HAVE_PYTHON_H` (126 KB object) |
+
+The crash-suppression finding is the operationally important one. §4's core-dump
+policy prevents *dumping*; without this header, a native hard failure still
+raised a Windows crash dialog or a POSIX SIGSEGV notice, handing the analyst a
+register state and a backtrace. Both defences are now in the same native module.
+
+Honest scope: none of the three hides the WRAPPER (§5n). The VM hides payload
+function bodies behind a bytecode interpreter; crash suppression prevents
+forensic leakage from native failures; ISA diversification raises disassembly
+cost. All three are measured contributions to analyst cost with recorded limits,
+not unqualified wins. Full detail in `docs/security/THREAT_BOUNDARY_LOADER.md`
+§"§9 audit".
+
+---
+
 
 ## 6. Honest limits of this benchmark
 

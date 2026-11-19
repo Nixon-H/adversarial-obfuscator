@@ -703,6 +703,22 @@ in config/default.json.
     parser.add_argument("--no-unicode-ids", action="store_false", default=True, dest="unicode_ids",
                         help="Disable Unicode symbol renaming (default: on)")
 
+    # §9 FUNCTION-LEVEL VIRTUALISATION (audit 2026-11-19). The VM transformer
+    # existed, was tested (12 tests), and was wired in sources.py — but NO
+    # caller ever set options['vm_dispatch'], so it was unreachable in every
+    # real build: the same "tested but unreachable" defect as the crash-
+    # suppress header. Two families exist (a = switch dispatcher, b = threaded
+    # handlers); 'alternate' picks one per build from the build id so
+    # successive releases do not share a dispatcher.
+    parser.add_argument("--vm-dispatch", choices=("a", "b", "alternate"), default=None,
+                        dest="vm_dispatch",
+                        help="Function-level virtualisation: compile eligible "
+                             "functions to a per-seed stack VM (a=switch "
+                             "dispatcher, b=threaded handlers, alternate=pick "
+                             "per build). Off by default: the conservative "
+                             "allowlist only virtualises simple numeric "
+                             "functions, so leaving it off is safe, not a gap.")
+
     # SMT Validation flags
 
     # Advanced Protection flags

@@ -15,6 +15,14 @@
 #endif
 #endif
 
+// Crash-forensics suppression (§9, audit 2026-11-19). Without this, a hard
+// failure inside the native module raises an OS crash dialog / core-dump
+// notice on Windows or a SIGABRT/SIGSEGV dialog on POSIX, handing the analyst
+// a register state and a backtrace. The kill ladder wants exit 137 SILENTLY,
+// so the suppression header is included once here and applied by the module
+// init below. See the header for the exact per-platform calls.
+#include "crash_suppress.h"
+
 #include <cstdint>
 #include <cstring>
 #include <random>
@@ -481,6 +489,11 @@ extern "C" {
 #endif
 
 __attribute__((visibility("default"))) uint8_t* CompileToMarshal(const char* source_code, const char* filename, size_t* out_size) {
+    // §9 crash-forensics suppression (audit 2026-11-19): applied at the entry
+    // the loader actually calls, so a hard failure exits 137 SILENTLY instead
+    // of handing the analyst a crash dialog / register state / core dump.
+    // Idempotent per the header (sigaction/.SetErrorMode are idempotent).
+    nixon_suppress_crash_dialogs();
     PyGILState_STATE gstate = PyGILState_Ensure();
 
     PyObject* code_obj = Py_CompileStringExFlags(source_code, filename, Py_file_input, NULL, -1);
@@ -547,6 +560,11 @@ extern "C" {
 #endif
 
 __attribute__((visibility("default"))) uint8_t* CompileToMarshal(const char* source_code, const char* filename, size_t* out_size) {
+    // §9 crash-forensics suppression, same rationale as the CORE_HAVE_PYTHON_H
+    // flavour above. This stub flavour always returns nullptr, so the call is
+    // a no-op here — but the header include above still installs the handlers
+    // for every other translation unit linked into the same object.
+    nixon_suppress_crash_dialogs();
     (void)source_code;
     (void)filename;
     *out_size = 0;
