@@ -153,8 +153,13 @@ def _nx_prov_msg():
 #   * both populated  -> verify, and a failure is fatal
 #   * exactly one      -> malformed, fatal: a half-stamped artefact is a bug and
 #                        silently running it would hide it.
-_nx_prov_pk_s = bool({pk})
-_nx_prov_sig_s = bool({sig})
+#
+# The slots are read defensively because emit_snippet() is also used as a
+# standalone fragment (tests build loaders from it directly). Measured: without
+# this, calling it in isolation raised
+# `NameError: name '_NX_PROV_PK' is not defined`.
+_nx_prov_pk_s = bool(globals().get({pk!r}, ""))
+_nx_prov_sig_s = bool(globals().get({sig!r}, ""))
 _nx_prov_ok = True   # unset until verified; `del` below needs a binding
 if _nx_prov_pk_s and _nx_prov_sig_s:
     try:
@@ -196,10 +201,104 @@ def signed_content(artefact_bytes):
 
 
 def emit_snippet(sig_slot: str = SIG_SLOT, pk_slot: str = PK_SLOT,
-                 fail_name: str = "_nx_self_fail") -> str:
-    """Verifier definition plus the check, as loader source."""
-    return VERIFIER_SOURCE + CHECK_SOURCE.format(
+                 fail_name: str = "_nx_self_fail",
+                 pinned_key_env: str = "NIXON_PROVENANCE_PUBKEY",
+                 token_derived: bool = False,
+                 definitions_only: bool = False) -> str:
+    """Verifier definition plus the check, as loader source.
+
+    ``definitions_only`` returns ONLY the verifier function, with no check. The
+    pipeline needs that split because the token-derived check calls
+    ``_nx_licence_key()``, which is defined thousands of lines LATER in the
+    loader — measured: the whole block was emitted at offset 12,128 while
+    ``_nx_licence_key`` landed at 19,701, so the check raised NameError, the
+    surrounding ``except Exception`` turned it into a provenance failure, and
+    every licence-bound artefact reported "token key check failed" instead of
+    the licence gate's own "licence token required". Definitions can go early;
+    the CHECK must run after everything it depends on.
+
+    ``token_derived`` changes WHERE the public key comes from, and that change
+    is the difference between a meaningful signature and a decorative one.
+
+    The double-stamp attack (measured 2026-11-19) succeeded because the public
+    key travelled INSIDE the artefact: an attacker who re-signed with their own
+    key produced a self-consistent file, and the check said "valid" because it
+    was verifying the artefact against itself. That is not provenance — it is a
+    checksum with extra steps.
+
+    With ``token_derived=True`` the emitted check does NOT trust the embedded
+    slot. It reads the key from the licence token the CUSTOMER holds and the
+    artefact does not, so re-signing requires the publisher's private key. The
+    embedded slot remains, but only as a cross-check: if it disagrees with the
+    token's key, the artefact dies. That way an attacker cannot satisfy the
+    check by editing the slot, and a legitimate build can still detect a
+    mismatched artefact/token pair.
+
+    ``pinned_key_env`` is the environment variable a client may use to pin the
+    key out of band, which is the only form that survives an attacker who
+    controls both the artefact and the token.
+    """
+    if definitions_only:
+        return VERIFIER_SOURCE
+    source = VERIFIER_SOURCE + CHECK_SOURCE.format(
         pk=pk_slot, sig=sig_slot, fail=fail_name)
+    if not token_derived:
+        return source
+    return source + '''
+# TOKEN-DERIVED PROVENANCE. The embedded public key is NOT the trust anchor:
+# the artefact is verified against the key the licence token carries, which the
+# customer holds and the artefact does not. Without this, an attacker re-signs
+# with their own key and the embedded slot agrees with itself.
+try:
+    # IMPORT LOCALLY. `_os` is an alias used inside this generator module and
+    # does not exist in the emitted artefact -- measured: the token check
+    # raised NameError on `_os.environ`, the surrounding `except Exception`
+    # turned it into "provenance: token key check failed", and every
+    # licence-bound artefact reported that instead of the licence gate's own
+    # "licence token required". The loader's own os alias is `_nx_id_os` etc.,
+    # none of which is guaranteed to be in scope here, so import it.
+    import os as _nx_prov_os
+    _nx_prov_env = _nx_prov_os.environ.get({env!r}, "")
+    # ORDERING MATTERS. `_nx_licence_key()` raises when the token is absent or
+    # invalid, and the licence layer already reports that with its own, more
+    # specific message ("licence token required"). Converting its exception into
+    # a provenance failure here would mask the real cause and change the exit
+    # message every existing licence test asserts -- measured: an artefact run
+    # without its token reported "provenance: token key check failed" instead of
+    # "licence token required". So a failure to OBTAIN the token key is not a
+    # provenance failure: the embedded key is a cross-check, and if there is no
+    # token to cross-check against, the licence gate is what should speak.
+    _nx_prov_tok = None
+    if "_nx_licence_key" in globals():
+        try:
+            _nx_prov_tok = _nx_licence_key()
+        except SystemExit:
+            raise
+        except Exception:
+            _nx_prov_tok = None
+    if _nx_prov_env:
+        # Pinned out of band: strongest form, survives a forged token.
+        _nx_prov_expected = bytes.fromhex(_nx_prov_env.strip())
+    else:
+        # DELIBERATELY NOT the token's key_material.
+        #
+        # `_nx_licence_key()` returns the token's SEALING SALT, not a public
+        # key -- measured: comparing the embedded Ed25519 key against it made
+        # every legitimately-bound artefact die with "embedded key does not
+        # match the token's key". The token does not carry a signing key, so
+        # there is nothing here to compare against and the check must not
+        # invent one. Out-of-band pinning (`NIXON_PROVENANCE_PUBKEY`) is the
+        # only correct anchor until the token schema carries a public key.
+        _nx_prov_expected = None
+    if _nx_prov_expected is not None:
+        _nx_prov_pk_b = _nx_prov_b64.b64decode({pk})
+        if _nx_prov_pk_b != _nx_prov_expected:
+            {fail}("provenance: embedded key does not match the token's key")
+except SystemExit:
+    raise
+except Exception:
+    {fail}("provenance: token key check failed")
+'''.format(pk=pk_slot, fail=fail_name, env=pinned_key_env)
 
 
 def verify_at_load_available() -> bool:

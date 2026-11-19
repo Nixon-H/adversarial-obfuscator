@@ -163,8 +163,13 @@ The public key travels IN the artefact, so an attacker who re-signs a modified
 file with their OWN key produces something self-consistent. Two things follow,
 and both are stated rather than implied:
 
-* pinning the public key in the CLIENT (or in the licence token) is what makes
-  the signature meaningful — an artefact that carries its own trust anchor can
+* pinning the public key in the CLIENT is what makes the signature meaningful.
+  Out-of-band pinning via `NIXON_PROVENANCE_PUBKEY` is implemented and
+  **measured**: a correct pin runs (rc 0), a wrong pin is refused (rc 137).
+  Pinning via the LICENCE TOKEN is **not** available: `_nx_licence_key()`
+  returns the token's sealing salt, not a public key, so comparing against it
+  made every legitimately bound artefact die. Measured and reverted; the token
+  schema would have to carry a signing key before that path can exist. — an artefact that carries its own trust anchor can
   only prove it agrees with itself;
 * an attacker who controls the interpreter can patch the verification call out,
   exactly as they can patch any check. §1's answer to that is the point-of-use
@@ -253,17 +258,43 @@ Windows, plus the `authenticode: True` this module already reports.
 
 ### 3. macOS Hardened Runtime, code signing, library validation
 
-**State: NOT POSSIBLE HERE.** `codesign`, `rcodesign` and `ldid` are all absent.
-Hardened Runtime and library validation live in the CodeDirectory of a signature,
-not in compiler flags, so `verify_macho_bytes` correctly reports
-`hardened_runtime: False, library_validation: False` for anything built here.
+**State: BLOCKED ON A macOS RUNNER — not "verified", and not something this host
+can produce.**
 
-**Missing capability:** `codesign` (macOS) or `rcodesign` (cross-platform), plus
-an Apple Developer ID certificate.
-**Verification that would follow:** a Mach-O with an `LC_CODE_SIGNATURE` whose
-CodeDirectory has `CS_RUNTIME | CS_RESTRICT`; the parser already reads exactly
-that and is tested against synthetic CodeDirectories, so again the check is
-ready and the toolchain is the gap.
+`codesign`, `rcodesign` and `ldid` are all absent. Hardened Runtime and library
+validation live in the CodeDirectory of a signature, not in compiler flags, so
+`verify_macho_bytes` correctly reports `hardened_runtime: False,
+library_validation: False` for anything built here: there is no signature for it
+to find.
+
+This is a different kind of entry from the CFG one. There, the mechanism was
+implemented and measured with a weaker result (no function table). Here the
+**parser is complete and tested** — it walks `LC_CODE_SIGNATURE`, parses the
+CodeDirectory superblob and reads `CS_RUNTIME` / `CS_RESTRICT` — but no signed
+Mach-O object exists on this host to point it at, so the parser has only ever
+been exercised against synthetic blobs. That is a weaker evidence class and it is
+recorded as such rather than as "verified".
+
+**Unblock step, named precisely:** a macOS runner (or `rcodesign` on any host)
+plus an **Apple Developer ID Application certificate**, then
+
+    codesign --options runtime --timestamp --sign "Developer ID Application: …" payload.dylib
+
+`--options runtime` is what sets `CS_RUNTIME`; `--timestamp` is what keeps the
+signature valid past certificate expiry. Library validation is `CS_RESTRICT`,
+enabled by the same Hardened Runtime option set.
+
+**Verification that would follow, and is already implemented:** the parser
+reports `hardened_runtime: True`, `library_validation: True`, and the
+CodeDirectory's hash type and flags; a negative control (signed without
+`--options runtime`) must report both `False`. Both directions are already
+asserted against synthetic CodeDirectories in `tests/test_native_harden.py`, so
+the only missing link is a real signed object.
+
+**Why no workaround:** there is no way to produce a Mach-O CodeDirectory that
+Gatekeeper accepts without a Developer ID, and a synthetic one would make the
+artefact look signed to a format check while being rejected by every macOS host
+that enforces it — the failure mode this document exists to prevent.
 
 ### Why these are recorded rather than worked around
 

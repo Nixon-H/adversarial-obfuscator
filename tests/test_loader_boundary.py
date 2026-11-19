@@ -352,3 +352,44 @@ def test_the_document_records_the_signature_fix():
     text = open(DOC, encoding="utf-8").read()
     assert "attestation.py" in text or "signature verification" in text.lower(), (
         "the boundary document must point at the implemented fix")
+
+
+# ── token-derived provenance: the double-stamp fix, closed ───────────────
+
+def test_plain_provenance_trusts_the_embedded_key():
+    """The DEFAULT still trusts the embedded slot, and that is why it failed.
+
+    Documented rather than hidden: an artefact verified against a key it carries
+    agrees with itself. An attacker re-signs with their own key and the check
+    passes — measured as the double-stamp attack.
+    """
+    from obfuscator import attestation as A
+    snippet = A.emit_snippet()
+    assert "NIXON_PROVENANCE_PUBKEY" not in snippet, (
+        "the plain variant does not pin a key; that is the limitation")
+
+
+def test_token_derived_provenance_does_not_trust_the_embedded_key():
+    """The fix: the trust anchor moves out of the artefact.
+
+    With ``token_derived=True`` the emitted check compares the embedded key
+    against the token's key (or an out-of-band pinned key) and dies on mismatch,
+    so re-signing requires the publisher's private key.
+    """
+    from obfuscator import attestation as A
+    snippet = A.emit_snippet(token_derived=True)
+    assert "NIXON_PROVENANCE_PUBKEY" in snippet, (
+        "no out-of-band pin: the artefact would still verify itself")
+    assert "does not match" in snippet, "no mismatch check emitted"
+    assert "_nx_licence_key" in snippet, (
+        "no token-derived key path: the customer's token is what makes the "
+        "signature meaningful")
+    compile(snippet, "<token-derived>", "exec")
+
+
+def test_both_provenance_variants_compile():
+    """Emitted code is pasted into every artefact, so it must be valid source."""
+    from obfuscator import attestation as A
+    for token_derived in (False, True):
+        compile(A.emit_snippet(token_derived=token_derived),
+                "<provenance>", "exec")

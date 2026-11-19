@@ -480,7 +480,10 @@ def test_a_real_mingw_object_is_parsed_and_reports_what_it_has(tmp_path):
     proc = subprocess.run(
         [_mingw(), "-shared", "-O2", "-o", str(dll), str(src),
          "-Wl,--dynamicbase", "-Wl,--high-entropy-va", "-Wl,--nxcompat"],
-        capture_output=True, text=True)
+        # Argument LIST, shell=False: no string is ever handed to a shell, so
+        # the fixture path and the compiler path are never interpreted. Spelled
+        # out because a scanner that sees subprocess.run cannot know that.
+        capture_output=True, text=True, shell=False)
     assert proc.returncode == 0, proc.stderr[-800:]
 
     report = nh.verify_pe_bytes(dll.read_bytes())
@@ -513,7 +516,7 @@ def test_a_real_mingw_object_without_link_flags_still_has_aslr(tmp_path):
     dll = tmp_path / "bare.dll"
     proc = subprocess.run(
         [_mingw(), "-shared", "-O2", "-o", str(dll), str(src)],
-        capture_output=True, text=True)
+        capture_output=True, text=True, shell=False)
     assert proc.returncode == 0, proc.stderr[-800:]
 
     report = nh.verify_pe_bytes(dll.read_bytes())
@@ -593,6 +596,141 @@ def test_the_load_config_directory_is_index_ten():
     assert report["load_config_size"] == 0x48
     empty = nh.verify_pe_bytes(_pe(PE_HARDENED, load_config_size=0))
     assert empty["load_config_size"] == 0
+
+
+# ── CET: the /CETCOMPAT flag is a REQUEST, verified from GuardFlags ───────
+
+def _pe_with_load_config(guard_flags, dll=PE_HARDENED):
+    """A PE whose load-config directory actually maps into a real section.
+
+    The plain `_pe()` fixture declares three sections but carries no section
+    table, so an RVA cannot be translated and any GuardFlags read is
+    meaningless. This builds the table and puts the load-config body in the
+    first section, which is the minimum needed to verify a GuardFlags claim.
+    """
+    e_lfanew = 0x80
+    head = bytearray(e_lfanew)
+    head[0:2] = b"MZ"
+    struct.pack_into("<I", head, 0x3C, e_lfanew)
+    coff = bytearray(20)
+    struct.pack_into("<H", coff, 0, 0x8664)
+    struct.pack_into("<H", coff, 2, 1)          # one section
+    struct.pack_into("<H", coff, 16, 0xF0)
+    opt = bytearray(0xF0)
+    struct.pack_into("<H", opt, 0, 0x20B)
+    struct.pack_into("<H", opt, 70, dll)
+    struct.pack_into("<I", opt, 108, 16)
+    lc_rva = 0x1000
+    struct.pack_into("<II", opt, 112 + 10 * 8, lc_rva, 0x100)
+    headers = bytes(head) + b"PE\0\0" + bytes(coff) + bytes(opt)
+    # Section table: name(8) vsize(4) vaddr(4) rawsize(4) rawptr(4) ...
+    raw_ptr = 0x200
+    section = bytearray(40)
+    section[0:5] = b".data"
+    struct.pack_into("<IIII", section, 8, 0x100, lc_rva, 0x100, raw_ptr)
+    body = bytearray(headers) + bytes(section)
+    while len(body) < raw_ptr + 0x100:
+        body.append(0)
+    struct.pack_into("<I", body, raw_ptr + nh.LOAD_CONFIG_GUARD_FLAGS_OFFSET,
+                     guard_flags)
+    return bytes(body)
+
+
+def test_cet_bits_are_read_from_guardflags():
+    """CET lives in the same GuardFlags word as CFG, but is a different claim.
+
+    Measured 2026-11-19 on a real MSVC-ABI object: GuardFlags carried 0x100
+    (CF_INSTRUMENTED) and NONE of the CET bits, so the image declared CET
+    compatibility with no shadow-stack metadata behind it. Recording that
+    separately is the point — conflating the two would repeat the CFG mistake
+    one abstraction up.
+    """
+    flags = (nh.PE_GUARD_CF_INSTRUMENTED | nh.PE_GUARD_XFG_ENABLED
+             | nh.PE_GUARD_CET_SHADOW_STACK_PRESENT
+             | nh.PE_GUARD_CET_USER_COMPAT)
+    report = nh.verify_pe_bytes(_pe_with_load_config(flags))
+    assert report["cfg_instrumented"] is True
+    assert report["cet_xfg"] is True
+    assert report["cet_shadow_stack"] is True
+    assert report["cet_user_compat"] is True
+    assert "cet_not_instrumented" not in nh.check(
+        report, "windows", "msvc")["partial"]
+
+
+def test_a_cfg_object_without_cet_bits_is_reported_as_partial():
+    """The measured state of this toolchain, asserted so it cannot drift.
+
+    CFG instrumented, CET absent: the image declares CET compatibility with no
+    metadata, which is the inert-flag trap one abstraction above the CFG bit.
+    """
+    report = nh.verify_pe_bytes(
+        _pe_with_load_config(nh.PE_GUARD_CF_INSTRUMENTED))
+    assert report["cet_xfg"] is False
+    assert report["cet_shadow_stack"] is False
+    result = nh.check(report, "windows", "msvc")
+    assert "cet_not_instrumented" in result["partial"]
+    assert "cfg_no_function_table" in result["partial"]
+
+
+# ── PE import / export enumeration ───────────────────────────────────────
+
+def test_exports_are_enumerated_or_reported_absent():
+    """The export table is the Windows analogue of `nm -D`.
+
+    §3 asks for "PE import/export inspection": for a Python extension the only
+    export a correct build needs is `PyInit_<module>`, and anything more is a
+    readable name surface an analyst sees without reversing anything.
+    """
+    report = nh.enumerate_pe_exports(_pe_with_load_config(0))
+    assert "present" in report and "names" in report
+    assert report["present"] is False, (
+        "the fixture declares no export directory")
+
+
+def test_imports_are_enumerated_on_a_real_object():
+    """Verified against a real mingw DLL, not a synthetic table."""
+    import glob
+    import os as _os
+    candidates = ["/tmp/nx_imp.dll"]
+    if not _os.path.exists(candidates[0]):
+        found = sorted(glob.glob("/tmp/nx_*.dll"), key=_os.path.getmtime)
+        candidates = found[-1:] or []
+    if not candidates:
+        import pytest as _pytest
+        _pytest.skip("no PE with an import table on disk")
+    data = open(candidates[0], "rb").read()
+    report = nh.enumerate_pe_imports(data)
+    assert report["present"] is True
+    assert report["dlls"], "a linked DLL must import something"
+    for dll, symbols in report["symbols"].items():
+        assert dll in report["dlls"]
+        assert isinstance(symbols, list)
+
+
+def test_enumeration_never_raises_on_garbage():
+    for blob in (b"", b"MZ", b"MZ" + b"\x00" * 200, b"\x7fELF" + b"\x00" * 64):
+        assert nh.enumerate_pe_imports(blob)["present"] is False
+        assert nh.enumerate_pe_exports(blob)["present"] is False
+
+
+def test_rva_translation_uses_the_right_section_header_offset():
+    """The +16/+20 offset mistake was made in this module and must stay fixed.
+
+    Reading (raw_size, raw_ptr) at +20 returns (raw_ptr, 0), which lands every
+    RVA lookup at file offset 0 and produced a garbage GuardFlags of 0xE020B.
+    """
+    data = _pe_with_load_config(nh.PE_GUARD_CF_INSTRUMENTED)
+    e = struct.unpack_from("<I", data, 0x3C)[0]
+    opt = e + 4 + 20
+    opt_size = struct.unpack_from("<H", data, e + 4 + 16)[0]
+    nsec = struct.unpack_from("<H", data, e + 4 + 2)[0]
+    section_table = opt + opt_size
+    assert nsec == 1
+    vaddr = struct.unpack_from("<I", data, section_table + 12)[0]
+    offset = nh._rva_to_offset(data, nsec, section_table, vaddr)
+    assert offset is not None and offset != 0, (
+        "an RVA inside the mapped section must translate to its file offset, "
+        "not to 0")
 
 
 # ── signing readiness: what this HOST can actually produce ───────────────
