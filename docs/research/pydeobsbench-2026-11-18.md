@@ -920,6 +920,68 @@ dispersal, update manifests) where `cryptography` is available at build time.
 
 ---
 
+## 5k. §6 adversarial solver validation — all three claims refuted, measured
+
+The review sets the bar explicitly:
+
+> "I would not count a transform as a successful security mechanism until it
+> survives automated simplification and adversarial recovery attempts."
+>
+> "NP-hardness of a general problem does not automatically make an individual
+> generated instance difficult."
+
+`pydeobsbench/transform_solvers.py` implements the adversarial half. It is
+separate from the emitter on purpose (§10): a transform that grades itself is
+the self-judging failure the review warns about.
+
+Measured 2026-11-19, CPython 3.13, gcc 14.2, sympy 1.14, this host:
+
+| claim | measured | verdict |
+|---|---|---|
+| subset-sum "NP-hard", 4096-entry DP | n = **8**; search space **256**; 200/200 instances solved, worst **0.000114 s** | **NOT A PROTECTION** |
+| multi-round MBA "exponential" | up to **2,073 characters**, 5 rounds; sympy recovered the constant in **0.0037 s** | **WHOLLY INEFFECTIVE** |
+| fixed-even opaque predicate at `-O3` | conditional branches in `main`: **3 at -O0, 0 at -O3** | **FOLDED AWAY** |
+
+### Why the 4096-entry table measures nothing
+
+The table sizes the **run-time verifier**. The attack is the subset lattice:
+`n = 8` means **256** subsets, which a script enumerates in microseconds. The
+review's distinction is exact — the difficulty of the class says nothing about a
+generated instance, and here the instance is trivially small. A 4096-entry
+table attached to a 256-element search space is inverted effort.
+
+### Why MBA length is not difficulty
+
+`_mba_substitute_constant` emits a genuinely nested, exact expression: the
+identity `x + y == (x ^ y) + 2 * (x & y)` is wrapped round after round, and
+every round is arithmetically correct. The `volatile` slots stop **gcc** folding
+it. They do not stop a **reader** or a **symbolic solver**, which see the same
+arithmetic with no secrets in it. sympy's generic `simplify` returned `12345`
+from a 2,073-character expression in under 4 ms — including the 5-round case.
+The transform costs bytes and buys no time.
+
+### Why the opaque predicate folds
+
+`(x*x - x) % 2 == 0` is true for all `x`, and gcc proves it. Disassembling
+`main` shows 3 conditional branches at `-O0` and **0** at `-O3`: the branch is
+gone. A predicate the compiler removes is a predicate an analyst never sees.
+
+### What this changes
+
+None of the three claims survives. They are recorded as refuted rather than
+softened, because the objective's instruction is to measure resistance rather
+than assert it. What the transforms still provide is **volume**: they enlarge
+the artefact and increase the number of things an analyst must look at. That is
+a real cost to the attacker, and it is a different claim from the one the
+documentation made. The distinction matters: volume is measurable in bytes, and
+difficulty is measured by solver time — which, here, is negligible.
+
+The probes are wired so a future change to `n` or to the round count moves the
+numbers, and `summarise()` reports `UNMEASURED` rather than a pass when a probe
+could not run. Three verdicts, three failures, no exemptions.
+
+---
+
 
 ## 6. Honest limits of this benchmark
 
