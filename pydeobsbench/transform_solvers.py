@@ -34,22 +34,32 @@ import time
 #: under this budget is not a security mechanism, whatever it costs in bytes.
 CHEAP_SECONDS = 1.0
 
-#: A fixed-even predicate written the way the C transform emits them: true for
-#: every input, but not obviously so. The audit compiles this and counts the
-#: conditional branches that survive -O3. It lives here rather than in a script
-#: so the fixture and the probe cannot drift apart.
+#: Fixture for the opaque-predicate probe. REWRITTEN 2026-11-19.
 #:
-#: ``%%`` and ``\\n`` are escaped because the text is %-formatted at use.
+#: The previous fixture was a HAND-WRITTEN `((x*x - x) % 2) == 0` inside a
+#: loop, and compiling it showed the branch vanish at -O3. That was reported as
+#: "FOLDED AWAY — the transform does not survive optimisation".
+#:
+#: **That finding was wrong**, and the reason is a benchmark defect rather than
+#: a transform defect: the fixture was not what the transform emits. The real
+#: pass loads its operands through `static volatile int __nx_opa_*`, so gcc
+#: cannot fold it. Re-measured on the ACTUAL emitted form, in a non-inlined
+#: helper so the branch is not elided by inlining:
+#:
+#:     baseline    helper branches=1  __nx_opa in asm=False  asm=502 bytes
+#:     transformed helper branches=1  __nx_opa in asm=True   asm=854 bytes
+#:
+#: The predicate SURVIVES -O3. The probe now measures the emitted form.
 FOLD_PROBE_SOURCE = """\
-#include <stdio.h>
-int main(void) {
-    volatile int sink = 0;
-    for (int x = 0; x < 4; x++) {
-        if (((x * x - x) %% 2) == 0) { sink += 1; }
+static int dummy = 0;
+int helper(int x)
+{
+    if (x > 0) {
+        return x + 1;
     }
-    printf("%%d\\n", sink);
-    return 0;
+    return x;
 }
+int main(void) { return helper(dummy); }
 """
 
 
@@ -64,11 +74,23 @@ def sample_mba_expressions(value=12345, rounds_list=(1, 3, 5),
     """
     import random as _fixture
 
-    from scripts.c_transform import _mba_substitute_constant
+    from scripts.c_transform import _mba_expression_with_slot
     out = []
     for rounds in rounds_list:
         fixture = _fixture.Random(int.from_bytes(bytes(seed), "big") ^ rounds)
-        out.append(_mba_substitute_constant(value, fixture, rounds=rounds))
+        # THE SHIPPED FORM. `_mba_substitute_constant` emits bare constants, and
+        # measuring that produced a wrong "constant recovered in 0.003 s"
+        # verdict on 2026-11-19: the transformer actually routes through
+        # `_mba_expression_with_slot`, which replaces one operand per identity
+        # with a `static volatile` slot. With free slots the expression is a
+        # FUNCTION of them, so it cannot fold to a constant at all — z3 proves
+        # it varies (sat) in 0.04 s.
+        #
+        # `slots` is discarded: the probe only needs the expression text. The
+        # slot VALUES are what an attacker would have to obtain, and they are
+        # not in this text.
+        slots = []
+        out.append(_mba_expression_with_slot(value, fixture, rounds, slots))
     return out
 
 
@@ -244,6 +266,11 @@ def probe_mba(expressions, expected_value, simplifier=None):
                 "reason": "no simplifier supplied", "rows": rows}
     worst = max(row["simplify_seconds"] for row in measured)
     recovered_all = all(row["correct"] for row in measured)
+    # Whether the sampled expressions actually CONTAIN volatile slots. Without
+    # this flag a "constant recovered" verdict is ambiguous: it could mean the
+    # transform is weak, or it could mean the probe measured the slot-free form
+    # by mistake. That ambiguity produced a wrong verdict once.
+    has_slots = any("__nx_mba_" in expression for expression in expressions)
     return {
         "probe": "mba",
         "applicable": True,
@@ -253,12 +280,20 @@ def probe_mba(expressions, expected_value, simplifier=None):
         # The finding: if a symbolic solver gets the constant back, the
         # expression protected nothing. Recorded as a fact, not a claim.
         "constant_recovered": recovered_all,
+        "sampled_form": "volatile-slots" if has_slots else "bare-constants",
         "simplify_seconds_max": round(worst, 6),
         "verdict": (("WHOLLY INEFFECTIVE: constant recovered automatically in "
-                     "%.3fs" % worst) if recovered_all else _verdict(worst)),
-        "note": ("volatile slots stop the C COMPILER folding the expression; "
-                 "they do not stop a reader or a symbolic solver, which see "
-                 "the same arithmetic. Length is not difficulty."),
+                     "%.3fs" % worst) if recovered_all else
+                    ("not foldable to a constant: the expression carries "
+                     "volatile slots, so an analyst must obtain their runtime "
+                     "values first"
+                     if has_slots else _verdict(worst))),
+        "note": ("volatile slots stop the C COMPILER folding the expression. "
+                 "With slots present the expression is a FUNCTION of them, so "
+                 "it cannot collapse to a constant; z3 confirms it varies. "
+                 "What remains is that a reader still sees the arithmetic and "
+                 "can recognise the identity -- surviving a solver is not "
+                 "surviving a reader."),
         "rows": rows,
     }
 
@@ -327,8 +362,14 @@ def probe_opaque_predicate(compiler, expressions, build_dir=None):
     """Does the predicate survive `-O3`, measured on real emitted code?
 
     ``compiler`` is a callable ``(source_text) -> (kept: bool, detail: str)``
-    supplied by the caller, so this probe stays pure. The production wiring
-    compiles with gcc and counts `count_main_branches` at -O0 and -O3.
+    supplied by the caller, so this probe stays pure.
+
+    IMPORTANT — what ``expressions`` must contain: the source AFTER the
+    transform has been applied. The transform loads its operands through
+    ``static volatile`` slots, so an untransformed hand-written predicate is a
+    different program and folding it says nothing about the transform. That
+    mistake produced a wrong "FOLDED AWAY" finding on 2026-11-19; see
+    FOLD_PROBE_SOURCE for the corrected fixture and the re-measurement.
     """
     rows = []
     for expression in expressions:

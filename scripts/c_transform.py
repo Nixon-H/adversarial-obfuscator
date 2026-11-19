@@ -173,6 +173,39 @@ def encrypt_strings(source: str, seed: bytes,
 #: wrapping something the transform cannot reason about.
 _IF_LINE = re.compile(r"^(\s*)if\s*\((.+)\)\s*\{\s*$")
 
+
+def _declaration_anchor(source: str) -> int:
+    """Offset at which the generated declarations should be spliced in.
+
+    ONE implementation for every pass that needs it, because the same bug was
+    written three times::
+
+        first_static = source.find("\\nstatic ")
+        if first_static < 0:
+            return source, 0        # <-- silent no-op
+
+    ``str.find("\\nstatic ")`` returns **-1 when ``static`` is the very first
+    token**, because there is no preceding newline. Measured 2026-11-19: a
+    fixture starting with ``static int dummy = 0;`` yielded 0 opaque predicates
+    and the pass reported success — the transform did nothing and said nothing.
+
+    Resolution order: before the first ``static`` declaration, else before the
+    first ``#include``, else the top of the file. Always a valid offset, so the
+    caller never has to early-return.
+    """
+    first_static = source.find("static ")
+    if first_static == 0:
+        return 0
+    if first_static > 0:
+        line_start = source.rfind("\n", 0, first_static)
+        return line_start + 1 if line_start >= 0 else 0
+    include_at = source.find("#include")
+    if include_at > 0:
+        line_start = source.rfind("\n", 0, include_at)
+        return line_start + 1 if line_start >= 0 else 0
+    return 0
+
+
 #: Opaque-true expressions.
 #:
 #: CORRECTNESS (adversarial audit 2026-11-18): these must be TRUE for every
@@ -230,11 +263,19 @@ def insert_opaque_predicates(source: str, seed: bytes,
         "static volatile int __nx_opa_3 = %d;\n"
         % (a, b, c)
     )
-    # C file: insert before the first `static` definition.
-    first_static = source.find("\nstatic ")
-    if first_static < 0:
-        return source, 0
-    insert_at = first_static + 1
+    # ANCHOR RESOLUTION — a shared helper, because this exact bug appeared
+    # THREE times in this file (subset-sum, opaque predicates, and the dead-block
+    # pass each had their own copy). Each used
+    #
+    #     first_static = source.find("\nstatic ")
+    #     if first_static < 0: return source, 0
+    #
+    # which returns -1 when `static` sits at byte 0 — no preceding newline — and
+    # the pass then silently emits NOTHING. Measured 2026-11-19: a fixture
+    # beginning with `static int dummy` produced 0 opaque predicates, and the
+    # transform reported success. Silent no-ops are the failure mode this
+    # project keeps finding, so the anchor logic lives in one place now.
+    insert_at = _declaration_anchor(source)
     count = 0
     out = []
     for i, line in enumerate(lines):

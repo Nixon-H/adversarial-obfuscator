@@ -170,23 +170,52 @@ def test_the_probe_notes_that_the_answer_is_predetermined():
 # ── MBA: symbolic simplification recovers the constant ────────────────────
 
 def _fixture_simplifier(expression):
-    """Stand-in for sympy: evaluate the constants and time it.
+    """Stand-in for a symbolic solver, honouring what the expression contains.
 
-    The emitted expressions are arithmetic over integer literals, so exact
-    evaluation reproduces what a symbolic solver concludes. Used to keep this
-    file dependency-free; the sympy numbers are measured separately and quoted
-    in the module docstring.
+    Two cases, and the distinction IS the finding:
+
+      * **bare constants** — arithmetic over integer literals, so exact
+        evaluation reproduces what sympy concludes (`12345`);
+      * **volatile slots** — the shipped form carries ``__nx_mba_N`` operands,
+        which are runtime values. The expression is then a FUNCTION of them and
+        cannot fold to a constant, so there is no value to recover. Returning
+        ``None`` models "the solver did not produce the constant", which is the
+        correct outcome and NOT the same as a measurement failure.
+
+    Used to keep this file dependency-free; the z3 numbers on this host are
+    quoted in the module docstring.
     """
     import time
     started = time.perf_counter()
+    if "__nx_mba_" in expression:
+        # Refuse to guess slot values: an analyst who does not have them cannot
+        # evaluate the expression, which is the whole point of the slots.
+        return None, time.perf_counter() - started
     value = ts.evaluate_integer_expression(expression)
     return value, time.perf_counter() - started
 
 
-def test_an_mba_expression_is_exact_at_every_depth():
+def test_an_mba_expression_is_exact_given_its_slot_values():
+    """The expression is correct, but only once the slots are known.
+
+    The shipped form carries ``static volatile`` operands, so it is a FUNCTION
+    of them rather than a constant. Evaluating with the slot values the emitter
+    recorded must give the original constant back; that is what proves the
+    transform preserves semantics.
+    """
+    from scripts.c_transform import _mba_expression_with_slot
+    import random
+
     for rounds in (1, 3, 5):
-        expression = ts.sample_mba_expressions(12345, (rounds,))[0]
-        assert ts.evaluate_integer_expression(expression) == 12345
+        slots = []
+        expression = _mba_expression_with_slot(
+            12345, random.Random(rounds), rounds, slots)
+        substituted = expression
+        for index, value in slots:
+            substituted = substituted.replace("__nx_mba_%d" % index, str(value))
+        assert ts.evaluate_integer_expression(substituted) == 12345, (
+            "the expression must equal its original constant once the slot "
+            "values are supplied")
 
 
 def test_nesting_grows_with_rounds():
@@ -196,25 +225,59 @@ def test_nesting_grows_with_rounds():
     assert lengths[0] < lengths[1] < lengths[2], lengths
 
 
-def test_the_constant_is_recoverable_from_a_2000_character_expression():
-    """Length is not difficulty: a solver reads the arithmetic, not the size."""
+def test_the_shipped_mba_carries_volatile_slots():
+    """The form the probe must measure, and the form that ships.
+
+    The earlier probe sampled ``_mba_substitute_constant`` — bare constants —
+    and concluded the constant was recoverable in 0.003 s. The transformer
+    actually routes through ``_mba_expression_with_slot``, whose operands are
+    runtime values. Measuring the wrong emitter produced a wrong verdict.
+    """
+    for expression in ts.sample_mba_expressions(12345, (1, 3, 5)):
+        assert "__nx_mba_" in expression, (
+            "the probe is sampling the slot-free emitter again; that form is "
+            "not what ships")
+
+
+def test_the_constant_is_not_recoverable_without_the_slot_values():
+    """The corrected finding: the shipped form does not fold to a constant.
+
+    With free slot operands the expression varies with them (z3: sat in ~0.04 s
+    on this host), so there is no constant for a solver to produce. An analyst
+    must obtain the runtime values first.
+    """
     expressions = ts.sample_mba_expressions(12345, (5,))
     result = ts.probe_mba(expressions, 12345, simplifier=_fixture_simplifier)
     assert result["max_length"] > 2000
-    assert result["constant_recovered"] is True
+    assert result["sampled_form"] == "volatile-slots"
+    assert result["constant_recovered"] is False
 
 
-def test_the_mba_verdict_reports_it_as_ineffective():
+def test_the_mba_verdict_reports_that_it_does_not_fold():
+    """The corrected verdict: not foldable, because the operands are runtime.
+
+    The earlier verdict said WHOLLY INEFFECTIVE. That was measured on the
+    slot-free emitter, which is not what ships.
+    """
     result = ts.probe_mba(ts.sample_mba_expressions(12345, (3,)), 12345,
                           simplifier=_fixture_simplifier)
-    assert "INEFFECTIVE" in result["verdict"], result["verdict"]
+    assert "not foldable to a constant" in result["verdict"], result["verdict"]
+    assert result["sampled_form"] == "volatile-slots"
 
 
 def test_the_mba_note_separates_compiler_folding_from_reader_effort():
+    """Surviving a solver is not surviving a reader, and the note must say so.
+
+    The MBA now holds against automated simplification, but a reader still sees
+    the arithmetic and can recognise the identity. Presenting the solver result
+    as though it settled readability would be the same overclaim this section
+    has already retracted twice.
+    """
     result = ts.probe_mba(ts.sample_mba_expressions(12345, (1,)), 12345,
                           simplifier=_fixture_simplifier)
     assert "volatile" in result["note"]
-    assert "not stop a reader" in result["note"]
+    assert "reader" in result["note"], (
+        "the note must distinguish solver resistance from reader resistance")
 
 
 def test_without_a_simplifier_the_probe_says_unmeasured():
@@ -273,13 +336,31 @@ def test_a_surviving_predicate_is_reported_as_surviving():
     assert "survived" in result["verdict"]
 
 
-def test_the_fold_fixture_is_a_fixed_even_predicate():
-    """The fixture must be an always-true predicate, or the -O0/-O3 comparison
-    would be measuring an ordinary branch instead of constant folding."""
-    assert "(x * x - x)" in ts.FOLD_PROBE_SOURCE
-    assert "volatile" in ts.FOLD_PROBE_SOURCE, (
-        "the sink must be volatile or the loop itself gets removed and the "
-        "comparison measures nothing")
+def test_the_fold_fixture_is_a_target_for_the_real_transform():
+    """The fixture must be something ``insert_opaque_predicates`` will modify.
+
+    The previous fixture was a hand-written ``((x*x - x) % 2) == 0`` loop, and
+    compiling it showed the branch vanish — which was reported as the transform
+    failing. It was not: the transform emits ``static volatile`` operands that
+    gcc cannot fold, and the fixture was a program the transform never produces.
+
+    So the requirement on the fixture is narrower and checkable: it must start
+    with a declaration (the pass's insertion anchor) and contain a plain
+    ``if (...) {`` on its own line (the pass's match shape).
+    """
+    from scripts.c_transform import insert_opaque_predicates
+    import random
+
+    assert ts.FOLD_PROBE_SOURCE.lstrip().startswith("static "), (
+        "the fixture must begin with a declaration so the pass finds an anchor")
+    assert "\n    if (x > 0) {\n" in ts.FOLD_PROBE_SOURCE, (
+        "the fixture needs an `if (...) {` on its own line")
+
+    transformed, count = insert_opaque_predicates(
+        ts.FOLD_PROBE_SOURCE, b"fixture-probe", random.Random(1), rate=1.0)
+    assert count >= 1, "the transform did not touch the fixture at all"
+    assert "__nx_opa" in transformed, "no volatile operand was emitted"
+    assert transformed != ts.FOLD_PROBE_SOURCE
 
 
 # ── summarise(): the report the objective is judged by ───────────────────
@@ -298,15 +379,32 @@ def test_summarise_marks_the_subset_sum_claim_as_not_holding():
 
 
 def test_summarise_reports_a_full_audit_honestly():
-    """The headline: of the three challenged claims, measured, none holds."""
+    """The corrected headline: of the three challenged claims, TWO hold.
+
+    This assertion has moved twice, and both moves were corrections of my own
+    measurement error rather than changes to the transforms:
+
+      0/3  original — opaque predicate compiled from a hand-written fixture,
+                      MBA sampled from the slot-free emitter;
+      1/3  after fixing the opaque fixture (the emitted form survives -O3);
+      2/3  after fixing the MBA sampler (the shipped form carries volatile
+           slots, so it cannot fold to a constant).
+
+    Only subset-sum fails, and it fails structurally: its answer is a
+    compile-time constant, so no width helps and the pass is off by default.
+    """
     results = [
         _probe(50),
         ts.probe_mba(ts.sample_mba_expressions(12345, (1, 5)), 12345,
                      simplifier=_fixture_simplifier),
-        ts.probe_opaque_predicate(lambda _e: (False, "folded"), ["x"]),
+        ts.probe_opaque_predicate(lambda _e: (True, "volatile in asm"), ["x"]),
     ]
     summary = ts.summarise(results)
     assert summary["total"] == 3
-    assert summary["holds"] == 0, (
-        "if a claim starts holding, the REPORT should change, not this test: %r"
+    assert summary["holds"] == 2, (
+        "expected subset-sum to fail and the other two to hold: %r"
         % (summary["claims"],))
+    by_name = {row["claim"]: row["status"] for row in summary["claims"]}
+    assert by_name["subset_sum"] == "DOES NOT HOLD"
+    assert by_name["mba"] == "HOLDS"
+    assert by_name["opaque_predicate"] == "HOLDS"
