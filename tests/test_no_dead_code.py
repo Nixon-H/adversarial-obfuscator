@@ -36,8 +36,15 @@ ROOT = Path(__file__).resolve().parent.parent
 # extension when the platform is Windows and the file is present (FARM_DRIVER_DATA
 # in obfuscator/core/utils.py uploads it); its absence is reported as
 # inert: ['cfg'] by native_harden.check.
+#
+# `enforcement.c` (2026-11-20) is the §5l boundary push: nx_apply_protections()
+# compiled into every locally-built blob, called by the loader BEFORE the
+# module init runs payload code, refused if absent. Both blob producers in
+# obfuscator/core/pipeline.py copy it into the build dir and compile it
+# alongside payload.c (measured: the built blob exports it and applies the
+# policy -- tests/test_native_enforcement.py).
 KEPT_NATIVE = {"core.cpp", "whitebox_feistel.cpp", "simd_vm.c", "simd_vm_test.c",
-               "pe_load_config.c"}
+               "pe_load_config.c", "enforcement.c"}
 
 # What was removed. The code lives in git history (see
 # archive/rust-runtime/README.md and archive/native/README.md for the
@@ -68,6 +75,10 @@ BUILD_REFERERS = (
     # native/pe_load_config.c (via FARM_DRIVER_DATA). Excluding it from this
     # list made the guard report a wired source as unreferenced.
     "obfuscator/core/utils.py",
+    # The blob-build file: both native producers (build_local_cython and
+    # compile_payload_to_cython) copy native/enforcement.c into the build
+    # dir and add it to the compile command.
+    "obfuscator/core/pipeline.py",
     "relay/build.rs",
     "relay/Cargo.toml",
     "scripts/build.py",

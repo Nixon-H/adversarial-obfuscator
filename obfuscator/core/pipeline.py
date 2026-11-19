@@ -739,12 +739,31 @@ def compile_payload_to_cython(source_path, output_dir):
 '''
             with open(pyx_path, 'w', encoding='utf-8') as f: f.write(cython_code)
         pyx_file = '__main__.pyx'
+        # §4 ENFORCEMENT TRAVELS WITH THE BLOB (2026-11-19): same contract as
+        # build_local_cython -- the loader dlopens the module, calls
+        # nx_apply_protections() BEFORE the module init runs payload code,
+        # and refuses a blob without that entry point. Compile the
+        # enforcement source into this extension too, or the loader would
+        # reject every blob this producer builds.
+        _enf_src = os.path.join(os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__)))),
+            "native", "enforcement.c")
+        if not os.path.isfile(_enf_src):
+            print("[!] native/enforcement.c missing: the loader refuses blobs "
+                  "without the enforcement entry point, so refusing to build "
+                  "one (fail closed)")
+            return None
+        with open(_enf_src, "r", encoding="utf-8") as _enf_in:
+            _enf_code = _enf_in.read()
+        with open(confined_path(cython_dir, "enforcement.c"), "w",
+                  encoding="utf-8") as _enf_out:
+            _enf_out.write(_enf_code)
         setup_content = f'''from setuptools import setup, Extension
 from Cython.Build import cythonize
 import sys
 extensions = [
-    Extension("payload_module", 
-              ["{pyx_file}"],
+    Extension("payload_module",
+              ["{pyx_file}", "enforcement.c"],
               # -O3 + LTO + hidden visibility, the same hardening the core
               # library gets from the Makefile. Cython marks PyInit_* with
               # default visibility, so hiding the rest costs nothing at the
@@ -1659,7 +1678,11 @@ def prepare_obfuscated_source(source_path, ast_opts=None):
 def build_local_cython(source_content, target_python=None, ast_opts=None):
     """Compile the payload to a native module via Cython + the C transform.
 
-    ``ast_opts`` applies the SAME AST layer the bytecode fallback gets.
+    The blob contract (§5l boundary push): enforcement.c is compiled into
+    every blob, and the loader dlopens it, calls nx_apply_protections()
+    BEFORE the module init runs payload code, and refuses a blob without
+    the entry. ``ast_opts`` applies the SAME AST layer the bytecode
+    fallback gets.
     Without it the native module was built from RAW source: measured
     2026-11-17, a build with --transforms string-key-env=... produced a .so
     whose strings were sealed with the inline key (the shard was ignored),
@@ -1700,6 +1723,26 @@ def build_local_cython(source_content, target_python=None, ast_opts=None):
             source_content = source_content.replace(_guard, "if True:")
         with open(src_path, "w", encoding="utf-8") as f:
             f.write(source_content)
+        # §4 ENFORCEMENT TRAVELS WITH THE BLOB (2026-11-19). The loader
+        # dlopens the module and calls nx_apply_protections() BEFORE the
+        # module init runs any payload code, and it REFUSES a blob without
+        # that entry point (fail-closed provenance check). The enforcement
+        # source is therefore compiled into every blob this pipeline
+        # produces -- payload.c + enforcement.c in one gcc invocation, the
+        # same hardening flags as the payload.
+        _repo_root = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))))
+        _enf_src = os.path.join(_repo_root, "native", "enforcement.c")
+        if not os.path.isfile(_enf_src):
+            print("    [!] native/enforcement.c missing: the loader refuses "
+                  "blobs without the enforcement entry point, so refusing "
+                  "to build one (fail closed)")
+            return None, None
+        with open(_enf_src, "r", encoding="utf-8") as _enf_in:
+            _enf_code = _enf_in.read()
+        with open(confined_path(build_dir, "enforcement.c"), "w",
+                  encoding="utf-8") as _enf_out:
+            _enf_out.write(_enf_code)
         print(f"    [>] Local Build Directory: {build_dir}")
         # Two-step native build (Tier: custom C transformation layer):
         # 1. cython generates the .c file
@@ -1808,7 +1851,8 @@ def build_local_cython(source_content, target_python=None, ast_opts=None):
         _gcc_argv = [_cc, "-shared", "-O3", "-flto",
                      "-fvisibility=hidden", "-std=c99"] + _hard_flags + [
                      "-I", __import__("sysconfig").get_paths()["include"],
-                     "-I", ".", "-o", "payload_module.so", "payload.c"]
+                     "-I", ".", "-o", "payload_module.so",
+                     "payload.c", "enforcement.c"]
         # Invoke the compiler DIRECTLY so its diagnostics reach us.  The
         # previous form ran gcc inside `python -c` + check_call, which printed
         # a Python traceback and DISCARDED gcc's message -- the build then
@@ -1828,7 +1872,8 @@ def build_local_cython(source_content, target_python=None, ast_opts=None):
             _gcc_retry = [_cc, "-shared", "-O3", "-flto",
                           "-fvisibility=hidden", "-std=c99"] + _core_flags + [
                           "-I", __import__("sysconfig").get_paths()["include"],
-                          "-I", ".", "-o", "payload_module.so", "payload.c"]
+                          "-I", ".", "-o", "payload_module.so",
+                          "payload.c", "enforcement.c"]
             gcc_result = subprocess.run(_gcc_retry, cwd=build_dir,
                                         capture_output=True, text=True,
                                         timeout=600)
@@ -2019,7 +2064,11 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
     # still read its own memory -- only to remove the external dump path.
     try:
         from obfuscator.memguard import emit_snippet as _emit_mg
-        _phase4_suffix += _emit_mg() + "\n"
+        # §5l boundary push (2026-11-19): a native-only build carries the
+        # anti-dump syscalls inside the blob, not in this text, so the
+        # snippet switches to the report-only form that reads the
+        # enforcement bitmask the loader captured at load time.
+        _phase4_suffix += _emit_mg(native_enforced=bool(native_only)) + "\n"
     except Exception:
         pass
     try:
@@ -2504,19 +2553,7 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         "    return _data\n"
     )
     loader_template = r'''# -*- coding: utf-8 -*-
-# Earliest anti-dump (2026-11-18): the prctl sat ~900 lines down, leaving a
-# ~225ms window where /proc/<pid>/mem was readable and the payload secret was
-# recovered from [stack]. It now runs first. Non-fatal if the kernel refuses.
-try:
-    import ctypes as _nx_e
-    _nx_e.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0)
-except Exception:
-    pass
-try:
-    import resource as _nx_r
-    _nx_r.setrlimit(_nx_r.RLIMIT_CORE, (0, -1))
-except Exception:
-    pass
+__NX_ANTI_DUMP__
 __NX_IDENTITY_GATE__
 __NX_SELF_CHECK_DEFS__
 __NX_SELF_CHECK_CALL__
@@ -3228,6 +3265,25 @@ def _load_native():
             except Exception:
                 if globals().get("_NX_SELF_CK") not in (None, "", "0" * 64):
                     _nx_self_fail("late self-check failed (native path)")
+            # ENFORCEMENT BEFORE PAYLOAD (2026-11-19). dlopen the module
+            # WITHOUT calling its init: CDLL maps the object but PyInit has
+            # not run, so no payload code has executed yet. Apply the
+            # process-level anti-dump policy from inside the native object
+            # (native/enforcement.c), and only then let the import below run
+            # the module init. The bitmask the entry returns is recorded for
+            # the NIXON_MEM_REPORT diagnostic (what the kernel accepted).
+            # Fail-closed on a blob that does not export the entry point:
+            # it was not produced by this pipeline, so its provenance is
+            # unverified and it is not trusted with the payload.
+            try:
+                _nx_enf = _ct_loader.CDLL(path)
+                globals()["_NX_NATIVE_ENF"] = int(
+                    _nx_enf.nx_apply_protections() or 0)
+            except AttributeError:
+                _nx_self_fail(
+                    "native blob lacks enforcement entry (nx_apply_protections)")
+            except Exception:
+                _nx_self_fail("native enforcement failed to apply")
             for _nx_mod_name in ("payload_module", "payload", "payload_native"):
                 try:
                     _nx_loader = _nx_mach.ExtensionFileLoader(_nx_mod_name, path)
@@ -3361,6 +3417,47 @@ if __name__ in ("__main__", "__mp_main__"):
     # the second return value stays the same b85 string for callers/tests.
     fallback_compressed = base64.b85encode(bytecode_fallback).decode('ascii') if bytecode_fallback and not native_only else ""
     fallback_blob_val = fallback_compressed if (bytecode_fallback and not native_only) else ("DISABLED" if native_only else "__FALLBACK_BLOB_PLACEHOLDER__")
+    # ANTI-DUMP EMISSION RULE (2026-11-19). The ctypes prctl/setrlimit block
+    # used to sit at the top of EVERY artefact -- DS 4.1 Flash reconstructed
+    # it verbatim from artefact text alone (§5l), and renaming cannot hide
+    # syscall constants. It is now emitted only for builds that can reach
+    # payload PLAINTEXT through Python (a sectioned fallback or a bytecode
+    # fallback). A native-only build (--package native-only, fallback
+    # DISABLED) has no Python path to plaintext: if the blob fails to load,
+    # nothing runs. For those builds the enforcement lives in the blob
+    # itself -- native/enforcement.c, called fail-closed in _load_native
+    # BEFORE the module init executes any payload code -- and the artefact
+    # text no longer carries the syscalls at all.
+    if native_only:
+        _anti_dump_block = (
+            "# §4 anti-dump enforcement is NATIVE for this build: _load_native\n"
+            "# dlopens the blob and calls its enforcement entry BEFORE the\n"
+            "# module init runs payload code, and refuses a blob that does\n"
+            "# not export that entry. The syscalls themselves live in the\n"
+            "# stripped blob, not in this text. No Python-side equivalent is\n"
+            "# emitted: this build has no Python execution path to payload\n"
+            "# plaintext (fallback DISABLED -- if the blob cannot load,\n"
+            "# nothing runs).\n"
+        )
+    else:
+        _anti_dump_block = (
+            "# Earliest anti-dump (2026-11-18): the prctl sat ~900 lines down, leaving a\n"
+            "# ~225ms window where /proc/<pid>/mem was readable and the payload secret was\n"
+            "# recovered from [stack]. It now runs first. Non-fatal if the kernel refuses.\n"
+            "try:\n"
+            "    import ctypes as _nx_e\n"
+            "    _nx_e.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0)\n"
+            "except Exception:\n"
+            "    pass\n"
+            "try:\n"
+            "    import resource as _nx_r\n"
+            "    _nx_r.setrlimit(_nx_r.RLIMIT_CORE, (0, -1))\n"
+            "except Exception:\n"
+            "    pass\n"
+        )
+    loader_template = loader_template.replace("__NX_ANTI_DUMP__", _anti_dump_block, 1)
+    if "__NX_ANTI_DUMP__" in loader_template:
+        raise RuntimeError("anti-dump placeholder was not fully consumed")
     # Section split (opt-in): the payload travels as N independently sealed
     # sections instead of one blob, so no single buffer holds the whole
     # encrypted payload and a partial dump yields no complete code object.
@@ -4942,6 +5039,28 @@ def build_project(args):
             is_native_only = getattr(args, 'native_only', False)
             if is_native_only:
                 UI.warn("Maximum Security: Fallback Mechanism DISABLED")
+            # CLASSIFY THE BLOBS BEFORE THE GENERATOR PACKS THEM (2026-11-20).
+            # The Output-Generation pack block classifies, then XOR-packs, in
+            # one pass -- but a native-only build never reaches that block:
+            # its loader is shipped through the normal variant path, and by
+            # the time the pack block runs, the generator's re-pack has
+            # already turned the ELF blobs into ciphertext, so the check read
+            # packed bytes and refused EVERY native-only build with "not an
+            # object file". Pre-existing defect: --package native-only could
+            # not ship an artefact at all. Classify here, while the dict
+            # still holds plaintext ELF; refuse native-only, warn otherwise
+            # (same contract as the Output block).
+            _loadable_now, _rejected_now = native_blob_loadability(blobs)
+            if not _loadable_now:
+                _detail_now = "; ".join(
+                    "%s: %s" % (p, r) for p, r in sorted(_rejected_now.items()))
+                if is_native_only:
+                    raise SystemExit(
+                        "Native requested but no platform blob is a loadable "
+                        "object file (%s). Refusing to label this artefact "
+                        "native." % (_detail_now,))
+                UI.warn("Native blob is not a loadable object file (%s); "
+                        "staying in Python mode" % (_detail_now,))
             hybrid_loader_src, real_blobs_dict, real_fallback_str = generate_hybrid_loader_script(
                 blobs, real_fallback_enc, blob_key_hex, native_only=is_native_only,
                 hwid=_w_hwid, trial_seconds=_w_trial_seconds,
@@ -5043,6 +5162,13 @@ def build_project(args):
                 print("    [!] No native blob for this OS: artefact carries an "
                       "empty NATIVE_BLOBS and will run from bytecode")
             args._real_native_blobs = real_blobs_dict
+            # The generator re-packed these against the loader's derived key
+            # (pipeline: re-pack block). Recording it lets the Output pack
+            # block skip them -- without this, a native-only build hit the
+            # pack block with ciphertext, failed the ELF-magic classification,
+            # and refused EVERY native-only artefact (pre-existing defect,
+            # measured 2026-11-20).
+            args._real_native_blobs_packed = True
             args._real_fallback_blob = real_fallback_str
             # Secure temp (no predictable CWD artifact): system temp dir,
             # random name, 0600; removed at the end of build_project.
@@ -5774,7 +5900,8 @@ def _VERIFY_INTEGRITY():
             # Silent) and this block sits inside it, so without the guard the
             # second variant would XOR an already-packed blob and neither
             # would dlopen.
-            if native_blob and any(native_blobs.values()) and not _native_blobs_packed:
+            if native_blob and any(native_blobs.values()) and not _native_blobs_packed \
+                    and not getattr(args, "_real_native_blobs_packed", False):
                 _rt_blob_key = bytes.fromhex(_key_raw_hex)
                 if _core_so and os.path.exists(_core_so) and not ast_options.get('portable'):
                     try:
