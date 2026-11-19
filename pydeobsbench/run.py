@@ -255,8 +255,15 @@ def _semantic_block(target_name, target):
     }
 
 
-def score(target, probes):
-    """Turn probe results into the metrics the reviewer listed."""
+def score(target, probes, target_name=None):
+    """Turn probe results into the metrics the reviewer listed.
+
+    ``target_name`` identifies which ground-truth program this is, so the §8
+    semantic block can compare against that target's independently written
+    equivalent. It defaults to None for callers that only want the older
+    metrics; the semantic block then reports itself as unmeasured rather than
+    silently scoring against the wrong target.
+    """
     plain = probes.get("plaintext", {})
     sec = probes.get("section_decrypt", {})
     pstr = probes.get("payload_strings", {})
@@ -337,7 +344,29 @@ def score(target, probes):
             # from the original source: pydeobsbench/equivalents.py. Reported
             # here rather than only in the test suite so the report shows the
             # comparison the score is based on.
-            "semantic": _semantic_block(name, target),
+            "semantic": _semantic_block(target_name, target),
+            # §8 WHAT THE MODEL ACTUALLY RECOVERED, including the result that
+            # matters most and was previously dropped here: `loader_reversed`.
+            # Measured 2026-11-19 on a real 'max' artefact, DS 4.1 Flash
+            # reconstructed the ENTIRE protection loader from the artefact text
+            # -- prctl(PR_SET_DUMPABLE), RLIMIT_CORE, the identity gate and its
+            # exit code, constant_time_compare, _nx_self_fail/exit 137, the
+            # mlock page-alignment. That is a complete map of the layer the
+            # payload is wrapped in.
+            #
+            # `algorithm_overlap` said "n/a (insufficient distinctive terms)"
+            # for the same run, because the tiny target's ground truth yields
+            # only two scorable words. Reporting that as resistance would be
+            # exactly the proxy the review warns about, so both numbers are
+            # carried and neither is allowed to stand alone.
+            "model_reconstruction": {
+                "loader_reversed": ai.get("loader_reversed"),
+                "payload_markers_found": ai.get("payload_markers_found", []),
+                "algorithm_text_chars": len(ai.get("algorithm_text") or ""),
+                "algorithm_text_head": (ai.get("algorithm_text") or "")[:400],
+                "overlap_note": ai.get("overlap_note", ""),
+                "refused": ai.get("refused"),
+            } if ai else None,
         },
         "patch_resistance": {
             "section_pack_derivable": sec.get("derived", False),
@@ -449,7 +478,7 @@ def run(targets, profile, do_ai, out_path):
                              ("%.2f" % _ov) if _ov is not None
                              else "n/a (%s)" % (a.get("overlap_note") or "?",
                                                 )), flush=True)
-            sc = score(tgt, probes)
+            sc = score(tgt, probes, name)
             results.append({
                 "target": name, "profile": profile,
                 "artefact": art, "artefact_bytes": os.path.getsize(art),
