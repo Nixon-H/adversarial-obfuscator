@@ -824,7 +824,9 @@ Updated 2026-11-19 after building a real MSVC-ABI object on this host.
 | mingw link flags are accepted and the build succeeds | **verified** |
 | mingw PE carries CFG | **no**, and cannot: GNU ld has no CFG option |
 | **MSVC-compatible path exercised** | **YES** — `clang --target=x86_64-pc-windows-msvc` + `lld-link 19` produced a real PE, `DllCharacteristics = 0x4160` (ASLR\|DEP\|CFG\|HEPA), and `check(windows, "msvc")` passes |
-| **CFG is a real mechanism, not just a bit** | **NO on this toolchain** — see below |
+| **CFG is a real mechanism, not just a bit** | **PARTIAL** — load config present (288 B, GuardFlags 0x100 = CF_INSTRUMENTED) but no function table: `partial: [cfg_no_function_table]` |
+| **CET** (`/CETCOMPAT`) | **NOT INSTRUMENTED** — measured GuardFlags carries no XFG/shadow-stack bits, so the flag is a declaration; reported as `partial: [cet_not_instrumented]` |
+| **PE import/export inspection** | **verified** — export table names and the full import surface (DLLs + symbols) enumerated from real objects (`KERNEL32.dll`, `msvcrt.dll`) |
 | macOS Hardened Runtime | **not verified**; it lives in the CodeDirectory and a freshly compiled object is unsigned |
 | Authenticode | **IMPLEMENTED and measured** on a real PE: digest identical before/after signing, WIN_CERTIFICATE rev 2.0 / type 0x0002, PKCS#7 parses with the signer cert. Gated on an operator-supplied certificate. |
 

@@ -78,6 +78,22 @@ PE_GUARD_CF_INSTRUMENTED = 0x00000100
 PE_GUARD_CFW_INSTRUMENTED = 0x00000200
 PE_GUARD_CF_FUNCTION_TABLE_PRESENT = 0x00000400
 
+#: CET (Control-flow Enforcement Technology) and shadow-stack bits, from the
+#: same GuardFlags word. Windows 10 2004+ uses these to decide whether to enable
+#: the hardware shadow stack for the image:
+#:
+#:   IMAGE_GUARD_XFG_ENABLED               0x00004000  eXtended Flow Guard
+#:   IMAGE_GUARD_CET_SHADOW_STACK_PRESENT  0x00040000  shadow-stack metadata
+#:   IMAGE_GUARD_CET_UserCETCompat         0x00100000  user-mode CET opt-in
+#:
+#: The /CETCOMPAT compiler flag alone does NOT set these. The linker must see
+#: CET metadata from the objects, or the image is marked "CET compatible" with
+#: nothing behind the claim — the same trap as the CFG bit. They are read and
+#: reported separately from CFG so the two cannot be conflated.
+PE_GUARD_XFG_ENABLED = 0x00004000
+PE_GUARD_CET_SHADOW_STACK_PRESENT = 0x00040000
+PE_GUARD_CET_USER_COMPAT = 0x00100000
+
 #: Offset of GuardFlags inside IMAGE_LOAD_CONFIG_DIRECTORY64, computed from the
 #: field layout rather than assumed: the naive 0x70 this module first used is
 #: the CFCheckFunctionPointer, so it read zero and would have reported every
@@ -170,6 +186,175 @@ def unknown_note():
             "note": "object magic not recognised; hardening not verifiable"}
 
 
+def _rva_to_offset(data, num_sections, section_table, rva):
+    """Translate an RVA to a file offset, or None.
+
+    One helper for every enumeration below. The section header gives
+    ``(vsize, vaddr)`` at +8 and ``(raw_size, raw_ptr)`` at +16 — reading +20
+    returns ``(raw_ptr, 0)`` and lands every lookup at file offset 0, which is a
+    mistake that was actually made in this module and is now pinned by a test.
+    """
+    try:
+        for index in range(min(num_sections, 96)):
+            entry = section_table + index * 40
+            vsize, vaddr = struct.unpack_from("<II", data, entry + 8)
+            raw_size, raw_ptr = struct.unpack_from("<II", data, entry + 16)
+            if vaddr <= rva < vaddr + max(vsize, raw_size):
+                return raw_ptr + (rva - vaddr)
+    except (struct.error, IndexError):
+        return None
+    return None
+
+
+def _read_cstring(data, offset, limit=256):
+    if offset is None or offset < 0 or offset >= len(data):
+        return ""
+    end = data.find(b"\x00", offset, min(offset + limit, len(data)))
+    if end < 0:
+        end = min(offset + limit, len(data))
+    return data[offset:end].decode("ascii", "replace")
+
+
+def enumerate_pe_exports(data):
+    """Names the object EXPORTS, read from the export directory (index 0).
+
+    §3 asks for "PE import/export inspection", and on Windows the export table is
+    the analogue of ``nm -D`` on ELF: it is what an analyst reads first, without
+    reversing anything. For a Python extension the only export a correct build
+    needs is ``PyInit_<module>``; anything more is a readable name surface.
+
+    Returns ``{"present": bool, "names": [...], "dll_name": str}``. An
+    unparseable table reports ``present: True, error: ...`` rather than an empty
+    list, because "no exports" and "could not read the exports" are different
+    findings and only one of them is good news.
+    """
+    out = {"present": False, "names": [], "dll_name": ""}
+    try:
+        if data[:2] != b"MZ":
+            return out
+        e = struct.unpack_from("<I", data, 0x3C)[0]
+        if data[e:e + 4] != b"PE\0\0":
+            return out
+        coff = e + 4
+        num_sections = struct.unpack_from("<H", data, coff + 2)[0]
+        opt_size = struct.unpack_from("<H", data, coff + 16)[0]
+        opt = coff + 20
+        magic = struct.unpack_from("<H", data, opt)[0]
+        dirs_off = opt + (112 if magic == 0x20B else 96)
+        section_table = opt + opt_size
+        exp_rva, exp_size = struct.unpack_from("<II", data, dirs_off)
+        if not exp_rva or not exp_size:
+            return out
+        out["present"] = True
+        base = _rva_to_offset(data, num_sections, section_table, exp_rva)
+        if base is None:
+            out["error"] = "export directory RVA not mapped by any section"
+            return out
+        # IMAGE_EXPORT_DIRECTORY: Name(4) Base(4) NumberOfFunctions(4)
+        # NumberOfNames(4) AddressOfFunctions(4) AddressOfNames(4)
+        # AddressOfNameOrdinals(4)
+        name_rva = struct.unpack_from("<I", data, base + 12)[0]
+        num_names = struct.unpack_from("<I", data, base + 24)[0]
+        names_rva = struct.unpack_from("<I", data, base + 32)[0]
+        out["dll_name"] = _read_cstring(
+            data, _rva_to_offset(data, num_sections, section_table, name_rva))
+        table = _rva_to_offset(data, num_sections, section_table, names_rva)
+        if table is None:
+            out["error"] = "export name table RVA not mapped"
+            return out
+        names = []
+        for index in range(min(num_names, 4096)):
+            rva = struct.unpack_from("<I", data, table + index * 4)[0]
+            names.append(_read_cstring(
+                data, _rva_to_offset(data, num_sections, section_table, rva)))
+        out["names"] = [n for n in names if n]
+    except (struct.error, IndexError) as exc:
+        out["error"] = "export parse failed: %s" % (str(exc)[:80],)
+    return out
+
+
+def enumerate_pe_imports(data):
+    """DLLs and symbols the object IMPORTS (import directory, index 1).
+
+    The import surface is the other half of "PE import inspection": it names the
+    libraries the artefact depends on, which is both a provenance signal (does a
+    "self-contained" payload pull in unusual DLLs?) and an analysis aid (an
+    analyst reads the import list to guess behaviour).
+
+    Returns ``{"present": bool, "dlls": [...], "symbols": {dll: [...]}}``.
+    """
+    out = {"present": False, "dlls": [], "symbols": {}}
+    try:
+        if data[:2] != b"MZ":
+            return out
+        e = struct.unpack_from("<I", data, 0x3C)[0]
+        if data[e:e + 4] != b"PE\0\0":
+            return out
+        coff = e + 4
+        num_sections = struct.unpack_from("<H", data, coff + 2)[0]
+        opt_size = struct.unpack_from("<H", data, coff + 16)[0]
+        opt = coff + 20
+        magic = struct.unpack_from("<H", data, opt)[0]
+        dirs_off = opt + (112 if magic == 0x20B else 96)
+        is64 = magic == 0x20B
+        section_table = opt + opt_size
+        imp_rva, imp_size = struct.unpack_from("<II", data, dirs_off + 8)
+        if not imp_rva or not imp_size:
+            return out
+        out["present"] = True
+        cursor = _rva_to_offset(data, num_sections, section_table, imp_rva)
+        if cursor is None:
+            out["error"] = "import directory RVA not mapped"
+            return out
+        # IMAGE_IMPORT_DESCRIPTOR: OriginalFirstThunk(4) TimeDateStamp(4)
+        # ForwarderChain(4) Name(4) FirstThunk(4) -- terminated by an all-zero
+        # entry. 20 bytes each.
+        for index in range(min(512, imp_size // 20 or 512)):
+            entry = cursor + index * 20
+            if entry + 20 > len(data):
+                break
+            oft, _ts, _fwd, name_rva, ft = struct.unpack_from("<IIIII",
+                                                              data, entry)
+            if not (oft or name_rva or ft):
+                break
+            dll = _read_cstring(
+                data, _rva_to_offset(data, num_sections, section_table,
+                                     name_rva))
+            if dll:
+                out["dlls"].append(dll)
+                out["symbols"].setdefault(dll, [])
+            thunk = oft or ft
+            thunk_off = _rva_to_offset(data, num_sections, section_table, thunk)
+            if thunk_off is None:
+                continue
+            width = 8 if is64 else 4
+            for slot in range(512):
+                pos = thunk_off + slot * width
+                if pos + width > len(data):
+                    break
+                value = (struct.unpack_from("<Q", data, pos)[0] if is64
+                         else struct.unpack_from("<I", data, pos)[0])
+                if not value:
+                    break
+                # High bit set = import by ordinal; the low bits are then an
+                # ordinal, not a name offset. Record it so the surface is not
+                # silently under-reported.
+                if value & (1 << (63 if is64 else 31)):
+                    if dll:
+                        out["symbols"][dll].append(
+                            "#%d" % (value & 0xFFFF,))
+                    continue
+                off = _rva_to_offset(data, num_sections, section_table,
+                                     value & 0x7FFFFFFF)
+                # IMAGE_IMPORT_BY_NAME: Hint(2) then the ASCII name.
+                name = _read_cstring(data, (off + 2) if off is not None else None)
+                if name and dll:
+                    out["symbols"][dll].append(name)
+    except (struct.error, IndexError) as exc:
+        out["error"] = "import parse failed: %s" % (str(exc)[:80],)
+    return out
+
+
 def verify_pe_bytes(data):
     """Report the PE hardening the object ACTUALLY carries.
 
@@ -196,7 +381,14 @@ def verify_pe_bytes(data):
     out = {"kind": "pe", "valid": False, "dll_characteristics": None,
            "aslr": False, "high_entropy_va": False, "dep": False,
            "cfg": False, "cfg_data": False, "authenticode": False,
-           "debug_directory": False, "load_config_size": 0}
+           "debug_directory": False, "load_config_size": 0,
+           # Load-config-derived keys are present from the start so the
+           # report's SHAPE never depends on what the object turned out to
+           # contain. A caller iterating the report must not get KeyError for
+           # an object that happens to declare no load config.
+           "cfg_guard_flags": 0, "cfg_instrumented": False,
+           "cfg_function_table": False, "cet_xfg": False,
+           "cet_shadow_stack": False, "cet_user_compat": False}
     if not data or data[:2] != b"MZ":
         return out
     try:
@@ -258,6 +450,31 @@ def verify_pe_bytes(data):
                 out["cfg_instrumented"] = bool(flags & PE_GUARD_CF_INSTRUMENTED)
                 out["cfg_function_table"] = bool(
                     flags & PE_GUARD_CF_FUNCTION_TABLE_PRESENT)
+                # CET is read from the SAME word but reported separately: the
+                # /CETCOMPAT flag does not set these bits, so conflating them
+                # would repeat the CFG mistake one abstraction up.
+                out["cet_xfg"] = bool(flags & PE_GUARD_XFG_ENABLED)
+                out["cet_shadow_stack"] = bool(
+                    flags & PE_GUARD_CET_SHADOW_STACK_PRESENT)
+                out["cet_user_compat"] = bool(flags & PE_GUARD_CET_USER_COMPAT)
+        # CET can ALSO be declared in DllCharacteristics (bit 0x8000 is
+        # TERMINAL_SERVER_AWARE, so this is not it) -- Windows' CET opt-in for
+        # an image is the GuardFlags bits above, not a DllCharacteristics bit.
+        # Recorded here so a reader does not go looking for one.
+        #
+        # EVERY load-config-derived key is defaulted, not just the CET ones.
+        # Measured 2026-11-19: an object with no load-config directory raised
+        # KeyError on `cfg_function_table` in a consumer that iterated the
+        # report, because that key was only created inside the `lc_size > 0`
+        # branch. A report whose shape depends on the object is a trap for
+        # every caller; the parser now always returns the same keys and lets
+        # the VALUES say "absent".
+        out.setdefault("cfg_guard_flags", 0)
+        out.setdefault("cfg_instrumented", False)
+        out.setdefault("cfg_function_table", False)
+        out.setdefault("cet_xfg", False)
+        out.setdefault("cet_shadow_stack", False)
+        out.setdefault("cet_user_compat", False)
         out["sections"] = num_sections
         out["opt_size"] = opt_size
     except (struct.error, IndexError):
@@ -557,6 +774,14 @@ def check(object_report, platform_name, toolchain=None):
             partial.append("cfg_not_instrumented")
         if not object_report.get("cfg_function_table"):
             partial.append("cfg_no_function_table")
+    # CET: the /CETCOMPAT flag is a REQUEST, not a result. Measured 2026-11-19
+    # on the MSVC-ABI object: GuardFlags carried 0x100 (CF_INSTRUMENTED) and
+    # NONE of the CET bits, so the image declares CET compatibility with no
+    # shadow-stack metadata behind it. That is the same inert-flag trap as the
+    # CFG bit one level up, and it is reported rather than assumed.
+    if object_report.get("cfg") and not (object_report.get("cet_xfg")
+                                         or object_report.get("cet_shadow_stack")):
+        partial.append("cet_not_instrumented")
     return {"ok": (not missing and not wrong and not inert
                    and bool(object_report.get("valid"))),
             "missing": missing, "wrong": wrong,

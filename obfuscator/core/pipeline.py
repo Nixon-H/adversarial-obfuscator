@@ -3684,8 +3684,31 @@ def _nx_self_check():
         from obfuscator.attestation import (
             emit_snippet as _emit_prov, SIG_SLOT as _prov_sig,
             PK_SLOT as _prov_pk)
+        # TOKEN-DERIVED PROVENANCE (measured 2026-11-19). The double-stamp
+        # attack beat the integrity layer because the public key travelled
+        # inside the artefact: an attacker re-signed with their own key and the
+        # check verified the file against itself. When this build is
+        # licence-bound the customer's token carries the key, so the emitted
+        # check verifies against THAT and treats the embedded slot as a
+        # cross-check. Otherwise there is nothing to anchor to and the plain
+        # variant is emitted, with its limitation documented.
+        _prov_token_bound = bool(licence_bound or licence_token_hash)
+        if _prov_token_bound:
+            print("    [+] Provenance: token-derived (embedded key is a "
+                  "cross-check, not the trust anchor)")
+        # SPLIT THE SNIPPET (measured 2026-11-19). The token-derived check calls
+        # `_nx_licence_key()`, which this generator defines thousands of lines
+        # LATER (offset ~19,701 vs ~12,128). Emitting the whole block here made
+        # the check raise NameError, the surrounding `except Exception` turn it
+        # into a provenance failure, and every licence-bound artefact report
+        # "token key check failed" instead of the licence gate's own "licence
+        # token required". Definitions are safe early; the CHECK must run after
+        # everything it depends on.
+        _prov_defs = _emit_prov(definitions_only=True)
+        _prov_check = _emit_prov(token_derived=_prov_token_bound).replace(
+            _prov_defs, "", 1)
         _prov_code = ('%s = ""\n%s = ""\n' % (_prov_sig, _prov_pk)
-                      + _emit_prov())
+                      + _prov_defs)
         # Anchor on the CFI helper definition, which is proven present by the
         # guard just above. The self-check CALL slot has already been consumed
         # by this point (it is replaced earlier in this function), so anchoring
@@ -3696,6 +3719,27 @@ def _nx_self_check():
         if "_nx_prov_verify" not in loader_template:
             raise RuntimeError(
                 "provenance verifier did not reach the loader template")
+        # THE CHECK RUNS LATE, after every definition it depends on. Anchored on
+        # the end of `_nx_licence_key`'s body -- the `_BLOB_S0` slot that
+        # immediately follows it -- so `_nx_licence_key` is bound by the time
+        # the token-derived check calls it. If that anchor is ever missing the
+        # check is NOT silently dropped: an unplaced check would leave the
+        # artefact verifying itself, which is the exact failure this feature
+        # exists to prevent.
+        if _prov_token_bound and _prov_check.strip():
+            _prov_anchor = '\n_BLOB_S0 = "'
+            if _prov_anchor not in loader_template:
+                raise RuntimeError(
+                    "cannot place the provenance check: the anchor after "
+                    "_nx_licence_key is missing, and an unplaced token check "
+                    "would let an artefact verify itself")
+            loader_template = loader_template.replace(
+                _prov_anchor, "\n" + _prov_check.strip() + "\n" + _prov_anchor, 1)
+            if loader_template.find("_nx_prov_env") < loader_template.find(
+                    "def _nx_licence_key"):
+                raise RuntimeError(
+                    "provenance check placed BEFORE _nx_licence_key; it would "
+                    "raise NameError and mask the licence gate's message")
     except Exception as _prov_exc:
         raise RuntimeError(
             "provenance snippet could not be emitted: %s" % (_prov_exc,))
