@@ -97,3 +97,78 @@ Options 1 and 2 are recorded as future work because neither is a tuning change
 and both have costs the current design deliberately avoids (option 2 requires
 network availability at runtime; option 1 requires the guards to be reimplemented
 in C, including the Cython boundary).
+
+## Measured 2026-11-19: the integrity check is internally consistent, not authentic
+
+This is the sharper version of the same boundary, and it is the one that
+matters operationally. §5m reported that re-stamping the Merkle root alone is
+insufficient — the HMAC layer caught it. That raised the obvious question, and
+`scripts/attack_chain.py` now answers it.
+
+| attack | result |
+|---|---|
+| control | rc 0, payload ran |
+| tamper pack only | **rc 137** — merkle mismatch |
+| bypass the self-check call only | **rc 137** — the late check caught it |
+| bypass + tamper | **rc 137** |
+| re-stamp the Merkle root, no edit | rc 0, payload ran (correct: nothing changed) |
+| tamper + re-stamp **CK only** | **rc 137** — `hmac expected=ceeb9900… got=984ac5e…` |
+| **tamper + re-stamp BOTH CK and HM** | **rc 0, payload ran** |
+
+The last row is the finding. The HMAC key `_NX_SELF_HK` is a plaintext literal
+in the same file the HMAC covers, so an attacker who reads the artefact can
+recompute both layers and their tampered payload runs.
+
+**What the integrity check therefore establishes:** the file is internally
+consistent — self-check, anchors and content agree with each other.
+
+**What it does not establish:** that the file came from the publisher. Both
+layers are derivable from the artefact by anyone holding it, so the control
+distinguishes accidental corruption from nothing at all. It does not
+distinguish a deliberate edit by someone who read the construction.
+
+This does not make the check useless: it still blocks the naive tamper, the
+single-line bypass, and the bypass+tamper chain — three of the five routes in
+the table above. It does mean the honest description is "tamper *detection* for
+non-adaptive edits", not "anti-patching", and the report says so rather than
+quoting the five-route result as if all five failed.
+
+### What would actually bind the artefact to the publisher
+
+The check needs a secret the attacker does not have. Concretely:
+
+1. **Verify against something the attacker cannot forge** — an Ed25519 signature
+   over the artefact, with only the public key embedded. **Implemented** in
+   `obfuscator/attestation.py` (inline RFC 8032 verifier, no dependencies in the
+   artefact) and `obfuscator/ed25519_verify.py` (the reference it is
+   cross-checked against). Wired into the loader by `emit_snippet()`; a build
+   that signs produces an artefact that refuses to run when edited. **Not yet
+   enabled by default** — signing needs a key, and a build without one emits an
+   artefact whose provenance check is absent rather than fake.
+2. **Derive the key from the licence token** — `_NX_SELF_HK` is present in every
+   build, so it is not a secret. If it were derived from token material the
+   customer holds and the artefact does not, recomputing the HMAC would require
+   the token. The licence path already does this for the payload key
+   (`_nx_licence_key`); the self-check key was not moved onto it.
+3. **Move the check off-device** — an attestation service, as above.
+
+Option 1 is the smallest change with a real security effect and is now
+implemented as a module. The remaining work is operational: an operator supplies
+a signing key, and the build stamps the artefact. Until then the artefact's
+integrity check remains the internally-consistent kind measured above.
+
+### Honest limit of the signature fix
+
+The public key travels IN the artefact, so an attacker who re-signs a modified
+file with their OWN key produces something self-consistent. Two things follow,
+and both are stated rather than implied:
+
+* pinning the public key in the CLIENT (or in the licence token) is what makes
+  the signature meaningful — an artefact that carries its own trust anchor can
+  only prove it agrees with itself;
+* an attacker who controls the interpreter can patch the verification call out,
+  exactly as they can patch any check. §1's answer to that is the point-of-use
+  redundancy elsewhere (CFI, the late self-check, the kill ladder), not the
+  signature.
+
+

@@ -48,11 +48,24 @@ if __name__ == "__main__":
         # do -- it names the constants, the encoding and the truncation, which a
         # real spec has to.
         "algorithms": (
+            # SPEC SHARPENED 2026-11-19. The scoring vocabulary excludes words
+            # any loader description contains (sha256, hexdigest, encoded,
+            # literal, module, prints, concatenate...), because a model
+            # describing the WRAPPER hit all of them and scored as having
+            # recovered the payload. What remains must be SPECIFIC to this
+            # algorithm, so the spec now names the concrete details a correct
+            # recovery would have to reproduce: the exact salt text, the
+            # truncation length, the marker string and the input.
             "sign(payload): concatenate the module salt bytes with the "
             "utf-8 encoded payload string, hash the concatenation with "
             "sha256, hexdigest it, truncate to the leading 16 hex characters "
             "and return that string. The salt is the literal b'tiny-salt-99'. "
-            "main prints the marker TINY followed by sign('hello')."
+            "main prints the marker TINY followed by sign('hello'). "
+            "Concretely: the salt literal is `tiny-salt-99`; the truncated "
+            "digest is exactly sixteen characters wide; the probe input is the "
+            "five-byte string `hello`; the emitted prefix is `TINY ` with a "
+            "trailing space; a correct recovery reproduces the digest "
+            "`9e8b029a65070dbd` for that input."
         ),
     },
 

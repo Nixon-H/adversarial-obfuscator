@@ -3578,6 +3578,15 @@ def _nx_self_check():
                       if _NX_SELF_CK.encode() not in l
                       and _NX_SELF_HM.encode() not in l
                       and b"_NX_CFI_SEQ = " not in l
+                      # §1 PROVENANCE SLOTS. These must be outside the hashed
+                      # content for the same reason CK/HM are: the signature
+                      # covers the file, and it is written INTO the file, so a
+                      # value cannot be part of what it describes. Without this
+                      # exclusion, signing an artefact invalidates its Merkle
+                      # root and every signed build dies at startup -- measured
+                      # exactly that (rc 137, "merkle expected=... got=...").
+                      and b"_NX_PROV_SIG" not in l
+                      and b"_NX_PROV_PK" not in l
                       and (not _NX_SELF_TOK or _NX_SELF_TOK.encode() not in l)]
     content = b"".join(filtered_lines)
     chunks = [content[i:i+1024] for i in range(0, len(content), 1024)]
@@ -3665,6 +3674,31 @@ def _nx_self_check():
         raise RuntimeError(
             "CFI definitions did not reach the loader template; every "
             "artefact would NameError at its first checkpoint")
+    # §1 EXECUTION PROVENANCE. The loader carries two slots and the check that
+    # uses them, so a signed build can verify its own origin at load. Emitted
+    # UNCONDITIONALLY (like CFI) because a build may sign later: with empty
+    # slots the check refuses, which is the correct behaviour for an artefact
+    # that claims no provenance, and it means a signing step can be added
+    # without changing the template.
+    try:
+        from obfuscator.attestation import (
+            emit_snippet as _emit_prov, SIG_SLOT as _prov_sig,
+            PK_SLOT as _prov_pk)
+        _prov_code = ('%s = ""\n%s = ""\n' % (_prov_sig, _prov_pk)
+                      + _emit_prov())
+        # Anchor on the CFI helper definition, which is proven present by the
+        # guard just above. The self-check CALL slot has already been consumed
+        # by this point (it is replaced earlier in this function), so anchoring
+        # there silently did nothing -- caught by the RuntimeError below rather
+        # than by every artefact failing to verify.
+        loader_template = loader_template.replace(
+            "def _nx_cfi_mark", _prov_code + "\ndef _nx_cfi_mark", 1)
+        if "_nx_prov_verify" not in loader_template:
+            raise RuntimeError(
+                "provenance verifier did not reach the loader template")
+    except Exception as _prov_exc:
+        raise RuntimeError(
+            "provenance snippet could not be emitted: %s" % (_prov_exc,))
     # §4 sensitive-memory handling: mlock helpers, emitted with the same
     # unconditional rule as CFI so a call can never exist without them.
     try:
@@ -4135,6 +4169,11 @@ def _stamp_hybrid_selfcheck(src_text, hmac_secret_hex, token_hash=""):
         if ck_slot in line or hm_slot in line or b"_NX_CFI_SEQ = " in line \
                 or (tok and tok in line):
             continue
+        # §1 PROVENANCE: excluded BY NAME, matching the runtime filter. The
+        # signature covers the file and lives in the file, so these lines are
+        # outside the hashed content -- exactly as CK/HM are.
+        if b"_NX_PROV_SIG" in line or b"_NX_PROV_PK" in line:
+            continue
         lines_for_hash.append(line)
     content = b"".join(lines_for_hash)
     chunks = [content[i:i + 1024] for i in range(0, len(content), 1024)]
@@ -4168,9 +4207,12 @@ def _stamp_hybrid_selfcheck(src_text, hmac_secret_hex, token_hash=""):
             "the emitted loader (template drifted from the stamping code)")
     _cfi_b = _cfi.encode("utf-8")
     # Mirror the RUNTIME filter exactly: exclude by variable name, not value.
+    # The provenance slots are excluded by name on both sides for the same
+    # reason CK/HM are excluded: a value cannot be part of what describes it.
     rt_keep = [l for l in out.splitlines(keepends=True)
                if root.encode("utf-8") not in l and hm.encode("utf-8") not in l
                and b"_NX_CFI_SEQ = " not in l
+               and b"_NX_PROV_SIG" not in l and b"_NX_PROV_PK" not in l
                and (not tok or tok not in l)]
     if b"".join(rt_keep) != content:
         raise RuntimeError(
@@ -5312,6 +5354,45 @@ def _VERIFY_INTEGRITY():
                 _candidate = _stamp_hybrid_selfcheck(
                     _candidate, secrets.token_hex(32),
                     token_hash=str(_licence_token_hash or ''))
+                # EXECUTION PROVENANCE (§1): sign the artefact so it can verify
+                # its own origin at load. Measured 2026-11-19 (attack_chain): the
+                # Merkle root and the HMAC are BOTH recomputable from the
+                # artefact, so recomputing them lets a tampered payload run. A
+                # signature checked against an embedded public key does not,
+                # because the private key never ships.
+                #
+                # Ordering: this comes AFTER every content change (pack, gates,
+                # self-check stamp) because the signature covers the final bytes.
+                # Signing before the self-check stamp would cover stale content.
+                #
+                # Opt-in: a build with no signing key emits an artefact whose
+                # provenance slots are empty, which REFUSES to run rather than
+                # running unverified. That is deliberate -- an artefact that
+                # claims provenance it does not have is worse than one that
+                # says nothing -- but it also means this must not turn on
+                # silently, so it is gated on the operator supplying a key.
+                _prov_key_hex = (os.environ.get("NIXON_ARTEFACT_SIGN_KEY", "")
+                                 or os.environ.get("NIXON_SIGN_KEY", ""))
+                if _prov_key_hex:
+                    try:
+                        from obfuscator.attestation import stamp_artefact
+                        from obfuscator.licensing import private_key_from_hex
+                        _candidate = stamp_artefact(
+                            _candidate, private_key_from_hex(_prov_key_hex))
+                        UI.item("Provenance", "artefact signed",
+                                "VERIFIABLE AT LOAD")
+                    except Exception as _prov_exc:
+                        # Fail the build: an artefact the operator asked to have
+                        # signed, silently shipped unsigned, is exactly the
+                        # "assume it worked" failure this project keeps finding.
+                        raise SystemExit(
+                            "artefact signing failed (%s); refusing to ship an "
+                            "artefact whose provenance the operator asked for"
+                            % (_prov_exc,))
+                else:
+                    UI.warn("provenance: no signing key (NIXON_ARTEFACT_SIGN_KEY "
+                            "/ NIXON_SIGN_KEY) — artefact carries no load-time "
+                            "signature; its integrity check is internal-only")
                 args._hybrid_loader_src = _candidate
                 _hybrid_src = _candidate
                 UI._out(" %sℹ Sectioned build: shipping the hybrid loader "

@@ -337,6 +337,22 @@ def score(target, probes, target_name=None):
             "time_to_recovery_elapsed_s": (tm.get("elapsed_s")
                                            if tm else None),
             "time_to_recovery_measured": bool(tm.get("measured")) if tm else False,
+            # WHY the answer was None. Without this, "not recovered" and "the
+            # probe could not judge" are indistinguishable in the report -- and
+            # they are different results with different remedies. Measured
+            # 2026-11-19 on `algo`: 13 distinctive markers, 1 hit (`state`),
+            # so the model described the LOADER and not the algorithm. That is
+            # a genuine non-recovery, not a metric failure, and the marker
+            # counts are what let a reader tell the two apart.
+            "time_to_recovery_verdict": (
+                {"correct": (tm.get("verdict") or {}).get("correct"),
+                 "markers_total": (tm.get("verdict") or {}).get("markers_total"),
+                 "hits": (tm.get("verdict") or {}).get("hits"),
+                 "hit_words": (tm.get("verdict") or {}).get("hit_words"),
+                 "hit_numbers": (tm.get("verdict") or {}).get("hit_numbers"),
+                 "min_markers": (tm.get("verdict") or {}).get("min_markers"),
+                 "note": tm.get("note", "")}
+                if tm else None),
             "ground_truth": target["algorithms"],
             # §8 semantic reconstruction, made measurable. The review asks for
             # semantic recovery as DISTINCT from source recovery, and that
