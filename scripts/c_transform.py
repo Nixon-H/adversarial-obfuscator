@@ -484,11 +484,16 @@ def generate_subset_sum_instance(seed: bytes, n: int = 8) -> dict:
     """Generate a random subset-sum instance with a KNOWN solution.
 
     At build time we construct the instance so the answer is deterministic.
-    At run time, proving the predicate requires either:
-    a) solving the subset-sum problem for the given set (pseudo-polynomial
-       DP, but the ANALYST must first recognise it as subset-sum inside the
-       transformed C), or
-    b) tracing the execution to observe the result (blocked by anti-debug).
+
+    MEASURED 2026-11-19 — this docstring used to overclaim. With the default
+    ``n=8`` the search space is **256 subsets**, and 200/200 generated
+    instances were solved by exhaustive enumeration in under 0.0002 s each. The
+    4096-entry DP table sizes the RUN-TIME CHECK; it does not size the attack.
+    The honest description of what this predicate provides is obfuscation
+    volume and a plausible-looking construct, NOT computational hardness.
+    Raising ``n`` is what would change that, and
+    ``pydeobsbench/transform_solvers.py`` is the measurement to re-run
+    afterwards. Numbers: docs/research/pydeobsbench-2026-11-18.md §5k.
     """
     rng = random.Random(int.from_bytes(
         hashlib.sha256(seed).digest()[:8], "big"))
@@ -692,6 +697,16 @@ def substitute_constants_mba(source: str, seed: bytes,
     is exact for every y, so the substituted expression still evaluates to the
     original constant -- but the optimiser cannot see the slot as a constant,
     so the expression survives to the binary.
+
+    MEASURED 2026-11-19 — and this is the part the docstring used to imply
+    otherwise. Surviving the COMPILER is not surviving an ANALYST. sympy's
+    generic ``simplify`` recovered the constant from a 2,073-character,
+    5-round expression in **0.0037 s**: a symbolic solver reads the arithmetic,
+    which contains no secret, and the ``volatile`` slots are invisible to it.
+    So the accurate claim is "defeats constant folding at -O3", NOT "is
+    computationally hard". Re-measure with
+    ``pydeobsbench/transform_solvers.py``; numbers in
+    docs/research/pydeobsbench-2026-11-18.md §5k.
     """
     # STRUCTURAL guard (audit 2026-11-18): a per-line `static` test is
     # fragile -- it has to re-derive "am I inside a declaration" from the
