@@ -1559,3 +1559,76 @@ Ranked by expected information gain:
 5. **Timed attack** — record wall-clock from "given artefact" to "algorithm
    described", which is the metric the review actually recommends optimising.
 
+
+---
+
+## 5o. §5l follow-up: enforcement moves native — what DS 4.1 Flash can still reconstruct
+
+The operator asked whether the §5l finding ("DS 4.1 Flash reconstructed the
+entire enforcement layer from artefact text") could be fixed. The boundary
+document's boundary-push option — enforcement into the native blob — is now
+implemented and re-measured with the same instrument (DS 4.1 Flash via
+Mistral, `mistral/deepseek-v4-1-flash-1017`, through the OpenCode CLI, per
+the operator's instruction; probe on the rebuilt max-profile artefact,
+2026-11-20).
+
+### What the model recovered on the rebuilt artefact
+
+| component | §5l (before) | §5o (after) |
+|---|---|---|
+| top-of-loader `prctl`/`RLIMIT_CORE` block | recovered in full | still recovered — BY DESIGN: the max profile's sectioned fallback is production-reachable, so the Python block stays (dropping it would be a §4 regression on that path) |
+| identity gate + exit code | yes | yes (unchanged — it must stay Python) |
+| `constant_time_compare` | yes | yes (unchanged) |
+| `_nx_self_fail` + `os._exit(137)` | yes | yes (unchanged) |
+| `_nx_mlock` + page alignment | yes | yes (unchanged — needed pre-dlopen in Python) |
+| native enforcement call | n/a | **mechanism recovered**: "dlopen's the object via CDLL and calls exported nx_apply_protections() (missing -> self-fail), records its bitmask" — the model knows the loader calls a native entry and that the entry is mandatory |
+| native enforcement SEMANTICS (what the entry does) | n/a | **not recovered**: the answer contains no description of prctl/setrlimit/PT_DENY_ATTACH/signal handlers at the native layer — those live in stripped machine code |
+| PT_DENY_ATTACH | n/a (macOS was a silent no-op) | **not recovered** — and newly APPLIED on macOS artefacts (additive enforcement) |
+
+### The boundary-push deliverables behind the table
+
+1. `native/enforcement.c`: `nx_apply_protections()` — Linux prctl
+   PR_SET_DUMPABLE=0 + RLIMIT_CORE=0; macOS setrlimit + PT_DENY_ATTACH
+   (additive); silent `_exit(137)` fatal-signal handlers. Self-contained,
+   C99, exported default-visibility, compiles clean under the blob build's
+   exact flags.
+2. Both blob producers compile it into every blob (`payload.c +
+   enforcement.c`); a missing source refuses the build (fail closed).
+3. The loader dlopens WITHOUT running init, calls the entry BEFORE any
+   payload code, records the returned bitmask (1 dumpable-off, 2 core-zero,
+   4 deny-attach) for NIXON_MEM_REPORT, and refuses a blob without the
+   entry (`_nx_self_fail`).
+4. Emission rule: the top-of-loader Python block is emitted only for builds
+   that can reach payload plaintext through Python. A `native_only=True`
+   loader carries ZERO syscall names — measured on the generated text.
+5. memguard's snippet switches to a report-only form for native-only builds
+   (reads the bitmask, names no syscalls).
+6. Pre-existing defect fixed on the way: the Output pack block classified
+   generator-PACKED bytes and refused every native-only build; the
+   classification now runs on plaintext ELF and the pack block skips an
+   already-packed dict.
+
+### What was measured, precisely
+
+* Real blob (built through the production `build_local_cython`), dlopen'd in
+  a subprocess by the committed probe fixture: `mask=3`, `CoreDumping: 0` —
+  both syscalls applied before any payload init.
+* Rebuilt max artefact: rc 0, `OK verify:14`; all six attack_chain routes
+  rc 137 with merkle/HMAC refusals (control rc 0).
+* DS 4.1 Flash re-probe: 125 loader names returned; the mechanism
+  ("calls exported nx_apply_protections(), missing -> self-fail") is in the
+  answer; the native semantics are not. The payload-side numbers are
+  unchanged (the probe's payload recovery stayed at nothing — the model
+  described the wrapper, not the payload).
+* `tests/test_native_enforcement.py`: 6 tests pin the contract.
+
+### What this does NOT claim
+
+The max-profile artefact's readable block remains — honestly. The sectioned
+fallback is production-reachable, so the Python anti-dump block must stay on
+that path; the enforcement there is layered (Python block + native entry).
+The boundary push is fully realized for loaders whose only payload path is
+the native module; for the max profile it is a measured cost-increase
+(enforcement semantics in machine code, mechanism still in text) plus one
+new enforcement (PT_DENY_ATTACH on macOS). Client-side software cannot reach
+full immunity; what changed is where the semantics live.

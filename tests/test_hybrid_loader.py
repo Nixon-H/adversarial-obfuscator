@@ -39,9 +39,16 @@ def _load_fragment():
     tpl = tpl.replace("__NX_IDENTITY_GATE__\n", "")
     tpl = tpl.replace("__NX_SELF_CHECK_DEFS__\n", "").replace(
         "__NX_SELF_CHECK_CALL__\n", "")
+    # __NX_ANTI_DUMP__ (2026-11-20) is substituted by the generator with a
+    # per-build anti-dump block; the block has its own tests
+    # (tests/test_native_enforcement.py) and is out of scope for this
+    # module's fragment (which exercises _ct_unmarshal / _nyser_loads), so
+    # the marker is dropped like the others.
+    tpl = tpl.replace("__NX_ANTI_DUMP__\n", "")
     assert "__NX_IDENTITY_GATE__" not in tpl
     assert "__NX_SELF_CHECK_DEFS__" not in tpl
     assert "__NX_SELF_CHECK_CALL__" not in tpl
+    assert "__NX_ANTI_DUMP__" not in tpl
     # Module header (sys/platform/base64/... imports) must be exec'd: the
     # key-reconstruct path uses base64 at module scope. Start from the top
     # (as the real loader does), not from the ctypes import.

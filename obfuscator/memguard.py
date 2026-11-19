@@ -33,9 +33,22 @@ trusting the build log.
 from __future__ import annotations
 
 
-def emit_snippet() -> str:
-    """Return the runtime anti-dump snippet (Python source, no placeholders)."""
-    return r'''
+def emit_snippet(native_enforced: bool = False) -> str:
+    """Return the runtime anti-dump snippet (Python source, no placeholders).
+
+    ``native_enforced=True`` (2026-11-19) is for native-only builds, where the
+    anti-dump syscalls themselves live in the stripped blob
+    (native/enforcement.c, called fail-closed by the loader BEFORE any payload
+    code runs). DS 4.1 Flash reconstructed the Python form verbatim from
+    artefact text (§5l), so for those builds the snippet keeps only the
+    NIXON_MEM_REPORT diagnostic and reads the enforcement bitmask
+    (``_NX_NATIVE_ENF``, set by the loader from the native entry's return:
+    1 = dumpable off, 2 = core limit zero, 4 = deny-attach) instead of naming
+    or calling any syscall. Default False keeps the historical Python form for
+    every build that can still reach payload plaintext through Python.
+    """
+    if not native_enforced:
+        return r'''
 def _nx_mem_harden():
     """Harden this process against the cheap memory-recovery channels.
 
@@ -73,6 +86,38 @@ def _nx_mem_harden():
         _nx_result["core_policy"] = "rlimit_only"
     except Exception:
         pass
+    try:
+        import os as _nx_os
+        _nx_report = _nx_os.environ.get("NIXON_MEM_REPORT")
+        if _nx_report:
+            with open(_nx_report, "a", encoding="utf-8") as _nx_fh:
+                _nx_fh.write("mem_harden " + " ".join(
+                    "%s=%s" % (k, v) for k, v in sorted(_nx_result.items())
+                ) + "\n")
+    except Exception:
+        pass
+    return _nx_result
+
+
+try:
+    _NX_MEM_HARDENING = _nx_mem_harden()
+except Exception:
+    _NX_MEM_HARDENING = {}
+'''
+    return r'''
+def _nx_mem_harden():
+    """Record what the NATIVE enforcement applied at load time.
+
+    The syscalls live in the stripped blob (native/enforcement.c); the loader
+    captured the entry's return bitmask in _NX_NATIVE_ENF. This reports it so
+    the NIXON_MEM_REPORT diagnostic stays meaningful without re-deriving any
+    syscall constant in artefact text.
+    """
+    _nx_result = {}
+    _nx_mask = globals().get("_NX_NATIVE_ENF", 0)
+    _nx_result["dumpable"] = "native(mask=%d)" % (_nx_mask,)
+    _nx_result["core_limit"] = "native(mask=%d)" % (_nx_mask,)
+    _nx_result["core_policy"] = "native_enforcement"
     try:
         import os as _nx_os
         _nx_report = _nx_os.environ.get("NIXON_MEM_REPORT")

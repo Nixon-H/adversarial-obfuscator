@@ -384,9 +384,80 @@ the handler semantics.
 None of the three hides the WRAPPER (see the loader boundary above). The VM
 hides payload *function bodies* behind a bytecode interpreter — the recovered
 loader description in §5l did not include any VM internals because the VM only
-runs on opted-in functions. Crash suppression prevents *forensic leakage* from
+runs on opt-in functions. Crash suppression prevents *forensic leakage* from
 native failures; it does not stop an attacker from setting their own handlers
 after load. ISA diversification raises disassembly cost; it does not make
 static analysis impossible. All three are measured contributions to analyst
 cost, and all three are recorded here with their limits rather than as
 unqualified wins.
+
+## Boundary push, measured 2026-11-20: enforcement moves native, split by build type
+
+The accepted boundary listed "move the enforcement into the native blob" as
+the boundary-push option. It is now implemented and measured.
+
+### What changed
+
+1. `native/enforcement.c` (new): `nx_apply_protections()` — prctl
+   PR_SET_DUMPABLE=0 + RLIMIT_CORE=0 on Linux; setrlimit + PT_DENY_ATTACH on
+   macOS (ADDITIVE: the old Python block was a silent no-op on macOS, so
+   macOS artefacts previously shipped dump-limit only); silent `_exit(137)`
+   fatal-signal handlers matching crash_suppress.h. Compiles clean under
+   `-std=c99 -fvisibility=hidden`, self-contained (no header to copy into
+   blob build dirs). Exported with default visibility so the dynamic table
+   carries it after `strip -x`.
+2. Every locally-built blob compiles it in (`payload.c + enforcement.c` in
+   one gcc invocation, same hardening flags). Both blob producers are wired;
+   a producer that cannot find the source refuses to build (fail closed).
+3. The loader dlopens the blob WITHOUT running its init, calls
+   `nx_apply_protections()`, records its return bitmask (1 = dumpable off,
+   2 = core limit zero, 4 = deny-attach) for the NIXON_MEM_REPORT diagnostic,
+   and ONLY THEN lets PyInit execute payload code. Fail-closed: a blob
+   without the entry is refused (`_nx_self_fail`) — not one of ours.
+4. The loader's top-of-file ctypes prctl block is now emitted ONLY for
+   builds that can reach payload plaintext through Python (sectioned or
+   bytecode fallback). A `native_only=True` loader emits no syscalls at all
+   — measured: zero occurrences of prctl/setrlimit/RLIMIT_CORE/
+   PR_SET_DUMPABLE/PT_DENY_ATTACH in the generated text.
+5. memguard's second readable prctl site switches form for native-only
+   builds: report-only, reading the enforcement bitmask instead of naming
+   syscalls. NIXON_MEM_REPORT stays meaningful.
+6. Pre-existing defect found on the way (measured 2026-11-20): the
+   Output-Generation pack block classified GENERATOR-PACKED blob bytes and
+   refused EVERY `--package native-only` build ("not an object file"). The
+   classification now runs while the blobs are still plaintext ELF, and the
+   pack block skips an already-packed dict. NOTE: the `--package native-only`
+   CLI route produces a DIFFERENT 19 MB packaging (the maximum-security
+   pipeline) with its own pre-existing loader defects — out of scope here;
+   this fix unblocks the build, it does not repair that wrapper.
+
+### What was measured
+
+* Blob probe (real `build_local_cython` blob, dlopen'd in a subprocess):
+  `mask=3, CoreDumping: 0` — both syscalls applied by the real artefact
+  object, before any payload init.
+* The real max-profile artefact: runs rc 0 (`OK verify:14`); all six
+  attack_chain routes rc 137 (control rc 0).
+* DS 4.1 Flash re-probe on the rebuilt max artefact: recovered the
+  ENFORCEMENT MECHANISM in full (dlopen → `nx_apply_protections()` →
+  refuse-if-missing → bitmask) but NOT the native-layer semantics — the
+  answer contains no description of what the native entry does internally.
+  The Python prctl block is still recovered because the max profile's
+  sectioned fallback keeps it BY DESIGN (see below).
+* `py.test tests/test_native_enforcement.py`: 6 tests pin the contract
+  (emission rule, fail-closed call, memguard form, source, blob probe).
+
+### The split, stated plainly
+
+* A build whose ONLY payload path is the native module (fallback DISABLED)
+  now carries NO anti-dump syscalls in text. The wrapper's enforcement layer
+  is machine code.
+* The max profile (sectioned fallback + native blob) keeps the Python block
+  because the sectioned fallback is production-reachable — dropping it
+  would be a §4 regression on that path, not a boundary push. On those
+  artefacts the enforcement is LAYERED (Python block + native entry, the
+  syscalls idempotent), and the readable block remains the honest residual.
+* Client-side software still cannot reach full immunity: an attacker with
+  execution can trace the native entry, and the blob is extractable. What
+  changed is where the semantics live — text vs stripped machine code — and
+  the measured DS probe confirms the difference.

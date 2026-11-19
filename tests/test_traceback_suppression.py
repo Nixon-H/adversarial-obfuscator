@@ -41,11 +41,15 @@ def _head_frag():
     # markers are not executable, so resolve them exactly as the
     # generator does -- gate text stripped (this fragment exec IS a
     # non-main exec) and the self-check markers emptied (its call reads
-    # __file__).
+    # __file__). __NX_ANTI_DUMP__ (2026-11-19) is substituted by the
+    # generator with a per-build anti-dump block; its CONTENT has its own
+    # tests -- this file's subject is the suppression ORDER, so the marker
+    # is dropped like the others rather than duplicating the block here.
     while "__NX_" in head:
         head = head.replace("__NX_IDENTITY_GATE__\n", "")
         head = head.replace("__NX_SELF_CHECK_DEFS__\n", "")
         head = head.replace("__NX_SELF_CHECK_CALL__\n", "")
+        head = head.replace("__NX_ANTI_DUMP__\n", "")
         if "__NX_" in head:
             raise AssertionError("unknown __NX_ marker in the loader head")
     return head
@@ -71,7 +75,8 @@ def _cut_at_statement_boundary(template, limit=2600):
         candidate = (candidate
                      .replace("__NX_IDENTITY_GATE__\n", "")
                      .replace("__NX_SELF_CHECK_DEFS__\n", "")
-                     .replace("__NX_SELF_CHECK_CALL__\n", ""))
+                     .replace("__NX_SELF_CHECK_CALL__\n", "")
+                     .replace("__NX_ANTI_DUMP__\n", ""))
         if "__NX_" in candidate:
             continue
         try:
