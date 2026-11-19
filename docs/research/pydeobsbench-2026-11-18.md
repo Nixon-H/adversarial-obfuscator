@@ -1090,6 +1090,54 @@ served; a customer who needs the *enforcement mechanism* hidden is not.
 
 ---
 
+## 5m. §1 re-tested against a re-stamping attacker — the check holds
+
+The §8 run above showed the model can read the loader completely. That raised a
+sharper question than "can it read?": **can it read the check and then get
+around it?**
+
+The self-check is a Merkle root over the artefact's own lines, so an attacker
+who knows the construction can recompute the stamp. `scripts/attack_chain.py`
+now measures exactly that, and it distinguishes two very different outcomes:
+
+* recomputing the stamp is enough → the integrity check is bound to the file's
+  TEXT, and §1's anti-patching redundancy reduces to "recompute one hash";
+* recomputing is not enough → something else in the chain is doing the work,
+  and that is worth knowing precisely.
+
+Measured on the same real artefact (`tiny`, `max` profile):
+
+| attack | result |
+|---|---|
+| control | rc 0, payload ran |
+| tamper pack only | **rc 137**, merkle mismatch |
+| bypass the self-check call only | **rc 137** — the LATE check caught it |
+| bypass + tamper | **rc 137** |
+| re-stamp the Merkle root, no edit | rc 0, payload ran (correct: nothing changed) |
+| **tamper + re-stamp** | **rc 137** — `hmac expected=d7551a8a… got=71a9d0e…` |
+
+The last row is the finding. Recomputing the Merkle root is **not sufficient**,
+because `_NX_SELF_HM` is a separate HMAC over the same content: an attacker who
+only reproduces the Merkle layer fails the HMAC layer. Two independent
+constructions over one artefact is precisely the "anti-patching redundancy" §1
+asked for, and it now has a measured refusal behind it rather than a design
+claim.
+
+Two honest qualifications:
+
+* **Both layers are still derivable from the artefact**, because both are
+  unkeyed-from-the-attacker's-view text transforms and the key material ships
+  inside it. The measured result is that recomputing ONE layer is insufficient;
+  it is not that a determined attacker who reimplements BOTH layers is blocked.
+  The next probe would be to supply `_NX_SELF_HM` consistently as well and see
+  what happens — that is the honest boundary of what this measurement covers.
+* **The "bypass only" row changed outcome since §5d.** Before the late
+  point-of-use check, patching the single call line let the payload run. It now
+  fails at 137, which is the §5d fix verified from the outside rather than
+  asserted from the source.
+
+---
+
 
 ## 6. Honest limits of this benchmark
 
