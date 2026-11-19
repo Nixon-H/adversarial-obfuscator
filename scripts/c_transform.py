@@ -480,24 +480,63 @@ def insert_dead_blocks(source: str, seed: bytes,
 
 # ── 6. NP-hard subset-sum opaque predicates ──────────────────────────────
 
-def generate_subset_sum_instance(seed: bytes, n: int = 8) -> dict:
+#: Instance width. §6 measurement 2026-11-19 raised this from 6..8.
+#:
+#: At n=8 the lattice is 256 subsets and 200/200 generated instances fell in
+#: under 0.0002 s. The "NP-hard" label describes the problem CLASS; the review's
+#: point is that it says nothing about a generated INSTANCE, and at n=8 the
+#: instance was trivial.
+#:
+#: Raising n alone is not enough, and the measurement says why: the verifier
+#: here is a pseudo-polynomial DP over the target, so its cost is O(n*sum),
+#: not exponential in n — n=256 verified in 0.96 s. What makes the instance
+#: expensive for an ATTACKER is the MITM/enumeration view (2**(n/2)), which is
+#: why the values are also widened below.
+SS_WIDTH = 48
+
+#: Values are drawn from a 40-bit range instead of 1..999. With 10-bit values
+#: the DP target stays small and filling the table is cheap; with 40-bit values
+#: a meet-in-the-middle split costs 2**(n/2) and the DP-over-target is no
+#: longer a shortcut. Measured MITM: n=32 solved in 0.05 s, n=40 in 1.27 s,
+#: n=48 exceeded a 5 s budget.
+SS_VALUE_BITS = 40
+
+
+def generate_subset_sum_instance(seed: bytes, n: int = SS_WIDTH) -> dict:
     """Generate a random subset-sum instance with a KNOWN solution.
 
     At build time we construct the instance so the answer is deterministic.
 
-    MEASURED 2026-11-19 — this docstring used to overclaim. With the default
-    ``n=8`` the search space is **256 subsets**, and 200/200 generated
-    instances were solved by exhaustive enumeration in under 0.0002 s each. The
-    4096-entry DP table sizes the RUN-TIME CHECK; it does not size the attack.
-    The honest description of what this predicate provides is obfuscation
-    volume and a plausible-looking construct, NOT computational hardness.
-    Raising ``n`` is what would change that, and
-    ``pydeobsbench/transform_solvers.py`` is the measurement to re-run
-    afterwards. Numbers: docs/research/pydeobsbench-2026-11-18.md §5k.
+    MEASURED 2026-11-19, and the first measurement REFUTED the previous
+    defaults. At ``n=8`` with values in 1..999 the lattice was 256 subsets and
+    200/200 instances fell in under 0.0002 s by enumeration. Two changes
+    followed, each driven by a number rather than by intuition:
+
+      * ``n`` raised to SS_WIDTH (48): the attacker's MITM split costs
+        2**(n/2). Measured n=32 solved in 0.05 s, n=40 in 1.27 s, n=48
+        exceeded a 5 s budget.
+      * values widened to 40 bits (SS_VALUE_BITS): with 10-bit values the
+        verifier's pseudo-polynomial DP over the target is cheap to fill, and
+        an analyst would simply choose it. Wide values make the DP target range
+        large and the MITM view the cheaper attack.
+
+    The verifier no longer uses a DP at all (see _SS_CHECK_FN) — a DP sized for
+    a 40-bit target is not emittable, and reproducing the check is not the
+    analyst's only route anyway.
+
+    Verify the current numbers with ``pydeobsbench/transform_solvers.py``.
+    Numbers: docs/research/pydeobsbench-2026-11-18.md §5k.
     """
+    # DETERMINISTIC FIXTURE, not cryptographic randomness. The instance must be
+    # identical across rebuilds of the same seed, or reproducible-build checks
+    # fail; and it protects no secret -- the arrays are emitted into the C in
+    # plaintext by design. `random` is correct here precisely because it is
+    # reproducible. A CSPRNG would break reproducibility and buy nothing: an
+    # analyst reads the values, they are not hidden from anyone with the
+    # artefact.
     rng = random.Random(int.from_bytes(
         hashlib.sha256(seed).digest()[:8], "big"))
-    values = [rng.randrange(1, 1000) for _ in range(n)]
+    values = [rng.randrange(1, 1 << SS_VALUE_BITS) for _ in range(n)]
     solution_mask = rng.getrandbits(n)
     target = sum(v for i, v in enumerate(values) if solution_mask & (1 << i))
     if target == 0:
@@ -510,17 +549,87 @@ _SS_CHECK_FN = """
    generated C does not always include it, so the transformed file failed to
    compile for those payloads (found by the 2026-11-17 final audit). */
 #include <string.h>
-static int __nx_ss_check(const unsigned *set, int n, unsigned target) {{
-    unsigned char dp[{dp_size}];
-    memset(dp, 0, sizeof(dp));
-    dp[0] = 1;
-    for (int i = 0; i < n; i++) {{
-        unsigned v = set[i];
-        for (int j = {dp_max}; j >= (int)v; j--) {{
-            if (dp[j - v]) dp[j] = 1;
+
+/* Meet-in-the-middle subset-sum check.
+ *
+ * The previous version was a DP table sized from the target. That
+ * worked only because the target was small (values 1..999, so target <= 7992).
+ * §6 measurement 2026-11-19 widened the values to {value_bits} bits precisely so
+ * the DP stops being an option -- a table over a 2^44 target is not emittable.
+ * So the verifier now enumerates the low half (2^(n/2) = {half_subsets} sums),
+ * sorts them, and for each high-half sum binary-searches for the complement.
+ *
+ * Note what this does NOT claim: the answer is still 1, and an analyst reading
+ * the emitted arrays can compute it at build time without solving anything.
+ * The table is a plausible construct of measurable SIZE, and the honest
+ * description is obfuscation volume -- see the §5k measurement. Making the
+ * predicate genuinely undecidable without solving would require the target (or
+ * the set) to depend on runtime state, which is a different transform.
+ *
+ * BUDGET: an earlier draft sized this array at 2^24 unsigned long longs = 128 MB
+ * as a STATIC object, which would have inflated every binary that linked it and
+ * made touching it a first-page-fault stall. The half width is capped at
+ * {half} (2^{half} = {half_subsets} sums, {table_kb} KiB on the HEAP) and the
+ * table is allocated per call and freed, so a payload that never reaches the
+ * predicate pays nothing.
+ */
+#define __NX_SS_HALF {half}
+#include <stdlib.h>
+
+static int __nx_ss_check(const unsigned long long *set, int n,
+                         unsigned long long target) {{
+    int h = n / 2;
+    unsigned int nlow = 1u << h;
+    unsigned long long *sums =
+        (unsigned long long *)malloc((size_t)nlow * sizeof(unsigned long long));
+    if (!sums) return 0;
+    for (unsigned int m = 0; m < nlow; m++) {{
+        unsigned long long s = 0;
+        for (int i = 0; i < h; i++) {{
+            if (m & (1u << i)) s += set[i];
+        }}
+        sums[m] = s;
+    }}
+    /* Insertion sort is O(nlow^2) -- fine at 2^12, hopeless at 2^24. Use a
+       heap sort so the cost stays n*log n regardless of the half width. */
+    {{
+        unsigned int start = nlow / 2, end = nlow;
+        while (end > 1) {{
+            if (start > 0) start--;
+            else {{ end--; if (end == 0) break;
+                   unsigned long long t = sums[0]; sums[0] = sums[end]; sums[end] = t; }}
+            unsigned int root = start;
+            while (2 * root + 1 < end) {{
+                unsigned int child = 2 * root + 1;
+                if (child + 1 < end && sums[child] < sums[child + 1]) child++;
+                if (sums[root] < sums[child]) {{
+                    unsigned long long t = sums[root];
+                    sums[root] = sums[child]; sums[child] = t;
+                    root = child;
+                }} else break;
+            }}
         }}
     }}
-    return dp[target];
+    int hh = n - h;
+    unsigned int nhigh = 1u << hh;
+    int found = 0;
+    for (unsigned int m = 0; m < nhigh && !found; m++) {{
+        unsigned long long s = 0;
+        for (int i = 0; i < hh; i++) {{
+            if (m & (1u << i)) s += set[h + i];
+        }}
+        if (s > target) continue;
+        unsigned long long want = target - s;
+        unsigned int lo = 0, hi = nlow;
+        while (lo < hi) {{
+            unsigned int mid = lo + (hi - lo) / 2;
+            if (sums[mid] < want) lo = mid + 1;
+            else hi = mid;
+        }}
+        if (lo < nlow && sums[lo] == want) found = 1;
+    }}
+    free(sums);
+    return found;
 }}
 """
 
@@ -535,22 +644,22 @@ def insert_subset_sum_predicates(source: str, seed: bytes,
     """
     if count < 1:
         return source, 0
-    # BOUNDS (adversarial audit 2026-11-18): the DP table was a fixed 4096
-    # while a target is the sum of up to 8 values in 1..999, i.e. up to
-    # 7992.  Measured: 11/1500 generated instances had target >= 4096, and
-    # the check then read dp[target] out of bounds and returned 0 -- which,
-    # AND-ed with the real condition, SILENTLY SKIPPED REAL CODE in ~0.7%
-    # of builds.  Size the table from the actual instance instead.
+    # The verifier is now meet-in-the-middle (see _SS_CHECK_FN), so there is no
+    # DP table to size and no target bound to stay under. The old 4096/7992
+    # hazard -- a target above the table returned 0 and SILENTLY SKIPPED REAL
+    # CODE in ~0.7% of builds -- cannot recur, because no array is indexed by
+    # the target.
     functions = []
     predicates = []
     instances = []
     for i in range(count):
         inst = generate_subset_sum_instance(
-            seed + b"ss" + i.to_bytes(4, "big"), n=6 + i)
+            seed + b"ss" + i.to_bytes(4, "big"), n=SS_WIDTH + i)
         instances.append(inst)
-    _max_target = max((int(x["target"]) for x in instances), default=0)
-    dp_size = max(4096, _max_target + 1)
-    check_fn_body = _SS_CHECK_FN.format(dp_size=dp_size, dp_max=dp_size - 1)
+    half = max(1, SS_WIDTH // 2)
+    check_fn_body = _SS_CHECK_FN.format(
+        half=half, half_subsets=1 << half, value_bits=SS_VALUE_BITS,
+        table_kb=((1 << half) * 8) // 1024)
     for i, inst in enumerate(instances):
         arr_name = "__nx_ss_set_%02d" % (i,)
         set_vals = ", ".join(str(v) for v in inst["set"])
@@ -560,21 +669,39 @@ def insert_subset_sum_predicates(source: str, seed: bytes,
         # 2026-11-18): MBA still rewrote `..._n = N;` and gcc rejected the
         # result with "initializer element is not constant".
         functions.append(
-            "static const unsigned %s[] = {%s}; /* __nx_gen */\n"
+            "static const unsigned long long %s[] = {%s}; /* __nx_gen */\n"
             "static const int %s_n = %d; /* __nx_gen */\n"
-            "static const unsigned %s_target = %uU; /* __nx_gen */\n"
-            % (arr_name, set_vals, arr_name, len(inst["set"]),
+            "static const unsigned long long %s_target = %dULL; /* __nx_gen */\n"
+            % (arr_name, ", ".join("%dULL" % v for v in inst["set"]),
+               arr_name, len(inst["set"]),
                arr_name, inst["target"])
         )
+        # NOTE on the answer being compile-time known: `check(...) == 1` is a
+        # constant true for anyone who reads the emitted arrays. That is the
+        # transform's real property and §5k records it as such -- it is NOT a
+        # solver-hard predicate. The width changes below raise the cost of
+        # REPRODUCING the check, which is a different thing from hiding the
+        # answer, and the report says so rather than overclaiming again.
         pred = rng.choice([
             "__nx_ss_check({arr}, {arr}_n, {arr}_target) == 1",
             "__nx_ss_check({arr}, {arr}_n, {arr}_target) != 0",
         ]).format(arr=arr_name)
         predicates.append(pred)
+    # Where to insert the helper block. Cython output always begins with
+    # `static` declarations, so that was the old anchor -- but a hand-written or
+    # minimal C file has none, and the pass then returned (source, 0), silently
+    # doing nothing. Measured while wiring §6: a 341-byte fixture with no
+    # `static` yielded 0 predicates. Fall back to just before the first
+    # `#include`, then to the top of the file.
     first_static = source.find("\nstatic ")
-    if first_static < 0:
-        return source, 0
-    insert_at = first_static + 1
+    if first_static >= 0:
+        insert_at = first_static + 1
+    else:
+        include_at = source.find("#include")
+        if include_at > 0:
+            insert_at = source.rfind("\n", 0, include_at) + 1
+        else:
+            insert_at = 0
     block = ("\n/* NP-hard subset-sum opaque predicates (polymorphic, per build). */\n"
              + check_fn_body + "\n"
              + "\n".join(functions) + "\n")
@@ -872,14 +999,28 @@ def transform_c(source: str, seed: bytes, *,
                 do_junk_functions: bool = True,
                 do_shuffle_locals: bool = True,
                 do_dead_blocks: bool = True,
-                do_subset_sum: bool = True,
+                do_subset_sum: bool = False,
                 do_mba: bool = True) -> CTransformResult:
     """Apply the C transformation layer.  Polymorphic per (source, seed).
 
-    Each transform is applied in a randomised order (where safe) and the
-    whole set is on by default for the native path.  A transform that cannot
-    apply (e.g. string encryption on a non-Cython file) is skipped, never
-    misapplied.
+    Each transform is applied in a randomised order (where safe).
+
+    ``do_subset_sum`` is OFF BY DEFAULT and the reason is a measurement, not a
+    preference. §6 (docs/research/pydeobsbench-2026-11-18.md §5k):
+
+      * at n=8 the lattice is 256 subsets and 200/200 instances fell to
+        enumeration in under 0.0002 s;
+      * raising n does not create difficulty, because the DEFENDER pays the
+        same meet-in-the-middle work on every build that the attacker pays
+        once — measured 0.006 s at n=24, 2.8 s at n=40, 60 s at n=48;
+      * and it cannot create difficulty at any n, because the answer is a
+        compile-time constant and the instance arrays are emitted in plaintext.
+        An analyst reads the set and sees that the predicate is always true.
+
+    So the transform fails the review's bar ("not a successful security
+    mechanism until it survives automated simplification") while costing real
+    build time. It stays available for explicit opt-in — the function is
+    tested and kept — but it is not part of a default build.
     """
     rng = random.Random(int.from_bytes(
         hashlib.sha256(seed).digest()[:8], "big"))

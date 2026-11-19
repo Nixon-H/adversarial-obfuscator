@@ -98,19 +98,54 @@ def _verdict(seconds):
     return "costs the analyst more than %.1fs" % (CHEAP_SECONDS,)
 
 
-# ── claim 2: subset-sum with a 4096-entry DP table ────────────────────────
+# ── claim 2: subset-sum with a target-indexed DP table ────────────────────
 
-def probe_subset_sum(instances, limit=None):
+def _meet_in_the_middle(values, target, budget_seconds=20.0):
+    """Solve subset-sum by MITM. Returns (solution_or_None, timed_out).
+
+    This is the method an analyst chooses once the values are wide, and it is
+    the method the emitted verifier uses too. It costs 2**(n/2), which is why
+    the review's distinction matters: DP over the target is cheap when values
+    are small and impossible when they are 40-bit, but MITM is unaffected by
+    value width and driven purely by n.
+
+    A BUDGET is enforced because probing a deliberately-hard instance at n=48
+    would otherwise run for hours inside a test suite. When the budget is hit
+    the result is reported as a timeout — a real measurement, not an
+    inference — and the caller records it as "the analyst did not finish".
+    """
+    started = time.perf_counter()
+    half = len(values) // 2
+    low = {}
+    for size in range(half + 1):
+        for combo in itertools.combinations(range(half), size):
+            if time.perf_counter() - started > budget_seconds:
+                return None, True
+            low.setdefault(sum(values[i] for i in combo), combo)
+    for size in range(len(values) - half + 1):
+        for combo in itertools.combinations(range(half, len(values)), size):
+            if time.perf_counter() - started > budget_seconds:
+                return None, True
+            if target - sum(values[i] for i in combo) in low:
+                return combo, False
+    return None, False
+
+
+def probe_subset_sum(instances, limit=None, budget_seconds=20.0):
     """How hard is a GENERATED instance to solve, measured, not inferred?
 
-    The review's argument: the 4096-entry DP table describes the run-time
-    verifier, not the attack. An analyst is not obliged to reproduce the DP —
-    they can enumerate subsets, use a meet-in-the-middle split, or just read the
-    constants and check which subset hits the target.
+    The review's argument: the table sizes the run-time verifier, not the
+    attack. An analyst is not obliged to reproduce it — the cheaper route is a
+    meet-in-the-middle split, and the cheaper route of all is to READ the
+    emitted arrays and observe that the predicate is a compile-time constant.
 
-    Measured here: exhaustive subset enumeration, which is what a human or a
-    small script does first. The number that matters is the SEARCH SPACE
-    (2**n), because that is what sets the cost of every method above.
+    Two numbers are reported and they answer different questions:
+
+      * ``search_space`` (2**n) sets the cost of every solver;
+      * ``solve_seconds_max`` is what MITM actually took, with a budget. A
+        timeout is recorded as ``timed_out`` rather than as a large number,
+        because "did not finish inside 20 s" and "took 20 s" are different
+        facts.
     """
     rows = []
     for index, instance in enumerate(instances):
@@ -121,24 +156,18 @@ def probe_subset_sum(instances, limit=None):
         width = len(values)
         space = 2 ** width
 
-        def _brute(values=values, target=target):
-            # Enumerate by increasing cardinality: an analyst wants a solution,
-            # not all of them, so stopping at the first hit is realistic.
-            for size in range(len(values) + 1):
-                for combo in itertools.combinations(range(len(values)), size):
-                    if sum(values[i] for i in combo) == target:
-                        return combo
-            return None
-
-        solution = _brute()
-        seconds = _solve_seconds(_brute)
+        started = time.perf_counter()
+        solution, timed_out = _meet_in_the_middle(values, target,
+                                                  budget_seconds)
+        seconds = time.perf_counter() - started
         rows.append({
             "n": width,
             "search_space": space,
             "target": target,
             "solved": solution is not None,
+            "timed_out": timed_out,
             "solve_seconds": round(seconds, 6),
-            "dp_table_entries": max(4096, target + 1),
+            "dp_table_entries": None,
         })
 
     if not rows:
@@ -146,6 +175,8 @@ def probe_subset_sum(instances, limit=None):
                 "reason": "no instances supplied"}
     spaces = {row["search_space"] for row in rows}
     worst = max(row["solve_seconds"] for row in rows)
+    timed_out = sum(1 for row in rows if row["timed_out"])
+    solved = sum(1 for row in rows if row["solved"])
     return {
         "probe": "subset_sum",
         "applicable": True,
@@ -157,12 +188,22 @@ def probe_subset_sum(instances, limit=None):
         "solve_seconds_max": worst,
         "solve_seconds_median": round(
             statistics.median([r["solve_seconds"] for r in rows]), 6),
-        "all_solved": all(row["solved"] for row in rows),
-        "dp_table_entries": rows[0]["dp_table_entries"],
-        "verdict": _verdict(worst),
-        "note": ("The DP table sizes the RUN-TIME check. It does not size the "
-                 "attack: the instance is 2**n subsets, and the table adds "
-                 "nothing an enumerator must pay."),
+        "solved": solved,
+        "timed_out": timed_out,
+        "all_solved": solved == len(rows),
+        # The DECISIVE number, and it is not a solver time: the predicate is a
+        # compile-time constant, so an analyst reads the emitted arrays and
+        # never runs a solver at all. That is why widening n cannot help.
+        "answer_predetermined": True,
+        "verdict": (
+            "NOT A PROTECTION: the predicate's answer is a compile-time "
+            "constant read off the emitted arrays"
+            if solved or timed_out else _verdict(worst)),
+        "note": ("MITM cost is 2**(n/2) and is measured with a budget; a "
+                 "timeout is reported as a timeout, not as a time. But the "
+                 "attack that matters costs nothing at any n: the set and "
+                 "target are emitted in plaintext, so `check(...) == 1` is "
+                 "true by inspection."),
         "sample": rows[0],
     }
 
@@ -330,7 +371,11 @@ def summarise(results):
             continue
         verdict = result.get("verdict", "")
         if name == "subset_sum":
-            holds = result.get("solve_seconds_max", 0) > CHEAP_SECONDS
+            # A timeout on the MITM does NOT mean the claim holds: the answer
+            # is a compile-time constant, so the solver is not the attack. The
+            # claim holds only if the predicate is not predetermined.
+            holds = (not result.get("answer_predetermined", False)
+                     and result.get("solve_seconds_max", 0) > CHEAP_SECONDS)
         elif name == "mba":
             holds = not result.get("constant_recovered", False)
         elif name == "opaque_predicate":

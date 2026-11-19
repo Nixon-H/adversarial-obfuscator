@@ -51,8 +51,12 @@ def test_subset_sum_predicates_are_emitted():
     assert count >= 2
     assert "__nx_ss_check" in new
     assert "__nx_ss_set_00" in new
-    # The set arrays must contain the actual values (not encrypted).
-    assert re.search(r"static const unsigned __nx_ss_set_\d+\[\] = \{\d+", new)
+    # The set arrays must contain the actual values (not encrypted). The width
+    # is `unsigned long long` since §6 widened the instance values to 40 bits:
+    # `unsigned` cannot hold them, and a DP table over a 2^44 target is not
+    # emittable, which is why the verifier is now meet-in-the-middle.
+    assert re.search(
+        r"static const unsigned long long __nx_ss_set_\d+\[\] = \{\d+ULL", new)
 
 
 def test_subset_sum_predicate_wraps_if_conditions():
@@ -139,21 +143,40 @@ def test_subset_sum_dp_table_covers_every_generated_target():
 
 
 def test_emitted_subset_sum_fn_is_sized_for_the_instance():
-    from scripts.c_transform import insert_subset_sum_predicates
+    """The verifier must be sized from the INSTANCE, not from a fixed constant.
+
+    The original defect this guards (audit 2026-11-18) was a fixed 4096-entry DP
+    table against targets of up to 7992: `dp[target]` read out of bounds and
+    returned 0, which AND-ed with the real condition SILENTLY SKIPPED REAL CODE
+    in ~0.7% of builds.
+
+    §6 measurement 2026-11-19 removed the DP entirely: the instance values are
+    now 40-bit, so a target-indexed table would need ~2^44 entries and the
+    out-of-bounds hazard cannot recur — nothing is indexed by the target any
+    more. The guarantee to assert is that the emitted check is derived from the
+    instance width, and that no target-indexed array exists.
+    """
+    from scripts.c_transform import insert_subset_sum_predicates, SS_WIDTH
     import hashlib
-    src = CYX_C
+    import re
+
     seed = hashlib.sha256(b"size-probe").digest()
-    out, n = insert_subset_sum_predicates(src, seed, __import__("random").Random(1),
+    out, n = insert_subset_sum_predicates(CYX_C, seed,
+                                          __import__("random").Random(1),
                                           count=3)
     assert n == 3
-    import re
-    m = re.search(r"unsigned char dp\[(\d+)\]", out)
-    assert m, "no dp table in the emitted C"
-    dp = int(m.group(1))
-    targets = [int(t) for t in re.findall(r"__nx_ss_set_\d+_target = (\d+)U", out)]
-    assert targets, "no targets emitted"
-    assert max(targets) < dp, (
-        "dp[%d] does not cover target %d" % (dp, max(targets)))
+
+    # No target-indexed table: that construction is what broke before.
+    assert not re.search(r"unsigned char dp\[", out), (
+        "a target-indexed DP table is back; it cannot cover 40-bit targets")
+    assert "__nx_ss_sums" not in out or "malloc" in out, (
+        "the meet-in-the-middle table must be heap-allocated, not static: "
+        "a static 2^%d array would bloat every linked binary" % (SS_WIDTH // 2))
+
+    # The half width must follow the instance width.
+    half = re.search(r"#define __NX_SS_HALF (\d+)", out)
+    assert half, "no half-width define emitted"
+    assert int(half.group(1)) == max(1, SS_WIDTH // 2)
 
 
 def test_mba_length_grows_with_rounds():
