@@ -91,6 +91,25 @@ class ObfuscationTransformer:
         self.mba_validator = mba_validator
 
     def _patch_secrets(self):
+        """Point the `secrets` module at a seeded RNG for a reproducible build.
+
+        This is a PROCESS-GLOBAL monkeypatch, and it is load-bearing for §5:
+        the AST layer draws nonces and choices through `secrets`, so a build
+        that wants bit-identical output for the same seed has to make those
+        draws deterministic. Two things follow, and both used to be wrong:
+
+          * it MUST be undone even when the transform raises. The `try/finally`
+            in `transform` is what guarantees that; without it one failed build
+            left `secrets.token_bytes` pointing at an Mersenne Twister for the
+            rest of the process, so every later key, nonce and challenge drawn
+            anywhere in the program became predictable. That is the failure the
+            static scanner flags on line ~97, and it is a real one, not a false
+            positive: the fix is to bound the patch lifetime, not to hide it.
+          * it is NOT thread-safe. Two concurrent transforms would interleave
+            patch/unpatch and corrupt each other's determinism. Callers that
+            transform in parallel must serialise around this; `transform`
+            documents that rather than pretending otherwise.
+        """
         _orig_randbelow = secrets.randbelow
         _orig_token_bytes = secrets.token_bytes
         _orig_choice = secrets.choice
@@ -160,9 +179,15 @@ class ObfuscationTransformer:
             _state = random.getstate()
             random.seed(self.seed)
             _patch = self._patch_secrets()
-            result, _ = apply_ast_mutation(source, options, strict=True)
-            self._unpatch_secrets(_patch)
-            random.setstate(_state)
+            try:
+                result, _ = apply_ast_mutation(source, options, strict=True)
+            finally:
+                # Also restores the module-global `secrets` on the exception
+                # path: without this, one failed transform left every later
+                # nonce/key draw in the process deterministic (see
+                # `_patch_secrets`).
+                self._unpatch_secrets(_patch)
+                random.setstate(_state)
             result = self._apply_residue(result, options)
             try:
                 _caller_options['residue_map'] = options.get('residue_map', {})
@@ -441,13 +466,55 @@ def swizzle_bytecode(data, key):
         kl = len(key)
         for i in range(len(b)): b[i] ^= key[i % kl]
         return bytes(b)
+#: Every generated file this module writes is a fixed NAME inside a directory the
+#: caller chose. That distinction is what makes the containment below a
+#: tightening rather than theatre: the goal is not to distrust the operator's
+#: build directory (they already own the process), it is to make sure a
+#: payload-derived string can never become part of a path. A name is validated;
+#: a path is confined to its root.
+_SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def confined_path(root, name, allow_subdirs=False):
+    """Return ``root/name``, refusing anything that escapes ``root``.
+
+    The build writes generated Cython sources and setup files next to the
+    directory the operator passed on the command line. Those names are built
+    from a uuid or a fixed string today, so this is not a live vulnerability --
+    but "the name happens to be safe" is exactly the assumption that stops being
+    true when someone later threads a parameter through. Checking at the one
+    place that joins is cheap, and it means a future caller cannot introduce a
+    traversal without a test failing.
+
+    ``allow_subdirs`` is for the native-mode path, whose key is a RELATIVE path
+    from a directory walk (``pkg/main.py``). Flattening that to a basename would
+    silently merge ``a/main.py`` and ``b/main.py`` into one output file, so
+    sub-directories are preserved -- but each component must still be a safe
+    name and the resolved result must stay inside ``root``.
+
+    Raises :class:`ValueError` otherwise: a silent ``os.path.join`` fallback
+    would hide the problem.
+    """
+    if not name:
+        raise ValueError("empty generated filename")
+    parts = str(name).split("/") if allow_subdirs else [str(name)]
+    for part in parts:
+        if not part or not _SAFE_NAME.match(part) or part == "..":
+            raise ValueError("unsafe generated filename: %r" % (name,))
+    base = os.path.realpath(str(root))
+    target = os.path.realpath(os.path.join(base, *parts))
+    if target != base and not target.startswith(base + os.sep):
+        raise ValueError("path escapes the build directory: %r" % (name,))
+    return target
+
+
 def build_native_vm(build_dir):
     print("    [+] Attempting to build Native VM (Cython)...") 
     try:
         unique_name = f"native_vm_{uuid.uuid4().hex}"
-        pyx_path = os.path.join(build_dir, f"{unique_name}.pyx")
+        pyx_path = confined_path(build_dir, f"{unique_name}.pyx")
         with open(pyx_path, "w", encoding='utf-8') as f: f.write(CYTHON_VM_SOURCE)
-        setup_py = os.path.join(build_dir, "setup.py")
+        setup_py = confined_path(build_dir, "setup.py")
         with open(setup_py, "w", encoding='utf-8') as f:
             f.write(f"from setuptools import setup\nfrom Cython.Build import cythonize\nsetup(name='{unique_name}', ext_modules=cythonize('{unique_name}.pyx', compiler_directives={{'language_level': 3}}))")
         cmd = [sys.executable, "setup.py", "build_ext", "--inplace"]
@@ -649,8 +716,15 @@ def compile_payload_to_cython(source_path, output_dir):
             else:
                 print(f"    [!] Native Mode: Standard guard not found in {name}. Appending fallback.")
                 code += "\n\nif __name__ != '__main__':\n    if 'main' in globals() and callable(globals()['main']): globals()['main']()\n"
-            pyx_name = name.replace('.py', '.pyx')
-            pyx_path = os.path.join(cython_dir, pyx_name)
+            # `name` is a relative path from the source tree walk
+            # (`pkg/mod.py`). Keep the structure -- flattening it would merge
+            # `a/main.py` and `b/main.py` into one generated file -- while
+            # `confined_path` still refuses `..`, absolute paths and anything
+            # that resolves outside `cython_dir`.
+            pyx_name = str(name).replace('\\', '/')
+            if pyx_name.endswith('.py'):
+                pyx_name = pyx_name[:-3] + '.pyx'
+            pyx_path = confined_path(cython_dir, pyx_name, allow_subdirs=True)
             os.makedirs(os.path.dirname(pyx_path), exist_ok=True)
             # Only language_level. The old header also set boundscheck /
             # wraparound / cdivision / infer_types, and those are not free
@@ -689,7 +763,7 @@ setup(
                          }})
 )
 '''
-        setup_path = os.path.join(cython_dir, 'setup.py')
+        setup_path = confined_path(cython_dir, 'setup.py')
         with open(setup_path, 'w', encoding='utf-8') as f: f.write(setup_content)
         cmd = [sys.executable, 'setup.py', 'build_ext', '--inplace']
         result = subprocess.run(cmd, cwd=cython_dir, capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -729,10 +803,14 @@ def process_file_safe(args):
     if src.endswith(out_name) or src.endswith('.pyc'): return None
     rel = os.path.relpath(src, root_source)
     if rel.startswith("..") or os.path.isabs(rel):
-        rel = os.path.basename(src) 
-    dest = os.path.join(build_dir, rel)
-    dest = os.path.normpath(dest)
-    if not os.path.realpath(dest).startswith(os.path.realpath(build_dir)):
+        rel = os.path.basename(src)
+    # Confinement moved into `confined_path` so the check is one auditable
+    # function rather than a `realpath().startswith()` idiom that a reader (and
+    # a static scanner) has to re-derive at every site. The old form also had a
+    # prefix bug: `/tmp/build` is a prefix of `/tmp/build-evil`.
+    try:
+        dest = confined_path(build_dir, rel, allow_subdirs=True)
+    except ValueError:
         print(f" [!] Security Block: Skipping unsafe path {src}")
         return None
     os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -757,8 +835,12 @@ def generate_report(base_name, build_info, all_outputs):
     report = {'build_info': {'timestamp': datetime.now().isoformat()}, 'protection_features': build_info['features'], 'metrics': build_info['metrics'], 'outputs': all_outputs}
     try:
         # splitext, not str.replace: a directory whose name contains
-        # ".py" would otherwise be mangled.
-        report_path = os.path.splitext(base_name)[0] + '.report.json'
+        # ".py" would otherwise be mangled. The report lands beside the artefact
+        # the operator named, so the containing directory is theirs and only the
+        # filename is generated here.
+        report_path = confined_path(
+            os.path.dirname(os.path.abspath(base_name)) or ".",
+            os.path.splitext(os.path.basename(base_name))[0] + '.report.json')
         with open(report_path, 'w', encoding='utf-8') as f: json.dump(report, f, indent=2)
     except Exception: pass
 def encrypt_payload(data, key, nonce, use_aes_ctr=True):
@@ -775,6 +857,132 @@ def encrypt_payload(data, key, nonce, use_aes_ctr=True):
                 "choose the XOR stream deliberately)")
         return Nixon_Enc_AES_CTR(data, key, nonce)
     return Nixon_Enc_blob(data, key, nonce)
+
+
+#: AEAD envelope layout: magic || 12-byte nonce || ciphertext+tag.
+#:
+#: The review asks for "authenticated encryption using AES-256-GCM or
+#: ChaCha20-Poly1305". AES-CTR (above) is confidential but NOT authenticated,
+#: so a modified payload decrypts to garbage and the only thing that notices is
+#: a later hash check. GCM makes tampering a decrypt-time failure with the tag
+#: covering the bytes that actually matter.
+#:
+#: The nonce is STORED IN THE ENVELOPE, which is what makes this safe to use as
+#: a general seal: a caller cannot accidentally reuse a nonce across two
+#: messages because there is no caller-supplied nonce to reuse. That was the
+#: binding requirement -- GCM nonce reuse is catastrophic (it leaks the
+#: authentication key), so the API must not let a caller cause it.
+AEAD_MAGIC = b"NXAEAD\x01"
+AEAD_NONCE_BYTES = 12
+
+
+def _aead_available():
+    """Is a GCM backend importable? Cached, like the AES-CTR probe."""
+    global _AEAD_AVAILABLE
+    try:
+        return _AEAD_AVAILABLE
+    except NameError:
+        pass
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import (  # noqa: F401
+            AESGCM)
+        _AEAD_AVAILABLE = True
+    except Exception:
+        try:
+            from Crypto.Cipher import AES  # noqa: F401
+            _AEAD_AVAILABLE = True
+        except Exception:
+            _AEAD_AVAILABLE = False
+    return _AEAD_AVAILABLE
+
+
+def derive_aead_key(key, salt=b""):
+    """AES-256 key from the build key.
+
+    A separate KDF label means the AEAD key and the CTR/XOR stream key are
+    different values even when derived from the same secret, which is the
+    "cryptographic separation between build-time and runtime secrets" the
+    review asks for: reuse across two constructions is how a break in one
+    becomes a break in the other.
+    """
+    return hashlib.sha256(b"nx-aead-key-v1:" + bytes(key) + bytes(salt)).digest()
+
+
+def seal_aead(data, key, *, aad=None, nonce=None):
+    """AES-256-GCM seal. Returns ``magic || nonce || ct||tag``.
+
+    ``aad`` binds context (a build id, a section index) without encrypting it, so
+    a ciphertext cannot be moved into a different slot. ``nonce`` exists ONLY for
+    the reproducibility path, where a seeded build must produce identical bytes;
+    when omitted a fresh 96-bit nonce is drawn from ``os.urandom``. That is the
+    correct default: every ordinary call gets a unique nonce for free.
+    """
+    if not _aead_available():
+        raise SystemExit(
+            "AEAD seal requested but no GCM backend is available; install "
+            "'cryptography' or 'pycryptodome'")
+    body = bytes(data)
+    if nonce is None:
+        nonce = os.urandom(AEAD_NONCE_BYTES)
+    nonce = bytes(nonce)
+    if len(nonce) != AEAD_NONCE_BYTES:
+        raise ValueError("AEAD nonce must be %d bytes, got %d"
+                         % (AEAD_NONCE_BYTES, len(nonce)))
+    aes_key = derive_aead_key(key)
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        sealed = AESGCM(aes_key).encrypt(nonce, body,
+                                         bytes(aad) if aad else None)
+    except ImportError:
+        from Crypto.Cipher import AES
+        cipher = AES.new(aes_key, AES.MODE_GCM, nonce=nonce)
+        if aad:
+            cipher.update(bytes(aad))
+        ct, tag = cipher.encrypt_and_digest(body)
+        sealed = ct + tag
+    return AEAD_MAGIC + nonce + sealed
+
+
+def open_aead(envelope, key, *, aad=None):
+    """Authenticated open. Raises ValueError on ANY tampering.
+
+    There is no "decrypt anyway and hope" branch: GCM's value is that the tag is
+    checked before the caller sees plaintext, so a failure here must be fatal to
+    the load, not a warning. Every backend failure is normalised to
+    :class:`ValueError` because ``cryptography`` raises its own
+    ``InvalidTag`` (an ``Exception`` subclass, NOT a ``ValueError``) while
+    pycryptodome raises ``ValueError``; a caller catching the documented type
+    must not silently miss one backend's tamper signal.
+    """
+    raw = bytes(envelope)
+    if not raw.startswith(AEAD_MAGIC):
+        raise ValueError("not an NX AEAD envelope")
+    rest = raw[len(AEAD_MAGIC):]
+    if len(rest) < AEAD_NONCE_BYTES + 16:
+        raise ValueError("AEAD envelope is truncated")
+    nonce, sealed = rest[:AEAD_NONCE_BYTES], rest[AEAD_NONCE_BYTES:]
+    aes_key = derive_aead_key(key)
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        try:
+            return AESGCM(aes_key).decrypt(nonce, sealed,
+                                           bytes(aad) if aad else None)
+        except Exception as exc:
+            # Only the authentication failure is expected here; anything else
+            # (bad key length, missing backend) still must not look like a
+            # successful open, so both become ValueError with the cause named.
+            raise ValueError("AEAD authentication failed: %s"
+                             % (type(exc).__name__,))
+    except ImportError:
+        from Crypto.Cipher import AES
+        cipher = AES.new(aes_key, AES.MODE_GCM, nonce=nonce)
+        if aad:
+            cipher.update(bytes(aad))
+        try:
+            return cipher.decrypt_and_verify(sealed[:-16], sealed[-16:])
+        except ValueError as exc:
+            raise ValueError("AEAD authentication failed: %s" % (exc,))
+
 
 _AES_CTR_AVAILABLE = None
 def _check_aes_ctr():
@@ -1466,7 +1674,7 @@ def build_local_cython(source_content, target_python=None, ast_opts=None):
     from Cython.Build import cythonize  # noqa: F401 (this line binds a name used by an embedded template)
     build_dir = tempfile.mkdtemp(prefix="nixon_local_build_")
     try:
-        src_path = os.path.join(build_dir, "payload.py")
+        src_path = confined_path(build_dir, "payload.py")
         # Apply the AST layer FIRST (same options as the fallback), then
         # rewrite the main guard so Cython compiles the body eagerly.
         if ast_opts:
@@ -3618,7 +3826,12 @@ def generate_trust_launchers(payload_path, output_name_base=None):
         mac_name = f"RUN_{name_no_ext}_MAC.command"
     cert_path = generate_dummy_cert(base_dir)
     cert_name = os.path.basename(cert_path) if cert_path else "Nixon_Security_Root.cer"
-    bat_path = os.path.join(base_dir, bat_name)
+    # `output_name_base` is an operator-supplied label, and it is interpolated
+    # into a launcher FILENAME. Confining it means a label containing `../` can
+    # no longer write a launcher outside the payload's directory -- and the
+    # basename step keeps the previous behaviour for ordinary labels.
+    bat_path = confined_path(base_dir, bat_name)
+    mac_path = confined_path(base_dir, mac_name)
     if filename.endswith(".py"):
         launch_cmd = f'python "{filename}" %*'
     else:
@@ -3656,7 +3869,7 @@ cd /d "%~dp0"
     with open(bat_path, "w", encoding='utf-8') as f:
         f.write(bat_content)
     print(f" [+] Generated Windows Smart-Launcher: {bat_path}")
-    mac_path = os.path.join(base_dir, mac_name)
+    mac_path = confined_path(base_dir, mac_name)
     if filename.endswith(".py"):
         mac_launch = f'python3 "$(dirname "$0")/{filename}"'
     else:
@@ -3680,14 +3893,23 @@ def polymorph_cpp_stub():
     if not os.path.exists(target): return
     try:
         with open(target, "r", encoding="utf-8") as f: lines = f.readlines()
+        # Seeded per build from a CSPRNG, not the global `random` stream.
+        # Two reasons, and the second is the one that matters for §5:
+        #   * the module-level `random` is shared with every other caller, so
+        #     the mutation pattern depended on what else had drawn from it;
+        #   * §5 claims per-build diversification, and a claim resting on a
+        #     predictably-seeded global is not diversification -- a rebuild with
+        #     the same interpreter state would repeat the same junk.
+        # os.urandom is the seed source; the RNG itself stays local.
+        _rng = random.Random(secrets.token_bytes(16))
         mutated = []
         for line in lines:
             mutated.append(line)
             sline = line.strip()
             if sline.endswith("{") and "struct " not in sline and "class " not in sline and "switch " not in sline:
-                if random.random() < 0.15:
-                    r1 = random.randint(1000, 9999)
-                    r2 = random.randint(10, 99)
+                if _rng.random() < 0.15:
+                    r1 = _rng.randint(1000, 9999)
+                    r2 = _rng.randint(10, 99)
                     ret_val = " 0" if "int " in sline or "DWORD " in sline else ""
                     mutated.append(f"    volatile int _jnk_{r1} = {r2};\n    if (_jnk_{r1} == 0xDEADBEEF) {{ return{ret_val}; }}\n")
         with open(target, "w", encoding="utf-8") as f: f.writelines(mutated)
@@ -4740,7 +4962,13 @@ def build_project(args):
     deployed_contract = ""
     bytecode_hex = None
     runtime_key = secrets.token_hex(16)
-    project_hash = hashlib.md5(os.path.abspath(source).encode()).hexdigest()[:8]
+    # sha256, not md5. This value is a build identity that ends up in emitted
+    # code and in the canary/registration path, so a collision-capable digest is
+    # the wrong primitive even at 8 hex chars -- and an anti-analysis build
+    # that fingerprints itself with MD5 is a gratuitous signal. Truncation is
+    # kept so existing artefact naming does not change.
+    project_hash = hashlib.sha256(
+        os.path.abspath(source).encode()).hexdigest()[:8]
     canary_url_enc = str(register_string(args.webhook)) if args.webhook else ""
     exp_ts = 0
     if args.expire:

@@ -143,6 +143,8 @@ from .sources import (
 )
 
 from .pipeline import (
+    AEAD_MAGIC,
+    AEAD_NONCE_BYTES,
     ANTI_DECOMPILER_SOURCE,
     ANTI_EMULATOR_SOURCE,
     ANTI_FRIDA_SOURCE,
@@ -282,10 +284,12 @@ from .pipeline import (
     compile_vm_stage1_decryptor,
     compile_vm_stage2_Nixon_Enc,
     concurrent,
+    confined_path,
     ctypes,
     cython_compat_issues,
     datetime,
     deploy_contract,
+    derive_aead_key,
     enable_log_redirect,
     encrypt_payload,
     fast_xor_bytes,
@@ -317,6 +321,7 @@ from .pipeline import (
     marshal,
     native_blob_loadability,
     next_h,
+    open_aead,
     os,
     pack_recipe,
     platform,
@@ -330,6 +335,7 @@ from .pipeline import (
     register_string,
     remove_entropy_source,
     rot13_encode,
+    seal_aead,
     secrets,
     shutil,
     stego_wrap_output,
@@ -353,6 +359,8 @@ from .pipeline import (
 )
 
 __all__ = [
+    'AEAD_MAGIC',
+    'AEAD_NONCE_BYTES',
     'ANTI_DECOMPILER_SOURCE',
     'ANTI_EMULATOR_SOURCE',
     'ANTI_FRIDA_SOURCE',
@@ -565,6 +573,7 @@ __all__ = [
     'compile_vm_stage2_Nixon_Enc',
     'compress_with_upx',
     'concurrent',
+    'confined_path',
     'create_exec_layer',
     'create_initial_layer',
     'create_intermediate_zip_layer',
@@ -573,6 +582,7 @@ __all__ = [
     'datetime',
     'deep_recursion',
     'deploy_contract',
+    'derive_aead_key',
     'dis',
     'enable_log_redirect',
     'encode_vm_bytecode',
@@ -621,6 +631,7 @@ __all__ = [
     'multiprocessing',
     'native_blob_loadability',
     'next_h',
+    'open_aead',
     'optimize_and_pack_binaries',
     'os',
     'pack_recipe',
@@ -638,6 +649,7 @@ __all__ = [
     'render_farm_driver',
     'resolve_tor_proxy',
     'rot13_encode',
+    'seal_aead',
     'secrets',
     'set_structure_rng',
     'shutil',
