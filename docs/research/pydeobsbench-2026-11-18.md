@@ -939,8 +939,8 @@ Measured 2026-11-19, CPython 3.13, gcc 14.2, sympy 1.14, this host:
 | claim | measured | verdict |
 |---|---|---|
 | subset-sum "NP-hard", 4096-entry DP | at the shipped n=8: 256 subsets, 200/200 solved in **0.000114 s**. At any n: the answer is a compile-time constant | **NOT A PROTECTION — pass removed from the default pipeline** |
-| multi-round MBA "exponential" | up to **2,073 characters**, 5 rounds; sympy recovered the constant in **0.0037 s** | **WHOLLY INEFFECTIVE** |
-| fixed-even opaque predicate at `-O3` | conditional branches in `main`: **3 at -O0, 0 at -O3** | **FOLDED AWAY** |
+| multi-round MBA "exponential" | **re-measured on the SHIPPED form** (volatile slots): the expression is a function of runtime values, z3 proves it varies (sat, 0.04 s), so there is no constant to fold | **SURVIVES — the earlier "WHOLLY INEFFECTIVE" verdict measured the slot-free emitter** |
+| fixed-even opaque predicate at `-O3` | **re-measured on the EMITTED form**: helper branches 1→1, `__nx_opa` operands present in asm, 502→854 bytes | **SURVIVES — the earlier "FOLDED AWAY" verdict was a benchmark defect** |
 
 ### Why the 4096-entry table measures nothing
 
@@ -960,17 +960,79 @@ arithmetic with no secrets in it. sympy's generic `simplify` returned `12345`
 from a 2,073-character expression in under 4 ms — including the 5-round case.
 The transform costs bytes and buys no time.
 
-### Why the opaque predicate folds
+### The opaque predicate: my first verdict was WRONG, and this is the retraction
 
-`(x*x - x) % 2 == 0` is true for all `x`, and gcc proves it. Disassembling
-`main` shows 3 conditional branches at `-O0` and **0** at `-O3`: the branch is
-gone. A predicate the compiler removes is a predicate an analyst never sees.
+The original row in this section said **FOLDED AWAY**, based on compiling
+`((x*x - x) % 2) == 0` and observing 3 branches at `-O0` and 0 at `-O3`.
+
+**That was a benchmark defect, not a transform defect.** The fixture I compiled
+was a hand-written predicate. The transform does not emit that: it loads its
+operands through `static volatile int __nx_opa_*`, which gcc cannot fold. I
+measured a program the transform never produces and reported the result against
+the transform.
+
+Re-measured on the ACTUAL emitted form, compiled with `-O3 -fno-inline` into a
+non-inlined helper so the branch is not elided by inlining:
+
+| | helper branches | `__nx_opa` in asm | asm size |
+|---|---|---|---|
+| baseline fixture | 1 | no | 502 B |
+| after `insert_opaque_predicates` | 1 | **yes** | 854 B |
+
+**The predicate survives `-O3`.** `__nx_opa` operands are read from volatile
+slots in the generated assembly, so nothing is folded, and the artefact grows by
+352 bytes of real code.
+
+What this does and does not establish:
+
+* **Establishes** the transform defeats constant folding at `-O3`. The earlier
+  anti-fold change (volatile operands, audit 2026-11-18) works.
+* **Does not establish** the predicate is hard to *analyse*. A reader sees
+  `((__nx_opa_1 * (__nx_opa_1 + 1)) & 1) == 0` and a trivial parity argument
+  resolves it — the same class of weakness as the MBA row. Survival of the
+  optimiser is not survival of a reader, and this report should not conflate
+  them a second time.
+
+The lesson worth recording: **a benchmark that measures the wrong input is
+indistinguishable from a benchmark that measures nothing**, and it is worse,
+because it produces a confident verdict. Two of the three §6 probes had this
+defect in some form — this one outright, and the subset-sum probe measured
+`n=8` while the code under test had moved on.
 
 ### What this changes
 
-None of the three claims survives. They are recorded as refuted rather than
-softened, because the objective's instruction is to measure resistance rather
-than assert it.
+Of the three claims, **two hold and one does not**, and the score moved twice as
+my own measurement errors were corrected (0/3 → 1/3 → 2/3). Both moves were
+fixes to the BENCHMARK, not to the transforms:
+
+| claim | verdict |
+|---|---|
+| subset-sum "NP-hard" | **does not survive** — the answer is a compile-time constant |
+| MBA "exponential" | **survives** — the shipped form carries `volatile` slots, so it is a function of runtime values and cannot fold to a constant (z3: varies, sat in 0.04 s) |
+| opaque predicate survives `-O3` | **survives** — volatile operands reach the assembly |
+
+The MBA correction is worth spelling out because it was the same class of error
+as the opaque-predicate one. The probe sampled `_mba_substitute_constant`, which
+emits **bare constants**; sympy folded that in 0.003 s and the report said
+"WHOLLY INEFFECTIVE". But the transformer routes through
+`_mba_expression_with_slot`, which replaces one operand per identity with a
+`static volatile` slot. With free slot operands there is no constant to recover
+— an analyst must obtain the runtime values first. Measuring the wrong emitter
+produced a confident wrong verdict, exactly as measuring a hand-written
+predicate did for the opaque row.
+
+What "survives" still does not mean, stated so it cannot be read as more: a
+reader sees `((__nx_opa_1 * (__nx_opa_1 + 1)) & 1) == 0` and settles it with a
+parity argument, and sees the MBA identity `x + y == (x ^ y) + 2(x & y)` and
+recognises it. These transforms defeat the COMPILER and the generic SOLVER.
+They do not hide their construction from someone reading the code, and the
+wrapper boundary (§5n) is where that limit is recorded.
+
+The lesson, now demonstrated three times in one section: **a benchmark that
+measures the wrong input is worse than a benchmark that measures nothing**,
+because it produces a confident verdict. Every probe in this file now samples
+the emitted form and reports `sampled_form` so the distinction is visible in the
+output rather than only in the source.
 
 **The subset-sum pass was removed from the default pipeline.** Raising `n` was
 attempted first, and it does not work — the measurement says why, and the
@@ -1135,6 +1197,61 @@ Two honest qualifications:
   point-of-use check, patching the single call line let the payload run. It now
   fails at 137, which is the §5d fix verified from the outside rather than
   asserted from the source.
+
+---
+
+## 5n. The loader boundary — measured, then accepted
+
+§5l showed the model reconstructing the whole enforcement layer. The obvious
+next step was to obfuscate it. That step was **tried and measured**, and the
+measurement says not to bother.
+
+The loader's **187 symbols were all renamed** to opaque identifiers — the
+strongest symbol-level obfuscation applicable without changing behaviour — and
+afterwards every behaviour-bearing constant was still present:
+
+| marker | survives total symbol renaming |
+|---|---|
+| `prctl` | yes |
+| `137` (exit code) | yes |
+| `RLIMIT_CORE` | yes |
+| `mlock` | yes |
+| `0o600` (temp-file mode) | yes |
+| `self-check error:` string | yes |
+
+The model did not recover `_nx_self_fail`. It recovered **"writes to stderr and
+calls `os._exit(137)`"** — a syscall and a constant, which the code must contain
+to function and which no renaming pass can touch.
+
+So the split is recorded as the accepted threat model, in
+`docs/security/THREAT_BOUNDARY_LOADER.md` and pinned by
+`tests/test_loader_boundary.py`:
+
+| layer | measured | stands |
+|---|---|---|
+| **payload** — source, algorithms, secrets | 0/4 names · 0/2 secrets static · 0/2 secrets and 0/4 names in memory over 14 samples · semantic equivalent at 0.00 identifier overlap | **holds** |
+| **wrapper** — how integrity, licensing and anti-dump are enforced | fully reconstructed from artefact text | **does not hold — accepted** |
+
+This is a scope statement, and it is defensible because the halves are different
+kinds of thing: the payload is *data*, and data can be sealed under keys the
+attacker lacks; the wrapper is *mechanism*, and mechanism must execute on the
+attacker's machine, so its behaviour is necessarily observable and — the artefact
+being text they can read — its structure is necessarily readable. The review says
+the same in its own words: *"absolute irreversibility isn't a realistic guarantee
+for client-side software"*.
+
+Two facts keep this from being fatal. First, §1's five attack routes all still
+end at `rc 137` **after** the loader was fully read, including tamper + re-stamp
+which the second HMAC layer caught — reading the mechanism is not defeating it.
+Second, `test_renaming_every_symbol_does_not_remove_the_behaviour` would fail if
+symbol obfuscation ever *did* hide the behaviour, which is the signal to reopen
+the decision.
+
+The document names the only two approaches that could change the answer, neither
+a tuning change: move the guards into the native blob (cost: reimplementing them
+in C across the Cython boundary, and the blob is itself extractable), or move
+them off-device into an attestation service (cost: the artefact then requires
+network availability at runtime).
 
 ---
 
