@@ -1018,6 +1018,78 @@ run. Three verdicts, three failures, no exemptions.
 
 ---
 
+## 5l. §8 what DS 4.1 Flash actually recovered — the loader falls, the payload holds
+
+The §8 AI probe is routed to DeepSeek V4.1 Flash via Mistral
+(`mistral/deepseek-v4-1-flash-1017`) through the OpenCode CLI, per the
+operator's instruction. Measured 2026-11-19 on a real `max`-profile artefact
+(280,469 bytes, built in 14.5 s), twice, same result both times.
+
+### The finding, stated first
+
+**The protection loader was reconstructed in full.** Given only the artefact
+text, the model returned a step-by-step map of the layer wrapping the payload:
+
+| component | recovered |
+|---|---|
+| `prctl(PR_SET_DUMPABLE=0)` anti-dump | yes, named explicitly |
+| `RLIMIT_CORE=(0,-1)` core-dump disable | yes |
+| identity gate (`__name__` in `__main__`/`__mp_main__`) and its exit code | yes |
+| `constant_time_compare` (length check + OR-accumulate of XOR pairs) | yes |
+| `_nx_self_fail` writing to stderr and `os._exit(137)` | yes |
+| `_nx_mlock` with `addressof`/page-alignment | yes |
+
+`loader_reversed: True` is now recorded in the score block under
+`algorithm_recovery.model_reconstruction`. It is not new information about the
+attacker — anyone holding the artefact can read that code — but this is the
+first time the harness MEASURED it, and the answer is that the enforcement
+layer is fully transparent to a model with no debugger and no execution.
+
+### What did NOT fall
+
+| metric | result | what it means |
+|---|---|---|
+| payload names | **0/4** | original identifiers are absent from the artefact |
+| payload secrets | **0/2** | literals are absent from the artefact |
+| in-memory secrets, 14 samples | **0/2** | no plaintext secret observed in the live process |
+| in-memory names | **0/4** | no payload identifier observed in memory |
+| native payload names in strings | **[]** | nothing payload-specific in the extracted blob |
+| dynamic exports | `['PyInit_payload']` only | no per-function symbol surface |
+
+### The honest reading, and the trap avoided
+
+`algorithm_overlap` reported **"n/a — insufficient distinctive terms"**. The
+tiny target's ground-truth spec yields only two scorable words (`chars`,
+`salt`), so the ratio is not computable. **That is a metric failure, not a
+protection success**, and it is recorded as `None` rather than `0.0` so the
+report cannot present it as a clean result. A pattern this project has had to
+retract before is exactly this: showing "algo overlap: n/a" beside "0 names"
+and letting a reader conclude the artefact was opaque. It is not — it is a
+loader the model read in full, around a payload it did not reach.
+
+The correct summary is narrow and specific: **the payload survived static and
+dynamic recovery; the wrapper did not survive static reading.** Those are
+different components with different outcomes, and only the second needs work.
+The loader's structure is discoverable because it is plain Python emitted into
+the artefact — the model broke no cipher, it read the launcher. Whether that
+matters is a threat-model question: a customer who needs the *payload* hidden is
+served; a customer who needs the *enforcement mechanism* hidden is not.
+
+### Two harness defects this measurement exposed
+
+1. `score()` accepted `(target, probes)` while the semantic block referenced a
+   variable `name` that was not in scope. The §8 semantic metric had therefore
+   never executed inside a harness run — its unit test passed because it called
+   the helper directly. Fixed; verified end to end on a real artefact
+   (`equivalent_output == target_output`, `source_overlap 0.00`).
+2. `probe_ai` computed `loader_reversed` and `algorithm_text`, and `score()`
+   dropped both. The single most informative result of the run was being
+   discarded between the probe and the report. Fixed: both are carried in
+   `model_reconstruction`, with `overlap_note` beside them so the "n/a" is
+   visible next to the loader finding instead of buried.
+
+---
+
 
 ## 6. Honest limits of this benchmark
 
