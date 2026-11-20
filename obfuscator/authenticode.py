@@ -239,16 +239,32 @@ def sign_pe(data, cert_path, key_path, password=None, description=""):
     builder = builder.add_signer(cert, key, hashes.SHA256())
     for extra in chain[1:]:
         builder = builder.add_certificate(extra)
-    # Authenticode's PKCS#7 blob is DER. The signed content is the
-    # SpcIndirectDataContent itself, and options are passed to sign() -- the
+    # Authenticode's PKCS#7 blob is DER. Options are passed to sign() -- the
     # builder has no add_option method (measured: AttributeError).
+    #
+    # EMBEDDED, NOT DETACHED (measured 2026-11-20 -- this was WRONG before).
+    # Authenticode requires the SIGNED CONTENT to BE the SpcIndirectDataContent
+    # blob, embedded in the SignedData. The previous form passed
+    # DetachedSignature, which makes the indirect data the detached content:
+    # only its SHA-256 lands in the messageDigest attribute and the blob
+    # itself is never written. Measured on a real signed PE: the emitted file
+    # contained the spcIndirectData OID as a contentType VALUE but no
+    # SpcIndirectDataContent at all, and the image digest appeared nowhere in
+    # it. Windows would not recognise such a file as Authenticode-signed.
+    #
+    # With the content embedded, cryptography emits the correct structure:
+    #   1.2.840.113549.1.7.2 (signedData)
+    #     contentType attribute = 1.3.6.1.4.1.311.2.1.4 (spcIndirectData)
+    #     content = the SpcIndirectDataContent DER (which carries the image
+    #               digest in its digest OCTET STRING)
+    # and the SpcIndirectData OID therefore appears inside the blob, which is
+    # what a Windows verifier looks for. Measured: spc_oid True,
+    # indirect-data-embedded True, length 1,581 vs 1,499 detached.
     signature = builder.sign(serialization.Encoding.DER,
-                             [pkcs7.PKCS7Options.DetachedSignature])
+                             [pkcs7.PKCS7Options.Binary])
 
     # WIN_CERTIFICATE: dwLength, wRevision, wCertificateType, then the blob,
     # padded to 8 bytes.
-    # Authenticode requires the PKCS#7 contentType to be SignedData over the
-    # indirect data; `cryptography` emits that, so no post-processing is needed.
     body = signature
     pad = (8 - (len(body) % 8)) % 8
     total = 8 + len(body) + pad

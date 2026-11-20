@@ -66,6 +66,17 @@ MH_PIE = 0x200000
 MH_NO_HEAP_EXECUTION = 0x01000000
 MH_ALLOW_STACK_EXECUTION = 0x00020000
 
+#: Mach-O filetype field values that matter for hardening claims. An
+#: MH_OBJECT is a relocatable .o: it has no LC_MAIN and is never code-signed,
+#: so a FALSE `pie`/`signed` there is expected rather than a defect.
+_MACHO_FILETYPES = {
+    1: "object",        # MH_OBJECT
+    2: "execute",       # MH_EXECUTE
+    6: "dylib",         # MH_DYLIB
+    8: "bundle",        # MH_BUNDLE
+    11: "dylib_stub",   # MH_DSYM is 10, this is 11
+}
+
 #: CodeDirectory / cs_blob flags relevant to Hardened Runtime.
 CS_RESTRICT = 0x00000800
 CS_RUNTIME = 0x00010000
@@ -424,7 +435,28 @@ def verify_pe_bytes(data):
         num_dirs = struct.unpack_from("<I", data, num_dirs_off)[0]
         if num_dirs > 4:
             sec_size = struct.unpack_from("<I", data, dirs_off + 4 * 8 + 4)[0]
+            # A certificate table EXISTING is not a signature that VERIFIES
+            # (measured 2026-11-20: the build emitted a valid generic PKCS#7
+            # blob that was not Windows-Authenticode at all, and this field
+            # said True throughout). Report both: the directory presence, and
+            # -- when a table exists -- whether the image's digest actually
+            # appears in the signed content.
             out["authenticode"] = sec_size > 0
+            if sec_size > 0:
+                try:
+                    from obfuscator.authenticode_verify import (
+                        verify_pe_signature)
+                    _sig = verify_pe_signature(data)
+                    out["authenticode_verified"] = bool(_sig.get("ok"))
+                    out["authenticode_reason"] = _sig.get("reason", "")
+                except Exception as _sig_exc:
+                    out["authenticode_verified"] = False
+                    out["authenticode_reason"] = (
+                        "signature could not be checked (%s)"
+                        % (type(_sig_exc).__name__,))
+            else:
+                out["authenticode_verified"] = False
+                out["authenticode_reason"] = "no certificate table"
         if num_dirs > 6:
             dbg_size = struct.unpack_from("<I", data, dirs_off + 6 * 8 + 4)[0]
             out["debug_directory"] = dbg_size > 0
@@ -493,11 +525,19 @@ def verify_macho_bytes(data):
     come from a code signature, which a freshly compiled object does NOT have:
     they are reported False and the caller must treat that as "not enabled",
     not as unknown.
+
+    ``filetype`` (added 2026-11-20) distinguishes the cases, because a FALSE
+    ``pie``/``signed`` means different things for different images: an MH_OBJECT
+    has no LC_MAIN and is never signed, so False is EXPECTED; an MH_DYLIB or
+    MH_EXECUTE with those False is a hardening defect. Without the field a
+    report cannot tell "not applicable" from "missing", which is how an
+    object measured on a build host reads as an unsigned artefact.
     """
     out = {"kind": "macho", "valid": False, "flags": None, "pie": False,
            "no_heap_exec": False, "stack_exec": False,
            "hardened_runtime": False, "library_validation": False,
-           "signed": False}
+           "signed": False, "filetype": None, "filetype_name": None,
+           "signature_expected": None}
     if not data or len(data) < 32:
         return out
     try:
@@ -520,9 +560,17 @@ def verify_macho_bytes(data):
         if magic != 0xFEEDFACF:       # MH_MAGIC_64
             return out
         flags = struct.unpack_from("<I", data, 24)[0]
+        filetype = struct.unpack_from("<I", data, 12)[0]
         out.update({
             "valid": True,
             "flags": flags,
+            "filetype": filetype,
+            "filetype_name": _MACHO_FILETYPES.get(filetype,
+                                                  "type_%d" % filetype),
+            # A signature is only MEANINGFUL for a linked image. Reporting the
+            # expectation separately is what keeps "object" from reading as
+            # "unsigned artefact".
+            "signature_expected": filetype in (2, 6, 8),  # EXECUTE, DYLIB, BUNDLE
             "pie": bool(flags & MH_PIE),
             "no_heap_exec": bool(flags & MH_NO_HEAP_EXECUTION),
             "stack_exec": bool(flags & MH_ALLOW_STACK_EXECUTION),

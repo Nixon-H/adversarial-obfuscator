@@ -440,3 +440,58 @@ def test_both_provenance_variants_compile():
     for token_derived in (False, True):
         compile(A.emit_snippet(token_derived=token_derived),
                 "<provenance>", "exec")
+
+
+# ── independent binary analysis (reviewer P2, 2026-11-20) ────────────────
+#
+# Measured with Ghidra headless on a real shipped blob. The finding has TWO
+# halves and they must not be conflated:
+#
+#   * the enforcement shim (nx_apply_protections, 305 bytes) is FULLY readable
+#     by a decompiler -- every syscall named. Moving enforcement into the blob
+#     defeated the text-reading probe, not binary analysis.
+#   * the payload is NOT recovered: 47 KB of decompiled payload code yields
+#     zero payload identifiers and zero payload strings.
+#
+# These assertions pin the *tooling contract* (the analysis is reproducible
+# from the committed driver); the numbers themselves are recorded in §5u.
+
+GHIDRA_DRIVER = os.path.join(REPO, "scripts", "ghidra_boundary_check.sh")
+GHIDRA_SCRIPTS = os.path.join(REPO, "scripts", "ghidra_scripts")
+
+
+def test_the_binary_analysis_driver_is_committed_and_honest():
+    """The Ghidra driver ships, and it separates the two questions."""
+    assert os.path.isfile(GHIDRA_DRIVER), (
+        "the binary-analysis driver is not committed, so the payload-survival "
+        "claim cannot be re-checked")
+    src = open(GHIDRA_DRIVER, encoding="utf-8").read()
+    # it must decompile the enforcement entry AND survey the payload -- a
+    # driver that only does one would let the other half go unmeasured
+    assert "DecompileProbe" in src, "no enforcement-shim decompilation"
+    assert "BigFnSurvey" in src, "no payload survey"
+    assert "NX_PAYLOAD_NEEDLES" in src, (
+        "the payload survey takes no ground-truth needles, so it cannot "
+        "distinguish 'no payload found' from 'looked for nothing'")
+
+
+def test_the_ghidra_scripts_are_committed():
+    for name in ("DecompileProbe.java", "BigFnSurvey.java"):
+        path = os.path.join(GHIDRA_SCRIPTS, name)
+        assert os.path.isfile(path), (
+            "%s is missing; the driver cannot run without it" % name)
+        body = open(path, encoding="utf-8").read()
+        assert "decompileFunction" in body, (
+            "%s does not decompile anything" % name)
+
+
+def test_the_boundary_document_records_both_halves():
+    """A record that mentions only one half would misstate the boundary."""
+    text = open(DOC, encoding="utf-8").read()
+    assert "nx_apply_protections" in text
+    # the shim's readability is recorded as a measured fact, not hidden
+    lower = text.lower()
+    assert "decompil" in lower or "ghidra" in lower, (
+        "the boundary document does not record the binary-analysis result")
+    # and the payload half is recorded with its number
+    assert "47159" in text or "47,159" in text or "payload" in lower
