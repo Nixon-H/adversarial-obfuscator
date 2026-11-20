@@ -3,7 +3,9 @@ import json
 
 import pytest
 
-from obfuscator.section_split import pack_json, split_sealed, stream_join
+from obfuscator.section_split import (
+    _keystream, _section_key, pack_json, split_sealed, stream_join,
+)
 
 
 def test_roundtrip_basic():
@@ -88,5 +90,86 @@ def test_unkeyed_tag_forgery_is_rejected():
     sec["data"] = bytes(
         a ^ b for a, b in zip(forged_tagged, _keystream(key, nonce, len(forged_tagged)))
     ).hex()
+    with pytest.raises(ValueError):
+        stream_join(pack, key)
+
+
+# ── crypto-architecture audit (reviewer P1, 2026-11-20) ──────────────────
+#
+# The reviewer asked which primitive protects the shipped sections, how the
+# keys are derived and separated, and whether nonces are unique. These tests
+# pin the answers to the code that actually ships, so the documentation
+# cannot drift into "AES-GCM is implemented, therefore AES-GCM is used".
+
+def test_the_shipped_construction_is_keystream_xor_plus_hmac_not_aead():
+    """Section data is SHA-256 keystream XOR; integrity is HMAC-SHA256.
+
+    The AEAD helper (obfuscator.aead) exists and is separately tested, but it
+    is NOT what protects the section pack. Anyone summarising this project
+    must not report "AES-GCM sections".
+    """
+    key = b"A" * 32
+    payload = b"shipped-path" * 50
+    pack = split_sealed(payload, sections=3, key=key)
+    for section in pack["sections"]:
+        nonce = bytes.fromhex(section["nonce"])
+        ciphertext = bytes.fromhex(section["data"])
+        # 32-byte tag prefix + the plaintext slice, all XORed with the
+        # SHA-256 counter-mode keystream under this section's derived key.
+        section_key = _section_key(key, section["i"], nonce)
+        recovered = bytes(
+            a ^ b for a, b in zip(
+                ciphertext, _keystream(section_key, nonce, len(ciphertext))))
+        assert recovered[32:] == payload[
+            section["i"] * (len(payload) // 3):
+            (section["i"] + 1) * (len(payload) // 3)], (
+            "section body is not a plain keystream XOR under the derived key")
+        # the 32-byte prefix is an HMAC, not a bare digest
+        import hashlib
+        import hmac
+        expected = hmac.new(section_key + nonce, recovered[32:],
+                            hashlib.sha256).digest()
+        assert recovered[:32] == expected
+
+
+def test_each_section_uses_a_distinct_derived_key():
+    """Key separation: master + index + nonce, never the master directly."""
+    key = b"B" * 32
+    pack = split_sealed(b"x" * 300, sections=4, key=key)
+    derived = set()
+    for section in pack["sections"]:
+        nonce = bytes.fromhex(section["nonce"])
+        section_key = _section_key(key, section["i"], nonce)
+        assert section_key != key, (
+            "a section used the master key directly instead of a derived one")
+        derived.add(section_key)
+    assert len(derived) == 4, "two sections share a derived key"
+
+
+def test_section_nonces_are_unique_per_pack():
+    """Nonce uniqueness: the counter-mode stream must never repeat."""
+    key = b"C" * 32
+    pack = split_sealed(b"y" * 400, sections=6, key=key)
+    nonces = [section["nonce"] for section in pack["sections"]]
+    assert len(set(nonces)) == len(nonces), "nonce reuse inside one pack"
+
+
+def test_index_binds_the_key_not_just_the_metadata():
+    """Same master key, same nonce, different index -> different key.
+
+    If the index only appeared in the metadata, an attacker could relabel a
+    section and have it decrypt; it must be part of the key derivation.
+    """
+    key = b"D" * 32
+    nonce = b"N" * 16
+    assert _section_key(key, 0, nonce) != _section_key(key, 1, nonce)
+
+
+def test_a_relabelled_section_fails_to_join():
+    """Moving ciphertext between sections breaks the tag (key is bound)."""
+    key = b"E" * 32
+    payload = b"z" * 400
+    pack = split_sealed(payload, sections=4, key=key)
+    pack["sections"][0]["data"] = pack["sections"][1]["data"]
     with pytest.raises(ValueError):
         stream_join(pack, key)

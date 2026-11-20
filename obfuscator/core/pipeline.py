@@ -3158,8 +3158,21 @@ def _load_native():
     # CI gate var is ALSO set (NIXON_CI or NIXON_ALLOW_SKIP). Prod artifacts
     # hold the gate with SKIP alone. Single helper keeps all five sites
     # consistent; _NX_CI_OK reads os.environ live at call time.
+    #
+    # NATIVE-ONLY BUILDS GET NO BYPASS (2026-11-20, reviewer P1). The
+    # absolute-native-only profile promises that no Python payload path
+    # exists. This helper used to answer "yes" whenever the CI env pair was
+    # set, and four failure sites then called `_exec_fallback()` -- a
+    # Python-payload entry in an artefact that is supposed to have none.
+    # It exited only because FALLBACK_BLOB was "DISABLED", and "the path is
+    # unreachable because a second check catches it" is exactly the
+    # layered-assumption failure this project keeps finding. The bypass now
+    # answers False for a native-only build, so the Python path is not
+    # emitted as reachable at all.
     def _nx_ci_bypass_ok():
         try:
+            if __NX_NATIVE_ONLY_GUARD__:
+                return False
             _e = os.environ
             if not _e.get('NIXON_VERIFY_SKIP_VERSION_CHECK'):
                 return False
@@ -3877,6 +3890,8 @@ def _nx_self_check():
     loader_src = (
         loader_template
         .replace("__LOCAL_TOKEN_SEARCH__", _local_token_search)
+        .replace("__NX_NATIVE_ONLY_GUARD__",
+                 "True" if native_only else "False")
         .replace("{build_id}", build_id)
         .replace("{customer_salt}", _customer_salt)
         .replace("{licence_token_hash}", str(licence_token_hash or ""))

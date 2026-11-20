@@ -91,8 +91,16 @@ jobs:
         # NIXON_REQUIRE_ARTEFACTS makes the artefact gate fail the
         # build if a compiled artefact is missing, instead of letting
         # the nineteen tests that need it skip quietly.
+        #
+        # NIXON_REQUIRE_DEP_LOCK (2026-11-20): the build only WARNS on
+        # dependency drift by default, and CI installed a drifted
+        # toolchain (Cython 3.2.1 against a 3.0.12 lock) on every run
+        # while still reporting green. Release CI must fail on drift:
+        # an artefact compiled by an unapproved toolchain is not the
+        # artefact the lock file describes.
         env:
           NIXON_REQUIRE_ARTEFACTS: "1"
+          NIXON_REQUIRE_DEP_LOCK: "1"
         # -u: unbuffered, so the log timestamps each test as it starts
         # instead of in 4 KB chunks; that is what made the 3.13/3.14
         # slowness impossible to attribute to a test.

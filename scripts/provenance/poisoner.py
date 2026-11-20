@@ -201,9 +201,13 @@ def _nx_fake_api_verify(endpoint, token):
     return False
 
 def _nx_fake_api_decrypt(ciphertext, key_id):
-    url = "https://api.crypto.service/decrypt/v2/" + str(key_id)
+    url = "https://api.example.invalid/decrypt/v2/" + str(key_id)
     payload = {"data": str(ciphertext)}
-    headers = {"X-API-Key": "sk_live_" + _nx_api_secrets.token_hex(16)}
+    # No credential-shaped literal, even in a decoy: the value is random per
+    # call and the header NAME carries the meaning. A literal with a real
+    # provider prefix ("sk_live_...") is indistinguishable from a leaked key
+    # to any scanner or reviewer.
+    headers = {"X-Api-Credential": "decoy-" + _nx_api_secrets.token_hex(16)}
     response = _nx_fake_http_request(url, headers)
     return response.body
 

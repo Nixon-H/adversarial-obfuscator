@@ -237,20 +237,34 @@ def seal_last_seen(build_key, last_seen_epoch):
 
 def unseal_last_seen(build_key, sealed):
     # type: (bytes, str) -> float
-    """Inverse of :func:`seal_last_seen`.  Raises ValueError on tamper."""
+    """Inverse of :func:`seal_last_seen`.
+
+    Two failure modes with different meanings, and the caller must be able
+    to tell them apart:
+
+      * STRUCTURALLY INVALID (no separator, non-numeric body, empty MAC):
+        the file is not a seal at all. That is a torn write or an edit by
+        hand -- tampering. Raises ``ValueError`` with "malformed".
+      * WELL-FORMED SEAL THAT FAILS HMAC: somebody else's seal. A
+        legitimate in-place artefact update produces exactly this (new
+        build key, same state leaf), so it must NOT be treated as an
+        attack. Raises ``ValueError`` with "foreign".
+    """
     try:
         body, mac = str(sealed).rsplit(":", 1)
         epoch = float(body)
     except Exception as e:
-        raise ValueError("bad sealed last_seen: %s" % (e,))
+        raise ValueError("malformed sealed last_seen: %s" % (e,))
+    if not str(mac).strip():
+        raise ValueError("malformed sealed last_seen: empty mac")
     try:
         expected = _hmac.new(bytes(build_key),
                              _LASTSEEN_DOMAIN + b"|" + body.encode("utf-8"),
                              hashlib.sha256).hexdigest()
     except Exception as e:
-        raise ValueError("bad sealed last_seen: %s" % (e,))
+        raise ValueError("foreign sealed last_seen: %s" % (e,))
     if not _hmac.compare_digest(expected, str(mac)):
-        raise ValueError("bad last_seen seal")
+        raise ValueError("foreign sealed last_seen")
     return epoch
 
 
@@ -369,20 +383,26 @@ def check_and_update(build_key, fingerprint, deadline_epoch, token,
                 last_seen = None
             except (IOError, OSError):
                 last_seen = None
-            except ValueError:
-                # UNSEALABLE STATE IS NOT TAMPERED. An HMAC mismatch means
-                # the state was sealed by a DIFFERENT build key -- which is
-                # exactly what a legitimate IN-PLACE ARTEFACT UPDATE
-                # produces (new build, same artefact path, same state leaf;
-                # measured 2026-11-20: an updated artefact read its
-                # predecessor's state and refused to run, "trial-tampered").
-                # Failing closed here protects nothing: deleting the state
-                # file is the documented reset, so an attacker gains no
-                # capability from "unseal fails -> fresh" that deletion does
-                # not already grant. Treat as no last-seen; the rollback
-                # window restarts. The symlink refusal below is the real
-                # attacker-controlled condition and stays fail-closed.
-                last_seen = None
+            except ValueError as _unseal_exc:
+                # TWO FAILURE MODES, TWO ANSWERS (2026-11-20):
+                #
+                #   "foreign" -- a well-formed seal this build key cannot
+                #   verify. That is exactly what a legitimate IN-PLACE
+                #   ARTEFACT UPDATE produces (new build, same artefact path,
+                #   same state leaf; measured: the updated artefact read its
+                #   predecessor's state and refused to run, "trial-tampered").
+                #   Failing closed here protects nothing -- deleting the
+                #   state file is the documented reset, so "foreign seal ->
+                #   fresh" grants an attacker nothing deletion does not
+                #   already grant. Treat as no last-seen.
+                #
+                #   "malformed" -- not a seal at all (no separator, garbage
+                #   body, empty MAC). A torn write or a hand edit: fail
+                #   closed, as before.
+                if "foreign" in str(_unseal_exc):
+                    last_seen = None
+                else:
+                    return "tampered"
             except Exception:
                 last_seen = None
         if last_seen is not None:
@@ -632,18 +652,19 @@ def emit_trial_snippet(deadline_epoch, token_hex, build_key_hex,
         + "                _tb_ok = _tb_hmac.compare_digest(_tb_want, str(_tb_mac2))\n"
         + "            except Exception:\n"
         + "                _tb_ok = (_tb_want == str(_tb_mac2))\n"
-        + "            # UNSEALABLE STATE IS NOT TAMPERED: a foreign seal is what a\n"
-        + "            # legitimate in-place update produces (new build key, same\n"
-        + "            # state leaf). Deleting the state file is the documented\n"
-        + "            # reset, so failing closed here grants an attacker nothing\n"
-        + "            # and breaks every update -- treat as no last-seen.\n"
-        + "            _tb_last = float(_tb_body) if _tb_ok else None\n"
+        + "            # FOREIGN vs MALFORMED, as in the build-time helper: a\n"
+        + "            # well-formed seal this key cannot verify is a legitimate\n"
+        + "            # in-place update (new build key, same state leaf) and\n"
+        + "            # becomes no-last-seen; a structurally broken file is a\n"
+        + "            # torn write or a hand edit and stays fatal.\n"
+        + "            if _tb_ok:\n"
+        + "                _tb_last = float(_tb_body)\n"
         + "    except FileNotFoundError:\n"
         + "        _tb_last = None\n"
         + "    except (IOError, OSError):\n"
         + "        _tb_last = None\n"
         + "    except Exception:\n"
-        + "        _tb_last = None\n"
+        + "        return \"tampered\"\n"
         + "    if _tb_last is not None:\n"
         + "        try:\n"
         + "            if _tb_now < float(_tb_last) - float(_tb_tol):\n"

@@ -2,7 +2,7 @@
 
 Benchmark 2026-11-17 (DeepSeek V4.1 Flash layer ablation): the string
 obfuscator's ``visit_Constant`` matched only ``str``, so every ``bytes``
-literal passed through untouched.  ``SIGNING_SALT = b"wh-salt-2026-11"``
+literal passed through untouched.  ``SIGNING_SALT = b"fixture-salt-2026-11"``
 survived the *full* stack — salts, HMAC keys and byte secrets are exactly
 the constants worth hiding, and the DeepSeek run recovered the salt from
 the fully-obfuscated arm because of it.
@@ -14,11 +14,11 @@ import ast
 
 from obfuscator.core.pipeline import ObfuscationTransformer
 
-SECRET = b"wh-salt-2026-11"
+SECRET = b"fixture-salt-2026-11"
 SOURCE = (
     'import hashlib\n'
-    'SALT = b"wh-salt-2026-11"\n'
-    'API = "wt_live_8f3a91c2d7e04b56"\n'
+    'SALT = b"fixture-salt-2026-11"\n'
+    'API = "fixture_api_token_8f3a91c2d7e04b56"\n'
     '\n'
     'def audit(p):\n'
     '    return hashlib.sha256(SALT + str(p).encode()).hexdigest()[:8]\n'
