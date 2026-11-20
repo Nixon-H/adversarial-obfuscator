@@ -2570,3 +2570,104 @@ the record is built from the mapping, states its hash form, covers every
 embedded platform, does not record empty strings as blobs, stays honestly
 empty for a bytecode build, and keeps the old file-based input working.
 
+### 5y.3 A fail-closed artefact that reported success
+
+Found by running the documented ABSOLUTE native-only command and checking the
+exit status instead of the output. With a wrong or missing seal shard, the
+artefact printed **nothing** and exited **0**.
+
+That is the worst shape a failure can take. Nothing had executed — the blob
+could not be decrypted, and the profile has no Python fallback by design — but
+systemd, CI, a supervisor, a benchmark harness, or a shell `&&` chain all read
+exit 0 as success. The profile's own documented promise is:
+
+> "If the blob cannot load, the loader runs nothing (fail-closed by
+> construction; there is nothing else to decrypt)."
+
+The *construction* was fail-closed. The *observation* was not. A control whose
+failure is invisible is not a control.
+
+**Cause, in two lines.** Every failure path in `_load_native()` ends
+`return None`, and the entrypoint was the bare call:
+
+```python
+if __name__ in ("__main__", "__mp_main__"):
+    _load_native()
+```
+
+The return value was discarded, so the process fell off the end of the module
+with status 0 regardless of what happened inside.
+
+**The fix, and the bug the fix had.** The entrypoint now captures the verdict
+and, for a native-only build, exits 78 with a reason on stderr when nothing
+ran. The guard is the existing `__NX_NATIVE_ONLY_GUARD__` placeholder, so the
+behaviour is compiled out for every profile that has a fallback.
+
+The first version of the fix was wrong, and the measurement caught it: with the
+**correct** shard the artefact printed `(36, 'sum')` and *then* exited 78. The
+success path was `if _nx_ok: return` — a bare return, i.e. `None` — so success
+and failure were indistinguishable to the new check and it fired on a
+successful run. Success now returns a sentinel:
+
+| path | returns | meaning |
+|---|---|---|
+| blob loaded, payload executed | `True` | ran natively |
+| fallback executed | `sys.modules[__name__]` | ran in Python (non-native-only profiles) |
+| nothing ran | `None` | fail-closed — fatal for native-only |
+
+**Measured, before and after, on real `--package native-only` builds:**
+
+| shard | before | after |
+|---|---|---|
+| correct | `(36, 'sum')`, rc 0 | `(36, 'sum')`, rc 0 |
+| wrong | *(silence)*, **rc 0** | `[FATAL] native-only artefact: the embedded blobs could not be loaded and no Python fallback exists (exit 78)`, rc 78 |
+| missing | *(silence)*, **rc 0** | same FATAL, rc 78 |
+
+The normal `--package native` profile was re-built and re-run afterwards to
+confirm the fallback path is untouched: `(36, 'sum')`, rc 0.
+
+**Tests.** `tests/test_failure_modes.py` gains two cases — the verdict is
+captured rather than discarded and `exit 78` is present for the native-only
+profile, and a fallback build does *not* gain the exit (the guard is
+substituted to `False`). Both assert on the emitted loader, which is the
+artifact that actually ships.
+
+### 5y.4 The independent binary analysis re-run against a freshly built blob
+
+§5u reported the Ghidra result once. Re-running it this session on a blob built
+from the current tree confirms the finding is a property of the code, not of
+that afternoon.
+
+The blob was recovered the way an analyst would recover it — using the
+project's own `pydeobsbench/extract_blob.py`, which reproduces the loader's
+arithmetic from the two key shares the artefact carries:
+
+    linux: 151424 bytes, magic=b'\x7fELF' -> extracted/linux.so
+      exported symbols: ['nx_apply_protections', 'PyInit_payload']
+
+Then `scripts/ghidra_boundary_check.sh` ran Ghidra headless over it. Two
+questions, two very different answers:
+
+| question | measurement |
+|---|---|
+| is the **enforcement shim** readable? | **yes** — `nx_apply_protections` at `0x0011eaa0`, 305-byte body, decompiled to 1,190 chars with `prctl`, `rlimit`, `setrlimit` and `sigaction` all named |
+| is the **payload** recoverable? | **no** — the 8 largest functions are 43,460 bytes and decompile to 249,767 chars of C, with **0** payload needles and **0** payload strings |
+
+The shim's readability is expected and was already recorded: it is a 305-byte
+syscall wrapper, and a syscall wrapper that could not be read would be
+suspicious. What matters is that reading it tells an analyst exactly what the
+process-level policy does — and nothing about the payload. The payload's 249,767
+characters of decompiled C contain none of the needles supplied, and no string
+constants from the source.
+
+One correction to how those numbers are stored, because I misread them first:
+`BigFnSurvey.java` writes `"chars"` as the **length of the decompiled C**, next
+to `"bytes"` as the function's body size. The first pass read `chars` as a
+body size, concluded decompilation had produced nothing, and nearly reported a
+decompiler failure. The JSON has no `c_code` field at all. Worth stating
+because "the tool produced zero output" and "the tool produced a quarter of a
+million characters containing nothing useful" are opposite conclusions about
+the same run.
+
+
+
