@@ -159,3 +159,59 @@ def test_native_path_applies_the_ast_layer():
     body = inspect.getsource(pl.build_local_cython)
     assert "apply_ast_mutation" in body, (
         "build_local_cython no longer applies the AST layer")
+
+
+# ── farm/local parity (reviewer, 2026-11-20) ─────────────────────────────
+#
+# The reviewer asked for explicit evidence that every farm artifact receives
+# the same shard-based protection as the local blob. The answer is a design
+# property worth pinning: the farm uploads the ALREADY-SEALED payload and
+# never receives the shard, so the shard cannot leak into a disposable repo
+# and the farm blob cannot be weaker than the local one.
+
+def test_farm_bound_payload_is_sealed_before_upload():
+    """What the farm receives carries sealed strings, no plaintext, no shard.
+
+    The pipeline applies `apply_ast_mutation` with the same `_native_ast_opts`
+    the local build uses and uploads THAT (pipeline.py, "FARM/LOCAL PARITY").
+    This test reproduces that step and asserts the three properties that make
+    the parity real.
+    """
+    from obfuscator.core.pipeline import apply_ast_mutation
+
+    opts = {k: True for k in _ON}
+    opts["string_key_env"] = SHARD_VAR
+    shard_value = "d" * 64
+    os.environ[SHARD_VAR] = shard_value
+    try:
+        out, _flat = apply_ast_mutation(SOURCE, opts, strict=False)
+    finally:
+        os.environ.pop(SHARD_VAR, None)
+
+    for secret in SECRETS:
+        assert secret not in out, (
+            "the farm-bound payload still carries %r in plaintext" % secret)
+    assert SHARD_VAR in out, (
+        "the env variable NAME must be baked in (the payload re-reads the "
+        "shard at run time)")
+    assert shard_value not in out, (
+        "the SHARD VALUE must never be baked into a payload that is uploaded "
+        "to a disposable farm repo")
+
+
+def test_the_farm_workflow_does_not_receive_the_shard():
+    """The generated workflow has no shard env block -- deliberately.
+
+    If the shard were passed to the runner it would land in the disposable
+    repository (and its logs), which is the leak this design avoids.
+    """
+    src = open(os.path.join(os.path.dirname(__file__), "..",
+                            "obfuscator", "core", "utils.py"),
+               encoding="utf-8").read()
+    driver_start = src.find("def create_workflow")
+    assert driver_start != -1
+    body = src[driver_start:driver_start + 12000]
+    for leak in ("NX_SEAL_SHARD", "string_key_env", "shard"):
+        assert leak not in body, (
+            "the farm workflow references %r; the shard must stay off the "
+            "runner and travel only inside the sealed payload" % leak)

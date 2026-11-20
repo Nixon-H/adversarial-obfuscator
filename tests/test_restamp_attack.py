@@ -148,3 +148,43 @@ def test_the_chain_reports_the_restamp_outcome_separately():
     assert "restamp (no edit)" in source
     assert "tamper + restamp" in source
     assert "SELF-CHECK IS NOT BINDING" in source
+
+
+# ── the harness's exclusion set must match the loader's ──────────────────
+
+def test_restamp_excludes_the_provenance_slots():
+    """The attacker's hash filter must exclude what the LOADER excludes.
+
+    Measured 2026-11-20: restamp_all hashed the provenance slot lines while
+    the loader excludes them, so every later attack row was stopped by
+    MERKLE before reaching the layer under test -- a false pass, for the
+    wrong reason, in the row that is supposed to prove the signature works.
+    """
+    source = open(os.path.join(REPO, "scripts", "attack_chain.py"),
+                  encoding="utf-8").read()
+    restamp_start = source.find("def restamp_all")
+    assert restamp_start != -1
+    body = source[restamp_start:source.find("\ndef ", restamp_start + 10)]
+    for marker in ('b"_NX_PROV_SIG"', 'b"_NX_PROV_PK"',
+                   'b"_NX_CFI_SEQ = "', "tok_v"):
+        assert marker in body, (
+            "restamp_all does not exclude %s from the hashed content; the "
+            "loader does, so a restamped artefact would fail merkle before "
+            "the layer under test is reached" % marker)
+
+
+def test_the_chain_names_the_layer_that_fires():
+    """Each verdict names a mechanism, not just a return code.
+
+    A harness that reports "blocked" without saying by WHAT cannot
+    distinguish "the signature held" from "my edit was a syntax error" --
+    the defect that made the first re-sign row look defended when nothing had
+    been tested.
+    """
+    source = open(os.path.join(REPO, "scripts", "attack_chain.py"),
+                  encoding="utf-8").read()
+    for named in ("SIGNATURE NOT BINDING", "CFI IS A TAMPER DETECTOR",
+                  "re-sign, attacker key", "CFI removed + rechain"):
+        assert named in source, (
+            "the chain does not name %r; a row that only prints rc does not "
+            "say which layer did the work" % named)
