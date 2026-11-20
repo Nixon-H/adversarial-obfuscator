@@ -1181,6 +1181,28 @@ fixes to the BENCHMARK, not to the transforms:
 | MBA "exponential" | **survives** — the shipped form carries `volatile` slots, so it is a function of runtime values and cannot fold to a constant (z3: varies, sat in 0.04 s) |
 | opaque predicate survives `-O3` | **survives** — volatile operands reach the assembly |
 
+**What "2/3" does and does not mean** (reviewer, 2026-11-20 — the label was
+being read as a security score, and it is not one). Each row above is a
+*property of the emitted form*, measured:
+
+| property | evidence status |
+|---|---|
+| the emitted form survives the tested compiler optimisation | **measured** |
+| the expression depends on runtime slot values (not a constant) | **measured** |
+| a symbolic solver cannot simplify it within the tested budget | **measured for the probes run** |
+| a human analyst or a symbolic tool cannot understand it | **not established** |
+| it meaningfully increases real analyst effort | **not established** |
+
+The familiar identity `x + y = (x ⊕ y) + 2(x ∧ y)` does not become
+computationally difficult because its operands live in volatile slots; it
+becomes *unfoldable at compile time*, which is a different claim. Likewise an
+opaque predicate surviving `-O3` proves the compiler did not eliminate it, not
+that a person cannot read it. The score is therefore a measure of **transform
+robustness under optimisation and constant folding**, and must not be quoted as
+reverse-engineering resistance. The subset-sum transform left the default
+pipeline for exactly this reason: its weakness is structural, not a tuning
+problem.
+
 The MBA correction is worth spelling out because it was the same class of error
 as the opaque-predicate one. The probe sampled `_mba_substitute_constant`, which
 emits **bare constants**; sympy folded that in 0.003 s and the report said
@@ -1922,3 +1944,54 @@ markers and basis terms matched). Verified on a live DS 4.1 Flash call: a
 test_ai_probe_record.py` (5 tests, offline via monkeypatched model call) pins
 the block, including that the prompt hash covers exactly what was sent and
 that no credential-shaped literal can appear in a record.
+
+### 5s. Adaptive attacker: eight routes, and the layer that actually catches each
+
+`scripts/attack_chain.py` now models an attacker who understands every
+mechanism (reviewer P2). Two routes were added beyond the original six, and
+one fix was required to make the existing rows honest.
+
+| route | result | caught by |
+|---|---|---|
+| control | rc 0, payload ran | — |
+| tamper pack only | rc 137 | merkle |
+| bypass self-check only | rc 137 | **provenance signature** |
+| bypass + tamper | rc 137 | **provenance signature** |
+| restamp (no edit) | rc 137 | merkle |
+| tamper + restamp CK | rc 137 | merkle |
+| tamper + BOTH stamps | rc 137 | **provenance signature** |
+| re-sign with attacker key | rc 137 | **provenance signature** (key fingerprint) |
+| CFI checkpoint removed + chain recomputed | rc 137 | merkle (chain recomputation is not enough) |
+
+Measured on the signed `max` artefact, 2026-11-20.
+
+**The finding that matters.** Before signing, `tamper + BOTH stamps` was the
+row that ran: an attacker who recomputed the Merkle root *and* the HMAC keyed
+with the file's own literal `_NX_SELF_HK` produced a self-consistent artefact
+and the payload executed. With load-time Ed25519 provenance active, that same
+route now dies on the signature. §1's anti-patching redundancy is therefore
+three independent layers on signed artefacts (merkle, HMAC, signature), not
+one hash recomputed twice — which is what §5m could only propose, and is now
+measured end to end.
+
+**Two defects in the harness itself, found while measuring** (both fixed):
+
+1. The `PK`/`SIG` substitution used the regex group holding the OLD slot
+   value instead of the closing quote, producing a line that failed to parse.
+   The row then showed `rc=1, payload_ran=False` and looked like a successful
+   defence when nothing had been tested. A harness that reports "blocked" for
+   a syntax error is the same false-confidence class as the benchmark defects
+   in §6.
+2. `restamp_all` did not exclude the provenance slot lines from the hashed
+   content, while the loader does. Every later row was therefore stopped by
+   MERKLE before reaching the layer under test — a false pass for the wrong
+   reason. With the exclusion set aligned to the loader's, the rows above
+   name the layer that actually fires.
+
+**Honest limits.** The re-sign row uses an attacker-generated key and expects
+the fingerprint prefix to catch it. An attacker who ALSO rewrites the
+fingerprint prefix to match their key is stopped only by the out-of-band pin
+(`NIXON_PROVENANCE_PUBKEY`), which is a deployment step — the §5r limit
+stands. The CFI row confirms the chain is a tamper detector, not a trust
+anchor: recomputation is expected to work, and the protection is that removal
+is *detected*.

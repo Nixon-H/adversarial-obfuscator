@@ -19,6 +19,13 @@ import subprocess
 import sys
 import tempfile
 
+# The re-sign route needs the package (attestation + licensing); this script
+# is run as a bare file, so put the repository root on the path here rather
+# than relying on the caller's environment.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 
 def _validated(path):
     if not path:
@@ -83,6 +90,12 @@ def recompute_self_ck(src):
 
 HK = re.compile(r"^(?P<lead>[ \t]*)_NX_SELF_HK\s*=\s*(?P<q>['\"])(?P<val>[^'\"]*)(?P=q)", re.M)
 
+# Provenance slots (provenance signing, 2026-11-20). Group 1/2 are the
+# assignment prefix and the closing quote, so a caller can substitute a new
+# value without disturbing the rest of the line.
+PK = re.compile(r'(?m)^(_NX_PROV_PK\s*=\s*")([^"]*)(")')
+SIG = re.compile(r'(?m)^(_NX_PROV_SIG\s*=\s*")([^"]*)(")')
+
 
 def restamp_all(src):
     """Recompute BOTH integrity layers: ``_NX_SELF_CK`` and ``_NX_SELF_HM``.
@@ -116,13 +129,23 @@ def restamp_all(src):
     tok_v = tok.group("val") if tok else ""
 
     def _content(text, ck_value, hm_value):
-        """The exact byte stream the loader hashes."""
+        """The exact byte stream the loader hashes.
+
+        The exclusion set must match the loader's, or a "restamped" artefact
+        is rejected by the MERKLE layer before the layer under test is
+        reached -- which would make every later row look defended for the
+        wrong reason. The loader excludes its own anchor values, the CFI
+        sequence slot, the licence token, and (provenance signing, 2026-11-20)
+        both provenance slots.
+        """
         lines = text.encode("utf-8", "surrogateescape").splitlines(keepends=True)
         return b"".join(
             ln for ln in lines
             if ck_value.encode() not in ln
             and hm_value.encode() not in ln
             and b"_NX_CFI_SEQ = " not in ln
+            and b"_NX_PROV_SIG" not in ln
+            and b"_NX_PROV_PK" not in ln
             and (not tok_v or tok_v.encode() not in ln))
 
     def _merkle(content):
@@ -267,6 +290,91 @@ def main():
         ds_ok = None
         print("tamper + BOTH stamps   : no section pack in this artefact")
 
+    # ── INFORMED ATTACKER: re-sign with the attacker's own key ───────────
+    #
+    # An attacker who reads the loader knows the self-check is internal and
+    # that a provenance signature exists. The cheapest route is to sign the
+    # tampered file with a key they control and rewrite the embedded public
+    # key. Both are in the file. What catches this is the KEY FINGERPRINT:
+    # the build writes `<sha256(raw key)[:16]>: <b64>` and the loader
+    # recomputes it, so a substituted key no longer matches its own prefix.
+    # This row measures that, and it is the strongest evidence for the
+    # layered design: it turns a two-line edit into several coordinated ones.
+    resign_ok = None
+    sig = SIG.search(base)
+    pk = PK.search(base)
+    if sig and pk:
+        try:
+            from obfuscator.attestation import signed_content
+            from obfuscator.licensing import public_key_hex
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+                Ed25519PrivateKey)
+            import base64 as _b64
+
+            attacker = Ed25519PrivateKey.generate()
+            attacker_pub = attacker.public_key().public_bytes_raw()
+            # 1. tamper, 2. re-stamp CK+HMAC so those layers agree
+            stage, _ = _flip_pack_byte(base)
+            stage, _ = restamp_all(stage)
+            # 3. sign the would-be-shipped bytes with the attacker's key.
+            # PK/SIG have three groups: 1 = prefix, 2 = OLD value,
+            # 3 = closing quote. Using group(2) here once concatenated the
+            # replacement with the previous value and produced a line that
+            # merely failed to parse -- which would have made this row look
+            # "blocked" when nothing had actually been checked.
+            signature = attacker.sign(signed_content(stage.encode("utf-8")))
+            forged = PK.sub(
+                lambda m: m.group(1) + public_key_hex(attacker) + m.group(3),
+                stage, count=1)
+            forged = SIG.sub(
+                lambda m: m.group(1) + _b64.b64encode(signature).decode()
+                + m.group(3),
+                forged, count=1)
+            r_rc, r_ok, r_tail = run(forged, "resign_attacker_key.py")
+            print("re-sign, attacker key  : rc=%-4s payload_ran=%-5s %s"
+                  % (r_rc, r_ok, r_tail[:60]))
+            resign_ok = r_ok
+        except Exception as exc:
+            print("re-sign, attacker key  : skipped (%s)" % (type(exc).__name__,))
+    else:
+        print("re-sign, attacker key  : no provenance slots in this artefact")
+
+    # ── INFORMED ATTACKER: forge the CFI checkpoint chain ────────────────
+    #
+    # The CFI chain folds tags into a digest seeded from _NX_SELF_HK. An
+    # attacker holding the whole file can recompute the expected value, which
+    # is why the chain is a tamper-detector rather than a trust anchor --
+    # §5r records that limit. This row makes the limit measured instead of
+    # asserted: remove a checkpoint and recompute the chain.
+    cfi_ok = None
+    SEQ = re.compile(r'(?m)^(_NX_CFI_SEQ\s*=\s*")([0-9a-f]*)"')
+    if SEQ.search(base) and "_nx_cfi_mark(" in base:
+        try:
+            stripped = re.sub(r"(?m)^\s*_nx_cfi_mark\([^)]*\)\n", "", base,
+                              count=1)
+            got = SEQ.search(stripped)
+            if got and got.group(2) and set(got.group(2)) != {"0"}:
+                # recompute the chain over the remaining checkpoints
+                seed_m = HK.search(stripped)
+                tags = re.findall(r"_nx_cfi_mark\(\s*['\"]([^'\"]+)['\"]",
+                                  stripped)
+                import hashlib as _h
+                state = _h.sha256(
+                    ("nx-cfi/v1:" + (seed_m.group("val") if seed_m else "")
+                     ).encode()).digest()
+                for tag in tags:
+                    state = _h.sha256(state + str(tag).encode()).digest()
+                forged_chain = SEQ.sub(
+                    lambda m: m.group(1) + state.hex() + '"', stripped, count=1)
+                c_rc, c_ok, c_tail = run(forged_chain, "cfi_forged.py")
+                print("CFI removed + rechain  : rc=%-4s payload_ran=%-5s %s"
+                      % (c_rc, c_ok, c_tail[:60]))
+                cfi_ok = c_ok
+        except Exception as exc:
+            print("CFI removed + rechain  : skipped (%s)" % (type(exc).__name__,))
+    else:
+        print("CFI removed + rechain  : no CFI chain in this artefact")
+
     print()
     if ds_ok:
         print("INTEGRITY IS INTERNAL-ONLY: a tampered payload ran once _NX_SELF_CK "
@@ -288,6 +396,21 @@ def main():
     if ch_ok:
         print("Tampered payload ran with the self-check bypassed "
               "(but tamper-alone was not independently blocked here).")
+        return 1
+    # The two informed-attacker rows (2026-11-20). They are the ones that
+    # distinguish "one layer held" from "the layers are independent".
+    if resign_ok:
+        print("SIGNATURE NOT BINDING: a tampered payload ran after it was "
+              "re-signed with an attacker-controlled key. The key fingerprint "
+              "prefix or the out-of-band pin is missing from this build; see "
+              "docs/security/THREAT_BOUNDARY_LOADER.md "
+              "(double-stamp mitigation).")
+        return 1
+    if cfi_ok:
+        print("CFI IS A TAMPER DETECTOR, NOT A TRUST ANCHOR: the checkpoint "
+              "chain was recomputed from the file's own seed and the payload "
+              "ran. Recorded as a known limit (§5r); the protection is that "
+              "removing a checkpoint is DETECTED, not that it is impossible.")
         return 1
     print("No chain: the tampered payload did not run after the bypass.")
     return 0
