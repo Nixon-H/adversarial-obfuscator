@@ -417,14 +417,11 @@ def get_random_var_name(prefix="NX", ascii_only=False):
     The babel pool is kept for the pure-Python path, where the unicode form
     really does reach the shipped source.
     """
-    # A native build opts in with NIXON_ASCII_IDS=1, set by the build path.
-    # Checked at CALL time so a single process can build either kind.
+    # SCOPED, NOT VIA os.environ (measured 2026-11-20). An earlier attempt
+    # read NIXON_ASCII_IDS from the environment, which is process-global: it
+    # leaked into later calls and broke the renamer tests, which legitimately
+    # expect a babel name. Callers pass ascii_only explicitly instead.
     if ascii_only:
-        return "%s_%s" % (prefix, "".join(
-            random.choice("abcdefghijklmnopqrstuvwxyz"
-                          "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-            for _ in range(random.randint(8, 14))))
-    if os.environ.get("NIXON_ASCII_IDS") == "1":
         return "%s_%s" % (prefix, "".join(
             random.choice("abcdefghijklmnopqrstuvwxyz"
                           "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -1135,9 +1132,26 @@ cythonize([Extension("payload", ["{payload_filename}"])], language_level=3)
 # the working directory, not to the package.
 _plc_src = "pe_load_config.c"
 _extra_sources = []
-if _platform.system().lower().startswith("win") and os.path.isfile(_plc_src):
+# UNDER REAL MSVC, DO NOT SHIP A HAND-WRITTEN LOAD CONFIG (measured
+# 2026-11-20). `_load_config_used` is what lets a clang-cl/lld-link build set
+# CF_INSTRUMENTED in the first place. But it is ALSO what blocks
+# CF_FUNCTION_TABLE_PRESENT: the linker only fills GuardCFFunctionTable /
+# GuardCFFunctionCount / GuardFlags when IT emits the structure, and it only
+# does that when the CRT's guard symbols (__guard_fids_table,
+# __guard_check_icall_fptr) are linked and no user structure shadows them.
+#
+# Real cl.exe links libcmt, which defines those symbols. So on a genuine MSVC
+# build the correct thing is to supply NO `_load_config_used` and let the CRT
+# provide the complete structure with the function table. Our file stays for
+# the clang-cl/mingw case, where nothing else would emit one.
+#
+# The driver decides from the same CC detection the flag selection uses.
+_use_plc = (os.environ.get("NIXON_MSVC_LOAD_CONFIG", "0") == "1")
+if _platform.system().lower().startswith("win") and os.path.isfile(_plc_src) and _use_plc:
     _extra_sources = [_plc_src]
-    print("PE load-config: including", _plc_src)
+    print("PE load-config: including hand-written", _plc_src)
+elif _platform.system().lower().startswith("win"):
+    print("PE load-config: omitted (letting the CRT emit the full structure)")
 else:
     print("PE load-config: not present or not applicable on this runner")
 # 2. The C transform layer, same as the local native build.
@@ -1258,13 +1272,23 @@ if _hsys.platform.startswith("win"):
         _cc_hint.startswith("cl ") and not _cc_hint.startswith("clang"))
     if _msvc:
         _toolchain = "msvc"
-        # MSVC flag names, and /wd4244 (the __int64->unsigned conversion Cython
-        # generates everywhere) plus /wd4127 so the build log stays readable.
+        # MSVC flag names. /wd4244 and /wd4127 silence the Cython-generated
+        # conversion and constant-conditional warnings so the log stays
+        # readable.
         _extra_cc = ["/" + f for f in ("DYNAMICBASE", "NXCOMPAT", "GUARD:CF",
                                        "CETCOMPAT", "HIGHENTROPYVA", "GS",
                                        "wd4244", "wd4127")]
-        _extra_ld = ["/" + f for f in ("DYNAMICBASE", "NXCOMPAT", "GUARD:CF",
-                                       "CETCOMPAT")]
+        # LINK FLAGS VIA THE ENVIRONMENT, NOT extra_link_args (measured
+        # 2026-11-20 on the windows runner). The link line in the job log had
+        # /DLL and NO /GUARD:CF, so the PE shipped without the CFG bit and
+        # with an empty function table even though cl.exe compiled with
+        # /guard:cf. setuptools' MSVC path does not reliably forward
+        # extra_link_args to link.exe; distutils reads LDFLAGS from the
+        # environment and appends it to the link command, which is the
+        # documented route for exactly this.
+        _os.environ["LDFLAGS"] = ("/GUARD:CF /DYNAMICBASE /NXCOMPAT "
+                                  "/CETCOMPAT /HIGHENTROPYVA")
+        _extra_ld = []
     else:
         _toolchain = "gcc"
         _extra_cc = ["-fstack-protector-strong"]

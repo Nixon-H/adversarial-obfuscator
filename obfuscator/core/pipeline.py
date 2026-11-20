@@ -5174,6 +5174,13 @@ def build_project(args):
                         "native." % (_detail_now,))
                 UI.warn("Native blob is not a loadable object file (%s); "
                         "staying in Python mode" % (_detail_now,))
+            # Record what is about to be EMBEDDED, while `blobs` still holds
+            # the plaintext base64 ELF per OS. The manifest is written at the
+            # very end of the build, long after the generator has re-packed
+            # these against the loader key, and it used to report
+            # `native_blob: {bytes: 0}` for a deliverable carrying a 212 KB
+            # .so -- it had no path to hash and no other input.
+            args._native_blob_dict = {k: v for k, v in blobs.items() if v}
             hybrid_loader_src, real_blobs_dict, real_fallback_str = generate_hybrid_loader_script(
                 blobs, real_fallback_enc, blob_key_hex, native_only=is_native_only,
                 hwid=_w_hwid, trial_seconds=_w_trial_seconds,
@@ -7818,6 +7825,12 @@ def main():
                         _ma_art, args.source, private_key=_bf_key,
                         transforms=list(
                             globals().get("_NIXON_LAST_TRANSFORMS") or []),
+                        # The compiled modules live only in memory (they are
+                        # XOR-packed into the loader), so the manifest gets the
+                        # mapping rather than a path. Without this it recorded
+                        # "no native blob" about a native artefact.
+                        native_blobs=dict(
+                            getattr(args, "_native_blob_dict", {}) or {}),
                         seed_classes={
                             "reproducible": "sha256(payload) [logged]",
                             "diversified": "sha256(repro + urandom + machine)",
