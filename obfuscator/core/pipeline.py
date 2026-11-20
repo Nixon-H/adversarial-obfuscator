@@ -3341,7 +3341,14 @@ def _load_native():
                 except ImportError:
                     continue
             if _nx_ok:
-                return
+                # SUCCESS HAS ITS OWN VERDICT (measured 2026-11-21). This was a
+                # bare `return`, so success and every failure path both handed
+                # back None and the entrypoint could not tell them apart. A
+                # native-only build that ran its payload perfectly then also
+                # satisfied "verdict is None", and the fail-closed exit fired on
+                # a SUCCESSFUL run. Returning a sentinel is what makes the
+                # entrypoint's check mean "nothing ran".
+                return True
             else:
                 if _nx_ci_bypass_ok():
                     _exec_fallback()
