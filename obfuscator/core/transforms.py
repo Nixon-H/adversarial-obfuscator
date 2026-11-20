@@ -207,10 +207,16 @@ _BUILTIN_EXCEPTIONS = _builtin_exception_names()
 
 
 class SymbolRenamer(ast.NodeTransformer):
-    def __init__(self, mapping=None):
+    def __init__(self, mapping=None, ascii_ids=False):
         self.mapping = mapping if mapping is not None else {}
         self.reverse_mapping = {}
         self._renamed_values = set()
+        # ASCII-only new names for a NATIVE build (measured 2026-11-20): the
+        # babel pool puts non-ASCII identifiers in the payload, and Cython
+        # 3.0.12 on the farm's Python 3.11 writes an intermediate stream as
+        # latin-1, which raises UnicodeEncodeError. Scoped to this instance --
+        # an environment flag leaked across calls and broke the renamer tests.
+        self._ascii_ids = bool(ascii_ids)
         # Per-build key for the deterministic branches below. See
         # _new_rename_key: a bare hash of the original name is invertible.
         self._rename_key = _new_rename_key()
@@ -746,9 +752,16 @@ class StringLiteralObfuscator(ast.NodeTransformer):
     # Per-string nonces (secrets.token_bytes) make every build unique;
     # tampered seals raise ValueError at runtime.
     def __init__(self, mode="chacha20", allowlist=None, string_key=None,
-                 kek_env=None, part_prefix=None):
+                 kek_env=None, part_prefix=None, ascii_ids=False):
         self.string_table = {}
         self.generated_vars = set()
+        # NATIVE BUILDS NEED ASCII IDENTIFIERS ONLY (measured 2026-11-20).
+        # The decoder helper and the string-table global were the last two
+        # non-ASCII names in an otherwise ASCII payload, and Cython's latin-1
+        # intermediate stream on the farm runners rejected them. The flag is
+        # per-instance, not process-global, so a pure-Python build in the same
+        # interpreter keeps its babel names.
+        self._ascii_ids = bool(ascii_ids)
         self.decoder_name = self._generate_babel_name()
         self.xor_key = secrets.randbelow(255) + 1
         self._chacha_key = None
@@ -788,7 +801,8 @@ class StringLiteralObfuscator(ast.NodeTransformer):
         else:
             self._session = None
     def _generate_babel_name(self):
-        return get_random_var_name("STR_DEC")
+        return get_random_var_name("STR_DEC",
+                                   ascii_only=self._ascii_ids)
     def visit_JoinedStr(self, node):
         node.values = [self.visit(v) if isinstance(v, ast.FormattedValue) else v for v in node.values]
         return node

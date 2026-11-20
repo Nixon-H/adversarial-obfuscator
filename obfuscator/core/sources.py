@@ -438,14 +438,13 @@ def _apply_ast_mutation_inner(source_code, options=None, strict=False):
     # the native option dict sets it False precisely because non-ASCII
     # identifiers cannot survive a C toolchain, and Cython transliterates them
     # anyway, so nothing about the shipped blob is weakened.
-    try:
-        import os as _nx_ascii_os
-        if options.get('unicode_ids') is False:
-            _nx_ascii_os.environ['NIXON_ASCII_IDS'] = '1'
-        elif options.get('unicode_ids') is True:
-            _nx_ascii_os.environ.pop('NIXON_ASCII_IDS', None)
-    except Exception:
-        pass
+    #
+    # SCOPED, NOT VIA os.environ (measured 2026-11-20). The first attempt set
+    # NIXON_ASCII_IDS in the environment, which is PROCESS-GLOBAL: it leaked
+    # into later calls in the same interpreter and broke the renamer tests
+    # (test_symbol_renamer_works, test_other_public_names_are_still_renamed --
+    # both expect a babel name). The flag is passed down explicitly instead.
+    _nx_ascii_ids = (options.get('unicode_ids') is False)
     # Batch-2 MBA levels: validate early so an invalid mba_level raises
     # ValueError instead of being swallowed by the broad except below.
     if options.get('mba_subs') and 'mba_level' in options:
@@ -648,7 +647,7 @@ def _apply_ast_mutation_inner(source_code, options=None, strict=False):
         else:
             _alias_preamble = ""
         if options.get('symbol_rename'):
-            renamer = SymbolRenamer()
+            renamer = SymbolRenamer(ascii_ids=_nx_ascii_ids)
             renamer.reserved.update({'NATIVE_BLOBS', 'FALLBACK_BLOB', 'BLOB_KEY'})
             # Cross-module export defect (defect 13): a module-level public name
             # that a SIBLING module imports cannot be renamed, because the
@@ -896,7 +895,8 @@ def _apply_ast_mutation_inner(source_code, options=None, strict=False):
                 allowlist=options.get('string_allowlist'),
                 string_key=options.get('string_key'),
                 kek_env=options.get('string_key_env'),
-                part_prefix=VARS.get('PART_PREFIX'))
+                part_prefix=_vars_for(_nx_ascii_ids).get('PART_PREFIX'),
+                ascii_ids=_nx_ascii_ids)
             tree = str_obf.visit(tree)
             preamble = str_obf.get_preamble()
         else: preamble = ""
@@ -1388,6 +1388,29 @@ _VARS_MAP = {
     "FAULT_CLS": "_nixon_" + __import__('secrets').token_hex(4),
 }
 VARS = {k: get_random_var_name(v) for k, v in _VARS_MAP.items()}
+
+
+def _vars_for(ascii_ids=False):
+    """The VARS table, with ASCII-only names when a NATIVE build asks.
+
+    Measured 2026-11-20: VARS is built once at import with babel names, and the
+    string-sealer uses `VARS['PART_PREFIX']` (and friends) as its emitted
+    helper names. That made `fragment_strings` the second source of non-ASCII
+    identifiers even with `unicode_ids=False`, which is what still failed on
+    the farm runners. A per-call table keeps the module-level default
+    unchanged for every other caller.
+    """
+    if not ascii_ids:
+        return VARS
+    out = {k: get_random_var_name(v, ascii_only=True)
+           for k, v in _VARS_MAP.items()}
+    # The non-name entries (MAGIC, STR_KEY, PART_PREFIX, MARKER_TOKEN, the
+    # FUNC_* tables) are copied verbatim, so a caller that only wants ASCII
+    # IDENTIFIERS keeps every other value identical to the module table.
+    for _k, _v in VARS.items():
+        if _k not in out:
+            out[_k] = _v
+    return out
 VARS["MAGIC"] = b"NIXON_ENC"
 VARS["STR_KEY"] = _struct_randbelow(255) + 1
 # Hardening A2.1: per-build ASCII token for the payload-part globals.

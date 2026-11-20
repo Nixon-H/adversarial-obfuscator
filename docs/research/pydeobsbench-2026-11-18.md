@@ -2342,3 +2342,141 @@ needs the token-derived variant plus the out-of-band pin, unchanged from
 `THREAT_BOUNDARY_LOADER.md`. `runner_attest.verify` (controller-side check of
 the runner's own attestation against the pre-upload digest) is implemented and
 unit-tested but was not re-run against these three artefacts in this pass.
+
+### 5x-bis. CFG function table on REAL cl.exe: the flag never reaches the linker
+
+The farm finally put a genuine `cl.exe` behind this item, and it narrowed the
+problem from "unknown blocker" to one measured fact.
+
+**What real cl.exe does achieve.** The Windows job (Microsoft `cl.exe`
+14.52.37025, run 44794331750) produced a `.pyd` with:
+
+| field | value |
+|---|---|
+| load config | **320 bytes** — the CRT emitted it (vs 288 for the hand-written file) |
+| `GuardFlags` | `0x100` = **CF_INSTRUMENTED** — instrumentation is real |
+| `GuardCFFunctionTable` | `0x0`, count `0` |
+| `CF_FUNCTION_TABLE_PRESENT` (0x400) | **clear** |
+| `DllCharacteristics` | `0x160` — GUARD_CF (0x4000) **not set** |
+
+So compiling with `/guard:cf` works and the CRT supplies a full structure, but
+the LINK does not know CFG is on.
+
+**The measured reason.** The `link.exe` command line in the job log contains
+`/DLL` and **no `/GUARD:CF`**. Two attempts to deliver it were both measured
+ineffective:
+
+| route | result |
+|---|---|
+| `extra_link_args=["/GUARD:CF", ...]` | absent from the link line |
+| `LDFLAGS=/GUARD:CF ...` in the environment | absent from the link line |
+
+setuptools' MSVC path does not forward either to `link.exe` in this version.
+That is an upstream packaging limitation, not a property of this project's
+code, and it is the whole of the remaining gap: with `/GUARD:CF` on the link,
+link.exe writes the guard table and sets both `DllCharacteristics` 0x4000 and
+`GuardFlags` 0x400.
+
+**Also measured, and worth keeping:** omitting the hand-written
+`_load_config_used` on MSVC is the RIGHT change regardless — the CRT's own
+320-byte structure is larger and is the one the linker rewrites. It now only
+ships for the clang-cl/mingw case (`NIXON_MSVC_LOAD_CONFIG=1` restores it),
+where nothing else would emit one.
+
+**Honest status.** CFG instrumentation: REAL and measured on real cl.exe.
+CFG function table: still absent, with the cause now pinned to setuptools not
+forwarding link flags — not to a missing compiler, headers, or CRT symbol. The
+workarounds that remain are a custom build_ext or invoking link.exe directly;
+both are packaging changes with their own risk, and neither is claimed here.
+
+## 5y. Two records that lied about the artefact: unicode identifiers and the manifest
+
+Both items below were found by asking a different question than "does the test
+pass": *does the artefact say something true about itself?* Neither was a
+crash. One was a build that failed on two of three runners; the other was a
+signed record that answered "no native blob" about a native binary.
+
+### 5y.1 The scoped ASCII-identifier fix: 376 → 0, with no process-wide flag
+
+The farm run that first went 3/3 (5x) needed `unicode_ids: False` for native
+builds, because Cython 3.0.12 on the Python 3.11 runner image writes an
+intermediate stream as latin-1 when the payload carries non-ASCII
+identifiers, and 150 such characters failed the compile with
+`UnicodeEncodeError` on two of three images. The payload's own protection
+value from unicode identifiers is close to nil on the native path (Cython
+transliterates them to ASCII C symbols anyway — measured 0 non-ASCII bytes in
+the generated C), so disabling them costs nothing there.
+
+The first implementation read a process-global environment variable. That was
+wrong, and the suite said so: `test_symbol_renamer_works`,
+`test_other_public_names_are_still_renamed` and five tests across
+`bench_verification_bundle`/`test_verification_bundle` failed, because the flag
+leaked into every other build in the same interpreter. The replacement is a
+per-call `ascii_ids` parameter threaded through the three emitters that
+actually produce names:
+
+| emitter | how it was reached | before | after |
+|---|---|---|---|
+| `SymbolRenamer` | `renamer = SymbolRenamer(ascii_ids=…)` | 163 non-ASCII | 0 |
+| `StringLiteralObfuscator` (`_generate_babel_name`) | `ascii_ids=…` on the constructor | 90 | 0 |
+| `VARS['PART_PREFIX']` and friends | `_vars_for(ascii_ids=True)` per call | — | ASCII |
+
+`_vars_for` returns the module table unchanged for every other caller and
+rebuilds only the name entries from `_VARS_MAP` when ASCII is asked for; the
+non-name entries (`MAGIC`, `STR_KEY`, `PART_PREFIX`, `MARKER_TOKEN`, the
+`FUNC_*` tables) are copied verbatim, so an ASCII build changes identifiers
+and nothing else.
+
+**Measured, three ways:**
+
+1. Direct AST measurement of a two-function/one-class payload:
+   `unicode_ids=False` → **0** non-ASCII NAME tokens (was 90 → 7 → 0 across
+   the three emitters). `unicode_ids=True` in the same process immediately
+   afterwards still emits 5 unique non-ASCII names, which is the leak test
+   the env-var version failed.
+2. A real `--package native` build: the Cython input
+   (`payload_protected_Packed.py`, 2.9 MB) contains **0** non-ASCII bytes.
+3. The same build's deliverable loads its module from a temp `_nx_*.so`
+   (`MODULE_NAME: payload`, `MODULE_ORIGIN: /tmp/_nx_*.so`) and prints its
+   output — the native path, not the bytecode fallback.
+
+The pure-Python path keeps babel identifiers, which is where they reach the
+shipped source and are worth something.
+
+### 5y.2 `native_blob: {bytes: 0}` about an artefact that was a native blob
+
+The §7 signed build manifest records what produced an artefact. Its
+`native_blob` field held a hash and a size of **0 and ""** on a build whose
+deliverable carried a 110,488-byte `.so` and demonstrably ran it.
+
+The cause was structural rather than a typo. The compiled modules never touch
+disk: the build holds them base64-encoded in memory and XOR-packs them
+straight into the loader. The manifest only ever read `native_blob_path`, and
+no caller sets it — so the field could only ever report "absent". A control
+that always answers the same way is worse than no control, because it teaches
+a reader to skip the field.
+
+The fix passes the in-memory mapping to `write_manifest` and records:
+
+| field | meaning |
+|---|---|
+| `bytes` / `sha256` | the largest embedded blob (keeps the single-blob schema meaningful) |
+| `platforms` | per-OS `{bytes, sha256}` for every blob actually embedded |
+| `hashed_form` | `plaintext-object-image` |
+
+That last field is not decoration. The hash covers the **plaintext** object
+image, while the bytes inside the artefact are that image XOR-packed against
+the loader's derived key — so hashing the embedded base64 literal directly
+yields a different digest even for a perfectly correct build. Anyone comparing
+the two would otherwise conclude the artefact had been tampered with. Naming
+the form turns a false positive into a documented invariant.
+
+**Measured end to end** after the fix: `native_blob.bytes = 118,672`,
+`platforms = ['linux']`, `hashed_form = plaintext-object-image`, and the same
+artefact still runs with `MODULE_ORIGIN: /tmp/_nx_*.so`.
+
+**Tests.** `tests/test_manifest_native_blob.py` (6 tests) pins the contract:
+the record is built from the mapping, states its hash form, covers every
+embedded platform, does not record empty strings as blobs, stays honestly
+empty for a bytecode build, and keeps the old file-based input working.
+

@@ -27,6 +27,7 @@ gate can fail on it rather than parsing prose.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -78,10 +79,53 @@ def _source_files(source_path):
 
 
 def build_manifest(artefact_path, source_path=None, *, transforms=None,
-                   native_blob_path=None, seed_classes=None,
+                   native_blob_path=None, native_blobs=None, seed_classes=None,
                    build_id=None, extra=None):
-    """Assemble the manifest dict. Never raises on missing optional inputs."""
+    """Assemble the manifest dict. Never raises on missing optional inputs.
+
+    ``native_blobs`` is the alternative to ``native_blob_path`` for the normal
+    case: the build keeps the compiled modules IN MEMORY (they are XOR-packed
+    straight into the loader), so there is no file on disk for the manifest to
+    hash. Passing the per-OS mapping records what was actually embedded.
+
+    Measured 2026-11-20: a native build whose deliverable carried a 212 KB
+    packed .so still wrote ``native_blob: {bytes: 0, sha256: ""}``, because
+    only ``native_blob_path`` was ever read and no caller sets it. A manifest
+    that says "no native blob" about an artefact that is a native blob is
+    worse than no manifest: the whole point of the record is to answer "what
+    produced this" from the artefact alone.
+    """
     artefact_path = os.path.abspath(artefact_path)
+    _nb_sha = ""
+    _nb_bytes = 0
+    _nb_platforms = {}
+    if native_blob_path:
+        _nb_sha = _sha256_file(native_blob_path) if native_blob_path else ""
+        _nb_bytes = (os.path.getsize(native_blob_path)
+                     if os.path.exists(native_blob_path) else 0)
+    for _nb_plat, _nb_val in (native_blobs or {}).items():
+        if not _nb_val:
+            continue
+        # The build holds each blob base64-encoded (that is what the loader
+        # decodes), so hash the DECODED image and report the size a reader can
+        # compare against the loader's `native_blob_loadability` verdict.
+        try:
+            _nb_raw = base64.b64decode(_nb_val, validate=False)
+        except Exception:
+            _nb_raw = _nb_val if isinstance(_nb_val, bytes) else b""
+        if not _nb_raw:
+            continue
+        _nb_platforms[_nb_plat] = {
+            "sha256": hashlib.sha256(_nb_raw).hexdigest(),
+            "bytes": len(_nb_raw),
+        }
+        # The top-level fields stay meaningful for an older reader that only
+        # knows one blob: record the largest, so a native build never again
+        # reports bytes: 0.
+        if len(_nb_raw) > _nb_bytes:
+            _nb_bytes = len(_nb_raw)
+            _nb_sha = _nb_platforms[_nb_plat]["sha256"]
+        _nb_raw = None
     manifest = {
         "schema": SCHEMA,
         "artefact": {
@@ -102,9 +146,21 @@ def build_manifest(artefact_path, source_path=None, *, transforms=None,
         },
         "transforms": sorted(transforms or []),
         "native_blob": {
-            "sha256": _sha256_file(native_blob_path) if native_blob_path else "",
-            "bytes": os.path.getsize(native_blob_path)
-            if native_blob_path and os.path.exists(native_blob_path) else 0,
+            # WHAT THE HASH COVERS (2026-11-20). These are hashes of the
+            # DECODED, PLAINTEXT object image -- the ELF/Mach-O/PE as the
+            # compiler emitted it. The bytes inside the shipped artefact are
+            # that same image XOR-packed against the loader's derived key, so
+            # hashing the embedded base64 literal directly yields a DIFFERENT
+            # value even when the artefact is correct. Stated here because
+            # anyone comparing an artefact's payload against this record will
+            # hit exactly that and conclude the build was tampered with.
+            "sha256": _nb_sha,
+            "bytes": _nb_bytes,
+            "hashed_form": "plaintext-object-image",
+            # Per-platform detail: a build that embedded linux only is not the
+            # same artefact as one that embedded all three, and that
+            # difference used to be invisible everywhere but the loader dict.
+            "platforms": _nb_platforms,
         },
         "seeds": dict(seed_classes or {}),
         "build": {
