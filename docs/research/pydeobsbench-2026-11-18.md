@@ -1995,3 +1995,50 @@ fingerprint prefix to match their key is stopped only by the out-of-band pin
 stands. The CFI row confirms the chain is a tamper detector, not a trust
 anchor: recomputation is expected to work, and the protection is that removal
 is *detected*.
+
+### 5t. DS 4.1 Flash against the NATIVE-ONLY artefact: wrapper fully read, enforcement semantics absent
+
+The §5o probe ran against a signed `max` artefact (sectioned fallback, so
+the Python anti-dump block was present by design and was recovered). The
+reviewer's sharper question is about **absolute-native-only**, where the
+Python anti-dump block is not emitted at all. Measured 2026-11-20 on a real
+native-only build (`FALLBACK_BLOB="DISABLED"`, runs rc 0 with its token,
+zero syscall names in the artefact text):
+
+| probe term | recovered? |
+|---|---|
+| `prctl` | **no** |
+| `PR_SET_DUMPABLE` | **no** |
+| `RLIMIT_CORE` | **no** |
+| `setrlimit` | **no** |
+| `PT_DENY_ATTACH` | **no** |
+| `nx_apply_protections` (the call) | yes, named |
+| `_nx_self_fail` / exit 137 | yes |
+| loader structure (identity gate, merkle, HMAC, Ed25519 verify, dlopen, mkstemp, mlock) | yes, in detail |
+
+The model's own summary is the finding, quoted verbatim:
+
+> "in this native-only build, `_load_native` selects the platform key,
+> base64-decodes the embedded blob (validating ELF/PE/Mach-O/ar magic after
+> XOR-decrypting with the derived key), writes it to a fresh mkstemp file,
+> mlocks the buffer, dlopen()s it via ctypes.CDLL and calls the exported
+> enforcement entry `nx_apply_protections()` BEFORE importing the module
+> (failing closed if that symbol is absent) ... The Python fallback
+> (`_exec_fallback` ...) is compiled in but explicitly disabled in this
+> build (`FALLBACK_BLOB='DISABLED'`, no share data, CI bypass hard-coded to
+> False)."
+
+So the model recovered the **mechanism completely and the semantics not at
+all**. It knows the loader calls an enforcement entry; it cannot name a
+single syscall that entry performs, because those live in stripped machine
+code. That is the exact boundary the design claims: identical wrapper
+readability to before, materially different recovery of the enforcement
+layer.
+
+Two honest limits, unchanged:
+
+* This is one instrument (a model reading artefact text). It says nothing
+  about Ghidra, a debugger, or a human against the `.so`.
+* The wrapper is still fully readable. `loader_reversed = TRUE` remains the
+  correct record for the loader; the claim that improved is narrower, and is
+  the one the table above measures.
