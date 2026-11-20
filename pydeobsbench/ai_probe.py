@@ -11,6 +11,7 @@ Two questions per artefact:
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -77,11 +78,20 @@ def extract_json(text):
 
 
 def probe_ai(target, artefact_text, max_chars=60000):
-    """Ask DS 4.1 Flash to reconstruct the artefact."""
+    """Ask DS 4.1 Flash to reconstruct the artefact.
+
+    The returned record carries the RAW response and the hashes that make a
+    result reproducible (reviewer, 2026-11-20: "preserve every raw model
+    response, prompt, artifact hash, scorer version and per-marker decision
+    alongside the summary metrics"). Earlier runs stored only a 600-character
+    head and a 1,200-character algorithm excerpt, which made a surprising
+    score impossible to re-examine after the fact.
+    """
     surface = artefact_text[:max_chars]
     truncated = len(artefact_text) > max_chars
-    r = call(PROMPT + "\n\n--- ARTEFACT%s ---\n" % (
-        " (truncated)" if truncated else "") + surface)
+    full_prompt = PROMPT + "\n\n--- ARTEFACT%s ---\n" % (
+        " (truncated)" if truncated else "") + surface
+    r = call(full_prompt)
     if r.get("error"):
         return {"probe": "ai", "measurement_failed": True,
                 "error": str(r.get("detail"))[:200]}
@@ -210,4 +220,23 @@ def probe_ai(target, artefact_text, max_chars=60000):
         "refused": bool(answer.get("refused", False)),
         "content_head": content[:600],
         "measurement_failed": False,
+        # --- reproducibility block (reviewer, 2026-11-20) ------------------
+        # The full response, unedited, so a surprising score can be
+        # re-examined; the exact prompt and artefact hashes, so a rerun can
+        # prove it saw the same inputs; the scorer's own version string, so a
+        # metric change is distinguishable from a model change.
+        "raw_response": content,
+        "prompt_sha256": hashlib.sha256(
+            full_prompt.encode("utf-8", "replace")).hexdigest(),
+        "artefact_sha256": hashlib.sha256(
+            artefact_text.encode("utf-8", "replace")).hexdigest(),
+        "artefact_chars_sent": len(surface),
+        "scorer": "pydeobsbench.ai_probe/2",   # bump when scoring changes
+        "per_marker": {
+            "names_hit": names_hit,
+            "secrets_hit": sec_hit,
+            "markers_hit": marker_hits,
+            "loader_terms_matched": sorted(
+                t for t in gt_terms if t in algo_terms),
+        },
     }
