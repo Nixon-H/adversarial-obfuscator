@@ -1,0 +1,20 @@
+{
+  "date": "2026-11-20",
+  "model": "mistral/deepseek-v4-1-flash-1017",
+  "artefact": "absolute-native-only (tiny)",
+  "artefact_sha256_16": "b82eab4e7eae63ff",
+  "names_returned": 134,
+  "syscall_terms_recovered": {
+    "prctl": false,
+    "PR_SET_DUMPABLE": false,
+    "RLIMIT_CORE": false,
+    "setrlimit": false,
+    "PT_DENY_ATTACH": false
+  },
+  "mechanism_recovered": {
+    "nx_apply_protections_named": true,
+    "loader_structure": true,
+    "fallback_disabled_noted": true
+  },
+  "raw_response_sha256": "c5c707aa484e86a00baeabcaab9d6e7219f6035f4a3b5eba2b37cc5662d70c50"
+}

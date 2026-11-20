@@ -239,7 +239,43 @@ def test_emit_snippet_symlink_fails_closed(monkeypatch, tmp_path):
     assert gate(fp) == "tampered"
 
 
-# -- emit snippet ----------------------------------------------------------
+def test_the_emitted_gate_treats_a_foreign_seal_as_fresh(tmp_path,
+                                                         monkeypatch):
+    """The SHIPPED snippet, not just the build helper, must allow an update.
+
+    Measured 2026-11-20: two builds at one artefact path share a state leaf,
+    so the second build cannot unseal the first build's state. If the emitted
+    gate called that "tampered", every legitimate in-place update would refuse
+    to run -- which is what happened before the split. The distinction is
+    between FOREIGN (well-formed, wrong key -> fresh) and MALFORMED (not a
+    seal -> tampered), and it has to hold in the code that ships.
+    """
+    key = b"f" * 32
+    fp = "SNIPPET-FOREIGN-HOST"
+    deadline = compute_deadline(3600, now=time.time())
+    token = mint_token(key, fp, deadline)
+    src = emit_trial_snippet(deadline, token, key.hex())
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    ns = {"__name__": "trial_snippet_foreign", "sys": sys}
+    exec(compile(src, "<trial_snippet>", "exec"), ns)
+    gate = ns["_nx_trial_gate"]
+    assert gate(fp) == "ok"
+    states = list(tmp_path.rglob(".trial_*.state"))
+    assert states, "gate did not create a state file"
+    state = states[0]
+
+    # FOREIGN: a well-formed seal under a different key (a previous build).
+    with open(state, "w", encoding="utf-8") as fh:
+        fh.write("1700000000.0:" + "ab" * 32)
+    assert gate(fp) == "ok", (
+        "the emitted gate rejected a foreign seal: a legitimate in-place "
+        "artefact update would refuse to run")
+
+    # MALFORMED: not a seal at all (torn write / hand edit).
+    with open(state, "w", encoding="utf-8") as fh:
+        fh.write("half-written{{{")
+    assert gate(fp) == "tampered", (
+        "the emitted gate accepted a structurally broken state file")
 
 def test_emit_snippet_compiles_and_enforces(tmp_path, monkeypatch):
     key = b"e" * 32
