@@ -352,25 +352,55 @@ def fast_xor_bytes(data, key):
     k_len = len(key)
     return bytes([b ^ key[i % k_len] for i, b in enumerate(data)])
 
+# MEASURED C-LEGAL UNICODE POOL (2026-11-20). These identifiers are
+# compiled into generated C (the Cython blob), and C99/C11 restrict which
+# non-ASCII characters may appear in identifiers regardless of what
+# Python's isidentifier() accepts. Measured with clang -std=c99
+# -ferror-limit=0, one identifier per line, over every candidate in the
+# old draw (910 candidates, 139 illegal): the first measurement attempt
+# bundled 40 identifiers per line and clang's default error limit
+# truncated the report, which hid most of the illegal characters and made
+# the "fix" itself still flaky. An illegal draw fails the ENTIRE blob
+# build, so native builds were FLAKY (some draws compiled, some did not).
+# This is effectively the C99 Annex D.1 table: Latin Ext-A/B and IPA
+# sub-ranges, Greek, Cyrillic, Hiragana; whole blocks like Cherokee,
+# Runic, Devanagari, Hebrew, Arabic, Thai, Georgian are absent from it.
+# Combining marks (U+0483-0487, U+3099-309A) are excluded even where
+# legal: they cannot start an identifier. CJK is capped at U+9FA5 (the
+# C99 table; beyond it is unmeasured).
+C_LEGAL_BABEL_RANGES = [
+    (0x0100, 0x01C2),
+    (0x01C4, 0x01F5),
+    (0x01FA, 0x0217),
+    (0x0250, 0x02A8),
+    (0x0386, 0x0386),
+    (0x0388, 0x038A),
+    (0x038C, 0x038C),
+    (0x038E, 0x03A1),
+    (0x03A3, 0x03CE),
+    (0x03D0, 0x03D6),
+    (0x03DA, 0x03DA),
+    (0x03DC, 0x03DC),
+    (0x03DE, 0x03DE),
+    (0x03E0, 0x03E0),
+    (0x03E2, 0x03F3),
+    (0x0401, 0x040C),
+    (0x040E, 0x044F),
+    (0x0451, 0x045C),
+    (0x045E, 0x0481),
+    (0x0490, 0x04C4),
+    (0x04C7, 0x04C8),
+    (0x04CB, 0x04CC),
+    (0x04D0, 0x04EB),
+    (0x04EE, 0x04F5),
+    (0x04F8, 0x04F9),
+    (0x3041, 0x3093),
+    (0x4E00, 0x9FA5),
+]
+
+
 def get_random_var_name(prefix="NX"):
-    babel_ranges = [
-        (0x0100, 0x017F), 
-        (0x0180, 0x024F), 
-        (0x0250, 0x02AF), 
-        (0x0370, 0x03FF), 
-        (0x0400, 0x04FF), 
-        (0x0530, 0x058F), 
-        (0x05D0, 0x05EA), 
-        (0x0600, 0x06FF), 
-        (0x0900, 0x097F), 
-        (0x0980, 0x09FF), 
-        (0x0E00, 0x0E7F), 
-        (0x10A0, 0x10FF), 
-        (0x13A0, 0x13F4), 
-        (0x16A0, 0x16EA), 
-        (0x3040, 0x309F), 
-        (0x4E00, 0x9FFF), 
-    ]
+    babel_ranges = C_LEGAL_BABEL_RANGES
     suffix = ""
     for _ in range(random.randint(5, 10)):
         found = False

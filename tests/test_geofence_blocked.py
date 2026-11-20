@@ -59,6 +59,38 @@ def test_no_lists_allows_any_location():
     assert geo.check() is True
 
 
+def test_unknown_location_allows_block_only_lists():
+    """LOCATION UNKNOWN IS NOT LOCATION BLOCKED.
+
+    Measured defect (2026-11-20, full-max build): with block-countries=RU,KP
+    and no reachable lookup service, location was None, check_allowed
+    returned False, and a NON-blocked host died rc 137 with no message. A
+    block list has no positive evidence when the location is unknown -- a
+    sandbox, an air-gapped deployment or a DNS hiccup is not a sanctioned
+    country. Fail-open for block-only configuration.
+    """
+    geo = _make(blocked_c=["RU", "KP"], location=None)
+    assert geo.check() is True
+
+
+def test_unknown_location_still_refuses_allow_lists():
+    """An allow-list keeps the fail-closed reading of an unknown country.
+
+    An operator who says 'only run in these countries' is not satisfied by
+    an unknown one; the lookup failing must not become a bypass of an
+    allow-list gate.
+    """
+    geo = _make(allowed_c=["US"], location=None)
+    assert geo.check() is False
+
+
+def test_unknown_location_refuses_when_allow_list_also_set():
+    """Allow-list wins the ambiguity: unknown location with both list kinds
+    set refuses (conservative), matching test_allow_list_still_rejects."""
+    geo = _make(allowed_c=["US"], blocked_c=["RU"], location=None)
+    assert geo.check() is False
+
+
 def test_loader_gate_passes_blocked_lists_to_the_class():
     # The instantiation site must actually hand the blocked lists to the
     # class; otherwise the enforcement above never runs in a real artefact.

@@ -2197,8 +2197,11 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
     if any(_geo.values()):
         # Inline, stdlib-only geo gate: the packed loader's GEOFENCE_SOURCE
         # needs urllib aliases the hybrid template does not bind.  Same
-        # semantics (fail closed when the location cannot be determined),
-        # same kill ladder.
+        # list semantics (block lists refuse on positive evidence only;
+        # allow-lists fail closed when the location cannot be determined --
+        # measured 2026-11-20: failing closed on an unknown location killed
+        # every offline host under a block-only configuration), same kill
+        # ladder.
         _phase4_suffix += (
             "_NX_GEO = %r\n"
             "try:\n"
@@ -2235,6 +2238,15 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
             "            _nx_geo_ok = False\n"
             "        else:\n"
             "            _nx_geo_ok = True\n"
+            "    else:\n"
+            "        # LOCATION UNKNOWN IS NOT LOCATION BLOCKED. A block-list\n"
+            "        # gate cannot evaluate offline (no reachable lookup\n"
+            "        # service), and failing closed here killed every offline\n"
+            "        # host -- measured 2026-11-20: a NON-blocked machine with\n"
+            "        # block-countries=RU,KP died rc 137, silently. A block\n"
+            "        # list refuses only on positive evidence; allow-lists\n"
+            "        # keep the fail-closed reading.\n"
+            "        _nx_geo_ok = not (_NX_GEO['a_c'] or _NX_GEO['a_r'])\n"
             "    if not _nx_geo_ok:\n"
             "        try:\n"
             "            _nx_kill('geo-blocked')\n"
@@ -5529,8 +5541,22 @@ def _VERIFY_INTEGRITY():
         if _hl_path and os.path.exists(_hl_path):
             with open(_hl_path, encoding="utf-8") as _hl_fh:
                 _candidate = _hl_fh.read()
-            if "_NX_SECTION_PACK = ''" not in _candidate and \
-                    "_stream(_NX_SECTION_PACK" in _candidate:
+            # A NATIVE-ONLY hybrid loader ships verbatim too (2026-11-20).
+            # It has no sections and FALLBACK_BLOB="DISABLED": the blob is
+            # the ONLY payload path, so wrapping it in packaging layers
+            # (the old route for this shape) produced a 19 MB wrapper whose
+            # CustomLoader exec'd the payload without __file__ and broke
+            # the identity gate -- measured. Ship the loader itself, like
+            # the sectioned path: if the blob cannot load, the loader
+            # refuses (fail-closed) rather than decrypting anything in
+            # Python, because there is nothing else to decrypt.
+            _is_native_only_hybrid = (
+                getattr(args, "native_only", False)
+                and 'FALLBACK_BLOB = "DISABLED"' in _candidate
+                and "NATIVE_BLOBS" in _candidate)
+            if ("_NX_SECTION_PACK = ''" not in _candidate and \
+                    "_stream(_NX_SECTION_PACK" in _candidate) \
+                    or _is_native_only_hybrid:
                 # Self-check stamping is the LAST content step before
                 # the variant loop writes the artefact: the hash must
                 # cover the final bytes (pack, honey, every gate
@@ -5591,7 +5617,7 @@ def _VERIFY_INTEGRITY():
                         _pk_fp = _prov_h.sha256(_pk_raw).hexdigest()[:16]
                         _candidate = _candidate.replace(
                             '_NX_PROV_PK = "', '_NX_PROV_PK = "'
-                            + _pk_fp + ':', 1)
+                            + _pk_fp + ': ', 1)
                         UI.item("Provenance", "artefact signed",
                                 "VERIFIABLE AT LOAD")
                     except Exception as _prov_exc:
@@ -5608,9 +5634,15 @@ def _VERIFY_INTEGRITY():
                             "signature; its integrity check is internal-only")
                 args._hybrid_loader_src = _candidate
                 _hybrid_src = _candidate
-                UI._out(" %sℹ Sectioned build: shipping the hybrid loader "
-                        "(section pack + moving decryption)%s"
-                        % (UI.CYAN, UI.RESET))
+                if _is_native_only_hybrid:
+                    UI._out(" %sℹ Native-only build: shipping the hybrid "
+                            "loader verbatim (native blob is the ONLY "
+                            "payload path; no Python fallback)%s"
+                            % (UI.CYAN, UI.RESET))
+                else:
+                    UI._out(" %sℹ Sectioned build: shipping the hybrid "
+                            "loader (section pack + moving decryption)%s"
+                            % (UI.CYAN, UI.RESET))
     except Exception:
         _hybrid_src = None
     for i, (suffix, is_debug) in enumerate(variants):

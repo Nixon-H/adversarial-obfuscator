@@ -1632,3 +1632,160 @@ the native module; for the max profile it is a measured cost-increase
 (enforcement semantics in machine code, mechanism still in text) plus one
 new enforcement (PT_DENY_ATTACH on macOS). Client-side software cannot reach
 full immunity; what changed is where the semantics live.
+
+---
+
+## 5p. The full-max profile: every flag enabled, four defects found and fixed
+
+The operator asked why the max build was missing flags added during the
+session, and "how is it maximum protection when Cython is not involved".
+Two answers, both measured:
+
+### Cython IS involved (evidence)
+
+The max build compiles the payload through Cython into the native blob:
+the build log prints "Native backend: clang/gcc", the artefact embeds an
+XOR-packed ELF blob, extract_blob decodes it (magic 0x7fELF), the blob
+exports PyInit_payload + nx_apply_protections, and the payload executes as
+machine code on the primary path. The confusion came from the profile
+string not naming `native`; `--package layers=25 zips=3 stego` arms native
+implicitly because section_split defaults on and the blob is built in the
+inner branch. The profile now names `--package native` explicitly.
+
+### The max profile now carries everything the harness can self-supply
+
+`pydeobsbench/run.py` PROFILES["max"] (the old string is kept as
+`max-legacy` so the §8 baseline stays comparable):
+
+    --package native layers=25 zips=3 stego
+    --section-count 8
+    --transforms data function-intent speculation
+    --access trial=7d vm-threshold=65 block-countries=RU,KP
+    --watermark pydeobs-max
+    (+ --licence token=<harness-issued> env-only; the profile is now in
+     LICENCE_PROFILES)
+    (+ env: NIXON_VM_DISPATCH=alternate, NIXON_ARTEFACT_SIGN_KEY=<per-run
+     Ed25519 key>, pinned at run time via NIXON_PROVENANCE_PUBKEY)
+
+`--anti-rea-level` needed nothing: maximum is already the parser default.
+
+Measured on the full-max build (2026-11-20, tiny target): build 12-19 s;
+runs rc 0 with the token and refuses without it (licence gate, kill ladder
+`section-stream-failed`); all six attack_chain routes rc 137 (control rc 0)
+-- and the bypass route now dies on the PROVENANCE SIGNATURE ("provenance:
+signature does not verify"), not merely the merkle check: signing active
+makes §1's anti-patch redundancy a three-layer chain.
+
+### Four defects the full-max run exposed (all fixed, all measured)
+
+Turning every flag on at once exercised paths no single-flag test reached.
+Each defect was found by the artefact refusing to run (or running when it
+must refuse) and reproduced in isolation:
+
+1. **Provenance fingerprint separator** (`pipeline.py`): the build appended
+   the key fingerprint as `<fp>:` but the loader's parser requires
+   `<fp>: ` (colon-space); `find(": ")` returned -1, the whole 62-char
+   slot decoded to 44 bytes, and EVERY signed artefact died at load. The
+   sign -> fingerprint -> ship -> load chain had never been run as a
+   whole -- each verifier test passed in isolation. Regression test added
+   (test_loader_boundary) that performs the build's exact replace and
+   parses with the loader's own rule.
+
+2. **Token-derived provenance ignored the prefix** (`attestation.py`): the
+   token-bound check decoded the pk slot WITHOUT stripping the fingerprint
+   prefix, so every pinned, licence-bound artefact died with "embedded key
+   does not match the token's key". Both checks now parse the slot
+   identically.
+
+3. **Geofence failed closed on an unknown location** (`pipeline.py` inline
+   gate + `sources.py` class): a block-list gate killed every offline host
+   (no reachable lookup service -> location None -> refuse), measured as a
+   silent rc 137 on a NON-blocked machine. A block list refuses only on
+   positive evidence now; allow-lists keep fail-closed. Semantics fix, not
+   a weakening: the gate's purpose (refuse sanctioned countries) is
+   unchanged, and the lookup failing never had RE-resistance value.
+
+4. **Trial gate treated a foreign-sealed state as tampered**
+   (`trial_bind.py`, both the build-time helper and the emitted snippet):
+   two builds at the same artefact path share one state leaf; the second
+   build could not unseal the first build's state and every legitimate
+   in-place update refused to run. An unsealable state is informationally
+   equivalent to the DOCUMENTED reset (delete the state file), so failing
+   closed granted an attacker nothing and broke updates. Now: fresh.
+   Symlink refusal unchanged (the real attacker-controlled condition).
+
+### Diagnostic note
+
+The silent kills were hard to attribute until the kill ladder's own
+diagnostic was found: `NIXON_LADDER_DEBUG=1` prints `nx-kill:<reason>` to
+stderr before the exit. Documented here because every future gate
+investigation should start there instead of strace.
+
+### What is still honest about "maximum"
+
+Client-side software cannot reach full immunity; enabling every flag is
+not maximum security (MAXIMUM_SECURITY.md §3.5). What this profile is: the
+strongest configuration whose protections were actually built, run, and
+verified end-to-end on this host -- with the four integration defects the
+exercise surfaced fixed rather than documented as limits.
+
+---
+
+## 5q. ABSOLUTE maximum: every flag, and a native-only loader with no Python fallback
+
+The operator asked for absolute maximum — "all letters if required" — and
+whether absolute max can have Cython with NO fallback to Python. Both are
+now profiles in the harness, measured end-to-end.
+
+### The native-only loader ships verbatim (pipeline change)
+
+A `--package native-only` hybrid loader used to be wrapped in the
+packaging layers, producing a 19 MB wrapper whose CustomLoader exec'd the
+payload without `__file__` and broke the identity gate (measured). The
+Output-Generation verbatim-ship path now covers this shape: a native-only
+loader (FALLBACK_BLOB="DISABLED", native blobs present) is stamped, signed
+and shipped verbatim like a sectioned loader. There are NO sections and NO
+bytecode fallback: the Cython blob is the ONLY payload path, and if the
+blob cannot load the loader runs nothing (fail-closed by construction).
+
+### ABSOLUTE profiles (pydeobsbench/run.py)
+
+* `absolute` — native blob, 8 sections, seal-shard string sealing
+  (string-key-env=NX_SEAL_SHARD, shard generated per run, threaded to the
+  build AND every artefact run), trial=7d, expire (+45 d), hwid bound to
+  this host via fallback_fingerprint() + hwid-lock, kod, driver-check,
+  name-gate, block-countries, vm-threshold, watermark, licence binding,
+  VM dispatch, per-run provenance signing. Measured: build 19.6 s, runs
+  rc 0 with the token, hwid-lock bound.
+* `absolute-native-only` — the same gate set, minus sections, plus
+  --package native-only. Measured: build ~101 s, runs rc 0, hwid-lock
+  bound, and ZERO anti-dump syscalls in the artefact text — the §5l
+  boundary push fully realized on a shipped artefact. Three consecutive
+  builds after the pool fix below: 3/3 green.
+
+### Fifth defect: the flaky blob build was a Unicode identifier draw
+
+The native-only builds failed intermittently (~50%): the C transform +
+Cython pipeline emitted identifiers from the babel pools, and clang
+rejects most non-ASCII characters in C identifiers ("character <U+XXXX>
+not allowed in an identifier") regardless of what Python's
+isidentifier() accepts. Cherokee U+13A0-13F4, Runic U+16A0-16EA,
+Devanagari U+0900-097F drew illegal identifiers; some builds drew legal
+characters and compiled, some did not. Measured properly (clang
+-std=c99 -ferror-limit=0, one identifier per line, 910 candidates, 139
+illegal -- the first measurement attempt bundled 40 identifiers per line
+and clang's default error limit truncated the report, which hid most of
+the illegal characters and made the first "fix" itself still flaky).
+The pool is now the measured C-legal set (C99 Annex D.1 shapes: Latin
+Ext-A/B and IPA sub-ranges, Greek, Cyrillic, Hiragana, CJK capped at
+U+9FA5), shared by utils.get_random_var_name and
+transforms.BuiltinAliaser as C_LEGAL_BABEL_RANGES. Three consecutive
+builds green after the fix.
+
+### Still operator-supplied (not harness-self-suppliable)
+
+`chain` licence (needs a real ERC-721 on an L2, §5.2 setup), `webhook=`
+(a real alerting endpoint), `--tls-ca-bundle` (a real CA bundle),
+`--lowering` (needs the shim deployed beside the artefact — measured
+1.46x-3.84x per-family overhead). Everything else in the ABSOLUTE command
+of MAXIMUM_SECURITY.md §5.3 is now exercised by the harness profiles.

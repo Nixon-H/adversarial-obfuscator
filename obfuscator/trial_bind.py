@@ -370,8 +370,19 @@ def check_and_update(build_key, fingerprint, deadline_epoch, token,
             except (IOError, OSError):
                 last_seen = None
             except ValueError:
-                # Tampered state file: fail closed (attacker edited last_seen).
-                return "tampered"
+                # UNSEALABLE STATE IS NOT TAMPERED. An HMAC mismatch means
+                # the state was sealed by a DIFFERENT build key -- which is
+                # exactly what a legitimate IN-PLACE ARTEFACT UPDATE
+                # produces (new build, same artefact path, same state leaf;
+                # measured 2026-11-20: an updated artefact read its
+                # predecessor's state and refused to run, "trial-tampered").
+                # Failing closed here protects nothing: deleting the state
+                # file is the documented reset, so an attacker gains no
+                # capability from "unseal fails -> fresh" that deletion does
+                # not already grant. Treat as no last-seen; the rollback
+                # window restarts. The symlink refusal below is the real
+                # attacker-controlled condition and stays fail-closed.
+                last_seen = None
             except Exception:
                 last_seen = None
         if last_seen is not None:
@@ -621,15 +632,18 @@ def emit_trial_snippet(deadline_epoch, token_hex, build_key_hex,
         + "                _tb_ok = _tb_hmac.compare_digest(_tb_want, str(_tb_mac2))\n"
         + "            except Exception:\n"
         + "                _tb_ok = (_tb_want == str(_tb_mac2))\n"
-        + "            if not _tb_ok:\n"
-        + "                return \"tampered\"\n"
-        + "            _tb_last = float(_tb_body)\n"
+        + "            # UNSEALABLE STATE IS NOT TAMPERED: a foreign seal is what a\n"
+        + "            # legitimate in-place update produces (new build key, same\n"
+        + "            # state leaf). Deleting the state file is the documented\n"
+        + "            # reset, so failing closed here grants an attacker nothing\n"
+        + "            # and breaks every update -- treat as no last-seen.\n"
+        + "            _tb_last = float(_tb_body) if _tb_ok else None\n"
         + "    except FileNotFoundError:\n"
         + "        _tb_last = None\n"
         + "    except (IOError, OSError):\n"
         + "        _tb_last = None\n"
         + "    except Exception:\n"
-        + "        return \"tampered\"\n"
+        + "        _tb_last = None\n"
         + "    if _tb_last is not None:\n"
         + "        try:\n"
         + "            if _tb_now < float(_tb_last) - float(_tb_tol):\n"
