@@ -34,6 +34,37 @@
  */
 #include <stddef.h>
 
+/* PORTABILITY FOR REAL cl.exe (measured 2026-11-20). This file had only ever
+ * been compiled by gcc/clang on Linux, and the first run under MSVC failed:
+ *
+ *   pe_load_config.c(95): error C2143: syntax error: missing ')' before 'sizeof'
+ *   pe_load_config.c(101): error C2143: syntax error: missing ')' before '('
+ *
+ * Two causes, both in this file:
+ *   * `_Static_assert` is C11; MSVC's C frontend spells it `static_assert`
+ *     (single underscore, <assert.h>), and rejects the double-underscore form
+ *     outside C11 mode;
+ *   * `__attribute__((used))` is GCC/Clang-only and MSVC does not parse it at
+ *     all -- hence "missing ')' before '('" on the declaration line.
+ *
+ * Both are now selected per compiler, so the same source compiles with gcc,
+ * clang AND cl.exe. This is the difference between "MSVC-ABI compatible" and
+ * "compiles with Microsoft's compiler", and it was not demonstrated until the
+ * farm ran on a real Windows runner.
+ */
+#if defined(_MSC_VER)
+#include <assert.h>
+#define NX_STATIC_ASSERT(cond, msg) static_assert(cond, msg)
+#define NX_USED
+#define NX_SELECTANY __declspec(selectany)
+#else
+#define NX_STATIC_ASSERT(cond, msg) _Static_assert(cond, msg)
+#define NX_USED __attribute__((used))
+/* gcc/clang have no selectany: a single definition in one translation unit
+ * does not need it, and __attribute__((used)) keeps it past -O3. */
+#define NX_SELECTANY
+#endif
+
 typedef unsigned long long NX_U64;
 typedef unsigned int NX_U32;
 typedef unsigned short NX_U16;
@@ -92,13 +123,14 @@ typedef struct {
     NX_U64 GuardEHContinuationCount;
 } NX_LOAD_CONFIG_64;
 
-_Static_assert(sizeof(NX_LOAD_CONFIG_64) == 288,
-               "load-config layout must be 288 bytes; the Windows loader reads "
-               "the Size field literally and a mismatch misreads the table");
+NX_STATIC_ASSERT(sizeof(NX_LOAD_CONFIG_64) == 288,
+                 "load-config layout must be 288 bytes; the Windows loader "
+                 "reads the Size field literally and a mismatch misreads the "
+                 "table");
 
 #define NX_GUARD_FLAGS 0x00000100u   /* IMAGE_GUARD_CF_INSTRUMENTED */
 
-__declspec(selectany) __attribute__((used))
+NX_SELECTANY NX_USED
 const NX_LOAD_CONFIG_64 _load_config_used = {
     sizeof(NX_LOAD_CONFIG_64),
     0, 0, 0,

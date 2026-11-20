@@ -734,7 +734,19 @@ def compile_payload_to_cython(source_path, output_dir):
             #     stops firing -- a behaviour change, not a speed-up;
             #   * infer_types=True infers C types for Python objects, which
             #     segfaulted this payload at import.
-            cython_code = f'''# cython: language_level=3
+            # ENCODING DECLARATION IS REQUIRED (measured 2026-11-20 on the
+            # ubuntu farm runner). With --transforms and unicode_ids the
+            # generated .pyx contains non-ASCII identifiers, and Cython then
+            # fails while writing its intermediate C:
+            #
+            #   UnicodeEncodeError: 'latin-1' codec can't encode characters
+            #   in position 88619-88625: ordinal not in range(256)
+            #
+            # PEP 263: a source file with a coding cookie is decoded as
+            # declared. Cython honours it when generating the C too, which is
+            # what makes the non-ASCII identifiers survive to the compiler.
+            cython_code = f'''# -*- coding: utf-8 -*-
+# cython: language_level=3
 {code}
 '''
             with open(pyx_path, 'w', encoding='utf-8') as f: f.write(cython_code)
@@ -1721,6 +1733,12 @@ def build_local_cython(source_content, target_python=None, ast_opts=None):
                        'if (__name__ == "__main__"):',
                        "if (__name__ == '__main__'):"):
             source_content = source_content.replace(_guard, "if True:")
+        # UTF-8 CODING COOKIE (measured 2026-11-20). With unicode_ids the
+        # payload body carries non-ASCII identifiers; without a PEP 263
+        # declaration Cython's C emission can fail with
+        # "UnicodeEncodeError: 'latin-1' codec can't encode characters".
+        if not source_content.startswith("#"):
+            source_content = "# -*- coding: utf-8 -*-\n" + source_content
         with open(src_path, "w", encoding="utf-8") as f:
             f.write(source_content)
         # §4 ENFORCEMENT TRAVELS WITH THE BLOB (2026-11-19). The loader
@@ -3841,27 +3859,52 @@ def _nx_self_check():
         if "_nx_prov_verify" not in loader_template:
             raise RuntimeError(
                 "provenance verifier did not reach the loader template")
-        # THE CHECK RUNS LATE, after every definition it depends on. Anchored on
-        # the end of `_nx_licence_key`'s body -- the `_BLOB_S0` slot that
-        # immediately follows it -- so `_nx_licence_key` is bound by the time
-        # the token-derived check calls it. If that anchor is ever missing the
-        # check is NOT silently dropped: an unplaced check would leave the
-        # artefact verifying itself, which is the exact failure this feature
-        # exists to prevent.
-        if _prov_token_bound and _prov_check.strip():
-            _prov_anchor = '\n_BLOB_S0 = "'
-            if _prov_anchor not in loader_template:
-                raise RuntimeError(
-                    "cannot place the provenance check: the anchor after "
-                    "_nx_licence_key is missing, and an unplaced token check "
-                    "would let an artefact verify itself")
-            loader_template = loader_template.replace(
-                _prov_anchor, "\n" + _prov_check.strip() + "\n" + _prov_anchor, 1)
-            if loader_template.find("_nx_prov_env") < loader_template.find(
-                    "def _nx_licence_key"):
-                raise RuntimeError(
-                    "provenance check placed BEFORE _nx_licence_key; it would "
-                    "raise NameError and mask the licence gate's message")
+        # THE CHECK RUNS FOR EVERY SIGNED BUILD, NOT ONLY TOKEN-BOUND ONES.
+        # Measured 2026-11-20 on a farm artefact: the condition used to be
+        # `if _prov_token_bound and _prov_check.strip()`, so an UNBOUND build
+        # emitted the verifier DEFINITIONS and never the CHECK -- the artefact
+        # carried a real Ed25519 signature that nothing ever verified. Caught
+        # by running it with a deliberately WRONG NIXON_PROVENANCE_PUBKEY: it
+        # printed "OK verify:14" and exited 0, which is exactly the
+        # "signature as decoration" failure this feature exists to prevent.
+        #
+        # Placement differs by case: the token-derived check calls
+        # `_nx_licence_key`, so it must go after that definition (the
+        # `_BLOB_S0` anchor); an unbound check depends only on the verifier,
+        # so it goes immediately after the definitions.
+        if _prov_check.strip():
+            if _prov_token_bound:
+                _prov_anchor = '\n_BLOB_S0 = "'
+                if _prov_anchor not in loader_template:
+                    raise RuntimeError(
+                        "cannot place the provenance check: the anchor after "
+                        "_nx_licence_key is missing, and an unplaced token "
+                        "check would let an artefact verify itself")
+                loader_template = loader_template.replace(
+                    _prov_anchor,
+                    "\n" + _prov_check.strip() + "\n" + _prov_anchor, 1)
+                if loader_template.find("_nx_prov_env") < loader_template.find(
+                        "def _nx_licence_key"):
+                    raise RuntimeError(
+                        "provenance check placed BEFORE _nx_licence_key; it "
+                        "would raise NameError and mask the licence gate's "
+                        "message")
+            else:
+                # Unbound: anchor immediately after the verifier definition,
+                # which is the only thing the check depends on.
+                _prov_anchor = "\ndef _nx_cfi_mark"
+                if _prov_anchor not in loader_template:
+                    raise RuntimeError(
+                        "cannot place the unbound provenance check: the CFI "
+                        "anchor is missing, and dropping the check would ship "
+                        "a signature nothing verifies")
+                loader_template = loader_template.replace(
+                    _prov_anchor,
+                    "\n" + _prov_check.strip() + _prov_anchor, 1)
+                if "signature does not verify" not in loader_template:
+                    raise RuntimeError(
+                        "the unbound provenance check did not reach the "
+                        "loader template")
     except Exception as _prov_exc:
         raise RuntimeError(
             "provenance snippet could not be emitted: %s" % (_prov_exc,))
@@ -4660,7 +4703,31 @@ def build_project(args):
                 # external API dispatch -- it only removes names that were
                 # already unreachable from outside.
                 'rename_internal': True,
-                'unicode_ids': True,
+                # UNICODE IDENTIFIERS ARE DISABLED FOR NATIVE BUILDS
+                # (measured 2026-11-20, farm runners). They were already a
+                # liability twice over before this change:
+                #   * clang/MSVC reject most non-ASCII characters inside C
+                #     identifiers, which is why the babel pool was narrowed to
+                #     the C-legal set earlier today;
+                #   * a 150-character non-ASCII payload then failed on the
+                #     farm runners with
+                #       UnicodeEncodeError: 'latin-1' codec can't encode
+                #       characters in position 110308-110313
+                #     while the same payload compiled locally. Cython 3.0.12
+                #     on Python 3.11 (the runner image) writes an intermediate
+                #     stream as latin-1 when the source carries non-ASCII
+                #     identifiers; PYTHONUTF8/PYTHONIOENCODING on the step did
+                #     not change it because the encoding is chosen inside
+                #     Cython, not by the interpreter's stdio.
+                #
+                # The protection value of unicode_ids on a NATIVE build is
+                # close to nil: Cython transliterates the identifiers into
+                # ASCII C symbols anyway (measured: 0 non-ASCII bytes in the
+                # generated C), so the analyst never sees the unicode form in
+                # the blob. Keeping it only bought a build that fails on two
+                # of three farm runner images. It stays ON for the pure-Python
+                # path, where it does reach the shipped source.
+                'unicode_ids': False,
                 'strip_meta': True,
                 'cfg_flatten': True,
                 'opaque_predicates': True,

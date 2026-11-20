@@ -428,6 +428,24 @@ def apply_ast_mutation(source_code, options=None, strict=False):
 
 def _apply_ast_mutation_inner(source_code, options=None, strict=False):
     if options is None: options = {}
+    # NATIVE BUILDS GET ASCII IDENTIFIERS (measured 2026-11-20). The
+    # identifier pools default to the babel range, and a NATIVE payload that
+    # carries them fails on the farm runner images:
+    #     UnicodeEncodeError: 'latin-1' codec can't encode characters in
+    #     position 115899-115905: ordinal not in range(256)
+    # (Cython 3.0.12 on Python 3.11 chooses that encoding internally; no
+    # interpreter-level env var changes it). The signal is `unicode_ids`:
+    # the native option dict sets it False precisely because non-ASCII
+    # identifiers cannot survive a C toolchain, and Cython transliterates them
+    # anyway, so nothing about the shipped blob is weakened.
+    try:
+        import os as _nx_ascii_os
+        if options.get('unicode_ids') is False:
+            _nx_ascii_os.environ['NIXON_ASCII_IDS'] = '1'
+        elif options.get('unicode_ids') is True:
+            _nx_ascii_os.environ.pop('NIXON_ASCII_IDS', None)
+    except Exception:
+        pass
     # Batch-2 MBA levels: validate early so an invalid mba_level raises
     # ValueError instead of being swallowed by the broad except below.
     if options.get('mba_subs') and 'mba_level' in options:

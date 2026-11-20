@@ -360,8 +360,25 @@ def inject_junk_functions(source: str, seed: bytes,
     """
     bodies = []
     digest = hashlib.sha256(seed).digest()
+    # NAMES MUST BE UNIQUE PER BUILD (measured 2026-11-20 on the ubuntu
+    # runner). `rng.choice(_JUNK_NAMES) + _%02x` could draw the SAME name
+    # twice -- only 8 base names, 3 draws -- while each body comes from a
+    # different `_JUNK_BODIES[i]`. Two bodies under one name is a real C
+    # error:
+    #
+    #   payload.c:654:13: error: conflicting types for '_nx_sync_state_ef';
+    #   have 'long int(const char *, int)'
+    #
+    # which gcc 11 treats as fatal. Retry until unique, with a
+    # disambiguating suffix if the pool is exhausted rather than reusing.
+    _used_names = set()
     for i in range(min(count, len(_JUNK_BODIES))):
         name = rng.choice(_JUNK_NAMES) + "_%02x" % digest[i]
+        for _attempt in range(len(_JUNK_NAMES) * 4):
+            if name not in _used_names:
+                break
+            name = "%s_%02x_%d" % (rng.choice(_JUNK_NAMES), digest[i], i)
+        _used_names.add(name)
         body = _JUNK_BODIES[i % len(_JUNK_BODIES)].format(
             name=name,
             seed=int.from_bytes(digest[i * 4:i * 4 + 4], "big"),
