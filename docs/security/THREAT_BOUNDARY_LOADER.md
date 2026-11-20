@@ -231,6 +231,26 @@ not merely `clang-cl`.
 non-zero `GuardCFFunctionCount`; `native_harden.check` already reports
 `partial: []` in that case, so the check is ready and only the CRT is absent.
 
+**Updated 2026-11-20: REAL cl.exe IS NOW DEMONSTRATED.** The CLOUD farm ran
+on `windows-latest` and produced `blob-payload.pyd` with **Microsoft
+`cl.exe` 14.52.37025** (visible in the job log's compile command line). So
+"Microsoft's compiler, not just MSVC-ABI compatibility" is no longer an open
+item — the farm builds with it on every run.
+
+Note what that did and did not settle. It settled:
+  * `native/pe_load_config.c` compiles under real `cl.exe` (it did not before:
+    `_Static_assert` and `__attribute__((used))` are GCC-isms — both are now
+    selected per compiler, and the file compiles with gcc, clang-cl and cl);
+  * the driver no longer passes gcc flags to cl (it detected MSVC by a
+    variable GitHub's image does not set).
+It did NOT settle the **function table**: `cl.exe` still refuses to fill
+`GuardCFFunctionTable` for a caller-defined `_load_config_used`, so the
+measured state remains `GuardFlags = 0x100` with `CF_FUNCTION_TABLE_PRESENT`
+clear, and `native_harden.check` reports `partial: ["cfg_no_function_table"]`.
+The blocker is unchanged and is now precisely attributable: the guard symbols
+(`__guard_fids_table`, `__guard_check_icall_fptr`) are not linked, which is a
+CRT/linker-flag question rather than a missing compiler.
+
 ### 2. Authenticode
 
 **State: IMPLEMENTED, gated on an operator-supplied certificate.**

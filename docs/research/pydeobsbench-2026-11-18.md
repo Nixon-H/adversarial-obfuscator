@@ -2246,3 +2246,99 @@ that is green most of the time is not evidence about a random transform. The
 review called this out as a process issue ("isolated reruns"); here it was
 also a real silent defect that changes program output — the worst class for a
 protection system, because the artefact still runs and still looks fine.
+
+---
+
+## 5x. Farm build on real runners: 3/3 OS blobs, and five defects only a runner could expose
+
+The reviewer's open item was "farm/shard uniformity — needs final multi-runner
+confirmation", and the platform table listed "actual Microsoft cl.exe backend —
+not demonstrated". Both are now closed by running the farm from the current
+tree with the gh token that was already on the host.
+
+**Result: run 44782055753, all three jobs green.**
+
+| job | compiler | artifact |
+|---|---|---|
+| windows-latest | **Microsoft `cl.exe` 14.52.37025** | `blob-payload.pyd`, 161,280 B |
+| ubuntu-22.04 | gcc 11 | `blob-payload.so`, 188,328 B |
+| macos-latest | Apple clang | `blob-payload.dylib`, 386,464 B |
+
+The local artefact embeds all three and runs (`OK verify:14`, rc 0).
+
+### Five defects found, none visible to a local build
+
+1. **`platform=github` without a token shipped a single-OS artefact and
+   reported success.** windows/darwin `NATIVE_BLOBS` were empty and the build
+   ended with "ALL OPERATIONS COMPLETE". Now it refuses (rc 1) and names all
+   three token sources, with `--skip-cloud` as the deliberate local route.
+
+2. **gcc flags were passed to `cl.exe`.** The driver detected MSVC by looking
+   for `VSCMD_ARG_TGT_ARCH`, which GitHub's Windows image does not set, so it
+   took the mingw branch (`cl : D9002: ignoring unknown option
+   '-fstack-protector-strong'`). Detection now reads the CC distutils will
+   actually use, with the env as fallback.
+
+3. **Cython was unpinned.** The runner installed 3.3.1 against the project's
+   3.0.12 lock, and 3.3.1's generated C failed under MSVC with `C2124: divide
+   or mod by zero`. Pinned on all three platforms — which also satisfies the
+   `NIXON_REQUIRE_DEP_LOCK` policy enforced in §5r.
+
+4. **`-pie` on a `-shared` link.** With `-shared` already present, gcc treated
+   the `.so` as an executable-style PIE: `undefined reference to
+   PyException_SetTraceback`. Removed; `-fPIE` stays in the compile flags.
+
+5. **`-fPIE` instead of `-fPIC` for the object.** `relocation R_X86_64_PC32
+   against undefined symbol '_Py_NoneStruct' can not be used when making a
+   shared object; recompile with -fPIC`. The local build already carried the
+   `-fPIC` correction; the farm driver never received it.
+
+### And one defect in the artefact, found by the farm
+
+`--transforms` put 150+ non-ASCII identifiers in the payload. It compiled
+locally (Cython transliterates them to ASCII C symbols) and died on every
+runner:
+
+    UnicodeEncodeError: 'latin-1' codec can't encode characters in
+    position 115899-115905: ordinal not in range(256)
+
+Cython 3.0.12 on Python 3.11 chooses that encoding internally;
+`PYTHONUTF8`/`PYTHONIOENCODING` at the step and in the driver changed nothing.
+Fixed with an `ascii_only` mode on `get_random_var_name`, driven by
+`NIXON_ASCII_IDS` and set from the native option dict (`unicode_ids=False` is
+the signal). Measured: native payloads 0 non-ASCII, pure-Python payloads keep
+their 345. **No protection lost** — Cython was transliterating those
+identifiers into ASCII C symbols anyway, which is why the blob never carried
+them.
+
+### The most important one: an unbound signed artefact was never verified
+
+The farm artefact carried a correct Ed25519 signature (88-char sig, embedded
+key fingerprint) but the **verification check was never emitted**, because
+its placement condition was `if _prov_token_bound`. Measured: running it with
+a deliberately wrong `NIXON_PROVENANCE_PUBKEY` still printed `OK verify:14`
+and exited 0, and `tamper + BOTH stamps` ran.
+
+Fixed: the check is emitted for every signed build (after the verifier for
+the unbound case, after `_nx_licence_key` for the token-derived case).
+Re-measured on a fresh artefact — **all six attack-chain routes now die on the
+provenance signature**, including `tamper + BOTH stamps`, the route that
+defeated §1 before signing existed:
+
+| route | result | layer |
+|---|---|---|
+| bypass + tamper | rc 137 | provenance signature |
+| restamp (no edit) | rc 137 | provenance signature |
+| tamper + restamp CK | rc 137 | provenance signature |
+| tamper + BOTH stamps | rc 137 | provenance signature |
+| re-sign, attacker key | rc 137 | provenance signature |
+| CFI removed + rechain | rc 137 | provenance signature |
+
+### Honest limits
+
+The unbound check verifies against the **embedded** key, so it detects
+tampering but not a re-sign whose new key is also written into the slot — that
+needs the token-derived variant plus the out-of-band pin, unchanged from
+`THREAT_BOUNDARY_LOADER.md`. `runner_attest.verify` (controller-side check of
+the runner's own attestation against the pre-upload digest) is implemented and
+unit-tested but was not re-run against these three artefacts in this pass.

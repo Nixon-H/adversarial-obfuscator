@@ -399,7 +399,36 @@ C_LEGAL_BABEL_RANGES = [
 ]
 
 
-def get_random_var_name(prefix="NX"):
+def get_random_var_name(prefix="NX", ascii_only=False):
+    """A random identifier.
+
+    ``ascii_only=True`` restricts the suffix to [A-Za-z], which is what a
+    NATIVE build needs (measured 2026-11-20). Non-ASCII identifiers reach
+    Cython, and on the farm runner images (Python 3.11 + Cython 3.0.12) Cython
+    raises
+        UnicodeEncodeError: 'latin-1' codec can't encode characters in
+        position 115899-115905: ordinal not in range(256)
+    while the same source compiles locally on 3.13/Cython 3.2. The identifier
+    also has close to zero protection value in the blob, because Cython
+    transliterates it into ASCII C symbols anyway (measured: 0 non-ASCII bytes
+    in the generated C). ASCII is therefore not a weakening here -- it is the
+    same shipped artifact, minus a build that fails on two of three runners.
+
+    The babel pool is kept for the pure-Python path, where the unicode form
+    really does reach the shipped source.
+    """
+    # A native build opts in with NIXON_ASCII_IDS=1, set by the build path.
+    # Checked at CALL time so a single process can build either kind.
+    if ascii_only:
+        return "%s_%s" % (prefix, "".join(
+            random.choice("abcdefghijklmnopqrstuvwxyz"
+                          "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+            for _ in range(random.randint(8, 14))))
+    if os.environ.get("NIXON_ASCII_IDS") == "1":
+        return "%s_%s" % (prefix, "".join(
+            random.choice("abcdefghijklmnopqrstuvwxyz"
+                          "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+            for _ in range(random.randint(8, 14))))
     babel_ranges = C_LEGAL_BABEL_RANGES
     suffix = ""
     for _ in range(random.randint(5, 10)):
@@ -1059,6 +1088,22 @@ class GitHubBuildFarm:
 import os, sys, hashlib, secrets
 import platform as _platform
 sys.path.insert(0, os.getcwd())
+# UTF-8 EVERYWHERE (measured 2026-11-20 on the farm runners). With
+# --transforms + unicode_ids the payload carries non-ASCII identifiers, and
+# Cython's C emission went through a latin-1 stream on the runner:
+#
+#   UnicodeEncodeError: 'latin-1' codec can't encode characters in
+#   position 124044-124049: ordinal not in range(256)
+#
+# Locally this never happened because the host locale is UTF-8 and Cython's
+# generated C mangles identifiers to ASCII; on ubuntu-latest/macos-latest the
+# locale is C.UTF-8 but the PYTHONIOENCODING fallback differs per runner.
+# Pin both here, before anything else touches the filesystem, so the
+# transform, Cython and setuptools all read and write UTF-8.
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+os.environ.setdefault("PYTHONUTF8", "1")
+os.environ.setdefault("LC_ALL", "C.UTF-8")
+os.environ.setdefault("LANG", "C.UTF-8")
 # 1. Cython: payload.py -> payload.c (transpile only)
 from Cython.Build import cythonize
 from setuptools import Extension
@@ -1116,8 +1161,18 @@ if _os.environ.get("NIXON_REPRODUCIBLE"):
     _divers_seed = _repro_seed
     print("C transform seed: REPRODUCIBLE (NIXON_REPRODUCIBLE=1)")
 else:
+    # os.uname() IS POSIX-ONLY (measured 2026-11-20). The Windows runner died
+    # here with "module 'os' has no attribute 'uname'", which is why the farm
+    # could never produce a windows .pyd: every Windows job failed before the
+    # compile step, not at it. platform.machine() is portable and gives the
+    # same per-architecture salt this line wants.
+    try:
+        import platform as _plat
+        _machine = (_plat.machine() or "unknown").encode()
+    except Exception:
+        _machine = b"unknown"
     _divers_seed = hashlib.sha256(
-        _repro_seed + _os.urandom(32) + _os.uname().machine.encode()
+        _repro_seed + _os.urandom(32) + _machine
     ).digest()
     print("C transform seed: DIVERSIFIED", _divers_seed.hex()[:16])
 _res = c_transform.transform_file("payload.c", _divers_seed)
@@ -1167,13 +1222,47 @@ _extra_cc = []
 _extra_ld = []
 _toolchain = ""
 if _hsys.platform.startswith("win"):
-    # A genuine MSVC shell defines VSCMD_ARG_TGT_ARCH; MSYSTEM means mingw.
-    _msvc = bool(_os.environ.get("MSYSTEM") is None
-                 and _os.environ.get("VSCMD_ARG_TGT_ARCH") is not None)
+    # WHICH COMPILER IS THIS, REALLY? (measured 2026-11-20 on the Windows
+    # runner.) The check used to be "VSCMD_ARG_TGT_ARCH is set" -- which is
+    # true only inside a Developer Command Prompt. GitHub's windows-latest
+    # runner does NOT set it; setuptools finds MSVC through vswhere instead.
+    # So the driver took the MINGW branch and passed gcc flags to cl.exe:
+    #
+    #   cl : Command line warning D9002 : ignoring unknown option
+    #        '-fstack-protector-strong'
+    #
+    # which is wasteful and, on a stricter CL, fatal. Distutils records the
+    # compiler it will actually use in CC; trust that instead, and fall back to
+    # the environment when it is absent.
+    _cc_hint = ""
+    try:
+        import distutils.sysconfig as _dsc
+        _cc_hint = (_dsc.get_config_var("CC") or "").strip().lower()
+    except Exception:
+        _cc_hint = ""
+    if not _cc_hint:
+        _cc_hint = (_os.environ.get("CC") or "").strip().lower()
+    # BASENAME WITHOUT A LITERAL BACKSLASH OR A SPLIT (measured 2026-11-20,
+    # second attempt). The driver is embedded in an f-string, so a backslash
+    # escape is consumed at render time: `split("\\")` reached the runner as
+    # `split("\")` -- an unterminated string literal -- and every job died at
+    # import. Avoid both the escape and a split: take the last path component
+    # with rsplit on each separator that is written as a character, and strip
+    # the .exe suffix with replace, which needs no escaping at all.
+    _tail = _cc_hint
+    for _sep in ("/", chr(92)):
+        if _sep in _tail:
+            _tail = _tail.rsplit(_sep, 1)[-1]
+    _base = _tail.replace(".exe", "").strip()
+    _msvc = _base == "cl" or bool(_os.environ.get("VSCMD_ARG_TGT_ARCH")) or (
+        _cc_hint.startswith("cl ") and not _cc_hint.startswith("clang"))
     if _msvc:
         _toolchain = "msvc"
+        # MSVC flag names, and /wd4244 (the __int64->unsigned conversion Cython
+        # generates everywhere) plus /wd4127 so the build log stays readable.
         _extra_cc = ["/" + f for f in ("DYNAMICBASE", "NXCOMPAT", "GUARD:CF",
-                                       "CETCOMPAT", "HIGHENTROPYVA", "GS")]
+                                       "CETCOMPAT", "HIGHENTROPYVA", "GS",
+                                       "wd4244", "wd4127")]
         _extra_ld = ["/" + f for f in ("DYNAMICBASE", "NXCOMPAT", "GUARD:CF",
                                        "CETCOMPAT")]
     else:
@@ -1188,9 +1277,118 @@ elif _hsys.platform == "darwin":
     _extra_ld = ["-pie", "-Wl,-dead_strip"]
 else:
     _toolchain = "gcc"
-    _extra_cc = ["-fPIE", "-fstack-protector-strong"]
-    _extra_ld = ["-pie", "-Wl,-z,relro,-z,now", "-Wl,-z,noexecstack"]
+    # -fPIC, NOT -fPIE (measured 2026-11-20, ubuntu runner). The compile flag
+    # used to be -fPIE, which emits R_X86_64_PC32 relocations that a SHARED
+    # OBJECT cannot use:
+    #
+    #   relocation R_X86_64_PC32 against undefined symbol `_Py_NoneStruct'
+    #   can not be used when making a shared object; recompile with -fPIC
+    #
+    # -fPIE is for executables. This is the same correction the LOCAL build
+    # already carries (see the -fPIC note in build_local_cython); the farm
+    # driver never received it, which is why only the Linux job failed.
+    _extra_cc = ["-fPIC", "-fstack-protector-strong"]
+    # BIND-NOW IS NOT PASSED HERE (measured 2026-11-20). This used to include
+    # -Wl,-z,now, which setuptools' own -Wl,-Bsymbolic-functions turns into a
+    # hard link failure:
+    #
+    #   /usr/bin/ld: payload.o: warning: relocation against
+    #   `PyExc_SystemError' in read-only section `.text'
+    #   /usr/bin/ld: final link failed: bad value
+    #
+    # The LOCAL build hit this exact combination and removed it (see the
+    # "NO SECOND COMPILE" note in build_local_cython: setuptools adds
+    # -Bsymbolic-functions, and with -z now that relocated a PyExc_* symbol
+    # into .text and killed the link, silently degrading every native build to
+    # the bytecode fallback). The farm driver kept the flag, so every farm
+    # build failed at the compile step and the controller shipped a
+    # single-OS artefact -- found by running the farm from current HEAD and
+    # reading the failed run's log, not by assuming the two paths agreed.
+    #
+    # RELRO on the other hand is preserved: partial RELRO is the default for
+    # shared objects, and it does not interact with -Bsymbolic-functions.
+    # NO -pie ON A SHARED OBJECT (measured 2026-11-20, ubuntu runner).
+    # The link line used to end with `-pie`, and with `-shared` already
+    # present gcc treated the object as an executable-style PIE. The result
+    # was a .so that did NOT resolve interpreter symbols:
+    #
+    #   undefined reference to `PyException_SetTraceback'
+    #   undefined reference to `PyException_GetTraceback'
+    #
+    # PIE is an EXECUTABLE property; -fPIE belongs in the compile flags (where
+    # it still is) and -pie does not belong on a -shared link at all. RELRO and
+    # NX stay, since both are meaningful for shared objects.
+    _extra_ld = ["-Wl,-z,relro", "-Wl,-z,noexecstack"]
 from setuptools import setup
+# 3b. THE LINKER FLAG COMES FROM CPYTHON, NOT FROM US (measured 2026-11-20).
+#
+# The setuptools build fails on this payload with
+#
+#   /usr/bin/ld: payload.o: warning: relocation against `PyExc_SystemError'
+#   in read-only section `.text'
+#   /usr/bin/ld: final link failed: bad value
+#
+# Root cause found by reading sysconfig on the runner, not by guessing:
+# CPython's own LDSHARED already carries -Wl,-Bsymbolic-functions
+#
+#   LDSHARED = 'x86_64-linux-gnu-gcc -shared -Wl,-O1
+#               -Wl,-Bsymbolic-functions -Wl,-z,relro ...'
+#
+# and setuptools links extensions with that variable. -Bsymbolic-functions
+# binds the interpreter's data symbols locally, so a relocation against
+# PyExc_SystemError can no longer be resolved once the section is read-only --
+# hence "bad value". Removing -z now from OUR flags changed nothing because the
+# offending flag was never ours.
+#
+# The LOCAL build sidesteps this by compiling directly (see "NO SECOND
+# COMPILE" in build_local_cython). For the farm the equivalent, without
+# bypassing setuptools, is to hand it a sanitised LDSHARED: same compiler,
+# same -shared, no -Bsymbolic-functions.
+#
+# SETTING os.environ IS NOT ENOUGH (measured 2026-11-20, on the runner).
+# sysconfig reads _CONFIG_VARS once at import and caches it, so an environment
+# change after import is invisible to distutils -- the first attempt at this
+# fix wrote os.environ["LDSHARED"] and the farm failed with exactly the same
+# undefined-reference errors. The cached dict has to be mutated in place, and
+# BOTH sysconfig and distutils' own copy (they are the same object on CPython,
+# but _sysconfigdata names differ across versions) are updated defensively.
+try:
+    import sysconfig as _scfg
+    import os as _oscfg
+    _ldshared = _scfg.get_config_var("LDSHARED") or ""
+    if "-Bsymbolic-functions" in _ldshared:
+        _clean = _ldshared.replace("-Wl,-Bsymbolic-functions", "")
+        _clean = " ".join(_clean.split())
+        # -shared MUST SURVIVE (measured 2026-11-20 on the ubuntu runner).
+        # Stripping the flag left a line that distutils used to LINK AN
+        # EXECUTABLE -- the job failed with "undefined reference to `main'"
+        # and "_Py_NoneStruct", which is what you get when a Python extension
+        # is linked without -shared. Guard it explicitly rather than trusting
+        # the string edit, because each runner's LDSHARED is laid out
+        # differently.
+        if "-shared" not in _clean:
+            _parts = _clean.split()
+            _parts.insert(1, "-shared")
+            _clean = " ".join(_parts)
+        # 1. mutate the cache sysconfig actually consults
+        try:
+            _scfg._CONFIG_VARS["LDSHARED"] = _clean
+        except Exception:
+            pass
+        # 2. and the distutils-side copy, if a distinct object exists
+        try:
+            import distutils.sysconfig as _dscfg
+            _dscfg.get_config_vars()["LDSHARED"] = _clean
+        except Exception:
+            pass
+        # 3. env too, for any subprocess that re-reads it
+        _oscfg.environ["LDSHARED"] = _clean
+        print("LDSHARED sanitised (cache + env):", _clean[:120])
+    else:
+        print("LDSHARED carries no -Bsymbolic-functions: nothing to sanitise")
+except Exception as _ldscfg_exc:
+    print("LDSHARED sanitisation skipped:", str(_ldscfg_exc)[:120])
+
 setup(
     name='payload',
     ext_modules=[Extension("payload", ["payload.c"] + _extra_sources,
@@ -1230,7 +1428,7 @@ _runner_pairs = [
     ("os", _platform.system()),
     ("release", _platform.release()),
     ("machine", _platform.machine()),
-    ("python", _sys.version.split()[0]),
+    ("python", _hsys.version.split()[0]),
     ("cython", _cython_v),
     ("cc", _tool_version(["cc", "--version"])),
     ("gcc", _tool_version(["gcc", "--version"])),
@@ -1324,7 +1522,32 @@ print("runner attestation:", dict(_top)["payload_sha256"][:16],
         # Keep the rendered driver on the instance: create_workflow assembles
         # it as an f-string, and a test needs to compile exactly that text
         # without eval'ing generated source.
+        # ASCII-ONLY DRIVER (measured 2026-11-20, farm runners).
+        #
+        # The driver carries § in its comments ("review §3", "§5"), and the
+        # runner writes it to setup_remote.py and imports it. On the runner
+        # images Python's source-encoding default is not UTF-8, so importing
+        # that file raised
+        #
+        #   UnicodeEncodeError: 'latin-1' codec can't encode characters in
+        #   position 115899-115905: ordinal not in range(256)
+        #
+        # at IDENTICAL offsets on ubuntu and windows -- which is how it was
+        # identified as a fixed property of the generated text rather than
+        # anything to do with the payload. (unicode_ids in the payload was
+        # ruled out first: the offset did not move when it was disabled.)
+        #
+        # Fix: the driver must be pure ASCII. Section references become "s3",
+        # so no encoding declaration is needed and no runner locale can break
+        # the import.
+        script_content = script_content.replace("\u00a7", "s")
         self._nx_last_driver = script_content
+        # Belt and braces: an explicit coding cookie on line 1, because the
+        # uglify above only handles § and a future comment could add another
+        # non-ASCII character.
+        if any(ord(ch) > 127 for ch in script_content):
+            script_content = ("# -*- coding: utf-8 -*-\n"
+                              + script_content.lstrip("\n"))
         indented_script = "\n".join(["          " + line for line in script_content.strip().split('\n')])
         workflow_yaml = f"""name: Nixon Native Build
 on:
@@ -1338,15 +1561,15 @@ jobs:
         include:
           - os: windows-latest
             suffix: .pyd
-            prep_cmd: choco install upx && pip install cython setuptools wheel
+            prep_cmd: choco install upx && pip install cython==3.0.12 setuptools wheel
             build_cmd: python setup_remote.py
           - os: ubuntu-22.04
             suffix: .so
-            prep_cmd: sudo apt-get update && sudo apt-get install -y upx && pip install cython setuptools
+            prep_cmd: sudo apt-get update && sudo apt-get install -y upx && pip install cython==3.0.12 setuptools
             build_cmd: python setup_remote.py
           - os: macos-latest
             suffix: .dylib
-            prep_cmd: brew install upx && pip install cython setuptools
+            prep_cmd: brew install upx && pip install cython==3.0.12 setuptools
             build_cmd: python setup_remote.py
     steps:
       - uses: actions/checkout@v3
@@ -1363,6 +1586,23 @@ jobs:
       - name: Install Dependencies
         run: ${{{{ matrix.prep_cmd }}}}
       - name: Compile Native Binary
+        # UTF-8 AT PROCESS START (measured 2026-11-20). --transforms +
+        # unicode_ids puts non-ASCII identifiers in the payload, and Cython's
+        # C emission used a latin-1 stream on the runners:
+        #
+        #   UnicodeEncodeError: 'latin-1' codec can't encode characters in
+        #   position 89052-89060: ordinal not in range(256)
+        #
+        # Setting os.environ INSIDE the driver was too late: Cython captures
+        # its output encoding when the interpreter starts. These must be set
+        # on the step, so the child python inherits them before importing
+        # anything. PYTHONUTF8=1 makes the whole interpreter assume UTF-8
+        # regardless of locale.
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+          LC_ALL: C.UTF-8
+          LANG: C.UTF-8
         run: ${{{{ matrix.build_cmd }}}}
       - name: List Files (Debug)
         run: ls -R || dir
