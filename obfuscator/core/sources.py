@@ -2892,7 +2892,18 @@ class {GEOFENCE_CLS}:
     def {METHOD_CHECK_ALLOWED}(self):
         location = self.{METHOD_GET_LOCATION}()
         if not location:
-            return False
+            # LOCATION UNKNOWN IS NOT LOCATION BLOCKED. A block-list gate
+            # (block-countries only) cannot evaluate offline: the lookup
+            # needs three external services, and any sandbox, air-gapped
+            # deployment or DNS hiccup leaves location None. Failing closed
+            # here killed every offline customer -- measured 2026-11-20: a
+            # NON-blocked host with block-countries=RU,KP died rc 137 with
+            # no message, because no lookup service was reachable. A block
+            # list refuses only on positive evidence (a known country on
+            # the list). Allow-lists keep the fail-closed reading: an
+            # operator who says "only these countries" is not satisfied by
+            # an unknown one.
+            return not (self._allowed_countries or self._allowed_regions)
         if (self._blocked_countries
                 and location.get('country') in self._blocked_countries):
             return False

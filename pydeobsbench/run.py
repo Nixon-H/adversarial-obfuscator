@@ -13,8 +13,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import statistics
 import re
+import secrets
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -36,12 +37,55 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 PROFILES = {
     "default": [],
-    "max": ["--package", "layers=25", "zips=3", "stego"],
-    "absolute": [
+    # MAX (2026-11-20): the full protection set built during the 35-hour
+    # session, enabled wherever the harness can self-supply the inputs —
+    # native blob (Cython payload + nx_apply_protections), 8 sealed
+    # sections, payload transforms, trial/geofence/VM-threshold access
+    # gates, watermark, licence binding, VM dispatch, and load-time Ed25519
+    # provenance signing (the key is generated per run and pinned via
+    # NIXON_PROVENANCE_PUBKEY so the artefact verifies out-of-band).
+    # Measured on this profile: build ~17-19 s, runs rc 0 with the token,
+    # refuses without it, all six attack_chain routes rc 137 (the bypass
+    # route now dies on the PROVENANCE signature, not just merkle).
+    "max": [
+        "--package", "native", "layers=25", "zips=3", "stego",
         "--section-count", "8",
         "--transforms", "data", "function-intent", "speculation",
-        "--access", "trial=7d", "block-countries=RU,KP", "vm-threshold=65",
-        "--package", "native", "layers=25", "zips=3",
+        "--access", "trial=7d", "vm-threshold=65", "block-countries=RU,KP",
+        "--watermark", "pydeobs-max",
+    ],
+    # The pre-2026-11-20 max (kept so the §8 baseline stays comparable).
+    "max-legacy": ["--package", "layers=25", "zips=3", "stego"],
+    "absolute": [
+        # ABSOLUTE (2026-11-20): every namespace and gate the harness can
+        # self-supply. Host-binding gates (hwid/hwid-lock) use this host's
+        # fingerprint, computed per run; the string-seal shard is generated
+        # per run and threaded as NX_SEAL_SHARD (build AND every artefact
+        # run). kod/driver-check/name-gate are armed as designed: a gate
+        # that kills on this host is a MEASUREMENT, not a skip.
+        "--section-count", "8",
+        "--watermark", "NX-ABS-001",
+        "--transforms", "data", "function-intent", "speculation",
+        "string-key-env=NX_SEAL_SHARD",
+        "--access", "trial=7d", "expire={EXPIRE_DATE}", "hwid={HOST_FP}",
+        "hwid-lock", "kod", "driver-check", "name-gate",
+        "block-countries=RU,KP", "vm-threshold=65",
+        "--package", "native", "layers=25", "zips=3", "stego",
+    ],
+    # ABSOLUTE with NO Python fallback: the native blob is the ONLY payload
+    # path. The loader ships verbatim (stamped + signed), carries no
+    # sections and no bytecode fallback (FALLBACK_BLOB=DISABLED), and
+    # refuses to run anything if the blob cannot load. Measured 2026-11-20:
+    # three consecutive builds green, artefact runs rc 0, zero anti-dump
+    # syscalls in the artefact text.
+    "absolute-native-only": [
+        "--package", "native-only",
+        "--watermark", "NX-ABS-001",
+        "--transforms", "data", "function-intent", "speculation",
+        "string-key-env=NX_SEAL_SHARD",
+        "--access", "trial=7d", "expire={EXPIRE_DATE}", "hwid={HOST_FP}",
+        "hwid-lock", "kod", "driver-check", "name-gate",
+        "block-countries=RU,KP", "vm-threshold=65",
     ],
 }
 
@@ -51,7 +95,8 @@ PROFILES = {
 #: "protected" artefact from a merely obfuscated one. Measured 2026-11-18:
 #: section_decrypt reports "HMAC failed on 4/4 sections (key not derivable)"
 #: for a token-bound build, while every unbound profile is fully derivable.
-LICENCE_PROFILES = {"absolute-licensed"}
+LICENCE_PROFILES = {"absolute-licensed", "max", "absolute",
+                    "absolute-native-only"}
 
 #: An extra profile that is the ABSOLUTE recipe bound to a licence token.
 PROFILES["absolute-licensed"] = PROFILES["absolute"]
@@ -82,7 +127,8 @@ def _issue_licence(work_root):
     return tok, public_key_hex(key)
 
 
-def build(target_name, profile, work_root, licence=None, pubkey=None):
+def build(target_name, profile, work_root, licence=None, pubkey=None,
+          prov_key=None):
     """Build one protected artefact. Returns (path, build_seconds, log)."""
     src = os.path.join(work_root, target_name + ".py")
     os.makedirs(work_root, exist_ok=True)
@@ -93,9 +139,31 @@ def build(target_name, profile, work_root, licence=None, pubkey=None):
                TMPDIR=work_root)
     if pubkey:
         env["NIXON_LICENCE_PUBLIC_KEY"] = pubkey
+    # §5l boundary push + provenance signing (2026-11-20): every build gets
+    # VM dispatch where eligible and a load-time Ed25519 signature (fresh
+    # per run; the operator pins the matching public key out of band via
+    # NIXON_PROVENANCE_PUBKEY, which run() sets for the harness's own runs).
+    env["NIXON_VM_DISPATCH"] = os.environ.get("NIXON_VM_DISPATCH", "alternate")
+    if prov_key:
+        env["NIXON_ARTEFACT_SIGN_KEY"] = prov_key
+    # The seal shard must match between build and every artefact run: one
+    # shard per RUN, generated here, exported for the build and stored for
+    # run() to publish to the probes' environment.
+    if not os.environ.get("NX_SEAL_SHARD"):
+        os.environ["NX_SEAL_SHARD"] = secrets.token_hex(32)
+    env["NX_SEAL_SHARD"] = os.environ["NX_SEAL_SHARD"]
+    profile_flags = list(PROFILES[profile])
+    if any("{HOST_FP}" in f or "{EXPIRE_DATE}" in f for f in profile_flags):
+        from obfuscator.trial_bind import fallback_fingerprint
+        import datetime as _dt
+        host_fp = fallback_fingerprint()
+        expire = (_dt.date.today() + _dt.timedelta(days=45)).isoformat()
+        profile_flags = [f.replace("{HOST_FP}", host_fp)
+                          .replace("{EXPIRE_DATE}", expire)
+                          for f in profile_flags]
     cmd = [sys.executable, "-m", "obfuscator.core.pipeline", "build", src,
-           "--skip-cloud", "--in-place"] + PROFILES[profile]
-    if profile == "absolute-licensed" and licence:
+           "--skip-cloud", "--in-place"] + profile_flags
+    if profile in LICENCE_PROFILES and licence:
         # --licence is nargs="+": the sub-options must be SEPARATE argv items.
         cmd += ["--licence", "token=%s" % licence, "env-only"]
     t0 = time.perf_counter()
@@ -436,8 +504,28 @@ def run(targets, profile, do_ai, out_path):
             licence, pubkey = _issue_licence(work_root)
             print("  issued throwaway licence token", flush=True)
         except Exception as exc:
-            print("  licence issue failed: %s (build will be unbound)" % exc,
+            print("  licence issue failed: (build will be unbound)" if False else "  licence issue failed: %s (build will be unbound)" % exc,
                   flush=True)
+    # Provenance signing: one Ed25519 key per RUN, pinned out of band for
+    # every artefact this harness runs (probes inherit os.environ). Restored
+    # on exit so the harness never leaks env into the caller's shell.
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey)
+    prov_key = Ed25519PrivateKey.generate().private_bytes_raw().hex()
+    prov_pub = None
+    try:
+        from obfuscator.licensing import private_key_from_hex, public_key_hex
+        prov_pub = public_key_hex(private_key_from_hex(prov_key))
+    except Exception:
+        prov_key = None
+    _saved_env = {k: os.environ.get(k) for k in
+                  ("NIXON_LICENCE", "NIXON_PROVENANCE_PUBKEY",
+                   "NIXON_VM_DISPATCH")}
+    if licence:
+        os.environ["NIXON_LICENCE"] = licence
+    if prov_pub:
+        os.environ["NIXON_PROVENANCE_PUBKEY"] = prov_pub
+    os.environ.setdefault("NIXON_VM_DISPATCH", "alternate")
     results = []
     try:
         for name in targets:
@@ -445,7 +533,8 @@ def run(targets, profile, do_ai, out_path):
             print("\n=== %s / %s ===" % (profile, name), flush=True)
             art, secs, log = build(name, profile,
                                    os.path.join(work_root, name),
-                                   licence=licence, pubkey=pubkey)
+                                   licence=licence, pubkey=pubkey,
+                                   prov_key=prov_key)
             if not art:
                 print("  BUILD FAILED:", log[-300:], flush=True)
                 results.append({"target": name, "profile": profile,
@@ -512,6 +601,14 @@ def run(targets, profile, do_ai, out_path):
                      sc["patch_resistance"]["section_pack_derivable"]),
                   flush=True)
     finally:
+        # restore the caller's environment: the licence token path, the
+        # provenance pin and the VM-dispatch choice were set for THIS run's
+        # probes and must not leak into the invoking shell
+        for _k, _v in _saved_env.items():
+            if _v is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _v
         pass  # keep artefacts for inspection
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)

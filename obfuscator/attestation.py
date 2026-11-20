@@ -308,7 +308,18 @@ try:
         # only correct anchor until the token schema carries a public key.
         _nx_prov_expected = None
     if _nx_prov_expected is not None:
-        _nx_prov_pk_b = _nx_prov_b64.b64decode({pk})
+        # PARSE THE PREFIX like the main check does. The build prefixes the
+        # slot with "<sha256[:16]>: " (the key fingerprint, the fourth
+        # coordinated edit of the double-stamp fix); decoding the raw slot
+        # here without stripping that prefix produced 44 bytes and made every
+        # pinned, licence-bound artefact die with "embedded key does not
+        # match the token's key" -- measured 2026-11-20 on the full-max
+        # build.
+        _nx_prov_pk_s = {pk}
+        _nx_prov_sep = _nx_prov_pk_s.find(": ")
+        _nx_prov_pk_b = _nx_prov_b64.b64decode(
+            _nx_prov_pk_s[_nx_prov_sep + 2:] if _nx_prov_sep == 16
+            else _nx_prov_pk_s)
         if _nx_prov_pk_b != _nx_prov_expected:
             {fail}("provenance: embedded key does not match the token's key")
 except SystemExit:

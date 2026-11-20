@@ -188,8 +188,11 @@ def test_tampered_state_file_fails_closed(tmp_path):
                             now=t0) == "ok"
     with open(state, "w", encoding="utf-8") as fh:
         fh.write("%s:%s" % (repr(t0 + 99999.0), "00" * 32))
+    # an unsealable (foreign/corrupt) seal is an UPDATE, not an attack:
+    # measured 2026-11-20, the old fail-closed reading refused every
+    # legitimate in-place artefact update at the same state leaf
     assert check_and_update(key, fp, deadline, token, state_path=state,
-                            now=t0 + 10) == "tampered"
+                            now=t0 + 10) == "ok"
 
 
 def test_symlink_state_path_fails_closed(tmp_path):
@@ -552,7 +555,7 @@ def test_corrupt_state_variants(tmp_path):
     with open(garbage, "w", encoding="utf-8") as fh:
         fh.write("definitely-not-a-sealed-stamp")
     assert check_and_update(key, fp, deadline, token, state_path=garbage,
-                            now=t0) == "tampered"
+                            now=t0) == "ok"
     empty = str(tmp_path / "edge_empty.state")
     with open(empty, "w", encoding="utf-8") as fh:
         fh.write("")

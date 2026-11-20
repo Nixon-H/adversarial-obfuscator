@@ -1,5 +1,5 @@
 import sys, os, zipfile, base64, io, shutil, tempfile, random, hashlib, lzma, struct, time, json, argparse, uuid, re, inspect, platform, subprocess, marshal, hmac, secrets, ctypes, importlib.util, atexit, warnings, zlib, codecs, string, builtins, math, dis, multiprocessing, types, traceback, gc, ast, socket, threading, concurrent.futures, logging  # noqa: F401 (this line binds a name used by an embedded template)
-from .utils import get_random_var_name
+from .utils import get_random_var_name, C_LEGAL_BABEL_RANGES
 
 
 def _new_rename_key():
@@ -988,24 +988,14 @@ class StringLiteralObfuscator(ast.NodeTransformer):
             except Exception: pass
         return '\n'.join(lines)
 class BuiltinAliaser(ast.NodeTransformer):
-    BABEL_RANGES = [
-        (0x0100, 0x017F),
-        (0x0180, 0x024F),
-        (0x0250, 0x02AF),
-        (0x0370, 0x03FF),
-        (0x0400, 0x04FF),
-        (0x0530, 0x058F),
-        (0x05D0, 0x05EA),
-        (0x0600, 0x06FF),
-        (0x0900, 0x097F),
-        (0x0980, 0x09FF),
-        (0x0E00, 0x0E7F),
-        (0x10A0, 0x10FF),
-        (0x13A0, 0x13F4),
-        (0x16A0, 0x16EA),
-        (0x3040, 0x309F),
-        (0x4E00, 0x9FFF),
-    ]
+    # MEASURED C-LEGAL POOL (2026-11-20), shared with
+    # utils.C_LEGAL_BABEL_RANGES: these identifiers are compiled into the
+    # Cython blob, and clang rejects many XID characters inside C
+    # identifiers -- "character <U+XXXX> not allowed in an identifier" --
+    # which made the blob build FLAKY: a random draw with an illegal
+    # character failed the whole native build, a legal one compiled. See
+    # the constant's comment in core/utils.py for the measurement.
+    BABEL_RANGES = C_LEGAL_BABEL_RANGES
     BUILTINS_TO_ALIAS = [
         'print', 'str', 'int', 'float', 'bool', 'list', 'dict', 'set', 'tuple',
         'len', 'range', 'enumerate', 'zip', 'map', 'filter', 'sorted', 'reversed',

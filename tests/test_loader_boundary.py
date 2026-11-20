@@ -276,6 +276,53 @@ def test_the_reference_verifier_agrees_with_cryptography():
     assert reference.verify(public, signature[:-1], message) is False
 
 
+def test_the_build_fingerprint_prefix_parses_in_the_loader():
+    """The build writes '<fp>: <b64>'; the loader must parse it back.
+
+    Measured defect (2026-11-20, full-max build): the build appended the
+    fingerprint as '<fp>:' with NO space, the loader's find(': ') returned
+    -1, the whole 62-character slot was b64-decoded into 44 bytes, and every
+    signed artefact died at load with 'provenance: signature does not
+    verify'. The end-to-end chain (sign -> fingerprint -> ship -> load) had
+    never been run as a whole -- the verifier tests above each passed in
+    isolation. This pins the format both sides agree on, using the loader's
+    own parse.
+    """
+    import base64
+    import hashlib
+    import re
+
+    pytest.importorskip("cryptography")
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey)
+
+    from obfuscator import attestation as A
+
+    key = Ed25519PrivateKey.generate()
+    template = '_NX_PROV_SIG = ""\n_NX_PROV_PK = ""\nprint("x")\n'
+    stamped = A.stamp_artefact(template, key)
+    pk_raw = key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw)
+    fp = hashlib.sha256(pk_raw).hexdigest()[:16]
+    # exactly the edit the build makes (pipeline provenance block)
+    candidate = stamped.replace(
+        '_NX_PROV_PK = "', '_NX_PROV_PK = "' + fp + ": ", 1)
+    pk_s = re.search(r'^_NX_PROV_PK = "([^"]*)"', candidate, re.M).group(1)
+    sep = pk_s.find(": ")
+    assert sep == 16, (
+        "the loader requires the fingerprint separator ': ' at index 16; "
+        "the build must write '<fp>: <b64>' -- measured defect: writing "
+        "'<fp>:' made find(': ') return -1 and every signed artefact "
+        "refused to run")
+    pk_b = base64.b64decode(pk_s[sep + 2:])
+    assert len(pk_b) == 32, "the parsed key must be a raw Ed25519 public key"
+    assert hashlib.sha256(pk_b).hexdigest()[:16] == pk_s[:sep], (
+        "the fingerprint prefix must be sha256(raw key)[:16] -- the loader "
+        "recomputes this check at load")
+
+
 def test_the_inline_verifier_matches_the_reference():
     """The copy that SHIPS is the one that must be tested.
 
