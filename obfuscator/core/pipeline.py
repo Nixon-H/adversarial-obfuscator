@@ -4729,8 +4729,27 @@ def build_project(args):
                 _gh_token = ConfigManager().get("github_token") or \
                     os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
                 if not _gh_token:
-                    UI.warn("platform=github but no GitHub token: other OSes "
-                            "fall back to bytecode (local blob still embedded)")
+                    # FAIL LOUDLY (measured 2026-11-20). This used to be a
+                    # single UI.warn, and in practice the operator saw
+                    # "ALL OPERATIONS COMPLETE" with windows and darwin
+                    # blobs EMPTY -- the warning was lost in the progress
+                    # output, so a `--package native platform=github` build
+                    # read as a successful 3-OS build while containing one
+                    # OS. That is the same false-confidence class as the
+                    # benchmark defects: a build that cannot do what it was
+                    # asked must fail, not degrade quietly.
+                    #
+                    # The operator asked for github explicitly, so degrading
+                    # to local-only without consent is a misrepresentation of
+                    # the artefact. `--skip-cloud` remains the deliberate
+                    # local path.
+                    raise SystemExit(
+                        "platform=github was requested but no GitHub token is "
+                        "available (checked ConfigManager 'github_token', "
+                        "GITHUB_TOKEN, GH_TOKEN). The farm builds the windows "
+                        "and darwin blobs; without it this artefact would be "
+                        "single-OS. Either provide a token, or pass "
+                        "--skip-cloud to build locally on purpose.")
                 else:
                     try:
                         _farm = _make_farm(args, _gh_token)

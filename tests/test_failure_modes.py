@@ -399,3 +399,36 @@ def test_failed_native_import_has_no_python_path_left():
         "NIXON_VERIFY_SKIP_VERSION_CHECK"), (
         "the compiled-shut guard must precede the environment read, or an "
         "env pair would still open the gate")
+
+
+# --- platform=github without a token must FAIL, not degrade ----------------
+
+def test_platform_github_without_a_token_refuses_to_build():
+    """Measured 2026-11-20: this used to print ONE warning and ship a
+    single-OS artefact under a "platform=github" request, ending with
+    "ALL OPERATIONS COMPLETE". The windows and darwin blobs were empty and the
+    warning was lost in the progress output, so the operator had every reason
+    to believe they held a 3-OS build.
+
+    A build that cannot do what it was asked must fail. This pins the refusal
+    in source: the branch must raise, and the deliberate local path
+    (--skip-cloud) must remain a separate, explicit choice.
+    """
+    src = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "obfuscator", "core", "pipeline.py"),
+        encoding="utf-8").read()
+    marker = "if _farm_platform == 'github' and not getattr(args, 'skip_cloud', False):"
+    assert marker in src, "the farm gate moved; re-check this test"
+    body = src[src.find(marker):src.find(marker) + 2200]
+    assert "raise SystemExit(" in body, (
+        "platform=github without a token no longer refuses: a single-OS "
+        "artefact could ship as a 3-OS build again")
+    # the message is split across literals, so match the pieces
+    assert "no GitHub token is" in body and "GITHUB_TOKEN, GH_TOKEN" in body
+    assert "single-OS" in body, (
+        "the refusal must say the artefact would be single-OS, or the "
+        "operator cannot tell what they almost shipped")
+    # and it must NOT still be a warn-and-continue
+    assert "fall back to bytecode (local blob still embedded)" not in body, (
+        "the warn-and-continue path is back; that is what shipped a "
+        "single-OS artefact under a platform=github request")
