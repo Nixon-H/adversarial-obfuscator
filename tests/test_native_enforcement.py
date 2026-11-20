@@ -167,3 +167,199 @@ def test_built_blob_applies_the_policy_in_a_subprocess():
     finally:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ── P0 (reviewer, 2026-11-20): WHAT runs before enforcement ──────────────
+#
+# "enforcement runs before any native code" is FALSE on Linux: the dynamic
+# linker runs every shared object's constructors (.init_array, .ctors,
+# _init) BEFORE dlopen() returns. The invariant that actually matters is
+# narrower, and it is what the test below proves:
+#
+#   no PAYLOAD initialization or execution happens before enforcement.
+#
+# The payload sets a builtins flag at module init, so the check needs no
+# marker file: the forked child inspects interpreter state directly, and the
+# object is written through pytest's tmp_path fixture.
+
+ORDER_PAYLOAD = (
+    "import builtins as _b\n"
+    "_b._NX_PAYLOAD_RAN = True\n"
+    "\n"
+    "\n"
+    "def main():\n"
+    "    return 'ok'\n"
+)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="fork/ELF semantics")
+def test_no_payload_code_runs_before_enforcement(tmp_path):
+    """Payload init must not happen before nx_apply_protections().
+
+    The child dlopens WITHOUT running init, checks the flag, calls the
+    enforcement entry, checks again, then imports and checks a third time.
+    Fork keeps the parent untouched (the child is the one made
+    non-dumpable).
+    """
+    import base64
+    import builtins
+
+    from obfuscator.core.pipeline import build_local_cython
+
+    blob, _ = build_local_cython(ORDER_PAYLOAD)
+    assert blob, "blob build failed"
+    if isinstance(blob, str):
+        blob = base64.b64decode(blob)
+    so_file = tmp_path / "payload_module.so"
+    so_file.write_bytes(blob)
+    so_path = str(so_file)
+    read_fd, write_fd = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        code = 0
+        try:
+            os.close(read_fd)
+            import ctypes
+            import importlib.util as _ilu
+            out = ["before=%s" % getattr(builtins, "_NX_PAYLOAD_RAN", False)]
+            lib = ctypes.CDLL(so_path)
+            out.append("after_dlopen=%s"
+                       % getattr(builtins, "_NX_PAYLOAD_RAN", False))
+            mask = int(lib.nx_apply_protections() or 0)
+            out.append("after_enforce=%s"
+                       % getattr(builtins, "_NX_PAYLOAD_RAN", False))
+            out.append("mask=%d" % mask)
+            spec = _ilu.spec_from_file_location("payload", so_path)
+            mod = _ilu.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            out.append("after_init=%s"
+                       % getattr(builtins, "_NX_PAYLOAD_RAN", False))
+            os.write(write_fd, ("|".join(out)).encode())
+        except BaseException as exc:  # noqa: BLE001 - report, then exit
+            try:
+                os.write(write_fd,
+                         ("error=%s" % type(exc).__name__).encode())
+            except Exception:
+                pass
+            code = 1
+        finally:
+            os._exit(code)
+    os.close(write_fd)
+    chunks = []
+    while True:
+        chunk = os.read(read_fd, 4096)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    os.close(read_fd)
+    _, status = os.waitpid(pid, 0)
+    report = b"".join(chunks).decode("utf-8", "replace")
+    assert os.waitstatus_to_exitcode(status) == 0, report
+    assert "after_dlopen=False" in report, (
+        "payload code ran during dlopen() -- a constructor is doing payload "
+        "work before enforcement: %s" % report)
+    assert "after_enforce=False" in report, (
+        "payload ran before enforcement was applied: %s" % report)
+    assert "mask=3" in report, (
+        "enforcement bitmask was not 3 (dumpable + core): %s" % report)
+    assert "after_init=True" in report, (
+        "the payload never ran even after module init: %s" % report)
+
+
+def _elf_sections(raw):
+    """Parse ELF64 section headers: [(name, type, offset, size, link)]."""
+    import struct
+    endian = "<" if raw[5] == 1 else ">"
+    e_shoff = struct.unpack(endian + "Q", raw[0x28:0x30])[0]
+    e_shentsize = struct.unpack(endian + "H", raw[0x3A:0x3C])[0]
+    e_shnum = struct.unpack(endian + "H", raw[0x3C:0x3E])[0]
+    e_shstrndx = struct.unpack(endian + "H", raw[0x3E:0x40])[0]
+    rows = []
+    for index in range(e_shnum):
+        off = e_shoff + index * e_shentsize
+        sh = raw[off:off + e_shentsize]
+        sh_name, sh_type = struct.unpack(endian + "II", sh[:8])
+        sh_flags, sh_addr, sh_offset, sh_size, sh_link = struct.unpack(
+            endian + "QQQQI", sh[8:44])
+        rows.append((sh_name, sh_type, sh_offset, sh_size, sh_link))
+    if e_shstrndx >= len(rows):
+        return []
+    str_off = rows[e_shstrndx][2]
+    named = []
+    for sh_name, sh_type, sh_offset, sh_size, sh_link in rows:
+        at = str_off + sh_name
+        stop = raw.find(b"\x00", at)
+        name = raw[at:stop if stop != -1 else at + 64].decode("ascii",
+                                                              "replace")
+        named.append((name, sh_type, sh_offset, sh_size, sh_link))
+    return named
+
+
+def _elf_init_array(raw):
+    """(.init_array addresses) from an ELF64 image, or None when absent."""
+    import struct
+    endian = "<" if raw[5] == 1 else ">"
+    for name, _sh_type, sh_offset, sh_size, _link in _elf_sections(raw):
+        if name == ".init_array":
+            body = raw[sh_offset:sh_offset + sh_size]
+            return [struct.unpack(endian + "Q", body[i:i + 8])[0]
+                    for i in range(0, len(body) - 7, 8)]
+    return None
+
+
+def _elf_export_addrs(raw):
+    """{function name: address} from .dynsym."""
+    import struct
+    endian = "<" if raw[5] == 1 else ">"
+    sections = _elf_sections(raw)
+    exports = {}
+    for name, sh_type, sh_offset, sh_size, sh_link in sections:
+        if sh_type != 11 or name != ".dynsym":      # SHT_DYNSYM
+            continue
+        if sh_link >= len(sections):
+            continue
+        _n, _t, strtab_off, strtab_size, _l = sections[sh_link]
+        for index in range(sh_size // 24):          # sizeof(Elf64_Sym)
+            ent = raw[sh_offset + index * 24: sh_offset + index * 24 + 24]
+            (st_name, st_info, st_other, st_shndx, st_value,
+             st_size) = struct.unpack(endian + "IBBHQQ", ent)
+            if not st_name:
+                continue
+            stop = raw.find(b"\x00", strtab_off + st_name,
+                            strtab_off + strtab_size)
+            symbol = raw[strtab_off + st_name:stop].decode("ascii", "replace")
+            exports[symbol] = st_value
+    return exports
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="ELF inspection")
+def test_the_real_blob_constructors_are_linker_scaffolding():
+    """The shipped object's .init_array holds no payload entry.
+
+    Measured on a real blob with a pure-Python ELF64 parse: the blob carries
+    constructor entries from the C runtime (frame_dummy / __cxa_finalize
+    scaffolding), never PyInit_payload. That is why the measured precondition
+    (constructors run first) does not contradict the invariant (payload init
+    runs after enforcement).
+    """
+    import base64
+    from obfuscator.core.pipeline import build_local_cython
+
+    blob, _ = build_local_cython(ORDER_PAYLOAD)
+    assert blob, "blob build failed"
+    if isinstance(blob, str):
+        blob = base64.b64decode(blob)
+    assert blob[:4] == b"\x7fELF", "shipped blob is not an ELF object"
+    entries = _elf_init_array(blob)
+    if entries is None:
+        pytest.skip("blob carries no .init_array")
+    live = [entry for entry in entries if entry]
+    assert len(live) <= 4, (
+        "more constructor entries than expected for a Cython module (%d); "
+        "inspect them before trusting the ordering claim" % len(live))
+    payload_export = _elf_export_addrs(blob).get("PyInit_payload")
+    assert payload_export is not None, (
+        "the shipped blob does not export PyInit_payload")
+    assert payload_export not in live, (
+        "PyInit_payload is in .init_array -- payload initialization would "
+        "run inside dlopen()")

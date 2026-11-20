@@ -45,6 +45,7 @@ from .utils import (
 )
 
 from .transforms import (
+    C_LEGAL_BABEL_RANGES,
     DependencyScanner,
     FunctionTransformer,
     ReflectionObfuscator,
@@ -385,6 +386,7 @@ __all__ = [
     'CROSS_PLATFORM_GUARD_SOURCE',
     'CUSTOM_VM_SOURCE',
     'CYTHON_VM_SOURCE',
+    'C_LEGAL_BABEL_RANGES',
     'CallGraphObfuscator',
     'CloudflareDeployer',
     'CodeChecksumInjector',

@@ -546,8 +546,16 @@ def test_missing_state_file_is_first_run_ok(tmp_path):
 
 
 def test_corrupt_state_variants(tmp_path):
-    # Garbage with no seal structure -> tampered (fail closed, NOT ok).
-    # An EMPTY file is the documented exception: treated as first run
+    # The two failure modes have different meanings (2026-11-20):
+    #
+    #   MALFORMED (no seal structure at all: a torn write, a hand edit)
+    #   stays fatal -> "tampered".
+    #
+    #   FOREIGN (a well-formed seal this key cannot verify: a legitimate
+    #   in-place artefact update with a new build key) becomes
+    #   no-last-seen -> "ok".
+    #
+    # An EMPTY file is the documented third case: treated as first run
     # (e.g. crashed mid-write) -> ok, resealed at `now`.
     key, fp, t0 = b"e" * 32, "EDGE-H", 1_700_000_000.0
     deadline, token = _trial_ctx(key, fp, t0)
@@ -555,6 +563,11 @@ def test_corrupt_state_variants(tmp_path):
     with open(garbage, "w", encoding="utf-8") as fh:
         fh.write("definitely-not-a-sealed-stamp")
     assert check_and_update(key, fp, deadline, token, state_path=garbage,
+                            now=t0) == "tampered"
+    foreign = str(tmp_path / "edge_foreign.state")
+    with open(foreign, "w", encoding="utf-8") as fh:
+        fh.write("%s:%s" % (repr(t0), "ab" * 32))
+    assert check_and_update(key, fp, deadline, token, state_path=foreign,
                             now=t0) == "ok"
     empty = str(tmp_path / "edge_empty.state")
     with open(empty, "w", encoding="utf-8") as fh:

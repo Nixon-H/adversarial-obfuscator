@@ -1789,3 +1789,112 @@ builds green after the fix.
 `--lowering` (needs the shim deployed beside the artefact — measured
 1.46x-3.84x per-family overhead). Everything else in the ABSOLUTE command
 of MAXIMUM_SECURITY.md §5.3 is now exercised by the harness profiles.
+
+---
+
+## 5r. Reviewer Priority 0 closed: ordering, trust anchor, negative matrix, crypto audit, dep lock
+
+The 2026-11-20 reviewer reports named five release-critical items. Each is
+now measured or fixed, and the two that could not be closed are stated as
+limits rather than claims.
+
+### P0-1 dlopen ordering — the claim is now precise, and the invariant is a test
+
+Both reviewers are right that "enforcement before PyInit" is weaker than
+"enforcement before any native code". On Linux the dynamic linker runs every
+shared object's constructors (`.init_array`, `.ctors`, `_init`) before
+`dlopen()` returns, so a constructor necessarily precedes
+`nx_apply_protections()`. Measured on the shipped object: a real blob carries
+**one** `.init_array` entry, a compiler-emitted thunk into the C runtime's
+`frame_dummy`/`__cxa_finalize` scaffolding — not `PyInit_payload`, and no
+Cython module code.
+
+The invariant that matters is narrower and is now executable
+(`tests/test_native_enforcement.py`): a payload that sets a flag at module
+init, a forked child that dlopens WITHOUT running init, calls
+`nx_apply_protections()`, and verifies at each stage —
+
+    before=False  after_dlopen=False  after_enforce=False  mask=3  after_init=True
+
+Payload initialization happens only after enforcement. Measured on the
+production builder, in the test suite, not by hand.
+
+### P0-2 provenance trust anchor — built, deployed externally
+
+The out-of-band Ed25519 pin (`NIXON_PROVENANCE_PUBKEY`) exists and is the
+only form that survives an attacker who controls the artefact. The reviewers
+correctly note an environment variable is not a trust boundary when the
+attacker owns the environment. That is a **deployment** step, not code: the
+pin must come from the launcher or protected configuration. Recorded in
+`MAXIMUM_SECURITY.md` §5.3 (run-time) and §5.2. The token was already
+retracted as a trust anchor (it returns a sealing salt, not a public key).
+
+### P0-3 negative matrix for native-only — seven paths, one contract
+
+`tests/test_failure_modes.py` now pins every path the reviewer listed:
+missing blob, corrupt blob, missing enforcement export, enforcement failure,
+wrong pin, failed native import, and the absence of a Python fallback. The
+last one exposed a **real defect**: `_nx_ci_bypass_ok()` answered "yes"
+whenever the CI env pair was set, and four failure sites then reached
+`_exec_fallback()` — a Python payload path inside a profile that promises
+none. It exited only because `FALLBACK_BLOB` was `"DISABLED"`, i.e. the
+path was unreachable only because a second check caught it. Fixed: the
+bypass is compiled shut for native-only builds (`if True: return False`
+before the environment is read), and the test asserts both halves — every
+call site gated, and the gate shut by construction.
+
+### P0-4 crypto path — audited, and it is NOT AES-GCM
+
+The reviewer's distinction is exactly right, and the answer is concrete:
+
+| question | measured answer |
+|---|---|
+| which primitive protects the shipped sections? | SHA-256 counter-mode keystream XOR (`sha256(key‖nonce‖counter)`) |
+| integrity? | HMAC-SHA256 over the plaintext, 32-byte tag, verified before the slice is released |
+| key derivation | `sha256("nx-section-key:" ‖ master ‖ index:4 ‖ nonce)` — per section |
+| encryption/MAC keys independent? | the section key is used for both; separation is by **section**, not by key role — recorded as a limit |
+| nonce uniqueness | `os.urandom(16)` per section per pack (deterministic only for honey/decoy packs) |
+| index bound to the key? | yes — relabelling a section's ciphertext fails the tag |
+| AAD? | none; the pack-level `state` digest binds count/total/ordering |
+
+Four tests in `tests/test_section_split.py` pin all of this by reconstructing
+the construction from the shipped output. The AEAD helper exists and is
+separately tested, but **it is not the section path**, and no summary may
+merge the two.
+
+### P0-5 dependency lock — now fatal in release CI
+
+`NIXON_REQUIRE_DEP_LOCK=1` is set on the CI test step. The build already
+warned on drift; verified that with the variable set it refuses
+(`dependency drift and NIXON_REQUIRE_DEP_LOCK=1: cython: lock 3.0.12,
+installed 3.2.1; …`). The drift is real on this host, which is the point:
+release CI must fail rather than compile artefacts with an unapproved
+toolchain.
+
+### P0-6 audit coverage — conclusive scan, baseline recorded
+
+The full scanner ran over the whole repository: **1,470 files, coverage
+complete, 0 dependency vulnerabilities**, 919 high / 8 medium / 257 low — and
+every high bucket was triaged, not suppressed, in
+`docs/security/MIMOSA_AUDIT_BASELINE.md`. Measured class breakdown: path
+traversal 587, code injection 271, SSRF 48, command-allowlist 7, hardcoded
+credential 3, deserialisation 2.
+
+The 587 path-traversal hits are all sinks whose path came from
+`confined_path()` / `mkstemp` / `realpath` 12–56 lines earlier (traced
+variable by variable, script in the baseline doc). The 48 SSRF hits are the
+project's own build-API clients and the geofence's hardcoded service list.
+The credential hits were three synthetic fixtures and one randomly-generated
+decoy header — changed to `fixture_…` shapes so no source file contains
+anything credential-shaped, synthetic or not.
+
+### Still open, honestly
+
+* A human or Ghidra analyst against the native blob: not tested. The DS probe
+  is one instrument.
+* Windows CFG function table, CET, a real `cl.exe`, Authenticode trust, macOS
+  Hardened Runtime: environment-limited, recorded in
+  `THREAT_BOUNDARY_LOADER.md`.
+* The farming/shard uniformity across all three runners: local path measured,
+  farm path not re-verified in this pass.
+* The pin's trust anchor is a deployment procedure, not code.

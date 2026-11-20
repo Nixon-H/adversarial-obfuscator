@@ -122,7 +122,7 @@ def cipher_seal(data, nonce):
 #: of the SPEC (fetch_ledger returns count 42 for any sku), so a spec-faithful
 #: equivalent must invent the same fixture -- which is exactly the kind of
 #: detail a semantic recovery is allowed to get right without copying a line.
-INVENTORY_SALT = b"inv-salt-2026-11"
+INVENTORY_SALT = b"fixture-inv-salt-2026-11"
 
 
 def _ledger_entry(sku):
@@ -180,7 +180,7 @@ def observe(target_name):
 #: caught rather than trusted.
 EXPECTED_OUTPUT = {
     "tiny": "TINY 9e8b029a65070dbd",
-    "inventory": "AUDIT 19487c7b06691c76",
+    "inventory": "AUDIT 78209b4fcc0a1829",
     "algo": "DERIVE 3249269004",
     "cipher": "SEALED 8771940273853809a401795ec7699cdc",
 }

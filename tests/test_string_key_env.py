@@ -28,13 +28,18 @@ import pytest
 from obfuscator.core.pipeline import ObfuscationTransformer
 
 SHARD_VAR = "NX_TEST_SEAL_SHARD"
-SECRETS = ["wt_live_8f3a91c2d7e04b56", "pg_prod_SuperSecret_9911",
-           "wh-salt-2026-11"]
+# Synthetic fixture values for the payload UNDER TEST, not credentials for
+# anything. They are spelled "fixture_..." so neither a scanner nor a reader
+# can mistake them for live keys -- the earlier "wt_live_"/"pg_prod_" shapes
+# were realistic on purpose and tripped the hardcoded-credential rule, which
+# is exactly what a real leak would look like.
+SECRETS = ["fixture_api_token_8f3a91c2d7e04b56",
+           "fixture_db_password_9911", "fixture-salt-2026-11"]
 
 SOURCE = (
-    'API_TOKEN = "wt_live_8f3a91c2d7e04b56"\n'
-    'DB_PASSWORD = "pg_prod_SuperSecret_9911"\n'
-    'SALT = b"wh-salt-2026-11"\n'
+    'API_TOKEN = "fixture_api_token_8f3a91c2d7e04b56"\n'
+    'DB_PASSWORD = "fixture_db_password_9911"\n'
+    'SALT = b"fixture-salt-2026-11"\n'
     '\n'
     'def main():\n'
     '    print("OK", len(API_TOKEN), len(DB_PASSWORD), len(SALT))\n'

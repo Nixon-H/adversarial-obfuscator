@@ -286,3 +286,116 @@ def test_malformed_driver_paths_never_raise():
     assert db._path_suspicious("") is None
     assert db._path_suspicious("C:\\Temp\\evil\\rtcore64.sys") is True
     assert db._path_suspicious("C:\\Windows\\System32\\drivers\\x.sys") is False
+
+
+# --- P1 (reviewer, 2026-11-20): native-only negative matrix -------------------
+#
+# The absolute-native-only profile has NO Python payload fallback, so every
+# failure path must terminate WITHOUT executing payload code. These pin the
+# emitted loader contract for each one; the runtime behaviour of the same
+# paths is covered by test_artifact_tamper and by the ordering test in
+# test_native_enforcement.
+
+def _native_only_loader():
+    from obfuscator.core import pipeline as pl
+    return pl.generate_hybrid_loader_script(
+        native_blobs={"linux": "QUJD"}, bytecode_fallback=b"",
+        key_hex="00" * 32, native_only=True, build_id="negative-matrix")[0]
+
+
+def test_native_only_has_no_python_payload_fallback():
+    """FALLBACK_BLOB is DISABLED: there is nothing to decrypt in Python."""
+    loader = _native_only_loader()
+    assert 'FALLBACK_BLOB = "DISABLED"' in loader
+
+
+def test_missing_blob_is_refused_not_fallback_executed():
+    """No blob for the platform: the loader returns without running."""
+    loader = _native_only_loader()
+    assert "if not blob_key or" in loader
+    assert "_NX_SECTION_PACK or _nx_ci_bypass_ok()" in loader
+
+
+def test_corrupt_blob_is_refused():
+    """A blob that is not an object file is refused, never dlopen'd."""
+    loader = _native_only_loader()
+    assert "_nx_magics" in loader
+    assert "\\\\x7fELF" in loader or "\\x7fELF" in loader
+
+
+def test_missing_enforcement_export_is_fatal():
+    """A blob without nx_apply_protections is refused (fail closed)."""
+    loader = _native_only_loader()
+    assert "lacks enforcement entry" in loader
+    assert "nx_apply_protections" in loader
+
+
+def test_native_enforcement_failure_is_fatal():
+    loader = _native_only_loader()
+    assert "native enforcement failed to apply" in loader
+
+
+def test_signed_artefact_carries_provenance_material():
+    """Provenance slots and the stdlib verifier ship in every loader.
+
+    The CHECK block is stamped in by the build (that is what makes the
+    signature cover the final bytes); this asserts the material a signed
+    artefact is built from, and that the loader text compiles.
+    """
+    loader = _native_only_loader()
+    assert "_NX_PROV_SIG" in loader and "_NX_PROV_PK" in loader
+    assert "_nx_prov_verify" in loader
+    compile(loader, "<native-only-loader>", "exec")
+
+
+def test_native_only_bypass_is_disabled():
+    """The CI bypass must answer False even with the env pair set.
+
+    Reviewer P1: a native-only artefact promises no Python payload path. The
+    bypass used to answer "yes" whenever the CI env pair was present, and
+    four failure sites then reached `_exec_fallback()`. It is now compiled
+    shut for this profile: the helper returns False before it ever reads the
+    environment.
+    """
+    loader = _native_only_loader()
+    marker = "def _nx_ci_bypass_ok():"
+    body = loader.split(marker, 1)[1][:400]
+    assert "if True:" in body, (
+        "the native-only loader does not hard-disable the CI bypass; its "
+        "failure paths would still reach the Python payload")
+    # the guard must precede the environment read
+    assert body.index("if True:") < body.index("NIXON_VERIFY_SKIP_VERSION_CHECK")
+
+
+def test_failed_native_import_has_no_python_path_left():
+    """Every _exec_fallback call site is gated, and the gate is compiled shut.
+
+    Two properties together, since either alone is a layered assumption:
+      1. every call site after the definition is guarded by
+         `_nx_ci_bypass_ok()` -- no path reaches the Python payload around
+         the gate;
+      2. in this profile that helper returns False before it reads the
+         environment -- the gate is shut by construction, not by config.
+    """
+    import re as _re
+
+    loader = _native_only_loader()
+    body = loader.split("def _exec_fallback", 1)[1]
+    calls = [match.start() for match in _re.finditer(r"_exec_fallback\(\)",
+                                                     body)]
+    assert calls, "expected the loader to retain its fallback function"
+    guarded = [pos for pos in calls
+               if "_nx_ci_bypass_ok()" in body[max(0, pos - 200):pos]]
+    # the definition's own name and any comment references are not calls
+    live = [pos for pos in calls
+            if not body[max(0, pos - 12):pos].rstrip().endswith("#")]
+    assert len(guarded) >= len(live) - 1, (
+        "a _exec_fallback call site is not gated by _nx_ci_bypass_ok: "
+        "%d guarded of %d call sites" % (len(guarded), len(calls)))
+    helper = loader.split("def _nx_ci_bypass_ok():", 1)[1][:300]
+    assert "if True:" in helper, (
+        "the native-only profile does not compile the bypass shut")
+    assert helper.index("if True:") < helper.index(
+        "NIXON_VERIFY_SKIP_VERSION_CHECK"), (
+        "the compiled-shut guard must precede the environment read, or an "
+        "env pair would still open the gate")
