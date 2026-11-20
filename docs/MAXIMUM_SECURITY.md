@@ -1,8 +1,13 @@
 # Maximum Security Configuration
 
-**Status:** current investigation, 2026-11-10. The title is a question, not a
-claim: this document establishes the **strongest configuration whose relevant
-protections were actually built and run**, and states what remains unmeasured.
+**Status:** current investigation, 2026-11-10; **commands and addendum
+updated 2026-11-20** (§5.3 below and the 2026-11-20 addendum at the end of
+this file). The title is a question, not a claim: this document establishes
+the **strongest configuration whose relevant protections were actually
+built and run**, and states what remains unmeasured. The 2026-11-10
+measurement matrix below is kept as history; the 2026-11-20 measured
+profiles live in `pydeobsbench/run.py` and the research log
+(`docs/research/pydeobsbench-2026-11-18.md`, §5o–§5q).
 
 The short answer: **enabling every flag is not maximum security.** It is a
 build-time and size explosion, it includes inert and metadata-only options, and
@@ -10,6 +15,15 @@ the strongest combination we could verify under a two-minute build budget is a
 packed-loader build with **anti-REA at maximum, section count 6, a licence
 token, a trial gate, a watermark, and 25 packaging layers**. At the default 100
 packaging layers, the same configuration **did not finish in 600 s**.
+
+**2026-11-20:** the strongest measured configuration is now ABSOLUTE
+native-only (§5.3) — Cython blob as the only payload path, no Python
+fallback, enforcement inside the stripped blob. Measured: ~101 s build,
+runs rc 0 with the token, zero anti-dump syscalls in the artefact text.
+It is also the least available configuration (a blob that cannot load on
+the customer's interpreter is a dead artefact), which is why the packed
+sectioned commands remain the delivery defaults. "Enabling everything
+fails" still holds at 100 packaging layers.
 
 Companion documents: [`SECURITY_FEATURES.md`](SECURITY_FEATURES.md),
 [`SEED_ARCHITECTURE.md`](SEED_ARCHITECTURE.md),
@@ -349,7 +363,7 @@ same gate for cents.
 
 ---
 
-### 5.3 The three maximum commands
+### 5.3 The four maximum commands
 
 Pick one. **LOCAL** runs entirely on this machine and produces a native
 blob for the **current OS only** (a Linux build makes a Linux `.so`;
@@ -357,15 +371,17 @@ cross-compiling Python extensions needs the target toolchain). **CLOUD**
 and **ABSOLUTE** additionally trigger the per-OS Cython build farm —
 windows → `.pyd`, ubuntu → `.so`, macos → `.dylib`, each built with
 Cython → the C transform layer → the platform compiler — and embed all
-the blobs, so the payload runs natively on every OS. Nuitka was removed
+the blobs, so the payload runs natively on every OS. **ABSOLUTE
+native-only** (2026-11-20) is ABSOLUTE's gate set with the Python fallback
+removed entirely: the blob is the only payload path. Nuitka was removed
 2026-11-17; `--package compile` no longer exists.
 
-All three need the string-seal shard. Keep it out of the artefact: without
+All four need the string-seal shard. Keep it out of the artefact: without
 it the artefact ships its own seal key and an analyst — or an LLM — can
 simply call the shipped decoder. Measured 2026-11-17: **4/4 secrets
 recovered** with the inline key, **0/4** with the shard.
 
-#### One-time setup (all three)
+#### One-time setup (all four)
 
 ```bash
 # Issuer seed for licence tokens. Keep it out of the repository.
@@ -378,6 +394,24 @@ python3 -m obfuscator.licensing issue --key-hex "$ISSUER_SEED" \
 # String-seal shard. Export it for the build AND for every run.
 NX_SEAL_SHARD=$(openssl rand -hex 32)
 export NX_SEAL_SHARD
+
+# 2026-11-20: provenance signing key. A fresh key per artefact release;
+# the artefact embeds its Ed25519 signature and the loader verifies it at
+# load. The PIN below is the out-of-band anchor: export it at RUN time
+# (and store it beside the artefact's release notes, never in it) so a
+# re-signed artefact is refused even by a holder who also holds a token.
+NIXON_ARTEFACT_SIGN_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+NIXON_PROVENANCE_PUBKEY=$(python3 -c "
+import sys; sys.path.insert(0, '.')
+from obfuscator.licensing import private_key_from_hex, public_key_hex
+print(public_key_hex(private_key_from_hex('$NIXON_ARTEFACT_SIGN_KEY')))")
+export NIXON_ARTEFACT_SIGN_KEY   # BUILD time only
+export NIXON_PROVENANCE_PUBKEY   # RUN time only
+
+# 2026-11-20: VM dispatch. Chooses the function-level virtualiser family
+# (a | b | alternate; alternate picks per build id so successive releases
+# do not share one dispatcher). Arm at build time.
+export NIXON_VM_DISPATCH=alternate
 ```
 
 #### LOCAL maximum — runs on this machine
@@ -387,14 +421,28 @@ NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD \
 python3 -m obfuscator.core.pipeline build payload.py \
   --skip-cloud \
   --anti-rea-level maximum \
-  --section-count 6 \
+  --section-count 8 \
   --watermark NX-MAX-001 \
-  --transforms string-key-env=NX_SEAL_SHARD \
-  --access trial=7d \
-  --access block-countries=RU,KP \
+  --transforms data function-intent speculation string-key-env=NX_SEAL_SHARD \
+  --access trial=7d expire=2027-12-31 \
+           hwid=$(python3 -c "import sys; sys.path.insert(0,'.'); \
+                  from obfuscator.trial_bind import fallback_fingerprint; \
+                  print(fallback_fingerprint())") hwid-lock \
+           kod driver-check name-gate \
+           block-countries=RU,KP vm-threshold=65 \
   --licence token=acme.licence env-only bootstrap-encrypted chain \
-  --package layers=25 stego
+  --package native layers=25 zips=3 stego
 ```
+
+2026-11-20 changes from the 2026-11-10 form: the native blob is built
+locally (Cython -> the C transform layer -> clang/gcc, with
+`nx_apply_protections()` compiled in — the anti-dump syscalls live in the
+stripped blob, applied BEFORE the payload's module init runs), section
+count 8, the payload transforms are named explicitly, and the access set
+adds expiry, host binding (`hwid`+`hwid-lock`; the value above is this
+machine's composite fingerprint — compute yours the same way), and the
+kod/driver-check/name-gate kill gates. `NIXON_VM_DISPATCH` and
+`NIXON_ARTEFACT_SIGN_KEY` come from the one-time setup exports.
 
 Output: `<dirname(payload)>/dist/`. The `_Packed` and `_Stego` variants are
 written beside the payload, not in `dist/` — ship `dist/`.
@@ -408,11 +456,11 @@ toolchain). For win/mac/mac-arm blobs, use CLOUD or ABSOLUTE.
 ```bash
 NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD NX_SEAL_SHARD=$NX_SEAL_SHARD \
 python3 -m obfuscator.core.pipeline build payload.py \
-  --section-count 6 \
+  --section-count 8 \
   --watermark NX-001 \
-  --transforms string-key-env=NX_SEAL_SHARD \
-  --access trial=7d \
-  --access block-countries=RU,KP \
+  --transforms data function-intent speculation string-key-env=NX_SEAL_SHARD \
+  --access trial=7d expire=2027-12-31 \
+           block-countries=RU,KP vm-threshold=65 \
   --licence token=acme.licence env-only bootstrap-encrypted chain \
   --package native platform=github layers=25 zips=3
 ```
@@ -442,32 +490,70 @@ python3 -m obfuscator.core.pipeline build payload.py \
            block-countries=RU,KP vm-threshold=65 \
   --licence token=acme.licence env-only bootstrap-encrypted chain \
   --tls-ca-bundle /etc/ssl/certs/ca.pem \
-  --package native platform=github layers=25 zips=3
+  --package native platform=github layers=25 zips=3 stego
 ```
 
-Parse-verified. Defaults not shown are already on: all six AST transforms,
-anti-REA at maximum, advanced protection, split-bootstrap, sectioned
-sealing, strict detections and the integrity gates.
+2026-11-20 changes: `stego` is back in `--package` (the stego/cloud
+conflict applied to the old separate farm step; the farm is triggered by
+the build now and `stego` travels with the local deliverable), and the
+environment from the one-time setup (`NIXON_VM_DISPATCH`,
+`NIXON_ARTEFACT_SIGN_KEY`) applies to every command — with it, the artefact
+carries function-level virtualisation where eligible and a load-time
+Ed25519 provenance signature. Defaults not shown are already on: all six
+AST transforms, anti-REA at maximum, advanced protection, split-bootstrap,
+sectioned sealing, strict detections and the integrity gates.
 
-#### Run (all three)
+#### ABSOLUTE native-only — Cython with NO fallback to Python
+
+```bash
+NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD NX_SEAL_SHARD=$NX_SEAL_SHARD \
+python3 -m obfuscator.core.pipeline build payload.py \
+  --package native-only \
+  --watermark NX-ABS-001 \
+  --transforms data function-intent speculation string-key-env=NX_SEAL_SHARD \
+  --access trial=7d expire=2027-12-31 hwid=<machine-hwid> hwid-lock kod driver-check \
+           name-gate block-countries=RU,KP vm-threshold=65 \
+  --licence token=acme.licence env-only bootstrap-encrypted chain
+```
+
+Measured 2026-11-20 (three consecutive builds green, with the env-only
+licence form; `chain` requires the §5.2 setup and is not exercised by the
+measurement): the loader ships VERBATIM — stamped and signed, no sections,
+no bytecode fallback (`FALLBACK_BLOB = "DISABLED"`) — and the Cython blob
+is the ONLY payload path. If the blob cannot load, the loader runs nothing
+(fail-closed by construction; there is nothing else to decrypt). Because
+no Python path to payload plaintext exists, the artefact text carries NO
+anti-dump syscalls: the enforcement (prctl/RLIMIT_CORE on Linux,
+setrlimit + PT_DENY_ATTACH on macOS, silent _exit(137) fatal-signal
+handlers) lives in the stripped blob (`nx_apply_protections()`, called by
+the loader BEFORE the payload's module init runs) and the loader refuses a
+blob that does not export it. This is the strongest measured configuration
+on this project — and the least available: a blob that fails on the
+customer's machine (ABI mismatch, glibc) is a dead artefact, not a
+degraded one. Ship it only to hosts you control the interpreter version
+of.
+
+#### Run (all four)
 
 ```bash
 # Without the token the artefact exits 1. The seal shard must be present at
 # RUN time too — that is the point: the artefact alone cannot decrypt its
-# own strings.
+# own strings. The provenance pin (2026-11-20) must match the key the
+# artefact was signed with; a re-signed artefact is refused.
 NIXON_LICENCE=acme.licence NX_SEAL_SHARD=$NX_SEAL_SHARD \
+  NIXON_PROVENANCE_PUBKEY=$NIXON_PROVENANCE_PUBKEY \
   python3 dist/payload_protected.py
 ```
 
-Every remaining loader flag is either in this command or deliberately
-excluded: `--access one-shot` (self-destruct after the first run — breaks
-re-runs, add only for burn-after-use payloads), `--package native-only`
-(removes the bytecode fallback entirely — stronger, but hwid-lock then has
-no fallback blob to lock and a farm compile failure bricks the artifact),
-`--exclude …` (nothing: every shield family is on), `--fast` / `--public` /
+Every remaining loader flag is either in one of these commands or
+deliberately excluded: `--access one-shot` (self-destruct after the first
+run — breaks re-runs, add only for burn-after-use payloads), `--exclude …`
+(nothing: every shield family is on), `--fast` / `--public` /
 `--debug-dump-raw` / `--pin-structure` (weaken or debug — never in a max
 build), `--tor`/`--tor-proxy` (build-host privacy, not artifact security),
-`--resume`/`--exclude-android`/`--python` (farm ops).
+`--resume`/`--exclude-android`/`--python` (farm ops). `--package
+native-only` is NO LONGER in the excluded list (2026-11-20): it has its
+own measured command above.
 
 Measured on the 2,635-byte payload: **69–99 s**, **1.46–8.25 MB**, runs with
 the token, exits 1 without it. Do not add `--opt-level 5` (the ladder is already at its
@@ -752,3 +838,46 @@ The honest summary: **the strongest configuration we can verify builds and runs
 is the maximum practical command in §5.3, but "strongest" here means "most
 protections enabled without breaking execution or the build budget". It does
 not mean "measured to resist reverse engineering".**
+
+---
+
+## 2026-11-20 addendum — what changed since the 2026-11-10 matrix
+
+The full addendum-by-measurement lives in
+`docs/research/pydeobsbench-2026-11-18.md` (§5o–§5q). Summary, all measured:
+
+* **Anti-REA is at maximum by default now** (`--anti-rea-level` parser
+  default), and sectioned sealing is on by default (4 sections; the
+  commands above raise it to 8). The §4 rows calling `--opt-level 5` and
+  `--section-split` redundant still hold; the row "hwid-lock without hwid
+  is silently disabled" still holds.
+* **Enforcement moved into the blob** (§5l boundary push): every
+  locally-built blob compiles `native/enforcement.c`
+  (`nx_apply_protections()` — dumpable off, core limit zero, deny-attach
+  on macOS, silent fatal-signal handlers) and the loader calls it BEFORE
+  the payload's module init runs, refusing a blob without the entry. The
+  top-of-loader ctypes block is emitted only for builds that can reach
+  payload plaintext through Python; the native-only artefact carries none.
+* **Provenance signing** (NIXON_ARTEFACT_SIGN_KEY at build, pinned via
+  NIXON_PROVENANCE_PUBKEY at run): with it armed, the bypass attack —
+  the one that defeated merkle+HMAC re-stamping — dies on the SIGNATURE.
+  §1's chain is three layers deep on signed artefacts.
+* **Four integration defects were found by turning every flag on at once,
+  and are fixed**: the provenance fingerprint separator, the token-derived
+  check ignoring that prefix, the geofence failing closed on an unknown
+  location (killed offline hosts), and the trial gate treating a foreign-
+  sealed state as tampered (broke every in-place update). A fifth: the
+  babel identifier pools drew Unicode that clang rejects in C
+  identifiers, making native blob builds FLAKY (~50%); the pool is now the
+  measured C-legal set (910 candidates, 139 illegal).
+* **`--package native-only` is a real, measured configuration now** (see
+  §5.3): the loader ships verbatim, the blob is the only payload path, no
+  Python fallback. The 2026-11-10 caution that a farm failure "bricks the
+  artifact" is now the DESIGN: a blob that cannot load runs nothing.
+* **Diagnostics**: `NIXON_LADDER_DEBUG=1` prints `nx-kill:<reason>` to
+  stderr before the kill ladder exits — start every gate investigation
+  there instead of strace.
+* **What the harness now measures** (pydeobsbench/run.py PROFILES): `max`
+  (full flag set), `max-legacy` (the 2026-11-10 baseline, kept for
+  comparability), `absolute`, `absolute-native-only`. The §8 numbers in
+  the matrix below were taken on the legacy shape.
