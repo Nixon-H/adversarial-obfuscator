@@ -1996,6 +1996,96 @@ stands. The CFI row confirms the chain is a tamper detector, not a trust
 anchor: recomputation is expected to work, and the protection is that removal
 is *detected*.
 
+### 5s-bis. The chain re-run from a clean build, and the unsigned-build control
+
+The §5s table was measured once. Re-running it from a fresh build this session
+turned it into a before/after pair that the table alone could not show, because
+the first run happened to use an artefact with no signing key.
+
+**Unsigned build** (`NIXON_ARTEFACT_SIGN_KEY` unset; the build printed
+`provenance: no signing key … its integrity check is internal-only`, and the
+deliverable carries `_NX_PROV_SIG = ""`):
+
+| route | result | caught by |
+|---|---|---|
+| control | rc 0, payload ran | — |
+| tamper pack only | rc 137 | merkle |
+| bypass self-check only | rc 137 | merkle |
+| bypass + tamper | rc 137 | merkle |
+| restamp (no edit) | rc 137 | merkle |
+| tamper + restamp CK | rc 137 | merkle |
+| **tamper + BOTH stamps** | **rc 0, payload ran `(36, 'sum')`** | **nothing** |
+| re-sign, attacker key | rc 137 | merkle |
+| CFI removed + rechain | rc 137 | merkle |
+
+The harness closed with the correct verdict: *"INTEGRITY IS INTERNAL-ONLY: a
+tampered payload ran once `_NX_SELF_CK` AND `_NX_SELF_HM` were recomputed."*
+That is the honest answer, and it is the one the boundary document states.
+
+**Signed build** (key supplied; `Provenance: artefact signed [VERIFIABLE AT
+LOAD]`), same payload, same flags, same harness:
+
+| route | result | caught by |
+|---|---|---|
+| control | rc 0, payload ran | — |
+| tamper pack only | rc 137 | provenance signature |
+| bypass only | rc 137 | provenance signature |
+| bypass + tamper | rc 137 | provenance signature |
+| restamp (no edit) | rc 137 | provenance signature |
+| tamper + restamp CK | rc 137 | provenance signature |
+| **tamper + BOTH stamps** | **rc 137** | **provenance signature** |
+| re-sign, attacker key | rc 137 | provenance signature |
+| CFI removed + rechain | rc 137 | provenance signature |
+
+Every route now dies on the signature, and the harness's own conclusion flips
+to *"No chain: the tampered payload did not run after the bypass."*
+
+**What this pair establishes, and what it does not.** It establishes that the
+signature is the layer doing the work — the same edit that succeeds without it
+fails with it, on the same harness and the same payload — so §1's redundancy
+on a signed artefact is three layers (merkle, HMAC, signature) rather than one
+hash recomputed twice. It does NOT establish that an attacker who controls the
+deployment environment is stopped: they can drop the pin. The build says so on
+every unsigned run, and the run-time pin remains a deployment step (§5r).
+
+### 5s-ter. The benchmark instrument re-run live, and the record it must produce
+
+The reproducibility item (§5r-bis) is only worth closing if the instrument
+still emits the full record on a real run. Re-measured this session with
+`python3 -m pydeobsbench.run --profile max --targets tiny --ai`, against
+`mistral/deepseek-v4-1-flash-1017` through OpenCode:
+
+    === max / tiny ===
+      built in 11.0s: tiny_protected.py (308612 bytes)
+      querying DS 4.1 Flash via Mistral...
+      AI: names 0/4, secrets 0/2, algo overlap 0.12
+      => names 0/4  secrets 0/2  pack_derivable=False
+
+The `probes.ai` record carried every field the review asked for:
+
+| field | value on this run |
+|---|---|
+| `model` | `mistral/deepseek-v4-1-flash-1017` |
+| `prompt_sha256` | `527a0c23…` |
+| `artefact_sha256` | `39cea388…` |
+| `artefact_chars_sent` | 60000 (truncated) |
+| `scorer` | `pydeobsbench.ai_probe/2` |
+| `raw_response` | **5,684 characters, stored in full** |
+| `per_marker` | `names_hit: []`, `secrets_hit: []`, `markers_hit: []`, `loader_terms_matched: [byte, bytes, digest, …]` |
+| `measurement_failed` | `False` |
+
+`tiny` is the CONTROL target — the one where everything is supposed to be
+recoverable — and DS 4.1 Flash still recovered 0/4 names and 0/2 secrets,
+with only 0.12 algorithm overlap. That is a strong result for the protection
+and a caution for the instrument: a control that scores zero is either an
+artefact of the prompt surface (60,000 characters of loader, in which the
+payload is a minority) or a genuine limit of the recovery attempt. Recording
+`loader_terms_matched` is what lets that be examined after the fact instead of
+argued about, and it is why the raw response is retained rather than a
+summary.
+
+
+
 ### 5t. DS 4.1 Flash against the NATIVE-ONLY artefact: wrapper fully read, enforcement semantics absent
 
 The §5o probe ran against a signed `max` artefact (sectioned fallback, so

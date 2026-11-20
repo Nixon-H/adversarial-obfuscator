@@ -309,6 +309,41 @@ def test_native_only_has_no_python_payload_fallback():
     assert 'FALLBACK_BLOB = "DISABLED"' in loader
 
 
+def test_native_only_failure_path_exits_non_zero():
+    """A fail-closed artefact must REPORT the failure, not exit 0.
+
+    Measured 2026-11-21 on a real `--package native-only` build: with a wrong
+    or missing seal shard the artefact printed nothing and exited **0**. Every
+    failure path in _load_native() returns None, and the entrypoint ignored
+    that return, so to systemd, CI, a supervisor or a benchmark the run was
+    indistinguishable from success. Nothing had executed.
+
+    The contract for this profile is "if the blob cannot load, the loader runs
+    nothing (fail-closed by construction)", which is only meaningful if the
+    failure is observable. Pinned at the source level here; the end-to-end
+    non-zero exit is exercised by the build-level test in
+    tests/test_native_enforcement.py.
+    """
+    loader = _native_only_loader()
+    # The verdict is captured, not discarded.
+    assert "_nx_native_verdict = _load_native()" in loader, \
+        "the entrypoint still ignores what _load_native() returns"
+    # ... and a None verdict is fatal for this profile.
+    assert "_nx_native_verdict is None" in loader
+    assert "exit 78" in loader
+    assert "no Python fallback exists" in loader
+
+
+def test_fallback_build_does_not_gain_the_native_only_exit():
+    """The non-zero exit is compiled out for every profile with a fallback."""
+    from obfuscator.core import pipeline as pl
+    with_fallback = pl.generate_hybrid_loader_script(
+        native_blobs={"linux": "QUJD"}, bytecode_fallback=b"PK\x03\x04junk",
+        key_hex="00" * 32, native_only=False, build_id="fallback-profile")[0]
+    assert "if False and _nx_native_verdict is None:" in with_fallback, \
+        "a fallback build must keep the old entrypoint behaviour"
+
+
 def test_missing_blob_is_refused_not_fallback_executed():
     """No blob for the platform: the loader returns without running."""
     loader = _native_only_loader()
