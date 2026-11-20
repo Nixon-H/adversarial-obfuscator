@@ -1898,3 +1898,27 @@ anything credential-shaped, synthetic or not.
 * The farming/shard uniformity across all three runners: local path measured,
   farm path not re-verified in this pass.
 * The pin's trust anchor is a deployment procedure, not code.
+
+### 5r-bis. The two items left open in the first pass, now closed
+
+**The constructor probe (reviewer's "required test").** `tests/
+test_crash_suppression.py` now compiles a shared object whose constructor
+writes a marker, dlopens it without calling anything, and asserts the marker
+already exists — the platform fact, measured on this toolchain rather than
+quoted from a manual. A second test parses the shipped blob's `.init_array`
+with pure Python and asserts `PyInit_payload` is not among its entries.
+
+Together with the end-to-end invariant in `test_native_enforcement.py`
+(`before=False, after_dlopen=False, after_enforce=False, mask=3,
+after_init=True`) the ordering question is now fully evidence-backed, and
+the claim is the narrow one: *no payload initialization before enforcement*.
+
+**Benchmark reproducibility.** `probe_ai` now records, in every result:
+`raw_response` (the full model answer, unedited), `prompt_sha256`,
+`artefact_sha256`, `artefact_chars_sent`, `scorer`
+(`pydeobsbench.ai_probe/2`) and `per_marker` (which names, secrets, numeric
+markers and basis terms matched). Verified on a live DS 4.1 Flash call: a
+5,014-character response stored in full with both hashes. `tests/
+test_ai_probe_record.py` (5 tests, offline via monkeypatched model call) pins
+the block, including that the prompt hash covers exactly what was sent and
+that no credential-shaped literal can appear in a record.
