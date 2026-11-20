@@ -2198,3 +2198,51 @@ signer, the verifier, the tamper rejection and the two-field reporting.
 **Still operator-supplied, unchanged:** a CA-issued certificate. A self-signed
 one proves the MECHANISM; it does not confer trust, and this record does not
 claim otherwise.
+
+### 5w. A 2%-of-runs wrong-answer bug in the ORAM slot allocator
+
+Found by refusing to accept a flake (reviewer: "I would also remove the
+underlying test interference rather than simply treating every parallel
+failure as environmental"). Shard 3 failed once in three runs on
+`test_bitwise_only_argument_is_virtualized_and_correct` and passed every time
+in isolation. Reproduced deliberately — eight shard runs, two failures,
+assertion captured:
+
+    _exec(src, "encrypt", 10, 6) returned 0, expected 12
+
+**Cause.** `data_protector.py` allocated ORAM slots with
+`rng.randint(0, 63)` per variable and **no collision check**. When two
+variables drew the same slot the transform emitted:
+
+    _oram_x = _nx_oram(64)
+    _oram_x.write(34, pack(key))
+    _oram_x.write(34, pack(data))      <-- SAME slot
+    result = read(34) ^ read(34)       <-- always 0
+
+Collision probability for 2 draws from 64 is ~1.6%; measured rate was
+**8 wrong answers in 400 transform runs**.
+
+**Scope, measured.** The ORAM branch requires two or more sensitive variables
+inside one bitwise expression. The benchmark payload shape
+(`tiny`/`algo`/`inventory`/`cipher`) uses the *virtualisation* path instead:
+100/100 runs contained no `_nx_oram`. So no benchmark artefact was corrupted,
+and the `max`/`absolute` measurements stand. The bug affects payloads that do
+have such a function — which is exactly the case the unit test covers, and why
+only that test ever saw it.
+
+**Fix.** Draw without replacement from a shuffled pool, widening the pool when
+a function has more sensitive variables than slots. Verified: 600 runs, 0
+wrong answers; 200 runs, 0 collisions; 300 runs on the exact pipeline
+transform, 0 broken.
+
+**Why the original test missed it.** It asserted the answer for ONE seed,
+which passed 98% of the time. The replacement asserts the property over 200
+draws; at the old collision rate that fails on 86.6% of runs, so the bug class
+cannot hide behind a lucky seed again. Two further tests cover the semantic
+check over 200 draws and pool widening at 70 variables.
+
+**The general lesson, recorded because this project keeps meeting it.** A test
+that is green most of the time is not evidence about a random transform. The
+review called this out as a process issue ("isolated reruns"); here it was
+also a real silent defect that changes program output — the worst class for a
+protection system, because the artefact still runs and still looks fine.

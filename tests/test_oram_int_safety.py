@@ -233,3 +233,42 @@ def test_unwritten_slot_reads_as_zero_not_none():
     """read() returns None for an empty slot; the unpack must not raise."""
     out = _oram("def f():\n    hash_count = 1\n    return hash_count\n")
     assert "or b'\\x00' * 8" in out or 'or b"\\x00" * 8' in out
+
+
+# ── slot allocation must be collision-free (measured 2026-11-20) ─────────
+#
+# The allocator used rng.randint(0, 63) per variable with no collision check.
+# When two variables drew the same slot -- ~2% of runs for a 2-variable
+# function -- the emitted code wrote both into one slot and read it twice:
+#     write(34, key); write(34, data); read(34) ^ read(34)  == 0
+# so encrypt(10, 6) returned 0 instead of 12. A protection that changes the
+# program's answer is worse than none, and it surfaced only as an intermittent
+# test failure -- the "isolated rerun makes it pass" trap the review names.
+#
+# These tests check the PROPERTY over many draws, because a single draw passed
+# 98% of the time and would never have caught it.
+
+def test_slot_allocation_never_collides_across_many_draws():
+    """Every variable gets a distinct slot, on every seed."""
+    import re as _re
+    src = ("def encrypt(key, data):\n"
+           "    result = key ^ data\n"
+           "    return result\n")
+    for _ in range(200):
+        out = _oram(src)
+        slots = [int(v) for v in _re.findall(r"\.write\((\d+),", out)]
+        assert len(slots) >= 2, out
+        assert len(set(slots)) == len(slots), (
+            "two variables share ORAM slot(s) %r; the emitted code would "
+            "write both into one slot and compute data ^ data:\n%s"
+            % (sorted(slots), out))
+
+
+def test_the_function_still_returns_the_right_answer_across_many_draws():
+    """The semantic check the flake was hiding, run enough times to catch it."""
+    src = ("def encrypt(key, data):\n"
+           "    result = key ^ data\n"
+           "    return result\n")
+    for _ in range(200):
+        assert _exec(src, "encrypt", 10, 6) == 10 ^ 6, (
+            "the ORAM transform changed the program's answer on this draw")

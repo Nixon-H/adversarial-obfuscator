@@ -977,9 +977,29 @@ class DataProtector:
 
                 body: list[ast.stmt] = [oram_init]
                 var_slots: dict[str, int] = {}
-                for sv in func_sensitive:
-                    slot = self.parent._rng.randint(0, 63)
-                    var_slots[sv] = slot
+                # DISTINCT SLOTS, ALWAYS (measured 2026-11-20). This used to
+                # be `rng.randint(0, 63)` per variable with no collision
+                # check, so two variables could land in the SAME slot. The
+                # symptom is silent and catastrophic for correctness: for
+                # `result = key ^ data`, both arguments picked slot 34, the
+                # transform emitted write(34, key); write(34, data) and then
+                # read(34) ^ read(34), which is always 0 -- encrypt(10, 6)
+                # returned 0 instead of 12. Measured rate: 8 wrong answers in
+                # 400 runs (~2%), matching the birthday collision probability
+                # for 2 draws from 64 slots. A protection that changes the
+                # program's answer is worse than no protection, and this
+                # surfaced only as an intermittent test failure -- the
+                # "isolated rerun makes it pass" pattern the review warned
+                # about.
+                #
+                # Allocation now draws WITHOUT replacement. If a function has
+                # more sensitive variables than slots, the pool widens rather
+                # than aliasing.
+                _slot_space = max(64, len(func_sensitive))
+                _slot_pool = list(range(_slot_space))
+                self.parent._rng.shuffle(_slot_pool)
+                for _sv_index, sv in enumerate(func_sensitive):
+                    var_slots[sv] = _slot_pool[_sv_index]
 
                 for stmt in node.body:
                     if isinstance(stmt, ast.Assign):
