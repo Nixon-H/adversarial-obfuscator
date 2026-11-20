@@ -3372,7 +3372,32 @@ def _load_native():
                 except Exception: 
                     pass
 if __name__ in ("__main__", "__mp_main__"):
-    _load_native()
+    # FAIL-CLOSED MUST BE OBSERVABLE (measured 2026-11-21). Every failure path
+    # in _load_native() returns None, and this call site ignored that: a
+    # NATIVE-ONLY artefact whose blob could not load -- wrong or missing seal
+    # shard, ABI mismatch, corrupt payload -- printed nothing and exited 0.
+    # To any automated caller (systemd, CI, a supervisor, a benchmark) that is
+    # indistinguishable from a successful run, which is the silent-degradation
+    # class this project keeps finding. The documented contract for the
+    # native-only profile is "if the blob cannot load, the loader runs nothing
+    # (fail-closed by construction)", so it now says so and exits non-zero.
+    #
+    # For a build WITH a Python fallback the old behaviour is preserved: a
+    # None return there means the fallback was the intended outcome, and the
+    # fallback path has already run or has already reported its own failure.
+    _nx_native_verdict = _load_native()
+    if __NX_NATIVE_ONLY_GUARD__ and _nx_native_verdict is None:
+        try:
+            _nx_m = __import__("sys")
+            _nx_m.stderr.write(
+                "[FATAL] native-only artefact: the embedded blobs could not "
+                "be loaded and no Python fallback exists (exit 78)\n")
+            _nx_m.stderr.flush()
+            _nx_m.exit(78)
+        except SystemExit:
+            raise
+        except Exception:
+            pass
 '''
     # Phase-4 wiring: prepend hostguard (opt-in only), append secure-temp +
     # VM snippets + KOD/trial/HWID-lock markers. Prepending/appending around
