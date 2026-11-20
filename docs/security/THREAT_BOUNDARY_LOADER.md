@@ -196,23 +196,40 @@ blurs them is useless.
 
 ### 1. CFG function table (`IMAGE_GUARD_CF_FUNCTION_TABLE_PRESENT`)
 
-**State: PARTIAL.** Measured 2026-11-19 on a real MSVC-ABI object:
+**State: PARTIAL — and the blocker is now measured precisely.**
+
+Measured 2026-11-19 on a real MSVC-ABI object:
 
 | object | load config | GuardFlags | instrumented | function table |
 |---|---|---|---|---|
 | `-guard:cf` only | empty | — | — | — |
 | + `native/pe_load_config.c` | 288 B | `0x100` | **yes** | **no** |
 
-`0x100` is `CF_INSTRUMENTED`: indirect call sites verify against the guard
-check pointer, which is real protection. `0x400`
-(`CF_FUNCTION_TABLE_PRESENT`) requires the compiler to emit a guard function
-table, which needs `clang-cl` with the MSVC headers — not present here.
+**Updated 2026-11-20: the earlier diagnosis ("needs clang-cl") was wrong.**
+`clang-cl-19` and `lld-link` are both installed here, and four probes were run
+with them. Every step is measured:
 
-**Missing capability:** MSVC headers / a Windows SDK.
+| probe | load config | GuardFlags @0x90 | table present |
+|---|---|---|---|
+| hand-defined LC, `unsigned long` fields (136 B) | 136 B | field beyond size | no |
+| explicit-width fields (152 B) | 152 B | `0x100` ✓ | no — lld-link: "GuardCFFunctionTable not set correctly" |
+| full 288-byte LC incl. LongJump tail (304 B) | 304 B | `0x100` ✓ | no — same three warnings |
+| **no `_load_config_used` defined at all** | **0 (none emitted)** | — | — — lld-link: "Control Flow Guard is enabled but `_load_config_used` is missing" |
+
+So `GuardFlags = 0x100` (`CF_INSTRUMENTED`) is reachable and correct — indirect
+calls are instrumented, which is real protection. `0x400`
+(`CF_FUNCTION_TABLE_PRESENT`) is **not reachable with this toolchain**, and the
+reason is now specific: lld-link only populates `GuardCFFunctionTable` /
+`GuardCFFunctionCount` / `GuardFlags` when it emits the structure itself, and it
+only does that when the MSVC CRT's guard symbols (`__guard_fids_table`,
+`__guard_check_icall_fptr`) are linked in. Those come from MSVC's `libcmt`/CRT,
+not from headers — so "install the headers" would not have helped.
+
+**Missing capability:** MSVC's CRT (a real `cl.exe` toolchain / Windows SDK),
+not merely `clang-cl`.
 **Verification that would follow:** a PE with `GuardFlags & 0x400` set and a
 non-zero `GuardCFFunctionCount`; `native_harden.check` already reports
-`partial: []` in that case, so the check is ready and only the toolchain is
-absent.
+`partial: []` in that case, so the check is ready and only the CRT is absent.
 
 ### 2. Authenticode
 
@@ -280,9 +297,25 @@ This is a different kind of entry from the CFG one. There, the mechanism was
 implemented and measured with a weaker result (no function table). Here the
 **parser is complete and tested** — it walks `LC_CODE_SIGNATURE`, parses the
 CodeDirectory superblob and reads `CS_RUNTIME` / `CS_RESTRICT` — but no signed
-Mach-O object exists on this host to point it at, so the parser has only ever
-been exercised against synthetic blobs. That is a weaker evidence class and it is
-recorded as such rather than as "verified".
+Mach-O object exists on this host to point it at, so the CodeDirectory path has
+only ever been exercised against synthetic blobs. That is a weaker evidence
+class and it is recorded as such rather than as "verified".
+
+**Updated 2026-11-20: the parser now runs against REAL Mach-O.** clang can
+cross-emit Mach-O for both architectures on this Linux host, so the object-level
+path is exercised on real bytes (built at test time by
+`tests/fixtures/build_macho_probe.sh`; `*.o` artefacts are never committed):
+arm64 and x86_64 objects parse as `valid: true`, `filetype: 1 (object)`, correct
+`MH_` flags. The signed-image path (CodeDirectory, `CS_RUNTIME`,
+`CS_RESTRICT`) still has no real input here, and that half remains the
+unverified part.
+
+The parser also gained a `filetype` / `signature_expected` field, because
+`pie: False` and `signed: False` mean different things for different images:
+an `MH_OBJECT` has no `LC_MAIN` and is never signed, so those are EXPECTED,
+while the same report on an `MH_DYLIB` or `MH_EXECUTE` is a hardening defect.
+Before this field the report could not tell "not applicable" from "missing" —
+an object measured on a build host read as an unsigned artefact.
 
 **Unblock step, named precisely:** a macOS runner (or `rcodesign` on any host)
 plus an **Apple Developer ID Application certificate**, then
@@ -461,3 +494,46 @@ the boundary-push option. It is now implemented and measured.
   execution can trace the native entry, and the blob is extractable. What
   changed is where the semantics live — text vs stripped machine code — and
   the measured DS probe confirms the difference.
+
+### Measured 2026-11-20: what a DECOMPILER gets (Ghidra headless)
+
+The DS probe above reads artefact TEXT. The obvious next question is what a
+binary-analysis tool gets, and the answer splits in two — which is why the
+two halves are recorded separately.
+
+**The enforcement shim is fully readable.** Decompiling
+`nx_apply_protections` (305 bytes) from a shipped blob produces C that names
+every operation:
+
+```c
+iVar1 = prctl(4,0,0,0,0);                  /* PR_SET_DUMPABLE = 0 */
+iVar2 = setrlimit(RLIMIT_CORE, &local_b0);  /* core limit zero */
+...
+sigaction(0xd, ...);                        /* SIGPIPE */
+sigaction(6, ...); sigaction(0xb, ...);      /* SIGABRT / SIGSEGV */
+sigaction(4, ...); sigaction(8, ...); sigaction(7, ...);
+                                            /* SIGILL / SIGFPE / SIGBUS */
+```
+
+So moving enforcement into the blob defeated the **text-reading probe**, not
+binary analysis. Any claim that the native entry "cannot be reconstructed"
+is false under a decompiler, and this document does not make it.
+
+**The payload is not recovered.** The number that matters:
+
+| measurement | result |
+|---|---|
+| functions in the blob | 374, of which **6 named** (the Cython symbol map is stripped) |
+| largest functions decompiled | 8, up to 11,826 bytes / 64,395 characters of C each |
+| of those, containing a payload identifier or literal | **0 of 8** |
+| defined strings containing payload material | **0** |
+| raw `strings` hits for payload identifiers | **0** |
+
+47,159 bytes of payload code decompiled into 246,485 characters of C, and no
+payload name, string or algorithm is recoverable from it. This is the first
+independent (non-LLM) evidence that the payload survives static binary
+analysis.
+
+Reproduce with `scripts/ghidra_boundary_check.sh <blob.so>` and
+`NX_PAYLOAD_NEEDLES="<identifiers;literals>"`; the driver and its two Ghidra
+scripts are committed. Full write-up: research log §5u.

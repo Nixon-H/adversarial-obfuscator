@@ -764,3 +764,148 @@ def test_a_self_signed_certificate_does_not_count_as_trusted():
     # asserts the DIRECTION: machinery alone is not trust.
     assert ("certificate" in readiness["reason"].lower()
             or "operator" in readiness["reason"].lower()), readiness["reason"]
+
+
+# ── a REAL object carrying the CET bits (2026-11-20) ─────────────────────
+#
+# Every CET test above uses a synthetic header. This one uses an object
+# actually produced by clang-cl + lld-link, because the 2026-11-19 record
+# ("CET measured as not instrumented") turned out to be a measurement defect:
+# the probe's load-config structure was the wrong size, so the bits never
+# reached the PE.
+
+REAL_CET_PE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "fixtures", "cet_marked_pe.exe")
+CET_PROBE_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "fixtures", "cet_probe.c")
+CET_BUILD_SH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "fixtures", "build_cet_probe.sh")
+CET_EXPECTED_FLAGS = 0x100 | 0x4000 | 0x40000 | 0x100000
+
+
+def _build_cet_probe(tmp_path):
+    """Compile the committed probe. Returns (path, skip_reason).
+
+    The object is built rather than checked in because `*.exe` is gitignored:
+    a committed binary would silently not exist in CI, and a test that skips
+    for that reason is the false-confidence pattern this project keeps
+    finding. clang-cl and lld-link are probed by the script itself.
+    """
+    import subprocess as _sp
+    if not os.path.isfile(CET_BUILD_SH):
+        return None, "build_cet_probe.sh missing"
+    run = _sp.run(["/bin/sh", CET_BUILD_SH], capture_output=True, text=True,
+                  timeout=300, cwd=str(tmp_path),
+                  env=dict(os.environ, NX_CET_OUTDIR=str(tmp_path)))
+    out = (run.stdout or "").strip()
+    if out.startswith("ok="):
+        return out[3:], None
+    if not out:
+        out = (run.stderr or "").strip()[-200:] or "no output"
+    return None, out
+
+
+def test_a_real_cet_marked_object_is_read_correctly(tmp_path):
+    """The object is BUILT here, so the check cannot skip for free.
+
+    A checked-in .exe would be gitignored and thus absent in CI, and a test
+    that skips because its fixture never shipped is the false-confidence
+    pattern this project keeps finding. The script reports why it could not
+    build, and the skip message carries that reason.
+    """
+    exe, reason = _build_cet_probe(tmp_path)
+    if exe is None:
+        pytest.skip("CET probe not buildable here (%s); the synthetic CET "
+                    "tests above still run" % (reason,))
+    raw = open(exe, "rb").read()
+    report = nh.verify_pe_bytes(raw)
+    assert report["cfg"] is True, "the real object must still declare CFG"
+    assert report["cfg_guard_flags"] == CET_EXPECTED_FLAGS, (
+        "GuardFlags changed: expected %#x "
+        "(CF_INSTRUMENTED|XFG|SHADOW_STACK|USER_CET_COMPAT), got %#x"
+        % (CET_EXPECTED_FLAGS, report["cfg_guard_flags"]))
+    assert report["cet_xfg"] is True
+    assert report["cet_shadow_stack"] is True
+    assert report["cet_user_compat"] is True
+    # and the function table is genuinely absent -- a caller-defined
+    # structure is why, recorded in the boundary document
+    assert report["cfg_function_table"] is False
+    verdict = nh.check(report, "windows", "msvc")
+    assert verdict["ok"] is True, verdict
+    assert verdict["inert"] == [], (
+        "a flag with no data behind it is the inert-flag trap; none here")
+
+
+def test_the_cet_probe_source_is_committed_and_reproducible():
+    assert os.path.isfile(CET_PROBE_SRC), (
+        "the CET probe source is missing, so the object cannot be rebuilt")
+    assert os.path.isfile(CET_BUILD_SH), (
+        "the build script is missing, so the probe cannot be rebuilt either")
+    body = open(CET_PROBE_SRC, encoding="utf-8").read()
+    # the build recipe must be in the file, or nobody can reproduce it
+    for token in ("clang-cl", "lld-link", "/guard:cf", "0x4000"):
+        assert token in body, (
+            "cet_probe.c no longer documents %r" % token)
+
+
+# ── real Mach-O objects (2026-11-20) ─────────────────────────────────────
+#
+# The macOS parser had only synthetic fixtures. clang can cross-emit real
+# Mach-O for both architectures on this Linux host, so the parser is now
+# exercised on real bytes -- and the report distinguishes an MH_OBJECT (where
+# "not signed" is EXPECTED) from a dylib (where it is a defect).
+
+MACHO_BUILD_SH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "fixtures", "build_macho_probe.sh")
+
+
+def _build_macho_probes(tmp_path):
+    import subprocess as _sp
+    if not os.path.isfile(MACHO_BUILD_SH):
+        return None, "build_macho_probe.sh missing"
+    run = _sp.run(["/bin/sh", MACHO_BUILD_SH], capture_output=True, text=True,
+                  timeout=300, cwd=str(tmp_path),
+                  env=dict(os.environ, NX_MACHO_OUTDIR=str(tmp_path)))
+    out = (run.stdout or "").strip()
+    if out.startswith("ok="):
+        return out[3:].split(), None
+    return None, out or (run.stderr or "").strip()[-200:] or "no output"
+
+
+def test_real_macho_objects_parse_and_report_their_filetype(tmp_path):
+    """Parse real arm64 + x86_64 Mach-O, and report type, not just flags.
+
+    Measured 2026-11-20: without a filetype field, `pie=False`/`signed=False`
+    on an MH_OBJECT is indistinguishable from the same report on an unsigned
+    dylib -- one is expected, the other is the defect the reviewer asked
+    about.
+    """
+    built, reason = _build_macho_probes(tmp_path)
+    if built is None:
+        pytest.skip("Mach-O cross-compile unavailable (%s)" % (reason,))
+    assert len(built) == 2, built
+    for path in built:
+        raw = open(path, "rb").read()
+        report = nh.verify_macho_bytes(raw)
+        assert report["valid"] is True, (
+            "%s did not parse as Mach-O" % os.path.basename(path))
+        assert report["filetype"] == 1, (
+            "cross-compiled objects are MH_OBJECT; got filetype %r"
+            % (report["filetype"],))
+        assert report["filetype_name"] == "object"
+        # the distinction that matters: signing is not EXPECTED of an object
+        assert report["signature_expected"] is False, (
+            "an MH_OBJECT must not be treated as a missing signature")
+        assert report["signed"] is False
+        assert report["hardened_runtime"] is False
+
+
+def test_the_macho_probe_source_is_committed_and_reproducible():
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "fixtures", "macho_probe.c")
+    assert os.path.isfile(src), "the Mach-O probe source is missing"
+    assert os.path.isfile(MACHO_BUILD_SH), "the build script is missing"
+    build = open(MACHO_BUILD_SH, encoding="utf-8").read()
+    for token in ("arm64-apple-macos", "x86_64-apple-macos"):
+        assert token in build, (
+            "the Mach-O build script no longer targets %r" % token)

@@ -237,3 +237,82 @@ def test_a_missing_key_file_raises_rather_than_signing(tmp_path):
     cert, _key = _make_cert(tmp_path)
     with pytest.raises(Exception):
         ac.sign_pe(_pe(), cert, str(tmp_path / "nope.pem"))
+
+
+# ── the signature must be WINDOWS-Valid, and verifiable (2026-11-20) ─────
+#
+# Before this batch the signer emitted a generic PKCS#7 signature: the image
+# digest was hashed into the messageDigest attribute, but the
+# SpcIndirectDataContent was DETACHED, so the spcIndirectData OID never
+# appeared in the blob and the image digest was not embedded. Windows would
+# not have recognised the file as signed, while native_harden reported
+# authenticode: True on the strength of a non-empty directory.
+
+SPC_OID_DER = bytes.fromhex("060a2b060104018237020104")
+
+
+def test_the_signed_blob_carries_the_spc_indirect_data_oid(tmp_path):
+    """Authenticode's contentType must be spcIndirectData, not pkcs7-data."""
+    ac = _authenticode()
+    cert, key = _make_cert(tmp_path)
+    signed = ac.sign_pe(_pe(), cert, key)
+    assert SPC_OID_DER in signed, (
+        "the spcIndirectData OID is absent: this is a generic PKCS#7 "
+        "signature that Windows will not accept as Authenticode")
+
+
+def test_the_signed_blob_embeds_the_image_digest(tmp_path):
+    """The signed content must CONTAIN the digest, not just hash it."""
+    ac = _authenticode()
+    cert, key = _make_cert(tmp_path)
+    unsigned = _pe()
+    signed = ac.sign_pe(unsigned, cert, key)
+    assert ac.pe_digest(unsigned) in signed, (
+        "the image's Authenticode digest is not embedded in the signed "
+        "content; a Windows verifier has nothing to compare against")
+
+
+def test_the_verifier_accepts_a_signature_it_produced(tmp_path):
+    from obfuscator.authenticode_verify import verify_pe_signature
+    ac = _authenticode()
+    cert, key = _make_cert(tmp_path)
+    signed = ac.sign_pe(_pe(), cert, key)
+    report = verify_pe_signature(signed)
+    assert report["ok"] is True, report["reason"]
+    assert report["digest_matches"] is True
+    assert report["revision"] == 0x0200
+    assert report["cert_type"] == 0x0002
+
+
+def test_the_verifier_rejects_an_image_modified_after_signing(tmp_path):
+    """THE property that makes a signature a signature."""
+    from obfuscator.authenticode_verify import verify_pe_signature
+    ac = _authenticode()
+    cert, key = _make_cert(tmp_path)
+    signed = bytearray(ac.sign_pe(_pe(), cert, key))
+    signed[0x200] ^= 0xFF              # one byte inside the image body
+    report = verify_pe_signature(bytes(signed))
+    assert report["ok"] is False
+    assert "does not appear in the signed content" in report["reason"]
+
+
+def test_the_verifier_rejects_an_unsigned_image(tmp_path):
+    from obfuscator.authenticode_verify import verify_pe_signature
+    report = verify_pe_signature(_pe())
+    assert report["ok"] is False
+    assert "no certificate table" in report["reason"]
+
+
+def test_native_harden_separates_presence_from_verification(tmp_path):
+    """A certificate table existing must not read as 'signed'."""
+    from obfuscator import native_harden as nh
+    ac = _authenticode()
+    cert, key = _make_cert(tmp_path)
+    unsigned_rep = nh.verify_pe_bytes(_pe())
+    assert unsigned_rep["authenticode"] is False
+    assert unsigned_rep["authenticode_verified"] is False
+    signed_rep = nh.verify_pe_bytes(ac.sign_pe(_pe(), cert, key))
+    assert signed_rep["authenticode"] is True
+    assert signed_rep["authenticode_verified"] is True, (
+        "the digest does not verify: %s"
+        % (signed_rep.get("authenticode_reason"),))

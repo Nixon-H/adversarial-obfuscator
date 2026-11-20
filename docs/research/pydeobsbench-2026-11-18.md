@@ -2042,3 +2042,159 @@ Two honest limits, unchanged:
 * The wrapper is still fully readable. `loader_reversed = TRUE` remains the
   correct record for the loader; the claim that improved is narrower, and is
   the one the table above measures.
+
+---
+
+## 5u. Independent binary analysis (Ghidra) and the Windows toolchain probes
+
+Two reviewer items assumed impossible without external resources. Both were
+actually testable on this host, and both changed the record.
+
+### Ghidra headless against the shipped native-only blob
+
+`analyzeHeadless` is installed (Ghidra + Java 21). The 192 KB ELF blob was
+extracted from a real native-only artefact and analysed with two headless
+post-scripts.
+
+**The enforcement shim is fully readable.** Ghidra's decompiler produced:
+
+```c
+char nx_apply_protections(void)
+{
+  iVar1 = prctl(4,0,0,0,0);                 /* PR_SET_DUMPABLE=0 */
+  iVar2 = setrlimit(RLIMIT_CORE, &local_b0); /* core limit zero */
+  ...
+  sigaction(0xd, ...);      /* SIGPIPE */
+  sigaction(6, ...); sigaction(0xb, ...);    /* SIGABRT / SIGSEGV */
+  sigaction(4, ...); sigaction(8, ...); sigaction(7, ...);
+                                             /* SIGILL / SIGFPE / SIGBUS */
+}
+```
+
+305 bytes in, 1,190 characters of C out, every syscall named. **This
+falsifies any claim that the enforcement semantics are hidden from binary
+analysis.** The DS model could not name a single syscall because it only
+reads artefact TEXT; a decompiler reads the machine code and names all five.
+The honest statement is the narrow one from §5o: moving enforcement into the
+blob defeated *the text-reading probe*, not analysis in general.
+
+**The payload does hold.** The number that matters:
+
+| measurement | result |
+|---|---|
+| functions recovered | 374, of which **6 named** (strip removed the Cython map) |
+| `__pyx_pf_*` payload symbols | **0** |
+| largest functions decompiled | 8, up to 11,826 bytes / 64,395 chars of C each |
+| of those, containing `SALT` / `transform` / `verify-me` | **0 of 8** |
+| defined strings containing payload material | **0** |
+| raw `strings` hits for payload identifiers | **0** |
+
+47,159 bytes of payload code decompiled into 246,485 characters of C, and it
+yields no payload identifier, no payload string, and no algorithm the tool
+can name. (`PyInit_payload` itself is a 16-byte stub calling
+`PyModuleDef_Init`.) That is the first independent, non-LLM evidence that the
+payload survives static binary analysis — and it is the reviewer's own
+requested test, not a proxy.
+
+### Windows toolchain: CFG function table needs the MSVC CRT, not the headers
+
+The 2026-11-19 entry said the CFG function table "needs clang-cl with the
+MSVC headers — not present here". **`clang-cl-19` and `lld-link` are both
+installed.** Four probes with them:
+
+| probe | load config | GuardFlags @0x90 | table |
+|---|---|---|---|
+| `unsigned long` fields (136 B) | 136 B | field beyond size | no |
+| explicit-width fields (152 B) | 152 B | `0x100` | no; lld-link: "GuardCFFunctionTable not set correctly" |
+| full 288-byte layout incl. LongJump tail | 304 B | `0x100` | no; same warnings |
+| no `_load_config_used` at all | **none emitted** | — | lld-link: "Control Flow Guard is enabled but `_load_config_used` is missing" |
+
+`GuardFlags = 0x100` (`CF_INSTRUMENTED`) is reachable and correct.
+`0x400` (`CF_FUNCTION_TABLE_PRESENT`) is not, and **the blocker is now
+identified precisely**: lld-link only populates `GuardCFFunctionTable` /
+`GuardCFFunctionCount` / `GuardFlags` when it emits the structure itself, and
+it only does that when the MSVC CRT's guard symbols (`__guard_fids_table`,
+`__guard_check_icall_fptr`) are linked in. Those are CRT objects, not
+headers — so installing headers would not have helped, and the earlier
+diagnosis was wrong in a way that would have wasted someone's afternoon.
+
+### Windows CET: the 2026-11-19 "inert" verdict was a measurement defect
+
+The same probe sequence showed CET bits DO land in the PE once the structure
+is correctly sized:
+
+    GuardFlags = 0x144100
+      CF_INSTRUMENTED          (0x100)    set
+      CET_XFG_ENABLED          (0x4000)   set
+      CET_SHADOW_STACK_PRESENT (0x40000)  set
+      CET_UserCETCompat        (0x100000) set
+
+and the linked binary carries **3 `endbr64` instructions**, emitted by
+default on this target (`-fcf-protection=full` changed nothing because it was
+already on). The earlier "CET is inert in the generated artifact" was
+measured without a correctly-sized load config, so the bits never reached the
+PE — the same class of error as the MBA probe measuring the wrong emitter.
+
+**Honest scope on CET:** header bits + `endbr64` mean the image is *marked
+CET-compatible and its indirect-branch targets are ENDBR-guarded*. Whether a
+Windows loader enforces shadow stack for it depends on the CPU, the OS
+mitigation policy and whether the process opts in — none of which exists on
+this Linux host. The claim that improved is "the artifact carries valid CET
+metadata", not "shadow stack is enforced at runtime".
+
+### 5v. The Authenticode signature was never Windows-valid, and could never be checked
+
+Two defects, both found by exercising the mechanism against a real signed PE
+on a host that turned out to have everything needed (openssl for a test
+certificate, clang-cl + lld-link for a real PE).
+
+**Defect 1: the emitted signature was generic PKCS#7, not Authenticode.**
+`sign_pe` passed `PKCS7Options.DetachedSignature`, so the
+SpcIndirectDataContent became the DETACHED content: only its hash reached the
+`messageDigest` attribute and the blob itself was never written. Measured on
+a real signed PE:
+
+| expectation | measured before | measured after fix |
+|---|---|---|
+| `spcIndirectData` OID (1.3.6.1.4.1.311.2.1.4) in the blob | **absent** | present |
+| image digest embedded in the signed content | **absent** | present |
+| contentType declared | `pkcs7-data` (1.2.840.113549.1.7.1) | `spcIndirectData` |
+| blob size | 1,499 (detached) | 1,581 (embedded) |
+
+A file like the "before" is a perfectly valid generic PKCS#7 signature and an
+INVALID Authenticode signature: Windows would not have shown it as signed.
+The old code comment asserted "`cryptography` emits that, so no
+post-processing is needed" — it does not, and the assertion was never tested
+against a real image. The fix is one line: sign with
+`PKCS7Options.Binary` (embedded), not `DetachedSignature`.
+
+**Defect 2: there was no verifier at all.** `authenticode.py` had 13
+functions and not one of them checked a signature.
+`native_harden.verify_pe_bytes` reported `authenticode: True` from
+`sec_size > 0` — "a certificate table exists", which is a directory lookup.
+
+Added `obfuscator/authenticode_verify.py` (no new dependencies; reads the DER
+itself). It checks: WIN_CERTIFICATE revision 2.0 and type 0x0002; dwLength
+consistent with the table; PKCS#7 DER length consistent with dwLength; and —
+the property that makes a signature a signature — **the image's current
+Authenticode digest appears inside the signed content**. Optional certificate
+pinning is supported. Trust in the ISSUER is deliberately NOT asserted:
+that is a PKI question, reported separately by
+`native_harden.signing_readiness`.
+
+Measured end to end on a real PE with a self-signed code-signing certificate:
+
+| case | result |
+|---|---|
+| signed by this build, then verified | **ok, digest_matches** |
+| one byte flipped after signing | rejected: "digest does not appear in the signed content" |
+| unsigned image | rejected: "no certificate table" |
+
+`native_harden` now reports BOTH facts — `authenticode` (table present) and
+`authenticode_verified` (digest verifies) — so a non-empty directory can no
+longer read as "signed". 15 tests in `tests/test_authenticode.py` pin the
+signer, the verifier, the tamper rejection and the two-field reporting.
+
+**Still operator-supplied, unchanged:** a CA-issued certificate. A self-signed
+one proves the MECHANISM; it does not confer trust, and this record does not
+claim otherwise.
