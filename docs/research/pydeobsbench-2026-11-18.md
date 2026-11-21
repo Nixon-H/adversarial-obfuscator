@@ -2228,14 +2228,21 @@ llvm names 0x4000 **CF_EXPORT_SUPPRESSION_INFO_PRESENT**, leaves 0x40000 and
 all. Where CET's opt-in really lives, measured on the same probe object:
 
     DllCharacteristics = 0xC160
-      CET_COMPAT   (0x8000)   set   <- the real /CETCOMPAT result
+      CET_COMPAT   (0x8000)   set   <- WRONG READING, see below
       GUARD_CF     (0x4000)   set
       NX_COMPAT / DYNAMIC_BASE / HIGH_ENTROPY_VA
 
 and on the FARM .pyd (run 44853081762): DllCharacteristics 0x4160 — GUARD_CF
-set, **CET compat ABSENT** — so the /CETCOMPAT link flag did not produce a
-CET-compat image there, and `native_harden` now reports that in a
-`cet_compat` field instead of implying one from mislabeled GuardFlags bits.
+set, "CET compat ABSENT".
+
+**RETRACTED 2026-11-21 (second correction, reviewer-flagged).** Everything
+in the last two paragraphs read CET from the WRONG FIELD. 0x8000 in the
+OPTIONAL header's DllCharacteristics is TERMINAL_SERVER_AWARE — the farm
+.pyd's 0xC160 was GUARD_CF + TERMINAL_SERVER_AWARE, never a CET marker, and
+its 0x4160 was GUARD_CF only. The real CET opt-in is the Debug Directory
+type-20 record, which the farm .pyd llvm-verifies as carrying
+IMAGE_DLL_CHARACTERISTICS_EX_CET_COMPAT (0x1) — the shipped blob IS
+CET-compatible. Full corrected measurement and history: §6b below.
 The parser's constants were renamed to the authoritative names
 (`PE_GUARD_EXPORT_SUPPRESSION_INFO_PRESENT` et al.), and
 `test_guard_flag_bit_names_match_the_authoritative_parser` pins each name
@@ -2917,7 +2924,7 @@ TODO without a reason.
 | **P0** CA-issued Authenticode identity | **accepted external limit** (§5z.5) | env/files/gh-secrets checked empty; procurement + identity validation is a third-party act |
 | **P0** Apple Developer ID | **accepted external limit** (§5z.5) | membership + macOS keychain identity |
 | **P0** Actual macOS build + runtime test | **CLOSED for build+run** (Hardened Runtime stays external) | farm run 44866777087/44870436990: the driver now IMPORTS the produced blob ON THE PRODUCING RUNNER before upload and records `smoke_test` in the attestation — measured: `payload.cpython-311-darwin.so loads on Darwin (0.01s)`, Windows `loads on Windows (0.04s)`, Linux `loads on Linux (0.08s)`. One revision, three platforms, each blob executed on its own OS. Hardened Runtime codesign remains gated on the Developer ID. |
-| **P1** CET compatibility on the farm .pyd | **CLOSED with a definitive answer: not linker-achievable for a DLL** | a controlled experiment on the same runner (run 44872550592): the SAME object linked with the SAME /CETCOMPAT flag — EXE variant: DllCharacteristics 0xC160, **cet_compat=True**; DLL variant: 0x4160, **cet_compat=False**. MSVC link.exe applies the CET_COMPAT bit to EXE targets only. CET for a .pyd is decided by the LOADING process (python.exe), not the DLL header — and what CET enforcement needs from the DLL is exactly what the farm .pyd now has: /GUARD:CF with a populated 48-entry function table. The probe (vc-env discovery + absolute-path cl/link + EXE/DLL variants) is embedded in the driver and ships in every farm attestation as `cet_probe`. |
+| **P1** CET compatibility on the farm .pyd | **REOPENED AND CORRECTED (see 6b — the experiment below measured the wrong field)** | 6a's row claimed "MSVC applies the CET_COMPAT bit to EXE targets only" based on optional-header 0x8000/0x4160 values — but 0x8000 in the optional header is TERMINAL_SERVER_AWARE, not CET. With the CORRECT field (Debug Directory type-20 record, EX_CET_COMPAT 0x1), the farm .pyd llvm-verifies as CET-compatible, and the probe re-run (44894648085) shows BOTH the EXE and the DLL variant carry the bit. See 6b for the corrected tables. |
 | **P1** 3-platform parity on one revision | **CLOSED** | the smoke-test step above: same revision, each blob imported and executed on its own runner, results in the attestation |
 | **P1** Independent review of section encryption | **partially closed: the two recorded limitations are fixed; the AEAD migration is rejected with a reason** | v2 scheme: role-separated enc/mac keys (`nx-section-enc:` / `nx-section-mac:` domains) and the MAC now binds `index‖total‖nonce‖plaintext` (the AAD role) — 6 new tests including a v1-compatibility pack and a relabel/total-tamper pair. The full AES-GCM migration is REJECTED for the section path because the loader must run on customer machines with STDLIB ONLY (no `cryptography` wheel) — the GCM helper stays for environments that have it, and the register's "if the review supports that change" resolves to "the standard construction that satisfies the constraint is the domain-separated HMAC construction, now hardened". |
 | **P1** Human/Ghidra semantic analysis | **deepened in-session; the independent human review stays external** | (a) BigFnSurvey now EXPORTS the decompiled C of the top-3 functions (the claim is checkable against text, not a count); (b) the semantic surface is mapped: 7 PyNumber_Multiply + 16 PyNumber_Add + 3 PyNumber_Xor call sites and 109 distinct CPython/Cython API references are findable in the binary — an analyst CAN locate the payload's arithmetic via the interpreter's own imports; (c) dynamic: under gdb the blob load happens in a FORKED CHILD through a memfd/namespace path — a name breakpoint stays PENDING forever and even `follow-fork-mode child` lands in `?? ()` frames (no symbols, no library mapping); the static symbol table is stripped. Honest conclusion: names/strings are unrecoverable; SEMANTICS are reconstructable with effort at known API sites — the register's human review remains the open item. |
@@ -2942,3 +2949,89 @@ regression-guarded):
    LNK1561 entry point → and finally the EXE/DLL variant pair. Each step is
    recorded in the driver comments with its run number, because the next
    person touching MSVC invocation on a runner will hit the same sequence.
+
+## 6b. Review register 2026-11-21 (second pass): the CET correction, and the register reopened correctly
+
+The reviewer found a concrete factual error in 6a and it is worse than a
+mislabel: **the CET experiment measured the wrong PE field.** This section
+reopens what 6a closed and records the corrected state.
+
+### The error
+
+The first "correction" (§5z.4) replaced CET bits in GuardFlags with
+"CET's opt-in is DllCharacteristics 0x8000". 0x8000 in the OPTIONAL HEADER is
+**TERMINAL_SERVER_AWARE**. The real CET opt-in is a Debug Directory record:
+
+* Type `IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS` (20 / 0x14)
+* Its 4-byte payload is the extended characteristics word
+* `IMAGE_DLL_CHARACTERISTICS_EX_CET_COMPAT` = 0x0001
+
+Consequences of the error: the farm .pyd — which llvm-readobj shows carries
+the type-20 record with `ExtendedCharacteristics 0x1` — was reported as
+**non-CET** when it IS CET-compatible, and the "MSVC applies /CETCOMPAT to
+EXE targets only" conclusion was drawn from a field that never measured CET.
+
+### The corrected measurement
+
+`native_harden` now parses the Debug Directory (data directory 6) for the
+type-20 record and reports `cet_compat` from bit 0x1 of its extended word;
+the optional-header word is reported with its correct name
+(`terminal_server_aware`). Parser vs llvm-readobj, on the REAL farm .pyd:
+
+| reader | extended record | CET bit |
+|---|---|---|
+| llvm-readobj --coff-debug-directory | ExtendedDLLCharacteristics (0x14), data 01000000 | IMAGE_DLL_CHARACTERISTICS_EX_CET_COMPAT set |
+| this parser (verify_pe_bytes) | ex_dllcharacteristics=1 | cet_compat=True |
+
+The farm probe re-measured with the corrected field (run 44894648085, same
+cl.exe/link.exe):
+
+| probe | result |
+|---|---|
+| EXE variant | ex_chars=1, **cet_compat=True** |
+| DLL variant (same object, /DLL /NOENTRY) | DllCharacteristics 0x4160, **cet_compat=True** |
+
+So with the CORRECT field, MSVC link.exe honours /CETCOMPAT for **both**
+targets, and the shipped farm .pyd **is CET-compatible-marked**. The earlier
+EXE-only conclusion is RETRACTED. The probe also queries the process
+user-shadow-stack policy (GetProcessMitigationPolicy, type 17) and records
+it beside the module verdict; on run 44894648085 the query returned false on
+that runner — recorded, not hidden, because module compatibility and process
+policy are related but distinct controls (register item 5).
+
+One honest note kept from the measurement chain: the lld-link probe built by
+tests/fixtures (hand-written minimal PE) has NO debug directory at all
+(DebugRVA 0x0), so it cannot express CET compatibility even with /CETCOMPAT
+— a real toolchain difference, asserted in its test.
+
+### Register disposition after the correction
+
+* **P1-6 (CET)**: the parser, the attestation field and the probe now
+  measure the right thing, and the farm .pyd passes. What remains for the
+  register is the RUNTIME half — confirming the host python.exe enables the
+  shadow-stack policy on supported hardware — which needs a Windows host and
+  is recorded as pending, not claimed.
+* **Pack v2 downgrade resistance**: the version field is now INSIDE the v2
+  MAC (a downgrade edit fails the tag); `NIXON_REQUIRE_PACK_V2=1` bakes a
+  v1 refusal into all three emitted decrypt paths at build time; the framing
+  tamper matrix (version downgrade/strip, index relabel, total, nonce,
+  ciphertext, tag, index swap) is tested independently; plaintext-after-MAC
+  ordering and constant-time comparison are pinned on the emitted source.
+* **Release trust chain**: the build manifest now binds the source commit
+  and the dependency-lock digest (below); the offline-revocation limitation
+  is stated in MAXIMUM_SECURITY §5.6; the publish-path/refusal matrix stays
+  open pending one release-candidate workflow that hashes the exact
+  published bytes.
+* **Payload semantic resistance**: PARTIAL, not closed (register item 4,
+  second pass reaffirms) — the exports and inventory make analysis
+  reproducible; the gdb difficulty is one dynamic observation, not evidence
+  of dynamic-analysis resistance (a capable analyst can investigate child
+  processes, instrument the loader, inspect memory after decryption, or
+  intercept runtime APIs); independent human reconstruction of the shipped
+  native-only artefact remains the outstanding review item.
+* **Mimosa baseline**: PARTIAL, not closed (register item 4, second pass
+  reaffirms) — self-sampling validates classifications but is not
+  independent review; a second reviewer should independently sample the
+  traversal/SSRF/code-execution categories, inspect the accepted-risk
+  rationale, and challenge the claimed false positives (including the
+  docstring one this baseline itself claims).

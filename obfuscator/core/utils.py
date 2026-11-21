@@ -1704,16 +1704,28 @@ try:
                         # dict(), NOT a brace literal: this driver is embedded
                         # in an f-string and a brace pair is a format
                         # specifier (the third time this trap fired here).
+                        #
+                        # CET FIELD CORRECTED (second pass, 2026-11-21): the
+                        # cet_compat below is read from the DEBUG DIRECTORY's
+                        # type-20 extended record (where CET actually lives),
+                        # NOT from optional-header 0x8000 (Terminal-Server-
+                        # Aware) as the first version of this probe did. The
+                        # process shadow-stack policy is recorded beside it,
+                        # because module compatibility and the process policy
+                        # are related but distinct controls.
                         _cet_probe = dict(
                             built=True,
                             dll_characteristics=_probe_rep.get(
                                 "dll_characteristics"),
                             cet_compat=_probe_rep.get("cet_compat"),
+                            ex_dllcharacteristics=_probe_rep.get(
+                                "ex_dllcharacteristics"),
                             dll_guard_cf=_probe_rep.get("dll_guard_cf"),
                             cfg_guard_flags=_probe_rep.get("cfg_guard_flags"))
                         print("CET probe exe: DllCharacteristics=%s "
-                              "cet_compat=%s"
+                              "ex_chars=%s cet_compat=%s"
                               % (_cet_probe["dll_characteristics"],
+                                 _cet_probe["ex_dllcharacteristics"],
                                  _cet_probe["cet_compat"]))
                     else:
                         # BOTH streams printed (measured run 44870998120:
@@ -1762,6 +1774,46 @@ try:
         except Exception as _vc_exc:
             print("CET probe: vc-env discovery failed ("
                   + str(_vc_exc)[:120] + "); trying the ambient PATH")
+        # PROCESS SHADOW-STACK POLICY (review register, item 5): module
+        # compatibility and the process policy are related but DISTINCT — a
+        # CET-compatible module does not demonstrate that the host process
+        # enabled the mitigation. Query THIS process's user shadow-stack
+        # policy (GetProcessMitigationPolicy,
+        # PROCESS_MITIGATION_USER_SHADOW_STACK_POLICY) and record it beside
+        # the module verdict, so the attestation answers both halves: "is the
+        # module marked" AND "is the process policy on".
+        if _hsys.platform.startswith("win"):
+            try:
+                import ctypes as _ct
+                _k32 = _ct.windll.kernel32
+                _cur = _k32.GetCurrentProcess()
+                _pol = _ct.c_ulonglong(0)
+                # PROCESS_MITIGATION_USER_SHADOW_STACK_POLICY = 17
+                _ok = _k32.GetProcessMitigationPolicy(
+                    _ct.c_void_p(_cur), 17,
+                    _ct.byref(_pol), _ct.sizeof(_pol))
+                _cet_probe["shadow_stack_policy_queried"] = bool(_ok)
+                if _ok:
+                    _cet_probe["shadow_stack_policy_raw"] = int(_pol.value)
+                    # USER_SHADOW_STACK_POLICY bits: 0x1 EnableUserShadowStack,
+                    # 0x2 AuditUserShadowStack, 0x4 strict-mode enable,
+                    # 0x8 strict-mode audit.
+                    _cet_probe["shadow_stack_enabled"] = bool(_pol.value & 0x1)
+                    _cet_probe["shadow_stack_strict"] = bool(
+                        _pol.value & 0x4)
+                    print("CET probe process policy: raw=%#x enabled=%s "
+                          "strict=%s" % (_pol.value,
+                                         _cet_probe["shadow_stack_enabled"],
+                                         _cet_probe["shadow_stack_strict"]))
+                else:
+                    _cet_probe["shadow_stack_policy_error"] = (
+                        "GetProcessMitigationPolicy returned false, "
+                        "GetLastError=%d" % (_k32.GetLastError(),))
+                    print("CET probe process policy: query failed")
+            except Exception as _ssp_exc:
+                _cet_probe["shadow_stack_policy_error"] = str(_ssp_exc)[:160]
+                print("CET probe process policy: ERROR",
+                      _cet_probe["shadow_stack_policy_error"])
     else:
         _cet_probe = dict(built=False,
                           error="not applicable on this runner/toolchain")

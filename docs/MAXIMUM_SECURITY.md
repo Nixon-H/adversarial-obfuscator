@@ -935,3 +935,20 @@ signing cannot be optional) remains buildable.
    `signed: false`; the provenance slots ship empty. A release artefact
    marked `signed: false` in its build manifest must not be distributed to
    customers — that is checkable from the artefact's own manifest.
+
+7. **OFFLINE REVOCATION IS NOT GLOBAL REVOCATION** (review register, second
+   pass, item 3). Verification is local and offline BY DESIGN — which means
+   a disconnected client cannot learn that a previously trusted key has been
+   compromised until it receives a trust-store update (a new
+   `NIXON_PROVENANCE_PUBKEY`) or another authenticated policy update.
+   Revocation propagates at the speed of pin distribution, not instantly.
+   The consequence the operator must plan for: artefacts signed with the
+   compromised key KEEP VERIFYING on a client that has not updated its pin.
+   Mitigations, in order of reach: out-of-band pin updates with the release
+   channel; a short "expected pin fingerprint" published in the release
+   notes so a holder can compare; and, where the deployment allows it, an
+   online licence-chain check (licensing.chain_owner_of) as a secondary
+   signal — knowing that path itself depends on the signature-gated RPC.
+   The build manifest binds the source commit and the dependency-lock
+   digest, so post-incident auditing of WHICH artefacts were signed by the
+   compromised key is answerable from the artefacts themselves.

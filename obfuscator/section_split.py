@@ -124,8 +124,19 @@ def _mac_context_v2(index: int, total: int, nonce: bytes) -> bytes:
 
     Editing any of these to redirect the loader (mis-slice, reorder, point
     the pack at another payload length) invalidates the tag.
+
+    DOWNGRADE RESISTANCE (review register, item 2): the VERSION FIELD is not
+    currently inside the MAC — an editor who changed a pack's ``v`` from 2 to
+    1 (or stripped the field) would flip the loader onto the legacy v1 path,
+    where the plaintext MAC verifies under the v1 derivation and the v2
+    guarantees (separated keys, bound metadata) silently disappear. The
+    version is therefore bound into every tag as a fixed-width 4-byte field,
+    so a tampered or stripped version fails verification outright.
     """
-    return (index.to_bytes(4, "big") + total.to_bytes(4, "big") + nonce)
+    return (SECTION_PACK_VERSION.to_bytes(4, "big")
+            + index.to_bytes(4, "big")
+            + total.to_bytes(4, "big")
+            + nonce)
 
 
 def split_sealed(payload: bytes, *, sections: int = DEFAULT_SECTIONS,
@@ -621,6 +632,13 @@ LOADER_JOIN_SOURCE = '''def {FUNC}(pack_b85, key):
     import json as _nx_sj
     try:
         pack = _nx_sj.loads(_nx_sb64.b85decode(pack_b85).decode("utf-8"))
+        # RELEASE-MODE DOWNGRADE GATE (review register, item 2): a new
+        # release must not silently accept v1 packs. The flag is baked
+        # in at BUILD time; v1 acceptance stays an explicit
+        # compatibility option, not an automatic fallback.
+        if _NX_PACK_V2_REQUIRED and pack.get("v") != 2:
+            raise ValueError("section pack is not scheme v2; the "
+                             "release policy refuses v1")
         sections = pack["sections"]
         # §1 runtime state validation: the declared structure must match the
         # content it describes. Fails closed on a pack without `state`.
@@ -652,7 +670,8 @@ LOADER_JOIN_SOURCE = '''def {FUNC}(pack_b85, key):
                     b"nx-section-enc:" + _basis).digest()
                 mkey = _nx_sh.sha256(
                     b"nx-section-mac:" + _basis).digest()
-                _mctx = (_i.to_bytes(4, "big")
+                _mctx = (int(pack["v"]).to_bytes(4, "big")
+                         + _i.to_bytes(4, "big")
                          + int(pack["total"]).to_bytes(4, "big") + nonce)
             elif _per_section:
                 skey = _nx_sh.sha256(
@@ -682,16 +701,21 @@ LOADER_JOIN_SOURCE = '''def {FUNC}(pack_b85, key):
 '''
 
 
-def emit_loader_snippet(func_name: str = None) -> str:
+def emit_loader_snippet(func_name: str = None,
+                        require_v2: bool = False) -> str:
     """Return the loader-side join source, ready to embed.
 
     The emitted function is self-contained (stdlib imports only) and
     returns ``None`` on any verification failure, so the caller can fail
-    closed instead of running a partially joined payload.
+    closed instead of running a partially joined payload. ``require_v2``
+    bakes the release-mode downgrade gate into the snippet (review register,
+    item 2): True makes the loader refuse v1 packs outright.
     """
     name = func_name or JOIN_FUNC
     from obfuscator.pack_state import emit_state_check_snippet as _esc
-    return _esc() + "\n" + LOADER_JOIN_SOURCE.replace("{FUNC}", name)
+    banner = "_NX_PACK_V2_REQUIRED = %r" % (bool(require_v2),)
+    return (banner + "\n" + _esc() + "\n"
+            + LOADER_JOIN_SOURCE.replace("{FUNC}", name))
 
 
 #: Loader-side MOVING decryption.  Each section is decrypted on demand,
@@ -716,6 +740,9 @@ LOADER_MOVING_SOURCE = '''def {FUNC}(pack_b85, key, sink):
     import json as _nx_mj
     try:
         pack = _nx_mj.loads(_nx_mb64.b85decode(pack_b85).decode("utf-8"))
+        # RELEASE-MODE DOWNGRADE GATE (see the whole-payload join).
+        if _NX_PACK_V2_REQUIRED and pack.get("v") != 2:
+            return False
         sections = pack["sections"]
         # §1 runtime state validation (shared check; see pack_state.py).
         if not _nx_pack_state_ok(pack):
@@ -742,7 +769,8 @@ LOADER_MOVING_SOURCE = '''def {FUNC}(pack_b85, key, sink):
                     b"nx-section-enc:" + _basis).digest()
                 mkey = _nx_mh.sha256(
                     b"nx-section-mac:" + _basis).digest()
-                _mctx = (_i.to_bytes(4, "big")
+                _mctx = (int(pack["v"]).to_bytes(4, "big")
+                         + _i.to_bytes(4, "big")
                          + int(pack["total"]).to_bytes(4, "big") + nonce)
             elif _per_section:
                 skey = _nx_mh.sha256(
@@ -780,10 +808,13 @@ LOADER_MOVING_SOURCE = '''def {FUNC}(pack_b85, key, sink):
 '''
 
 
-def emit_moving_snippet(func_name: str = "_nx_section_walk") -> str:
+def emit_moving_snippet(func_name: str = "_nx_section_walk",
+                        require_v2: bool = False) -> str:
     """Return the loader-side MOVING-decryption source, ready to embed."""
     from obfuscator.pack_state import emit_state_check_snippet as _esc
-    return _esc() + "\n" + LOADER_MOVING_SOURCE.replace("{FUNC}", func_name)
+    banner = "_NX_PACK_V2_REQUIRED = %r" % (bool(require_v2),)
+    return (banner + "\n" + _esc() + "\n"
+            + LOADER_MOVING_SOURCE.replace("{FUNC}", func_name))
 
 
 #: Loader-side STREAMING decompression.  This is the piece that makes moving
@@ -809,6 +840,9 @@ LOADER_STREAM_SOURCE = '''def {FUNC}(pack_b85, key):
     import zlib as _nx_szl
     try:
         pack = _nx_sj.loads(_nx_sb64.b85decode(pack_b85).decode("utf-8"))
+        # RELEASE-MODE DOWNGRADE GATE (see the whole-payload join).
+        if _NX_PACK_V2_REQUIRED and pack.get("v") != 2:
+            return None
         sections = pack["sections"]
         # §1 runtime state validation (shared check; see pack_state.py).
         if not _nx_pack_state_ok(pack):
@@ -838,7 +872,8 @@ LOADER_STREAM_SOURCE = '''def {FUNC}(pack_b85, key):
                     b"nx-section-enc:" + _basis).digest()
                 mkey = _nx_sh.sha256(
                     b"nx-section-mac:" + _basis).digest()
-                _mctx = (_i.to_bytes(4, "big")
+                _mctx = (int(pack["v"]).to_bytes(4, "big")
+                         + _i.to_bytes(4, "big")
                          + int(pack["total"]).to_bytes(4, "big") + nonce)
             elif _per_section:
                 skey = _nx_sh.sha256(
@@ -898,7 +933,10 @@ LOADER_STREAM_SOURCE = '''def {FUNC}(pack_b85, key):
 '''
 
 
-def emit_stream_snippet(func_name: str = "_nx_section_stream") -> str:
+def emit_stream_snippet(func_name: str = "_nx_section_stream",
+                        require_v2: bool = False) -> str:
     """Return the loader-side STREAMING decrypt+decompress source."""
     from obfuscator.pack_state import emit_state_check_snippet as _esc
-    return _esc() + "\n" + LOADER_STREAM_SOURCE.replace("{FUNC}", func_name)
+    banner = "_NX_PACK_V2_REQUIRED = %r" % (bool(require_v2),)
+    return (banner + "\n" + _esc() + "\n"
+            + LOADER_STREAM_SOURCE.replace("{FUNC}", func_name))

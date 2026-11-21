@@ -93,14 +93,27 @@ PE_GUARD_CF_FUNCTION_TABLE_PRESENT = 0x00000400
 #: (--coff-load-config), verified bit by bit with per-bit probe PEs
 #: (tests/test_native_harden.py::test_guard_flag_bit_names_match_the_authoritative_parser).
 #:
-#: CORRECTION 2026-11-21: this table previously called 0x4000 "XFG_ENABLED"
-#: and 0x40000/0x100000 "CET shadow-stack / user-compat". Both were wrong:
-#: llvm names 0x4000 CF_EXPORT_SUPPRESSION_INFO_PRESENT, leaves 0x40000 and
-#: 0x100000 unnamed, and names 0x400000 EH_CONTINUATION_TABLE_PRESENT — so the
-#: earlier "CET verified reachable" record measured export-suppression and
-#: longjump metadata, not CET. There are NO CET bits in GuardFlags: CET's
-#: image opt-in is DllCharacteristics 0x8000 (read as `cet_compat` in
-#: verify_pe_bytes).
+#: CORRECTION 2026-11-21 (second pass, reviewer-flagged): the correction
+#: above was ITSELF wrong about where CET lives. It replaced "CET bits in
+#: GuardFlags" with "CET's image opt-in is DllCharacteristics 0x8000" — and
+#: 0x8000 in the OPTIONAL HEADER's DllCharacteristics is
+#: TERMINAL_SERVER_AWARE, not CET. The real CET compatibility opt-in is an
+#: EXTENDED DLL-characteristics record in the PE DEBUG DIRECTORY:
+#:
+#:   * Debug directory entry Type = IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS
+#:     (20, 0x14)
+#:   * its 4-byte data holds the extended characteristics word
+#:   * IMAGE_DLLCHARACTERISTICS_EX_CET_COMPAT = 0x0001 in that word
+#:
+#: Verified against the REAL farm .pyd with llvm-readobj --coff-debug-directory:
+#: the record exists, its ExtendedCharacteristics are 0x1, and llvm names the
+#: bit IMAGE_DLL_CHARACTERISTICS_EX_CET_COMPAT. The first "correction"
+#: therefore reported a CET-compatible artefact as non-CET (it read bit 0x8000
+#: of the optional header and found Terminal-Server-Aware instead), and the
+#: "EXE-only linker behaviour" conclusion built on that field was unsupported.
+#: The parser below reads the debug-directory record; `cet_compat` is
+#: populated from THAT, and the optional-header word is reported with its
+#: correct names.
 #:
 #:   0x00001000  PROTECT_DELAYLOAD_IAT
 #:   0x00002000  DELAYLOAD_IAT_IN_ITS_OWN_SECTION
@@ -114,7 +127,19 @@ PE_GUARD_LONGJUMP_TABLE_PRESENT = 0x00010000
 PE_GUARD_EH_CONTINUATION_TABLE_PRESENT = 0x00400000
 
 #: DllCharacteristics CET opt-in (what /CETCOMPAT asks the linker for).
-DLL_CHARS_CET_COMPAT = 0x00008000
+#: THE CET OPT-IN, WHERE IT ACTUALLY LIVES (2026-11-21, second correction).
+#: The Debug Directory's extended DLL-characteristics record replaces the
+#: earlier (wrong) "DllCharacteristics 0x8000" claim: 0x8000 in the optional
+#: header is TERMINAL_SERVER_AWARE. Verified with llvm-readobj
+#: --coff-debug-directory over the real farm .pyd, which carries
+#: ExtendedCharacteristics 0x1 named IMAGE_DLL_CHARACTERISTICS_EX_CET_COMPAT.
+DEBUG_TYPE_EX_DLLCHARACTERISTICS = 20
+IMAGE_DLL_CHARACTERISTICS_EX_CET_COMPAT = 0x0001
+
+#: Optional-header DllCharacteristics names (for reporting; 0x8000 here is
+#: Terminal-Server-Aware, NOT CET).
+DLL_CHARS_TERMINAL_SERVER_AWARE = 0x00008000
+DLL_CHARS_GUARD_CF = 0x00004000
 
 #: Offset of GuardFlags inside IMAGE_LOAD_CONFIG_DIRECTORY64, computed from the
 #: field layout rather than assumed: the naive 0x70 this module first used is
@@ -235,6 +260,57 @@ def _read_cstring(data, offset, limit=256):
     if end < 0:
         end = min(offset + limit, len(data))
     return data[offset:end].decode("ascii", "replace")
+
+
+def _read_extended_dllcharacteristics(data, num_sections, section_table,
+                                      dbg_rva, dbg_size):
+    """(cet_compat, extended_word) from the Debug Directory's type-20 record.
+
+    WHERE CET COMPATIBILITY ACTUALLY LIVES (2026-11-21, reviewer-flagged
+    second correction). The optional header's DllCharacteristics 0x8000 is
+    TERMINAL_SERVER_AWARE; the CET opt-in is a Debug Directory entry of type
+    IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS (20) whose 4-byte payload is the
+    extended characteristics word, with bit 0x1 =
+    IMAGE_DLL_CHARACTERISTICS_EX_CET_COMPAT.
+
+    Returns ``(False, 0)`` on any failure — an unreadable record is reported
+    as "not CET-compatible" rather than as a pass, mirroring the fail-closed
+    convention of _read_guard_flags. Verified against the REAL farm .pyd with
+    llvm-readobj --coff-debug-directory: the record exists there, its
+    ExtendedCharacteristics are 0x1, and this parser must agree with llvm.
+    """
+    if not dbg_rva or not dbg_size:
+        return False, 0
+    base = _rva_to_offset(data, num_sections, section_table, dbg_rva)
+    if base is None:
+        return False, 0
+    # IMAGE_DEBUG_DIRECTORY entries are 28 bytes:
+    #   0x00 Characteristics (4)
+    #   0x04 TimeDateStamp (4)
+    #   0x08 MajorVersion (2)  0x0A MinorVersion (2)
+    #   0x0C Type (4)
+    #   0x10 SizeOfData (4)
+    #   0x14 AddressOfRawData (4)
+    #   0x18 PointerToRawData (4)
+    try:
+        entries = dbg_size // 28
+        for index in range(min(entries, 64)):
+            entry = base + index * 28
+            dtype = struct.unpack_from("<I", data, entry + 0x0C)[0]
+            if dtype != DEBUG_TYPE_EX_DLLCHARACTERISTICS:
+                continue
+            size_of_data = struct.unpack_from("<I", data, entry + 0x10)[0]
+            raw_ptr = struct.unpack_from("<I", data, entry + 0x18)[0]
+            if size_of_data < 4 or not raw_ptr:
+                continue
+            if raw_ptr + 4 > len(data):
+                continue
+            extended = struct.unpack_from("<I", data, raw_ptr)[0]
+            return (bool(extended & IMAGE_DLL_CHARACTERISTICS_EX_CET_COMPAT),
+                    extended)
+    except (struct.error, IndexError):
+        return False, 0
+    return False, 0
 
 
 def enumerate_pe_exports(data):
@@ -414,6 +490,8 @@ def verify_pe_bytes(data):
            "guard_longjump_table": False,
            "guard_eh_continuation_table": False,
            "dll_characteristics": None, "cet_compat": False,
+           "ex_dllcharacteristics": 0, "terminal_server_aware": False,
+           "debug_directory": False,
            "dll_guard_cf": False}
     if not data or data[:2] != b"MZ":
         return out
@@ -517,19 +595,36 @@ def verify_pe_bytes(data):
                     flags & PE_GUARD_LONGJUMP_TABLE_PRESENT)
                 out["guard_eh_continuation_table"] = bool(
                     flags & PE_GUARD_EH_CONTINUATION_TABLE_PRESENT)
-        # CET's image-level opt-in is DllCharacteristics 0x8000
-        # (IMAGE_DLLCHARACTERISTICS_CET_COMPAT, what /CETCOMPAT asks for).
-        # The old comment here claimed 0x8000 was TERMINAL_SERVER_AWARE and
-        # that CET "is not a DllCharacteristics bit" — both wrong: 0x8000 in
-        # DllCharacteristics IS CET compat, and the farm .pyd measures
-        # DllCharacteristics 0x4160 with llvm-readobj, i.e. GUARD_CF set and
-        # CET compat ABSENT despite the /CETCOMPAT link flag. Reported as its
-        # own field so the claim is checkable instead of asserted.
+        # CET's image-level opt-in is the DEBUG DIRECTORY's extended
+        # DLL-characteristics record — NOT the optional header's
+        # DllCharacteristics word, whose 0x8000 bit is TERMINAL_SERVER_AWARE.
+        # CORRECTION HISTORY (2026-11-21, two passes): this parser first read
+        # CET bits from GuardFlags (wrong — they are export-suppression and
+        # longjump metadata), then from DllCharacteristics 0x8000 (wrong —
+        # that is Terminal-Server-Aware). The reviewer caught the second
+        # error; llvm-readobj --coff-debug-directory over the REAL farm .pyd
+        # settles it: the object carries a type-20 record whose
+        # ExtendedCharacteristics are 0x1
+        # (IMAGE_DLL_CHARACTERISTICS_EX_CET_COMPAT) — i.e. the farm .pyd IS
+        # CET-compatible, and the first correction had reported a
+        # CET-compatible artefact as non-CET.
+        if num_dirs > 6:
+            dbg_rva, dbg_size = struct.unpack_from(
+                "<II", data, dirs_off + 6 * 8)
+            out["debug_directory"] = dbg_size > 0
+            out["cet_compat"], out["ex_dllcharacteristics"] = \
+                _read_extended_dllcharacteristics(
+                    data, num_sections, opt + opt_size, dbg_rva, dbg_size)
         if num_dirs > 0:
             _dll_chars = struct.unpack_from("<H", data, opt + 70)[0]
             out["dll_characteristics"] = _dll_chars
-            out["cet_compat"] = bool(_dll_chars & 0x8000)
-            out["dll_guard_cf"] = bool(_dll_chars & 0x4000)
+            # NAMED CORRECTLY (second correction, 2026-11-21): 0x8000 in the
+            # optional header is TERMINAL_SERVER_AWARE; the CET bit is NOT in
+            # this word. Reported with its right name so no consumer can
+            # mistake it for CET again.
+            out["terminal_server_aware"] = bool(
+                _dll_chars & DLL_CHARS_TERMINAL_SERVER_AWARE)
+            out["dll_guard_cf"] = bool(_dll_chars & DLL_CHARS_GUARD_CF)
         #
         # EVERY load-config-derived key is defaulted, not just the CET ones.
         # Measured 2026-11-19: an object with no load-config directory raised
@@ -546,6 +641,9 @@ def verify_pe_bytes(data):
         out.setdefault("guard_eh_continuation_table", False)
         out.setdefault("dll_characteristics", None)
         out.setdefault("cet_compat", False)
+        out.setdefault("ex_dllcharacteristics", 0)
+        out.setdefault("terminal_server_aware", False)
+        out.setdefault("debug_directory", False)
         out.setdefault("dll_guard_cf", False)
         out["sections"] = num_sections
         out["opt_size"] = opt_size
