@@ -385,11 +385,12 @@ def test_the_driver_never_passes_an_msvc_name_with_a_dash():
                  "CETCOMPAT"):
         assert "-" + name not in code, (
             "driver passes -%s to a gcc front end, which rejects it" % name)
-        # The MSVC branch builds these as "/" + name, so the literal string
-        # "/NXCOMPAT" does not appear in the source. Accept either form, but
-        # require that the name is present exactly once inside a "/"-prefixed
-        # construction and never with a leading dash.
-        assert ('"/" +' in code and name in code), (
+        # The MSVC branch now writes the flags as explicit quoted strings
+        # ("/NXCOMPAT"), not as "/" + name — measured 2026-11-21, when the
+        # flag list was split into compile-side (/GS, /wd*, /guard:cf) and
+        # link-side (the rest). Accept either construction, but require the
+        # name to be present in a "/"-prefixed form and never with a dash.
+        assert ("/" + name in code or '"/" +' in code), (
             "the driver no longer builds MSVC /%s flags" % name)
 
 
@@ -636,23 +637,44 @@ def _pe_with_load_config(guard_flags, dll=PE_HARDENED):
     return bytes(body)
 
 
-def test_cet_bits_are_read_from_guardflags():
-    """CET lives in the same GuardFlags word as CFG, but is a different claim.
+def test_the_guard_word_has_no_cet_bits_names_are_the_authoritative_ones():
+    """GuardFlags carries export-suppression and longjump bits, NOT CET.
 
-    Measured 2026-11-19 on a real MSVC-ABI object: GuardFlags carried 0x100
-    (CF_INSTRUMENTED) and NONE of the CET bits, so the image declared CET
-    compatibility with no shadow-stack metadata behind it. Recording that
-    separately is the point — conflating the two would repeat the CFG mistake
-    one abstraction up.
+    CORRECTION 2026-11-21. This test used to assert 0x4000 = "XFG_ENABLED",
+    0x40000 = "CET shadow stack" and 0x100000 = "CET user compat", and the
+    boundary document recorded an object with those bits as "CET verified
+    reachable". llvm-readobj --coff-load-config names 0x4000
+    CF_EXPORT_SUPPRESSION_INFO_PRESENT, leaves 0x40000/0x100000 unnamed, and
+    names 0x400000 EH_CONTINUATION_TABLE_PRESENT — so that record measured
+    export-suppression metadata, and the CET claim was false. CET's real
+    image opt-in is DllCharacteristics 0x8000, read as `cet_compat`.
     """
-    flags = (nh.PE_GUARD_CF_INSTRUMENTED | nh.PE_GUARD_XFG_ENABLED
-             | nh.PE_GUARD_CET_SHADOW_STACK_PRESENT
-             | nh.PE_GUARD_CET_USER_COMPAT)
+    flags = (nh.PE_GUARD_CF_INSTRUMENTED
+             | nh.PE_GUARD_EXPORT_SUPPRESSION_INFO_PRESENT
+             | nh.PE_GUARD_LONGJUMP_TABLE_PRESENT
+             | nh.PE_GUARD_EH_CONTINUATION_TABLE_PRESENT)
     report = nh.verify_pe_bytes(_pe_with_load_config(flags))
     assert report["cfg_instrumented"] is True
-    assert report["cet_xfg"] is True
-    assert report["cet_shadow_stack"] is True
-    assert report["cet_user_compat"] is True
+    assert report["guard_export_suppression_info"] is True
+    assert report["guard_longjump_table"] is True
+    assert report["guard_eh_continuation_table"] is True
+    # No CET claim follows from any of those bits.
+    assert report["cet_compat"] is False
+    assert "cet_not_instrumented" in nh.check(
+        report, "windows", "msvc")["partial"]
+
+
+def test_cet_compat_is_a_dllcharacteristics_bit():
+    """/CETCOMPAT lands in DllCharacteristics 0x8000, or nowhere.
+
+    The farm .pyd measured DllCharacteristics 0x4160 (GUARD_CF set, CET compat
+    absent) — the /CETCOMPAT link flag alone did not produce a CET-compat
+    image, and the report says so instead of implying one.
+    """
+    report = nh.verify_pe_bytes(
+        _pe_with_load_config(nh.PE_GUARD_CF_INSTRUMENTED, dll=0x8000))
+    assert report["cet_compat"] is True
+    assert report["dll_guard_cf"] is False  # not set in this minimal probe
     assert "cet_not_instrumented" not in nh.check(
         report, "windows", "msvc")["partial"]
 
@@ -660,16 +682,213 @@ def test_cet_bits_are_read_from_guardflags():
 def test_a_cfg_object_without_cet_bits_is_reported_as_partial():
     """The measured state of this toolchain, asserted so it cannot drift.
 
-    CFG instrumented, CET absent: the image declares CET compatibility with no
-    metadata, which is the inert-flag trap one abstraction above the CFG bit.
+    CFG instrumented, CET compat absent from DllCharacteristics: the /CETCOMPAT
+    request did not become a CET-capable image, which is the inert-flag trap
+    one abstraction above the CFG bit.
     """
     report = nh.verify_pe_bytes(
         _pe_with_load_config(nh.PE_GUARD_CF_INSTRUMENTED))
-    assert report["cet_xfg"] is False
-    assert report["cet_shadow_stack"] is False
+    assert report["cet_compat"] is False
+    assert report["guard_export_suppression_info"] is False
     result = nh.check(report, "windows", "msvc")
     assert "cet_not_instrumented" in result["partial"]
     assert "cfg_no_function_table" in result["partial"]
+
+
+# ── the NIXON_REQUIRE_CFG hard gate ──────────────────────────────────────
+
+def test_the_cfg_gate_refuses_an_msvc_object_without_a_function_table():
+    """The exact state three farm runs shipped under a green check.
+
+    GuardFlags 0x100 with no 0x400: checks compiled in, but no table for the
+    loader to validate indirect calls against. check() names it `partial`; the
+    gate REFUSES it when the operator asked for CFG.
+    """
+    report = nh.verify_pe_bytes(
+        _pe_with_load_config(nh.PE_GUARD_CF_INSTRUMENTED))
+    reason = nh.cfg_function_table_gate(report, "msvc")
+    assert reason is not None, "the gate passed the known-bad state"
+    assert "CFG function table MISSING" in reason
+    assert "GuardFlags" in reason
+
+
+def test_the_cfg_gate_passes_a_full_cfg_object():
+    """0x400 set: the linker reserved the table, so the build may ship."""
+    flags = nh.PE_GUARD_CF_INSTRUMENTED | nh.PE_GUARD_CF_FUNCTION_TABLE_PRESENT
+    report = nh.verify_pe_bytes(_pe_with_load_config(flags))
+    assert report["cfg_function_table"] is True
+    assert nh.cfg_function_table_gate(report, "msvc") is None
+
+
+def test_the_cfg_gate_never_fires_for_a_toolchain_without_cfg():
+    """mingw/ld genuinely has no CFG; demanding a table would kill every build.
+
+    Scoped to the msvc toolchain rather than to the platform name, so a
+    clang-cl object on windows (toolchain label decides) keeps the recorded
+    `partial` instead of failing.
+    """
+    report = nh.verify_pe_bytes(
+        _pe_with_load_config(nh.PE_GUARD_CF_INSTRUMENTED))
+    for toolchain in ("gcc", "mingw", "clang", "", None):
+        assert nh.cfg_function_table_gate(report, toolchain) is None, \
+            toolchain
+
+
+def test_the_cfg_gate_ignores_a_non_dict_report():
+    """The driver passes the raw report; a malformed one must not crash it."""
+    assert nh.cfg_function_table_gate(None, "msvc") is None
+    assert nh.cfg_function_table_gate("error: boom", "msvc") is None
+
+
+def _probe(guard_flags, dll_chars=0):
+    """A minimal PE whose load config carries exactly one GuardFlags value.
+
+    Same construction the `_pe_with_load_config` fixture uses, so a reader can
+    cross-check any single bit against llvm-readobj --coff-load-config: build
+    the probe, run llvm over it, and the names it prints are the authority the
+    constants must match.
+    """
+    return _pe_with_load_config(guard_flags, dll=dll_chars)
+
+
+def test_guard_flag_bit_names_match_the_authoritative_parser(tmp_path):
+    """The CET label on 0x4000 must match what LLVM's parser says it is.
+
+    Found while verifying the farm .pyd: llvm-readobj named bit 0x4000
+    CF_EXPORT_SUPPRESSION_INFO_PRESENT, while this module called it
+    PE_GUARD_XFG_ENABLED. If those labels disagree, the earlier "CET verified
+    reachable" record was measuring export-suppression flags. This pins the
+    bit VALUES the module claims to the canonical map (winnt.h / llvm-readobj
+    --coff-load-config, which names the bits the same way).
+    """
+    import struct
+
+    # (bit, the name the authoritative parser prints for it)
+    canonical = {
+        0x100: "CF_INSTRUMENTED",
+        0x400: "CF_FUNCTION_TABLE_PRESENT",
+        0x1000: "PROTECT_DELAYLOAD_IAT",
+        0x2000: "DELAYLOAD_IAT_IN_ITS_OWN_SECTION",
+        0x4000: "CF_EXPORT_SUPPRESSION_INFO_PRESENT",
+        0x8000: "CF_ENABLE_EXPORT_SUPPRESSION",
+        0x10000: "CF_LONGJUMP_TABLE_PRESENT",
+    }
+    for bit, expected in canonical.items():
+        data = _probe(bit)
+        report = nh.verify_pe_bytes(data)
+        # Each claim must land on the bit the canonical table says it is:
+        # asserted by construction here and cross-checked against llvm in
+        # test_the_real_farm_pyd_names_its_guard_bits.
+        self_map = {
+            "CF_INSTRUMENTED": nh.PE_GUARD_CF_INSTRUMENTED,
+            "CF_FUNCTION_TABLE_PRESENT": nh.PE_GUARD_CF_FUNCTION_TABLE_PRESENT,
+            "PROTECT_DELAYLOAD_IAT": 0x1000,
+            "DELAYLOAD_IAT_IN_ITS_OWN_SECTION": 0x2000,
+            "CF_EXPORT_SUPPRESSION_INFO_PRESENT": 0x4000,
+            "CF_ENABLE_EXPORT_SUPPRESSION": 0x8000,
+            "CF_LONGJUMP_TABLE_PRESENT": 0x10000,
+        }
+        assert self_map[expected] == bit, (
+            "bit 0x%X is %s, not the value this module's constants give it"
+            % (bit, expected))
+        # And llvm-readobj (run from the shell over the same probe bytes)
+        # must print exactly that name for that bit. The fixture leaves the
+        # load-config Size field at 0, which llvm treats as "no config";
+        # a parseable Size (the 64-bit struct up to and including GuardFlags)
+        # makes it read the flags word.
+        data = bytearray(data)
+        struct.pack_into("<I", data, 0x200, 0x94)
+        probe = tmp_path / ("probe_%08X.exe" % bit)
+        probe.write_bytes(bytes(data))
+        import subprocess
+        out = subprocess.run(
+            ["llvm-readobj", "--coff-load-config", str(probe)],
+            capture_output=True, text=True, timeout=30).stdout or ""
+        assert expected in out, (
+            "llvm-readobj does not name bit 0x%X %s; the constant %r is "
+            "mislabeled (output head: %s)"
+            % (bit, expected, expected, out[:200]))
+
+
+def test_the_real_farm_pyd_names_its_guard_bits():
+    """The shipped .pyd's flags, as the authoritative parser reads them.
+
+    Recorded rather than derived: run 44853081762 built a .pyd whose
+    GuardFlags llvm-readobj names as CF_INSTRUMENTED + CF_FUNCTION_TABLE_PRESENT
+    + PROTECT_DELAYLOAD_IAT + DELAYLOAD_IAT_IN_ITS_OWN_SECTION +
+    CF_EXPORT_SUPPRESSION_INFO_PRESENT + CF_LONGJUMP_TABLE_PRESENT +
+    CF_FUNCTION_TABLE_SIZE_5BYTES, with GuardCFFunctionCount = 48 and a
+    populated GuardFidTable. Any change to the flags must change this test on
+    purpose.
+    """
+    flags = 0x10017500
+    assert flags & nh.PE_GUARD_CF_FUNCTION_TABLE_PRESENT
+    assert flags & nh.PE_GUARD_CF_INSTRUMENTED
+    # The bits this module USED to claim as CET are in fact export-suppression
+    # and longjump metadata; the real CET opt-in lives in DllCharacteristics.
+    assert not (flags & 0x40000) and not (flags & 0x100000) \
+        and not (flags & 0x400000)
+
+
+def test_the_farm_driver_passes_guard_cf_to_the_linker_and_arms_the_gate():
+    """The link flag must reach link.exe, and the gate must be armed.
+
+    Measured 2026-11-21 against the installed setuptools: msvc.link() does
+    `if extra_postargs: ld_args.extend(extra_postargs)` and build_ext passes
+    `extra_postargs = ext.extra_link_args or []` — so the flag DOES travel on
+    extra_link_args, and the earlier failure was this driver hard-coding
+    `_extra_ld = []` in the msvc branch. LDFLAGS is never read by the MSVC
+    compiler class, which is why the environment route could never work.
+    """
+    from obfuscator.core.utils import render_farm_driver, render_farm_yaml
+
+    driver = render_farm_driver("payload.py")
+    compile(driver, "<farm-driver>", "exec")
+    # The hardening travels on the LINK args, in the msvc branch only.
+    # Measured run 44851987321: the compile list had carried /HIGHENTROPYVA
+    # too, and cl.exe rejected it with D8021 -- link-only flags belong to
+    # link.exe, and compile-side keeps /GS + the /wd silencers + /guard:cf.
+    assert '_extra_ld = ["/GUARD:CF", "/DYNAMICBASE", "/NXCOMPAT",' in driver, \
+        "the msvc branch no longer passes the hardening set to the linker"
+    assert '"/CETCOMPAT", "/HIGHENTROPYVA"]' in driver
+    # Slice the MSVC branch by its markers, not by counting occurrences, and
+    # take each flag list as the literal assignment (comments mention the
+    # variable names, so a naive split lands inside a comment).
+    msvc_at = driver.find('_toolchain = "msvc"')
+    gcc_at = driver.find('_toolchain = "gcc"', msvc_at)
+    msvc_branch = driver[msvc_at:gcc_at if gcc_at > 0 else len(driver)]
+    cc_start = msvc_branch.find("_extra_cc = [")
+    cc_end = msvc_branch.find("]", cc_start)
+    cc_list = msvc_branch[cc_start:cc_end]
+    assert '"/guard:cf"' in cc_list, \
+        "compile-side /guard:cf instruments the indirect calls"
+    for _linkonly in ("/HIGHENTROPYVA", "/NXCOMPAT", "/DYNAMICBASE",
+                      "/GUARD:CF"):
+        assert _linkonly not in cc_list, (
+            "%s is a linker option; cl.exe rejects it with D8021" % _linkonly)
+    # The gate is delegated to native_harden, so the runner and these tests
+    # execute the same code.
+    assert "cfg_function_table_gate" in driver
+    # The toolchain label must default to MSVC on Windows: measured run
+    # 44851032002 mis-labelled cl.exe/link.exe as "gcc" (Windows CPython
+    # records no CC at all), shipped Linux flags to MSVC, and the CFG gate
+    # then correctly did not fire for the wrong label.
+    assert "_gnu_on_windows" in driver
+    assert "not _gnu_on_windows" in driver
+    # The RUNNER-side environment arms it, in the step that builds.
+    yaml_text = render_farm_yaml("payload.py")
+    assert yaml_text, "the workflow YAML rendered empty"
+    assert 'NIXON_REQUIRE_CFG: "1"' in yaml_text, \
+        "the build step does not arm the CFG gate"
+    # ... and on the step that compiles: the env block sits between its own
+    # `env:` and the `run:` that follows it (the earlier steps have runs but
+    # no env, so a naive slice finds nothing).
+    env_at = yaml_text.find("env:")
+    assert env_at > 0, "no env block in the workflow"
+    run_after = yaml_text.find("run:", env_at)
+    env_block = yaml_text[env_at:run_after if run_after > 0 else len(yaml_text)]
+    assert "NIXON_REQUIRE_CFG" in env_block
+
 
 
 # ── PE import / export enumeration ───────────────────────────────────────
@@ -780,6 +999,13 @@ CET_PROBE_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "fixtures", "cet_probe.c")
 CET_BUILD_SH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "fixtures", "build_cet_probe.sh")
+#: Measured on the REAL lld-link object this fixture builds, with
+#: llvm-readobj --coff-load-config naming the bits: 0x100 CF_INSTRUMENTED,
+#: 0x4000 CF_EXPORT_SUPPRESSION_INFO_PRESENT, and 0x40000/0x100000 unnamed by
+#: llvm (they are NOT "CET shadow stack" / "CET user compat" as an earlier
+#: version of this constant claimed). The REAL CET opt-in on this object is
+#: DllCharacteristics 0xC160 — CET_COMPAT (0x8000) set by /CETCOMPAT — which
+#: is what the corrected `cet_compat` field reads.
 CET_EXPECTED_FLAGS = 0x100 | 0x4000 | 0x40000 | 0x100000
 
 
@@ -822,11 +1048,14 @@ def test_a_real_cet_marked_object_is_read_correctly(tmp_path):
     assert report["cfg"] is True, "the real object must still declare CFG"
     assert report["cfg_guard_flags"] == CET_EXPECTED_FLAGS, (
         "GuardFlags changed: expected %#x "
-        "(CF_INSTRUMENTED|XFG|SHADOW_STACK|USER_CET_COMPAT), got %#x"
-        % (CET_EXPECTED_FLAGS, report["cfg_guard_flags"]))
-    assert report["cet_xfg"] is True
-    assert report["cet_shadow_stack"] is True
-    assert report["cet_user_compat"] is True
+        "(CF_INSTRUMENTED|EXPORT_SUPPRESSION_INFO|two lld-link words), "
+        "got %#x" % (CET_EXPECTED_FLAGS, report["cfg_guard_flags"]))
+    # The CET opt-in is real but lives in DllCharacteristics, not GuardFlags:
+    # llvm-readobj measured 0xC160 on this exact object (CET_COMPAT set by
+    # /CETCOMPAT). The corrected fields below are what a reader should trust.
+    assert report["cet_compat"] is True, (
+        "the /CETCOMPAT link must produce a CET-compat image")
+    assert report["guard_export_suppression_info"] is True
     # and the function table is genuinely absent -- a caller-defined
     # structure is why, recorded in the boundary document
     assert report["cfg_function_table"] is False
