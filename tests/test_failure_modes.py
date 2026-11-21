@@ -453,7 +453,11 @@ def test_unsigned_release_build_refused_when_provenance_is_required():
         encoding="utf-8").read()
     marker = 'os.environ.get("NIXON_REQUIRE_PROVENANCE") == "1"'
     assert marker in src, "the provenance release gate moved; re-check"
-    body = src[src.find(marker):src.find(marker) + 900]
+    # The flag now drives TWO policy points: the run-time pin requirement
+    # baked into the emitted check (early), and the unsigned-build refusal
+    # (late). Anchor on the LAST occurrence -- the refusal site -- because
+    # the pin threading sits thousands of lines earlier.
+    body = src[src.rfind(marker):src.rfind(marker) + 900]
     assert "raise SystemExit(" in body, (
         "NIXON_REQUIRE_PROVENANCE=1 no longer refuses an unsigned build: "
         "the measured unsigned-control bypass could ship again")

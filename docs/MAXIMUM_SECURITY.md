@@ -916,10 +916,18 @@ signing cannot be optional) remains buildable.
    NOT from inside the artefact, which an attacker can edit. The pin must be
    distributed with the release notes through a channel the attacker does
    not control (the deployment step §5r records as operator-owned).
-4. **Missing credentials or pin fail closed at run time.** The loader's
-   provenance check is fatal when both slots are populated and the signature
-   does not verify (all eight attack routes die there, §5s-bis); a missing
-   RUN-time pin means the check cannot be satisfied and the artefact refuses.
+4. **Missing credentials or pin fail closed at run time.** Measured
+   2026-11-21 (§6c): the non-token-derived provenance check originally never
+   consulted the run-time pin at all — a release-candidate acceptance run
+   caught a missing pin AND a wrong pin being ACCEPTED. Fixed: when the
+   build runs under `NIXON_REQUIRE_PROVENANCE=1`, the loader bakes in a
+   run-time pin requirement (missing pin is fatal), and a PRESENT pin must
+   match the artefact's signing key, so an untrusted publisher is refused
+   even though the embedded signature verifies against itself. Also note
+   the TWO signing keys: `NIXON_ARTEFACT_SIGN_KEY` (loader provenance slots)
+   and `NIXON_BUILD_MANIFEST_KEY` (the signed build manifest) — a release
+   MUST set both, and the acceptance check detects a half-signed artefact.
+   All eight attack routes die at the signature (§5s-bis).
 5. **Key rotation and revocation.** Rotation: issue the next key with
    `python3 -m obfuscator.licensing` (§5.2), ship it as the new
    `NIXON_ARTEFACT_SIGN_KEY`, and publish the new pin as the expected

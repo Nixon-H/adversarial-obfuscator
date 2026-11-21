@@ -3035,3 +3035,85 @@ tests/fixtures (hand-written minimal PE) has NO debug directory at all
   traversal/SSRF/code-execution categories, inspect the accepted-risk
   rationale, and challenge the claimed false positives (including the
   docstring one this baseline itself claims).
+
+## 6c. Release-candidate acceptance run: two real defects found, one fixed, one measured blocked
+
+The register's decisive test — "start from the current tree, produce the
+final release artefact, verify the exact published bytes, run the refusal
+matrix" — was executed for real (build NX-RC-004, artefact 124,140 bytes,
+built under `NIXON_REQUIRE_PROVENANCE=1` with both signing keys set).
+
+### Defect 1 (found by the acceptance run, fixed): the out-of-band pin was never consulted
+
+The refusal matrix's first two rows FAILED:
+
+| row | before | after the fix |
+|---|---|---|
+| refusal: missing run-time pin | **rc 0 — ACCEPTED** | rc 137, "provenance: run-time pin missing (release policy requires the out-of-band trust anchor)" |
+| refusal: wrong pin (untrusted key) | **rc 0 — ACCEPTED** | rc 137, "provenance: run-time pin does not match the artefact's signing key (untrusted publisher)" |
+
+Root cause, read from the shipped loader: the non-token-derived provenance
+check verified the signature against the **embedded** `_NX_PROV_PK` slot and
+never read `NIXON_PROVENANCE_PUBKEY` at run time. The embedded-key
+self-check is self-referential by construction — exactly the
+"signature-as-decoration" failure the feature exists to prevent, surviving
+in the non-licence path while the token-derived path had its own pin
+handling. `emit_snippet` now takes `pin_required` (baked from
+`NIXON_REQUIRE_PROVENANCE` at build time): under the release policy a
+missing pin is fatal; with or without the policy, a PRESENT pin must match
+the embedded key, so an untrusted publisher is refused even though the
+embedded signature verifies against itself. MAXIMUM_SECURITY §5.6 item 4
+promised exactly this and it is now implemented and measured.
+
+### Defect 2 (found, documented): the manifest and the provenance have TWO different signing keys
+
+`NIXON_ARTEFACT_SIGN_KEY` signs the loader's provenance slots;
+`NIXON_BUILD_MANIFEST_KEY` signs the build manifest. The first RC build set
+only the provenance key and the acceptance check caught
+`manifest is signed: False` on a build that WAS provenance-signed. Both keys
+are release-policy inputs now recorded in §5.6; a release that sets one and
+not the other ships a half-signed artefact, which the acceptance run
+detects.
+
+### Refusal matrix, final state (all rows executed by RUNNING the artefact)
+
+| row | result |
+|---|---|
+| control: published bytes under the correct pin | rc 0, payload ran |
+| refusal: missing run-time pin | rc 137 (release policy) |
+| refusal: wrong pin (untrusted key) | rc 137 |
+| refusal: malformed signature | rc 137 |
+| refusal: re-signed with attacker key | rc 137 — "run-time pin does not match" |
+| refusal: tampered published bytes | rc 137 |
+| manifest detects tampered bytes | verify_manifest ok=False |
+| threat probe: loader patch | rc 1 (merkle) |
+| threat probe: artefact reaches payload | rc 0 |
+
+### Threat-model probes against the shipped Linux artefact
+
+**Memory dumping: BLOCKED BY THE ARTEFACT'S OWN ENFORCEMENT.** Scanning the
+live process's writable memory — the register's "memory dumping" capability —
+fails at `/proc/<pid>/maps` with **PermissionError**: `nx_apply_protections()`
+sets `PR_SET_DUMPABLE=0` and `RLIMIT_CORE=0`, so the process refuses
+`/proc` inspection for a non-root analyst. Measured live: `CoreDumping: 0`,
+`TracerPid: 0`, maps unreadable. The honest limits, stated rather than
+hidden: a ROOT analyst reads /proc regardless, and the bytecode fallback
+keeps plaintext resident for builds that ship one (native-only removes that
+surface). The dumpability probe is a loader-level regression guard for the
+enforcement shim.
+
+**Loader patching: refused** — a one-byte patch inside the integrity-anchor
+region dies at the merkle check (rc 1/137 depending on path).
+
+**Replay/rollback**: the machinery is implemented and unit-tested
+(`licence_replay`: nonce + key_version in the signed payload;
+`rollback`: monotonic `protection_level` high-water mark, HMAC'd, with its
+own stated limit that a determined local attacker deletes the mark file).
+The live replay/rollback probes against a running artefact require the
+licence-chain setup and stay part of the licence tests rather than the
+acceptance run.
+
+**What the acceptance run does not yet cover** (honest): the publish-path
+matrix for CI (workflow-refusal semantics are build-level only), and the
+Windows strict-mode shadow-stack runtime test on supported hardware. Both
+remain register-open.

@@ -3883,8 +3883,17 @@ def _nx_self_check():
         # "token key check failed" instead of the licence gate's own "licence
         # token required". Definitions are safe early; the CHECK must run after
         # everything it depends on.
+        # RELEASE POLICY (register, second pass): when the build ran
+        # under NIXON_REQUIRE_PROVENANCE=1, the emitted check bakes in
+        # the run-time pin requirement — a release artefact refuses to
+        # run without its out-of-band trust anchor. Measured gap: the
+        # non-token-derived check never consulted the pin, so a missing
+        # AND a wrong pin were both accepted (rc 0) on an RC build.
+        _prov_pin_required = (
+            os.environ.get("NIXON_REQUIRE_PROVENANCE") == "1")
         _prov_defs = _emit_prov(definitions_only=True)
-        _prov_check = _emit_prov(token_derived=_prov_token_bound).replace(
+        _prov_check = _emit_prov(token_derived=_prov_token_bound,
+                                 pin_required=_prov_pin_required).replace(
             _prov_defs, "", 1)
         _prov_code = ('%s = ""\n%s = ""\n' % (_prov_sig, _prov_pk)
                       + _prov_defs)

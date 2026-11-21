@@ -404,16 +404,25 @@ def test_the_document_records_the_signature_fix():
 # ── token-derived provenance: the double-stamp fix, closed ───────────────
 
 def test_plain_provenance_trusts_the_embedded_key():
-    """The DEFAULT still trusts the embedded slot, and that is why it failed.
+    """CORRECTED 2026-11-21: the plain variant now consults the out-of-band pin.
 
-    Documented rather than hidden: an artefact verified against a key it carries
-    agrees with itself. An attacker re-signs with their own key and the check
-    passes — measured as the double-stamp attack.
+    This test used to assert the OPPOSITE — that the plain (non-token) variant
+    never referenced NIXON_PROVENANCE_PUBKEY, documenting the self-referential
+    limitation. The release-candidate acceptance run (§6c) then measured the
+    consequence: a missing run-time pin AND a wrong pin were both ACCEPTED,
+    because the check verified the signature against the embedded key only.
+    The register flagged the pin as the fix, and the emitted check now reads
+    the pin: present-but-mismatching is fatal, and under the release policy
+    (pin_required=True) a missing pin is fatal too. The old premise is pinned
+    here in reverse so the fail-open state cannot return quietly.
     """
     from obfuscator import attestation as A
     snippet = A.emit_snippet()
-    assert "NIXON_PROVENANCE_PUBKEY" not in snippet, (
-        "the plain variant does not pin a key; that is the limitation")
+    assert "NIXON_PROVENANCE_PUBKEY" in snippet, (
+        "the plain variant no longer consults the out-of-band pin — the "
+        "fail-open regression the acceptance run caught is back")
+    assert "_nx_prov_pin_b != _nx_prov_pk_b" in snippet, (
+        "a present pin must be compared against the artefact's key")
 
 
 def test_token_derived_provenance_does_not_trust_the_embedded_key():
