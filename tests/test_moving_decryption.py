@@ -143,9 +143,18 @@ def test_each_section_uses_its_own_key():
         keys.append(_section_key(master, int(sec["i"]), nonce))
     assert len(set(keys)) == len(keys), "sections share a key"
     assert all(k != master for k in keys)
-    for sec, key in zip(pack["sections"], keys):
+    # Salt derivation (v2 scheme): the pack's salt hint is sha256 over the
+    # ENC-role key and the nonce. The `keys` above are the v1-derived ones
+    # the tier-1.1 independence property is about, so the salt check derives
+    # the v2 enc key separately from the same (master, index, nonce) basis
+    # the packer uses.
+    for sec in pack["sections"]:
         nonce = bytes.fromhex(sec["nonce"])
-        assert sec["salt"] == hashlib.sha256(key + nonce).hexdigest()[:16]
+        enc_key = hashlib.sha256(
+            b"nx-section-enc:" + master
+            + int(sec["i"]).to_bytes(4, "big") + nonce).digest()
+        assert sec["salt"] == hashlib.sha256(
+            enc_key + nonce).hexdigest()[:16]
 
 
 def test_per_section_pack_still_round_trips():

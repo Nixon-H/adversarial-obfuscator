@@ -864,7 +864,18 @@ FARM_DRIVER_MODULES = ("c_transform", "native_harden", "authenticode")
 #: object keeps the bit and loses the enforcement, and the attestation reports
 #: `inert: ['cfg']`. Uploading it is therefore not optional for a Windows
 #: runner that wants CFG.
-FARM_DRIVER_DATA = (("pe_load_config.c", "native/pe_load_config.c"),)
+FARM_DRIVER_DATA = (
+    ("pe_load_config.c", "native/pe_load_config.c"),
+    # CET ISOLATION PROBE (review register, P1: "enable and verify CET
+    # compatibility on the actual Windows farm artifact"). The farm .pyd
+    # measured DllCharacteristics 0x4160 -- /CETCOMPAT did NOT set the
+    # CET_COMPAT bit under MSVC link.exe, while the lld-link probe DID set
+    # it (0xC160). Compiling this probe on the SAME runner with the SAME
+    # cl.exe/link.exe and parsing its DllCharacteristics isolates whether the
+    # flag is honored for an EXE and not a DLL, dropped for extension-style
+    # links, or something else -- instead of leaving the difference guessed.
+    ("cfg_msvc_probe.c", "tests/fixtures/cfg_msvc_probe.c"),
+)
 
 
 def _repo_root():
@@ -1112,6 +1123,7 @@ class GitHubBuildFarm:
         # with doubled braces.
         script_content = f"""
 import os, sys, hashlib, secrets
+import time as _time
 import platform as _platform
 sys.path.insert(0, os.getcwd())
 # UTF-8 EVERYWHERE (measured 2026-11-20 on the farm runners). With
@@ -1507,6 +1519,256 @@ setup(
                            extra_link_args=_extra_ld)],
     script_args=['build_ext', '--inplace']
 )
+# 3c. RUNTIME SMOKE TEST ON THE PRODUCING RUNNER (review register, P0-5 and
+# P1-7). A blob that compiles but cannot LOAD on the OS it was built for is
+# exactly the silent-fallback class this project keeps finding: the loader
+# would decline it and run bytecode, and the only symptom was a warn line.
+# The macos job is the one this matters most for -- before this step NOTHING
+# ever executed the darwin blob, so "the farm produces a .dylib" carried no
+# evidence that the .dylib RUNS on macOS.
+#
+# The blob is imported under the name its PyInit export declares ("payload")
+# via spec_from_file_location, which dlopens it and runs the module init on
+# THIS runner's OS and interpreter. The result goes into the attestation, so
+# one controller download answers "did all three blobs build AND load AND
+# execute their module init on their own platforms" for the SAME revision.
+_smoke = dict()
+try:
+    import importlib.util as _il_spec
+    _smoke_blob = None
+    for _n in sorted(_os.listdir(".")):
+        if _n.startswith("payload") and _n.endswith((".so", ".pyd", ".dylib")):
+            _smoke_blob = _n
+            break
+    if _smoke_blob:
+        _smoke_t0 = _time.time()
+        try:
+            _smoke_spec = _il_spec.spec_from_file_location(
+                "payload", _os.path.abspath(_smoke_blob))
+            _smoke_mod = _il_spec.module_from_spec(_smoke_spec)
+            _smoke_spec.loader.exec_module(_smoke_mod)
+            _smoke["loaded"] = True
+            _smoke["blob"] = _smoke_blob
+            _smoke["seconds"] = round(_time.time() - _smoke_t0, 2)
+            print("runtime smoke test:", _smoke_blob, "loads on",
+                  _platform.system(), "(%.2fs)" % _smoke["seconds"])
+        except Exception as _smoke_exc:
+            _smoke["loaded"] = False
+            _smoke["blob"] = _smoke_blob
+            _smoke["error"] = "%s: %s" % (type(_smoke_exc).__name__,
+                                          str(_smoke_exc)[:200])
+            print("runtime smoke test FAILED for", _smoke_blob, "->",
+                  _smoke["error"])
+    else:
+        _smoke["loaded"] = False
+        _smoke["error"] = "no blob produced; nothing to smoke-test"
+        print("runtime smoke test skipped: no blob")
+except Exception as _smoke_outer:
+    _smoke["loaded"] = False
+    _smoke["error"] = str(_smoke_outer)[:200]
+# 3d. CET ISOLATION PROBE (windows only; review register P1). Compiles the
+# uploaded cfg_msvc_probe.c with the SAME compiler and the SAME hardening
+# flags the extension uses, then parses the probe's DllCharacteristics. This
+# answers, on the runner itself, whether MSVC link.exe honors /CETCOMPAT for
+# this toolchain and link style -- the farm .pyd measured GUARD_CF set and
+# CET_COMPAT absent, and the difference between "the flag cannot work" and
+# "the flag needs a different invocation" is exactly what this probe pins
+# down. Non-Windows runners record the probe as not-applicable.
+_cet_probe = dict()
+try:
+    if _hsys.platform.startswith("win") and _toolchain == "msvc" \
+            and _os.path.isfile("cfg_msvc_probe.c"):
+        import subprocess as _sp_probe
+        _probe_obj = "cfg_msvc_probe.obj"
+        _probe_exe = "cfg_msvc_probe.exe"
+        # LOCATE THE VC TOOLS (measured run 44868235168: `cl` is NOT on the
+        # step's PATH -- setuptools finds MSVC through vswhere and builds
+        # without activating a Developer prompt, so a bare subprocess call
+        # dies with WinError 2). The same machinery setuptools used for the
+        # extension build hands back the environment (PATH/INCLUDE/LIB) that
+        # reaches cl.exe and link.exe; borrow it instead of re-implementing
+        # the discovery.
+        _probe_env = dict(_os.environ)
+        try:
+            # THREE ROUTES, OLDEST-FIRST FALLBACK (measured run
+            # 44868599858: the runner's setuptools predates
+            # setuptools._distutils.compilers, and cl is not on the ambient
+            # PATH). 1) the modern shim module; 2) the legacy
+            # distutils._msvccompiler shim (present in every setuptools with
+            # the distutils hack); 3) vswhere.exe directly, which is how
+            # setuptools itself finds the installation and needs no shim.
+            _vc_env = None
+            try:
+                from setuptools._distutils.compilers.C.msvc import (
+                    _get_vc_env as _probe_vc)
+                _vc_env = _probe_vc("x86_amd64")
+            except Exception:
+                pass
+            if not _vc_env:
+                try:
+                    import distutils._msvccompiler as _pvc2
+                    _vc_env = _pvc2._get_vc_env("x86_amd64")
+                except Exception:
+                    pass
+            if not _vc_env:
+                # NO BACKSLASH LITERALS HERE (measured run 44868914170: the
+                # template is an f-string, so a backslash-vee sequence inside
+                # 'Installer' + 'vswhere' was consumed as a VERTICAL TAB
+                # escape before the raw-string prefix ever applied -- the
+                # rendered YAML carried a 0x0B and GitHub rejected the
+                # workflow). os.path.join from expandvars parts keeps every
+                # separator an os.sep the runner expands.
+                _vs_installer = _os.path.join(
+                    _os.path.expandvars("%ProgramFiles(x86)%"),
+                    "Microsoft Visual Studio", "Installer")
+                _vsw = _os.path.join(_vs_installer, "vswhere.exe")
+                if _os.path.isfile(_vsw):
+                    _vs_r = _sp_probe.run(
+                        [_vsw, "-latest", "-products", "*",
+                         "-requires", "Microsoft.VisualStudio.Component."
+                         "VC.Tools.x86.x64",
+                         "-property", "installationPath"],
+                        capture_output=True, text=True, timeout=60)
+                    _vs_root = (_vs_r.stdout or "").strip().splitlines()
+                    if _vs_root:
+                        import glob as _glob
+                        _host = _glob.glob(_os.path.join(
+                            _vs_root[0], "VC", "Tools", "MSVC", "*",
+                            "bin", "HostX64", "x64"))
+                        if _host:
+                            _probe_env["PATH"] = _probe_env.get(
+                                "PATH", "") + _os.pathsep + _host[0]
+                            _vc_env = dict(PATH=_host[0])
+            if _vc_env:
+                for _k in ("path", "include", "lib"):
+                    if _vc_env.get(_k):
+                        _probe_env[_k.upper()] = _vc_env[_k]
+                # PRINT THE ROUTE OUTCOME (measured run 44869941226: the
+                # discovery "succeeded" without actually adding cl to PATH
+                # and the failure surfaced only as WinError 2, with no
+                # evidence of WHICH route ran).
+                print("CET probe: a vc-env route returned; PATH entries:",
+                      len(_probe_env.get("PATH", "").split(";")))
+            else:
+                print("CET probe: all three vc-env routes failed; "
+                      "attempting the ambient PATH anyway")
+            # Resolve cl.exe through the EXACT environment the subprocess
+            # will get, and print the verdict before the call.
+            import shutil as _sh_probe
+            _cl_resolved = _sh_probe.which("cl.exe",
+                                           path=_probe_env.get("PATH", ""))
+            print("CET probe: cl.exe resolved to",
+                  _cl_resolved or "NOTHING")
+            # CALL BY ABSOLUTE PATH (measured run 44870436990: which() FOUND
+            # cl.exe through the probe env, yet subprocess still died with
+            # WinError 2 -- Windows resolves a bare "cl" against the PARENT's
+            # search imagery, not the child env dict. The resolved absolute
+            # path needs no search at all. link.exe is resolved the same way
+            # because it lives in the same directory.)
+            _link_resolved = _sh_probe.which("link.exe",
+                                             path=_probe_env.get("PATH", ""))
+            if not _cl_resolved or not _link_resolved:
+                _cet_probe = dict(built=False,
+                                  error="cl/link not resolvable through the "
+                                        "vc-env PATH (cl=%s link=%s)"
+                                        % (_cl_resolved, _link_resolved))
+                print("CET probe DID NOT RUN:", _cet_probe["error"])
+            else:
+                _r1 = _sp_probe.run([_cl_resolved, "/guard:cf", "/O2", "/c",
+                                     "cfg_msvc_probe.c"],
+                                    capture_output=True, text=True,
+                                    timeout=120, env=_probe_env)
+                if _r1.returncode != 0 or not _os.path.isfile(_probe_obj):
+                    _cet_probe = dict(built=False,
+                                      error="compile failed: " +
+                                            (_r1.stderr or "")[-160:])
+                    print("CET probe DID NOT COMPILE:",
+                          _cet_probe["error"])
+                else:
+                    _r2 = _sp_probe.run(
+                        [_link_resolved, "/GUARD:CF", "/CETCOMPAT",
+                         "/DYNAMICBASE", "/NXCOMPAT", "/HIGHENTROPYVA",
+                         # ENTRY + SUBSYSTEM ARE REQUIRED (measured run
+                         # 44871473330: LNK1561 "entry point must be
+                         # defined" -- the probe defines mainCRTStartup
+                         # itself and links WITHOUT the CRT, which is the
+                         # fixture's documented invocation).
+                         "/ENTRY:mainCRTStartup", "/SUBSYSTEM:CONSOLE",
+                         "/OUT:" + _probe_exe, _probe_obj],
+                        capture_output=True, text=True, timeout=120,
+                        env=_probe_env)
+                    if _r2.returncode == 0 and _os.path.isfile(_probe_exe):
+                        import native_harden as _nh_probe
+                        _probe_rep = _nh_probe.verify_pe_bytes(
+                            open(_probe_exe, "rb").read())
+                        # dict(), NOT a brace literal: this driver is embedded
+                        # in an f-string and a brace pair is a format
+                        # specifier (the third time this trap fired here).
+                        _cet_probe = dict(
+                            built=True,
+                            dll_characteristics=_probe_rep.get(
+                                "dll_characteristics"),
+                            cet_compat=_probe_rep.get("cet_compat"),
+                            dll_guard_cf=_probe_rep.get("dll_guard_cf"),
+                            cfg_guard_flags=_probe_rep.get("cfg_guard_flags"))
+                        print("CET probe exe: DllCharacteristics=%s "
+                              "cet_compat=%s"
+                              % (_cet_probe["dll_characteristics"],
+                                 _cet_probe["cet_compat"]))
+                    else:
+                        # BOTH streams printed (measured run 44870998120:
+                        # link.exe writes its errors to STDOUT, so a
+                        # stderr-only tail printed as empty and the failure
+                        # was undiagnosable from the log).
+                        _cet_probe = dict(built=False,
+                                          error="link failed: stdout=" +
+                                                (_r2.stdout or "")[-260:] +
+                                                " stderr=" +
+                                                (_r2.stderr or "")[-160:])
+                        print("CET probe DID NOT LINK:",
+                              _cet_probe["error"])
+                    # DLL VARIANT FROM THE SAME OBJECT (measured run
+                    # 44871940968: the EXE probe carried CET_COMPAT 0x8000
+                    # while the farm .pyd measured 0x4160 without it. If the
+                    # same object linked as a DLL also lacks the bit, the
+                    # conclusion is that MSVC applies /CETCOMPAT to EXE
+                    # targets only and CET policy for a .pyd is decided by
+                    # the LOADING PROCESS, not the DLL's own header.)
+                    _probe_dll = "cfg_msvc_probe_dll.dll"
+                    _r3 = _sp_probe.run(
+                        [_link_resolved, "/GUARD:CF", "/CETCOMPAT",
+                         "/DYNAMICBASE", "/NXCOMPAT", "/HIGHENTROPYVA",
+                         "/DLL", "/NOENTRY", "/OUT:" + _probe_dll,
+                         _probe_obj],
+                        capture_output=True, text=True, timeout=120,
+                        env=_probe_env)
+                    if _r3.returncode == 0 and _os.path.isfile(_probe_dll):
+                        import native_harden as _nh_probe
+                        _dll_rep = _nh_probe.verify_pe_bytes(
+                            open(_probe_dll, "rb").read())
+                        _cet_probe["dll_variant_cet_compat"] = \
+                            _dll_rep.get("cet_compat")
+                        _cet_probe["dll_variant_dll_chars"] = \
+                            _dll_rep.get("dll_characteristics")
+                        print("CET probe DLL variant: DllCharacteristics=%s "
+                              "cet_compat=%s"
+                              % (_cet_probe["dll_variant_dll_chars"],
+                                 _cet_probe["dll_variant_cet_compat"]))
+                    else:
+                        _cet_probe["dll_variant_error"] = \
+                            (_r3.stdout or _r3.stderr or "")[-160:]
+                        print("CET probe DLL variant did not link:",
+                              _cet_probe["dll_variant_error"])
+        except Exception as _vc_exc:
+            print("CET probe: vc-env discovery failed ("
+                  + str(_vc_exc)[:120] + "); trying the ambient PATH")
+    else:
+        _cet_probe = dict(built=False,
+                          error="not applicable on this runner/toolchain")
+        print("CET probe skipped:", _cet_probe["error"])
+except Exception as _cet_exc:
+    _cet_probe = dict(built=False, error=str(_cet_exc)[:200])
+    print("CET probe ERROR:", _cet_probe["error"])
 # 4. RUNNER SELF-ATTESTATION (review item 7.9, farm-runner integrity).
 # A compromised runner can bypass every protection implemented in the
 # compiler, so the runner states what it used: OS/Python/Cython, the toolchain
@@ -1640,6 +1902,16 @@ _top = [
     ("artifacts", dict(_artifact_pairs)),
     ("hardening", _hardening),
     ("hardening_verdict", _hard_verdict),
+    # RUNTIME SMOKE TEST (review register P0-5/P1-7): did the produced blob
+    # dlopen and run its module init ON THE OS THAT BUILT IT. One controller
+    # download now answers "built AND loads AND executes on its own platform"
+    # for all three runners at the same revision.
+    ("smoke_test", dict(_smoke)),
+    # CET ISOLATION PROBE (review register P1): the same cl.exe/link.exe
+    # building a minimal probe with the same hardening flags, parsed back --
+    # pins down whether /CETCOMPAT is honored by this toolchain and link
+    # style, instead of leaving the farm .pyd's missing CET_COMPAT guessed at.
+    ("cet_probe", dict(_cet_probe)),
 ]
 import json as _j
 with open("runner-attestation.json", "w", encoding="utf-8") as _af:

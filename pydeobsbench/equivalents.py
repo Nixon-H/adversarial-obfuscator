@@ -150,6 +150,55 @@ def inventory_audit_signature(payload):
     return hashlib.sha256(INVENTORY_SALT + canonical).hexdigest()
 
 
+# ── ledger: sliding-window class, from the spec sentence ─────────────────
+#
+# Review register (P2: broaden beyond the four payloads). Written from the
+# description -- "keeps a sliding window of the last THRESHOLD=40 entries;
+# overflow counts how many times the window slid; balance is the sum of the
+# retained entries" -- with a deque instead of list slicing so the
+# implementation is structurally independent of the original.
+LEDGER_THRESHOLD = 40
+LEDGER_OPENING = (10, 20)
+
+
+def ledger_post(entries, overflow, amount):
+    """One post: append, slide when over threshold, return the new length."""
+    entries.append(amount)
+    if len(entries) > LEDGER_THRESHOLD:
+        overflow[0] += 1
+        del entries[0:len(entries) - LEDGER_THRESHOLD]
+    return len(entries)
+
+
+def ledger_balance(entries):
+    """Spec: the sum of the retained entries."""
+    return sum(entries)
+
+
+def ledger_run():
+    """The target's default input: opening (10, 20), then posts of n*5, n=1..5."""
+    from collections import deque
+    entries = deque(LEDGER_OPENING)
+    overflow = [0]
+    for n in range(1, 6):
+        ledger_post(entries, overflow, n * 5)
+    return "BAL %d LEN %d" % (ledger_balance(entries), len(entries))
+
+
+# ── memo_fib: memoised recursion, from the spec sentence ─────────────────
+#
+# Written iteratively from the description ("memoised, base cases n<2 return
+# n") -- an explicit table walk instead of recursion, which is both
+# structurally independent and cannot blow the interpreter's recursion limit.
+def memo_fib(n):
+    if n < 2:
+        return n
+    table = {0: 0, 1: 1}
+    for index in range(2, n + 1):
+        table[index] = table[index - 1] + table[index - 2]
+    return table[n]
+
+
 def observe(target_name):
     """Return what the target PRINTS for its default input.
 
@@ -166,6 +215,10 @@ def observe(target_name):
     if target_name == "inventory":
         reconciled = inventory_reconcile("SKU-1001", 40)
         return "AUDIT " + inventory_audit_signature(reconciled)[:16]
+    if target_name == "ledger":
+        return ledger_run()
+    if target_name == "memo_fib":
+        return "FIB %d" % memo_fib(24)
     return None
 
 
@@ -183,6 +236,10 @@ EXPECTED_OUTPUT = {
     "inventory": "AUDIT 78209b4fcc0a1829",
     "algo": "DERIVE 3249269004",
     "cipher": "SEALED 8771940273853809a401795ec7699cdc",
+    # Review register (P2: broaden beyond the four payloads). Recorded by
+    # running the source above as __main__ on this interpreter.
+    "ledger": "BAL 105 LEN 7",
+    "memo_fib": "FIB 46368",
 }
 
 #: Which targets have an independently written equivalent, and what it covers.
@@ -191,6 +248,12 @@ COVERAGE = {
     "algo": "full -- mix32/rotl32/derive",
     "cipher": "full -- keystream/seal",
     "inventory": "full -- reconcile delta + canonical-JSON audit signature",
+    # Review register (P2: broaden beyond the four payloads). Both have
+    # independently written reimplementations (deque-based sliding window;
+    # iterative table walk) written from the algorithm descriptions, so
+    # semantic reconstruction is measured the same way as the others.
+    "ledger": "full -- ledger_post/ledger_balance (deque, no list slicing)",
+    "memo_fib": "full -- memo_fib (iterative table walk, not recursive)",
 }
 
 

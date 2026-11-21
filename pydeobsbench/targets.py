@@ -204,6 +204,89 @@ if __name__ == "__main__":
             "seal: XOR body, HMAC-SHA256(KEY || nonce, body)[:16] prefixed"
         ),
     },
+
+    # --- class-heavy: method dispatch and state, not free functions -------
+    # The review register (P2: broaden beyond the current four payloads):
+    # the existing set is dominated by free functions; a stateful class with
+    # per-instance state exercises a different rename/dispatch surface than
+    # the rest of the set (methods survive symbol_rename by design, so the
+    # question is what the whole-module internal rename does with them).
+    "ledger": {
+        "source": '''\
+class Ledger:
+    THRESHOLD = 40
+
+    def __init__(self, opening):
+        self.entries = list(opening)
+        self.overflow = 0
+
+    def post(self, amount):
+        self.entries.append(amount)
+        if len(self.entries) > self.THRESHOLD:
+            self.overflow += 1
+            self.entries = self.entries[-self.THRESHOLD:]
+        return len(self.entries)
+
+    def balance(self):
+        return sum(self.entries)
+
+
+def main():
+    book = Ledger([10, 20])
+    for n in range(1, 6):
+        book.post(n * 5)
+    print("BAL", book.balance(), "LEN", len(book.entries))
+
+
+if __name__ == "__main__":
+    main()
+''',
+        "secrets": [],
+        "names": ["Ledger", "post", "balance", "main", "THRESHOLD"],
+        "algorithms": (
+            "Ledger keeps a sliding window of the last THRESHOLD=40 entries "
+            "(overflow counts how many times the window slid); balance is "
+            "the sum of the retained entries"
+        ),
+    },
+
+    # --- recursion + memoisation: control flow the flattener must keep ----
+    # Recursion through a memo dict is a different decompiler problem from
+    # the flat loops in the other targets: the call graph is self-recursive,
+    # and the memo table is runtime state an analyst must recognise to
+    # follow the data flow.
+    "memo_fib": {
+        "source": '''\
+import sys
+
+sys.setrecursionlimit(10000)
+_MEMO = {}
+
+
+def fib(n):
+    if n in _MEMO:
+        return _MEMO[n]
+    if n < 2:
+        return n
+    value = fib(n - 1) + fib(n - 2)
+    _MEMO[n] = value
+    return value
+
+
+def main():
+    print("FIB", fib(24))
+
+
+if __name__ == "__main__":
+    main()
+''',
+        "secrets": [],
+        "names": ["fib", "main", "_MEMO"],
+        "algorithms": (
+            "fib: memoised recursion (_MEMO dict keyed by n), base cases "
+            "n<2 return n; main computes fib(24)"
+        ),
+    },
 }
 
 

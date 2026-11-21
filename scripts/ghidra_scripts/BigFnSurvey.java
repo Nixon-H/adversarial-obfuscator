@@ -62,6 +62,32 @@ public class BigFnSurvey extends GhidraScript {
             sb.append("\n    {\"name\": \"").append(f.getName())
               .append("\", \"bytes\": ").append(sz)
               .append(", \"chars\": ").append(c.length());
+            // SEMANTIC EVIDENCE (review register, P1): the earlier survey
+            // recorded only the CHARACTER COUNT, which made "how much C was
+            // produced" auditable but "what does the decompiled logic look
+            // like" a matter of trust. The first functions' decompiled text
+            // is now written beside the counts (capped, JSON-escaped) so a
+            // human reviewer can check the recoverability claim against the
+            // actual output instead of a number.
+            if (done < 3) {
+                String capped = c;
+                if (capped.length() > 20000) capped = capped.substring(0, 20000);
+                StringBuilder esc = new StringBuilder();
+                for (int ci = 0; ci < capped.length(); ci++) {
+                    char ch = capped.charAt(ci);
+                    if (ch == '"') esc.append("\\\"");
+                    else if (ch == '\\') esc.append("\\\\");
+                    else if (ch == '\n') esc.append("\\n");
+                    else if (ch == '\r') esc.append("\\r");
+                    else if (ch == '\t') esc.append("\\t");
+                    else if (ch < 32 || ch > 126) {
+                        esc.append(String.format("\\u%04x", (int) ch));
+                    } else {
+                        esc.append(ch);
+                    }
+                }
+                sb.append(", \"c_code\": \"").append(esc).append("\"");
+            }
             boolean hit = false;
             if (needlesArg != null && needlesArg.length() > 0) {
                 for (String needle : needlesArg.split(";")) {

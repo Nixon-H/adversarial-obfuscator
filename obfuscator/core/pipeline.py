@@ -5769,9 +5769,29 @@ def _VERIFY_INTEGRITY():
                             "artefact whose provenance the operator asked for"
                             % (_prov_exc,))
                 else:
-                    UI.warn("provenance: no signing key (NIXON_ARTEFACT_SIGN_KEY "
-                            "/ NIXON_SIGN_KEY) — artefact carries no load-time "
-                            "signature; its integrity check is internal-only")
+                    # RELEASE POLICY (review register, P0): the §5s-bis
+                    # measurement showed an unsigned artefact's integrity is
+                    # ONE hash recomputed twice -- tamper + both stamps RAN.
+                    # A warn assumes the operator reads the console; a
+                    # release pipeline does not. With
+                    # NIXON_REQUIRE_PROVENANCE=1 an unsigned build is a
+                    # FAILED build: the release either carries a verifiable
+                    # signature or it does not ship. The variable stays
+                    # opt-in so a deliberate test artefact (the unsigned
+                    # control in tests/test_failure_modes.py) remains
+                    # buildable -- and that control is exactly why signing
+                    # cannot be optional in production.
+                    _prov_reason = (
+                        "provenance: no signing key (NIXON_ARTEFACT_SIGN_KEY "
+                        "/ NIXON_SIGN_KEY) -- the artefact would carry no "
+                        "load-time signature and its integrity check would "
+                        "be internal-only")
+                    if os.environ.get("NIXON_REQUIRE_PROVENANCE") == "1":
+                        raise SystemExit(
+                            _prov_reason + "; NIXON_REQUIRE_PROVENANCE=1 "
+                            "refuses to ship unsigned artefacts (measured: "
+                            "tamper + both stamps ran on an unsigned build)")
+                    UI.warn(_prov_reason)
                 args._hybrid_loader_src = _candidate
                 _hybrid_src = _candidate
                 if _is_native_only_hybrid:

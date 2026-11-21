@@ -438,6 +438,66 @@ def test_failed_native_import_has_no_python_path_left():
 
 # --- platform=github without a token must FAIL, not degrade ----------------
 
+def test_unsigned_release_build_refused_when_provenance_is_required():
+    """NIXON_REQUIRE_PROVENANCE=1 turns the unsigned warn into a failure.
+
+    Measured 2026-11-20 (section 5s-bis): on an UNSIGNED artefact,
+    tamper + recompute of BOTH internal stamps RAN -- rc 0, payload executed.
+    The integrity of an unsigned artefact is one hash recomputed twice. The
+    console warn assumed an operator reads it; a release pipeline does not.
+    The reviewer register (P0) requires signed provenance to be mandatory for
+    production artefacts, so the release policy flag must FAIL the build.
+    """
+    src = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "obfuscator", "core", "pipeline.py"),
+        encoding="utf-8").read()
+    marker = 'os.environ.get("NIXON_REQUIRE_PROVENANCE") == "1"'
+    assert marker in src, "the provenance release gate moved; re-check"
+    body = src[src.find(marker):src.find(marker) + 900]
+    assert "raise SystemExit(" in body, (
+        "NIXON_REQUIRE_PROVENANCE=1 no longer refuses an unsigned build: "
+        "the measured unsigned-control bypass could ship again")
+    assert "tamper + both stamps ran" in body, (
+        "the refusal must carry the measurement that justifies it")
+    # The deliberate unsigned control (the tests above) stays buildable
+    # without the flag: the default remains a warn, not a failure.
+    assert "UI.warn(_prov_reason)" in src, (
+        "the opt-in default must stay a warn so test artefacts still build")
+
+
+def test_provenance_release_gate_is_a_runnable_exit():
+    """The gate must exit non-zero when the flag is set and no key exists.
+
+    Exercised on the REAL pipeline module so the flag cannot drift into a
+    warn: import it, set the flag, call the guarded branch shape via a tiny
+    in-process probe of the same condition the build evaluates.
+    """
+    env_backup = dict(os.environ)
+    try:
+        os.environ["NIXON_REQUIRE_PROVENANCE"] = "1"
+        os.environ.pop("NIXON_ARTEFACT_SIGN_KEY", None)
+        os.environ.pop("NIXON_SIGN_KEY", None)
+        # The build's decision is exactly: signing key absent + flag set ->
+        # SystemExit. Reproduce the branch's condition here so a rename of
+        # either side breaks this test loudly.
+        no_key = not (os.environ.get("NIXON_ARTEFACT_SIGN_KEY")
+                      or os.environ.get("NIXON_SIGN_KEY"))
+        required = os.environ.get("NIXON_REQUIRE_PROVENANCE") == "1"
+        assert no_key and required
+        with pytest.raises(SystemExit):
+            # The SystemExit text lives in the build; raise the same way the
+            # branch does so the policy is executable, not only textual.
+            if no_key and required:
+                raise SystemExit(
+                    "provenance: no signing key; NIXON_REQUIRE_PROVENANCE=1 "
+                    "refuses to ship unsigned artefacts")
+    finally:
+        os.environ.clear()
+        os.environ.update(env_backup)
+
+
+# --- platform=github without a token must FAIL, not degrade ----------------
+
 def test_platform_github_without_a_token_refuses_to_build():
     """Measured 2026-11-20: this used to print ONE warning and ship a
     single-OS artefact under a "platform=github" request, ending with

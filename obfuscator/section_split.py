@@ -78,6 +78,56 @@ def _section_key(master: bytes, index: int, nonce: bytes) -> bytes:
     ).digest()
 
 
+# PACK SCHEME VERSIONS (review register, P1: "independent review of the
+# production section encryption"). The audited limitation of the v1 scheme
+# was recorded, not hidden: ONE derived key served both the keystream and
+# the HMAC role, and the MAC covered only the plaintext -- no binding of the
+# metadata an attacker would edit (index, total) to redirect the loader.
+#
+# v2 fixes both without leaving stdlib-only crypto (the loader runs on
+# customer machines that may have no `cryptography` wheel, which is the
+# reason the section path never used the AES-GCM helper):
+#
+#   * KEY SEPARATION -- the encryption and MAC roles derive INDEPENDENT
+#     keys from domain-separated personalisation strings, so recovering
+#     neither weakens the other and a keystream leak is not a forgery
+#     capability:
+#         enc = sha256(b"nx-section-enc:" + master + index4 + nonce)
+#         mac = sha256(b"nx-section-mac:" + master + index4 + nonce)
+#   * CONTEXT BINDING -- the MAC input is
+#         index4 || total4 || nonce || plaintext
+#     so a section is cryptographically bound to its position and to the
+#     pack's declared total: relabelling a section, reordering it, or
+#     re-pointing the pack at a different total fails the tag BEFORE the
+#     plaintext is trusted. This is the AAD role of an AEAD construction,
+#     achieved with the same stdlib primitives.
+#
+# Packs carry "v": 2 when built with this scheme; the loader-side joins
+# branch on that field and keep the v1 derivation for packs built before
+# the change, so old artefacts stay loadable and the change ships without
+# a compatibility cliff.
+SECTION_ENC_DOMAIN = b"nx-section-enc:"
+SECTION_MAC_DOMAIN = b"nx-section-mac:"
+SECTION_PACK_VERSION = 2
+
+
+def _section_keys_v2(master: bytes, index: int, nonce: bytes):
+    """Role-separated (encryption, MAC) keys for a pack-v2 section."""
+    basis = bytes(master) + index.to_bytes(4, "big") + nonce
+    enc = hashlib.sha256(SECTION_ENC_DOMAIN + basis).digest()
+    mac = hashlib.sha256(SECTION_MAC_DOMAIN + basis).digest()
+    return enc, mac
+
+
+def _mac_context_v2(index: int, total: int, nonce: bytes) -> bytes:
+    """The metadata a v2 MAC binds: position, declared total, nonce.
+
+    Editing any of these to redirect the loader (mis-slice, reorder, point
+    the pack at another payload length) invalidates the tag.
+    """
+    return (index.to_bytes(4, "big") + total.to_bytes(4, "big") + nonce)
+
+
 def split_sealed(payload: bytes, *, sections: int = DEFAULT_SECTIONS,
                  key: Optional[bytes] = None,
                  nonce_seed: Optional[bytes] = None) -> dict:
@@ -112,14 +162,18 @@ def split_sealed(payload: bytes, *, sections: int = DEFAULT_SECTIONS,
         else:
             nonce = hashlib.sha256(b"nx-nonce:" + bytes(nonce_seed) +
                                    i.to_bytes(4, "big")).digest()[:16]
-        # Each section is sealed under its OWN key, derived from the master
-        # key, the section index and the section nonce.
-        skey = _section_key(key, i, nonce)
+        # Each section is sealed under its OWN role-separated keys, derived
+        # from the master key, the section index and the section nonce (v2
+        # scheme; see the derivation notes above _section_keys_v2).
+        skey, mkey = _section_keys_v2(key, i, nonce)
         # Keyed tag, not a bare sha256: an unkeyed digest detects corruption
         # but is not a MAC, so anyone able to touch the ciphertext could
-        # recompute it.  HMAC with the section key needs no new crypto and
-        # keeps the same 32-byte-prefix layout.
-        _tag = hmac.new(skey + nonce, part, hashlib.sha256).digest()
+        # recompute it.  The v2 tag additionally binds the section's index,
+        # the pack's declared total and the nonce -- the metadata a pack
+        # editor would change to redirect the loader (AAD role).
+        _tag = hmac.new(
+            mkey, _mac_context_v2(i, len(data), nonce) + part,
+            hashlib.sha256).digest()
         tagged = _tag + part
         enc = bytes(a ^ b for a, b in zip(tagged, _keystream(skey, nonce, len(tagged))))
         out_sections.append({
@@ -134,6 +188,9 @@ def split_sealed(payload: bytes, *, sections: int = DEFAULT_SECTIONS,
         "total": len(data),
         "key_hint": hashlib.sha256(key).hexdigest()[:16],
         "per_section": True,
+        # Pack scheme version: the loader branches on this to pick the v2
+        # derivation/MAC or the v1 legacy path (see SECTION_PACK_VERSION).
+        "v": SECTION_PACK_VERSION,
         # Runtime state validation (§1): a digest over the pack's DECLARED
         # structure, so a hand-edited pack that changes count/total/index
         # ordering fails on internal inconsistency instead of only on the
@@ -162,18 +219,30 @@ def stream_join(pack: dict, key: bytes) -> bytearray:
         raise ValueError("section index mismatch")
     joined = bytearray()
     per_section = bool(pack.get("per_section"))
+    v2 = pack.get("v") == SECTION_PACK_VERSION
+    total_declared = int(pack["total"])
     for sec in ordered:
         nonce = bytes.fromhex(sec["nonce"])
         enc = bytes.fromhex(sec["data"])
-        # Per-position key when the pack says so; the legacy single-key path
-        # stays for packs built before the change.
-        skey = _section_key(bytes(key), int(sec["i"]), nonce) if per_section else bytes(key)
+        if v2 and per_section:
+            # v2: role-separated keys and a MAC bound to index/total/nonce.
+            skey, mkey = _section_keys_v2(bytes(key), int(sec["i"]), nonce)
+            _ctx = _mac_context_v2(int(sec["i"]), total_declared, nonce)
+        elif per_section:
+            # Legacy v1 path: packs built before the scheme change stay
+            # loadable. The v1 MAC is hmac(skey + nonce, plaintext) -- the
+            # nonce rides in the "context" slot so the single MAC call below
+            # serves both schemes without duplicating the compare.
+            skey = _section_key(bytes(key), int(sec["i"]), nonce)
+            mkey, _ctx = skey + nonce, b""
+        else:
+            skey, mkey, _ctx = bytes(key), bytes(key), b""
         tagged = bytes(a ^ b for a, b in zip(enc, _keystream(skey, nonce, len(enc))))
         if len(tagged) < 32:
             raise ValueError("section truncated")
         tag, part = tagged[:32], tagged[32:]
         if not hmac.compare_digest(
-                hmac.new(skey + nonce, part, hashlib.sha256).digest(), tag):
+                hmac.new(mkey, _ctx + part, hashlib.sha256).digest(), tag):
             raise ValueError(f"section {sec['i']} integrity failure")
         joined.extend(part)
     if len(joined) != pack["total"]:
@@ -572,14 +641,26 @@ LOADER_JOIN_SOURCE = '''def {FUNC}(pack_b85, key):
         for sec in ordered:
             nonce = bytes.fromhex(sec["nonce"])
             enc = bytes.fromhex(sec["data"])
-            # Per-position key: sha256("nx-section-key:" + master + index +
-            # nonce).  Must match split_sealed exactly.
-            if _per_section:
+            # Pack-scheme branch. v2 (see SECTION_PACK_VERSION in the build
+            # module): role-separated keys + MAC bound to index/total/nonce.
+            # v1 (packs built before the change): single derived key, MAC
+            # over the plaintext only. Must match split_sealed exactly.
+            _i = int(sec["i"])
+            if pack.get("v") == 2 and _per_section:
+                _basis = bytes(key) + _i.to_bytes(4, "big") + nonce
+                skey = _nx_sh.sha256(
+                    b"nx-section-enc:" + _basis).digest()
+                mkey = _nx_sh.sha256(
+                    b"nx-section-mac:" + _basis).digest()
+                _mctx = (_i.to_bytes(4, "big")
+                         + int(pack["total"]).to_bytes(4, "big") + nonce)
+            elif _per_section:
                 skey = _nx_sh.sha256(
                     b"nx-section-key:" + bytes(key)
-                    + int(sec["i"]).to_bytes(4, "big") + nonce).digest()
+                    + _i.to_bytes(4, "big") + nonce).digest()
+                mkey, _mctx = skey + nonce, b""
             else:
-                skey = bytes(key)
+                skey, mkey, _mctx = bytes(key), bytes(key), b""
             ks = bytearray()
             c = 0
             while len(ks) < len(enc):
@@ -590,7 +671,7 @@ LOADER_JOIN_SOURCE = '''def {FUNC}(pack_b85, key):
                 raise ValueError("section truncated")
             tag, part = tagged[:32], tagged[32:]
             if not _nx_hm.compare_digest(
-                    _nx_hm.new(skey + nonce, part, _nx_sh.sha256).digest(), tag):
+                    _nx_hm.new(mkey, _mctx + part, _nx_sh.sha256).digest(), tag):
                 raise ValueError("section integrity failure")
             out.extend(part)
         if len(out) != pack["total"]:
@@ -652,12 +733,24 @@ LOADER_MOVING_SOURCE = '''def {FUNC}(pack_b85, key, sink):
         for entry in ordered:
             nonce = bytes.fromhex(entry["nonce"])
             enc = bytes.fromhex(entry["data"])
-            if _per_section:
+            # Pack-scheme branch, matching split_sealed and the whole-payload
+            # join (v2 = role-separated keys + bound MAC; v1 = legacy).
+            _i = int(entry["i"])
+            if pack.get("v") == 2 and _per_section:
+                _basis = bytes(key) + _i.to_bytes(4, "big") + nonce
+                skey = _nx_mh.sha256(
+                    b"nx-section-enc:" + _basis).digest()
+                mkey = _nx_mh.sha256(
+                    b"nx-section-mac:" + _basis).digest()
+                _mctx = (_i.to_bytes(4, "big")
+                         + int(pack["total"]).to_bytes(4, "big") + nonce)
+            elif _per_section:
                 skey = _nx_mh.sha256(
                     b"nx-section-key:" + bytes(key)
-                    + int(entry["i"]).to_bytes(4, "big") + nonce).digest()
+                    + _i.to_bytes(4, "big") + nonce).digest()
+                mkey, _mctx = skey + nonce, b""
             else:
-                skey = bytes(key)
+                skey, mkey, _mctx = bytes(key), bytes(key), b""
             ks = bytearray()
             c = 0
             while len(ks) < len(enc):
@@ -670,7 +763,7 @@ LOADER_MOVING_SOURCE = '''def {FUNC}(pack_b85, key, sink):
                 return False
             tag, part = bytes(tagged[:32]), bytes(tagged[32:])
             if not _nx_mhm.compare_digest(
-                    _nx_mhm.new(skey + nonce, part, _nx_mh.sha256).digest(), tag):
+                    _nx_mhm.new(mkey, _mctx + part, _nx_mh.sha256).digest(), tag):
                 return False
             buf = bytearray(part)
             try:
@@ -736,12 +829,24 @@ LOADER_STREAM_SOURCE = '''def {FUNC}(pack_b85, key):
         for idx, entry in enumerate(ordered):
             nonce = bytes.fromhex(entry["nonce"])
             enc = bytes.fromhex(entry["data"])
-            if _per_section:
+            # Pack-scheme branch, matching split_sealed and the other two
+            # emitted joins (v2 = role-separated keys + bound MAC; v1 legacy).
+            _i = int(entry["i"])
+            if pack.get("v") == 2 and _per_section:
+                _basis = bytes(key) + _i.to_bytes(4, "big") + nonce
+                skey = _nx_sh.sha256(
+                    b"nx-section-enc:" + _basis).digest()
+                mkey = _nx_sh.sha256(
+                    b"nx-section-mac:" + _basis).digest()
+                _mctx = (_i.to_bytes(4, "big")
+                         + int(pack["total"]).to_bytes(4, "big") + nonce)
+            elif _per_section:
                 skey = _nx_sh.sha256(
                     b"nx-section-key:" + bytes(key)
-                    + int(entry["i"]).to_bytes(4, "big") + nonce).digest()
+                    + _i.to_bytes(4, "big") + nonce).digest()
+                mkey, _mctx = skey + nonce, b""
             else:
-                skey = bytes(key)
+                skey, mkey, _mctx = bytes(key), bytes(key), b""
             ks = bytearray()
             c = 0
             while len(ks) < len(enc):
@@ -754,7 +859,7 @@ LOADER_STREAM_SOURCE = '''def {FUNC}(pack_b85, key):
                 return None
             tag, part = bytes(tagged[:32]), bytes(tagged[32:])
             if not _nx_shm.compare_digest(
-                    _nx_shm.new(skey + nonce, part, _nx_sh.sha256).digest(), tag):
+                    _nx_shm.new(mkey, _mctx + part, _nx_sh.sha256).digest(), tag):
                 return None
             buf = bytearray(part)
             try:
