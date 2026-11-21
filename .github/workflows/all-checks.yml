@@ -27,6 +27,11 @@ name: All checks
 on:
   push:
     branches: [master, main]
+  # EVENT COVERAGE (review register, FIFTH pass, item 3): PRs and merge
+  # queues must run the complete checks too — a merge-queue required check
+  # has to listen for merge_group or its status check is never triggered.
+  pull_request:
+  merge_group:
   schedule:
     # Weekly, Monday 03:17 UTC. The time-drift tiers (deep matrix, fuzz sweep,
     # real-clock gating) are the ones a schedule actually adds signal to.

@@ -181,9 +181,21 @@ jobs:
   publish:
     # HARD DEPENDENCY: this job cannot run when build-and-accept fails or
     # is skipped — `needs:` makes acceptance mandatory for publication.
+    #
+    # PRODUCTION ENVIRONMENT (review register, FIFTH pass, item 2): the job
+    # declares `environment: production` so it is gated by THAT
+    # environment's protection rules. Declaring it does NOT prove the
+    # protections exist — an auto-created environment has none — so the
+    # administrator-side checklist in MAXIMUM_SECURITY 5.6 item 9 governs:
+    # required reviewers, prevent self-review, protected branch/tag
+    # scoping, no-admin-bypass, and production credentials available only
+    # after approval. The upload step pins upload-artifact v4.4.3 (v4+
+    # immutable archive semantics; no overwrite: true is used anywhere in
+    # this workflow).
     needs: build-and-accept
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: production
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
