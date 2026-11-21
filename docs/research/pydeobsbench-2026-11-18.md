@@ -3200,3 +3200,43 @@ required reviewers — the operator step.
 * The memory guarantee keeps its corrected scope: unprivileged inspection
   blocked in the tested configuration; CAP_SYS_PTRACE bypass documented;
   the core-file row measured on a real crash.
+
+
+## 6e. Fifth review pass: the evidence-integrity record
+
+The reviewer refused the fourth pass's "final commit verified" claim, and
+the refusal was correct: the gate's shard lines recorded `tree=1441525`,
+which was the SHORT COMMIT SHA of the PREVIOUS commit — the gate ran before
+the fourth-pass changes were committed, so its 29,928 results were bound to
+the wrong identity. A commit SHA and a tree object ID are different
+identifiers and must not be used interchangeably.
+
+The gate is now an evidence-integrity record. Per shard it writes the FULL
+40-character commit SHA, the full tree object ID, the untracked-all dirty
+count, the gate run id and the exit code — and it re-reads all three at the
+END of the run, reporting `identity_stable` only when nothing moved. The
+`--clean` flag refuses to start on a dirty tree (measured: the first
+attempt refused with "dirty (3 entries)", exactly the half-committed state
+the reviewer's procedure is designed to catch).
+
+**The clean rerun against the final commit:**
+
+    commit: b91a161f8e8e69081e1e3eb21c0915d9f50111ea
+    tree:   3eb050ebe20e49b963a14bbd8ae7067f0a70675f
+    dirty_files: 0
+    run_id: rc-gate-20261121T234916-2101852
+    shard 1..10: rc=0, commit/tree/dirty identical on every line
+    identity_stable: true
+    shards_with_failures: 0
+
+Fourth-pass corrections confirmed, plus the fifth-pass items: SHA
+provenance for all four pinned actions (official repositories, expected
+releases), the umbrella workflow now covers pull_request and merge_group,
+the publish job declares `environment: production` with the explicit
+statement that declaration does not prove protection (the admin checklist
+governs), and `overwrite: true` appears nowhere in the release workflow.
+
+Remaining open (unchanged, external or admin-side): the production publish
+target in a protected environment, the two independent reviews, CA-issued
+Authenticode identity, Apple Developer ID, and the Windows strict-mode
+runtime test on supported hardware.
