@@ -960,3 +960,21 @@ signing cannot be optional) remains buildable.
    The build manifest binds the source commit and the dependency-lock
    digest, so post-incident auditing of WHICH artefacts were signed by the
    compromised key is answerable from the artefacts themselves.
+
+8. **THE MANIFEST KEY HAS ITS OWN OUT-OF-BAND ANCHOR** (review register,
+   third pass, item 2). The RC acceptance found that the provenance key and
+   the manifest key are two INDEPENDENT signing inputs — and an anchor
+   question applies to both. A manifest that authenticates itself through
+   its own embedded key would recreate the exact fail-open fixed in the
+   provenance check. Resolution: `verify_manifest` resolves its trust
+   anchor as (a) an explicit caller key, then (b) the out-of-band
+   `NIXON_BUILD_MANIFEST_PUBKEY` pin (hex Ed25519 public key from the
+   infrastructure trust store), then (c) — under
+   `NIXON_REQUIRE_PROVENANCE=1` — a REFUSAL when a manifest claims
+   `signed: true` but no trusted anchor is configured. Rotation: the
+   manifest pin rotates with the release-infrastructure key (publish the
+   new pin; old manifests verify only against the old pin, which is the
+   revocation of the old key's future). Key isolation: both private keys
+   travel only as environment variables inside the signing environment and
+   are never written to artefacts, logs, test reports or build caches; the
+   acceptance run verifies no artefact text contains key material.
