@@ -2903,3 +2903,42 @@ reviews is closed and measured; what remains here is exactly the part that
 requires a third party to issue an identity. The artefacts' honesty does not
 depend on the credentials: unsigned artefacts say they are unsigned, in the
 console, the attestation and the header parse.
+
+## 6a. Review register 2026-11-21: every in-session item closed
+
+The 2026-11-21 assessment left a prioritised register (§7 of that document).
+Each row is dispositioned here with its evidence; nothing was moved to a
+TODO without a reason.
+
+| register item | disposition | evidence |
+|---|---|---|
+| **P0** Provision the out-of-band provenance pin | **code + policy closed; deployment stays operator-side** | `NIXON_REQUIRE_PROVENANCE=1` makes an unsigned build FAIL (tests/test_failure_modes.py, 2 tests); the pin's deployment, rotation and revocation are now specified in MAXIMUM_SECURITY §5.6 — pin replacement IS revocation, because verification is local and offline |
+| **P0** Signed provenance mandatory for production | **closed** | the release-policy gate above; the unsigned control stays buildable so the §5s-bis measurement remains reproducible |
+| **P0** CA-issued Authenticode identity | **accepted external limit** (§5z.5) | env/files/gh-secrets checked empty; procurement + identity validation is a third-party act |
+| **P0** Apple Developer ID | **accepted external limit** (§5z.5) | membership + macOS keychain identity |
+| **P0** Actual macOS build + runtime test | **CLOSED for build+run** (Hardened Runtime stays external) | farm run 44866777087/44870436990: the driver now IMPORTS the produced blob ON THE PRODUCING RUNNER before upload and records `smoke_test` in the attestation — measured: `payload.cpython-311-darwin.so loads on Darwin (0.01s)`, Windows `loads on Windows (0.04s)`, Linux `loads on Linux (0.08s)`. One revision, three platforms, each blob executed on its own OS. Hardened Runtime codesign remains gated on the Developer ID. |
+| **P1** CET compatibility on the farm .pyd | **CLOSED with a definitive answer: not linker-achievable for a DLL** | a controlled experiment on the same runner (run 44872550592): the SAME object linked with the SAME /CETCOMPAT flag — EXE variant: DllCharacteristics 0xC160, **cet_compat=True**; DLL variant: 0x4160, **cet_compat=False**. MSVC link.exe applies the CET_COMPAT bit to EXE targets only. CET for a .pyd is decided by the LOADING process (python.exe), not the DLL header — and what CET enforcement needs from the DLL is exactly what the farm .pyd now has: /GUARD:CF with a populated 48-entry function table. The probe (vc-env discovery + absolute-path cl/link + EXE/DLL variants) is embedded in the driver and ships in every farm attestation as `cet_probe`. |
+| **P1** 3-platform parity on one revision | **CLOSED** | the smoke-test step above: same revision, each blob imported and executed on its own runner, results in the attestation |
+| **P1** Independent review of section encryption | **partially closed: the two recorded limitations are fixed; the AEAD migration is rejected with a reason** | v2 scheme: role-separated enc/mac keys (`nx-section-enc:` / `nx-section-mac:` domains) and the MAC now binds `index‖total‖nonce‖plaintext` (the AAD role) — 6 new tests including a v1-compatibility pack and a relabel/total-tamper pair. The full AES-GCM migration is REJECTED for the section path because the loader must run on customer machines with STDLIB ONLY (no `cryptography` wheel) — the GCM helper stays for environments that have it, and the register's "if the review supports that change" resolves to "the standard construction that satisfies the constraint is the domain-separated HMAC construction, now hardened". |
+| **P1** Human/Ghidra semantic analysis | **deepened in-session; the independent human review stays external** | (a) BigFnSurvey now EXPORTS the decompiled C of the top-3 functions (the claim is checkable against text, not a count); (b) the semantic surface is mapped: 7 PyNumber_Multiply + 16 PyNumber_Add + 3 PyNumber_Xor call sites and 109 distinct CPython/Cython API references are findable in the binary — an analyst CAN locate the payload's arithmetic via the interpreter's own imports; (c) dynamic: under gdb the blob load happens in a FORKED CHILD through a memfd/namespace path — a name breakpoint stays PENDING forever and even `follow-fork-mode child` lands in `?? ()` frames (no symbols, no library mapping); the static symbol table is stripped. Honest conclusion: names/strings are unrecoverable; SEMANTICS are reconstructable with effort at known API sites — the register's human review remains the open item. |
+| **P1** Independent review of the Mimosa baseline | **self-sampling done; independent reviewer external** | fresh scan (1,482 files, 921 high) + fresh samples in MIMOSA_AUDIT_BASELINE.md: 5 traversal re-traced to confined_path; the licensing SSRF is SIGNATURE-GATED (rpc_url from the signed licence, HTTPS-enforced); one scanner FALSE POSITIVE found (section_split.py:30 — a docstring mentioning exec). |
+| **P1** Dependency-lock on every release builder | **CLOSED** | the env was scoped to the pytest step; three more artefact-producing steps were unguarded. Moved to JOB scope in ci.yml. |
+| **P2** Expand ORAM differential tests | **CLOSED** | 5 expression shapes × 120 draws × (no-collision + semantic-equivalence), reusing the crash tests' executor: 27 tests pass |
+| **P2** Broaden RE payloads | **CLOSED** | two targets added: `ledger` (stateful class with a sliding window) and `memo_fib` (self-recursive memoised), each with an independently written equivalent (deque-based; iterative table walk) verified against the recorded output — 6 targets total |
+| **P2** Production issuer/revocation/secure-update | **deployment documentation closed** | MAXIMUM_SECURITY §5.6 items 5–6 (rotation = pin replacement; revocation = publish the new pin; `signed: false` manifests must not ship to customers) |
+
+**Two engineering findings made while closing the register** (both now
+regression-guarded):
+
+1. The f-string template consumed the backslash-vee sequence inside
+   `Installer\vswhere` as a VERTICAL TAB escape (third strike of the
+   braces/escapes trap): the rendered YAML carried 0x0B and GitHub rejected
+   the workflow in 0 seconds. `test_the_driver_and_yaml_carry_no_control_characters`
+   now refuses ANY control character in the rendered driver or YAML.
+2. The CET probe needed FOUR measured corrections to reach its verdict:
+   cl is not on the step PATH (WinError 2) → vc-env discovery → the
+   discovery "succeeded" without resolving (added which() diagnosis) →
+   bare-name resolution uses the PARENT's imagery (absolute paths) →
+   LNK1561 entry point → and finally the EXE/DLL variant pair. Each step is
+   recorded in the driver comments with its run number, because the next
+   person touching MSVC invocation on a runner will hit the same sequence.

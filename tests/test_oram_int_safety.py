@@ -272,3 +272,96 @@ def test_the_function_still_returns_the_right_answer_across_many_draws():
     for _ in range(200):
         assert _exec(src, "encrypt", 10, 6) == 10 ^ 6, (
             "the ORAM transform changed the program's answer on this draw")
+
+
+# ── differential expansion (review register, P2: the original defect lived
+#    in the real transform while the benchmark payloads never hit its branch,
+#    so the property must hold over MORE shapes than the one that caught it).
+#    Each shape exercises a different binding shape the slot allocator must
+#    keep collision-free; the runner closes over the expected answer and
+#    executes the TRANSFORMED source through the file's existing _exec helper
+#    (the one the crash tests use).
+
+_SHAPES = (
+    ("three_ints",
+     "def f(a, b, c):\n"
+     "    x = a ^ b\n"
+     "    y = b ^ c\n"
+     "    z = a ^ c\n"
+     "    return x ^ y ^ z\n",
+     lambda: _exec("def f(a, b, c):\n"
+                   "    x = a ^ b\n"
+                   "    y = b ^ c\n"
+                   "    z = a ^ c\n"
+                   "    return x ^ y ^ z\n", "f",
+                   0b1100, 0b1010, 0b0110),
+     0b1100 ^ 0b1010 ^ 0b1010 ^ 0b0110 ^ 0b1100 ^ 0b0110),
+    ("int_across_two_sites",
+     "def f(key, data):\n"
+     "    first = key ^ data\n"
+     "    second = data ^ key\n"
+     "    return first == second\n",
+     lambda: _exec("def f(key, data):\n"
+                   "    first = key ^ data\n"
+                   "    second = data ^ key\n"
+                   "    return first == second\n", "f", 0x5A, 0x3C),
+     True),
+    ("int_alongside_bytes",
+     "def f(key, blob):\n"
+     "    masked = key ^ 0xFF\n"
+     "    return masked, blob\n",
+     lambda: _exec("def f(key, blob):\n"
+                   "    masked = key ^ 0xFF\n"
+                   "    return masked, blob\n", "f", 0x41, b"payload"),
+     (0x41 ^ 0xFF, b"payload")),
+    ("int_read_in_comprehension",
+     "def f(keys, data):\n"
+     "    masked = [k ^ data for k in keys]\n"
+     "    return masked\n",
+     lambda: _exec("def f(keys, data):\n"
+                   "    masked = [k ^ data for k in keys]\n"
+                   "    return masked\n", "f", [1, 2, 3], 0x0F),
+     [1 ^ 0x0F, 2 ^ 0x0F, 3 ^ 0x0F]),
+    ("single_int_self_cancel",
+     "def f(start):\n"
+     "    acc = start\n"
+     "    acc = acc ^ acc\n"
+     "    return acc\n",
+     lambda: _exec("def f(start):\n"
+                   "    acc = start\n"
+                   "    acc = acc ^ acc\n"
+                   "    return acc\n", "f", 0xDEAD),
+     0),
+)
+
+
+def test_slot_allocation_holds_across_expression_shapes_and_seeds():
+    """Every shape, 120 draws each: no slot collision ever.
+
+    The original defect was found on ONE shape (`key ^ data`) and would have
+    survived any test suite that only re-ran that shape. Different binding
+    counts change how many slots the allocator draws, so the no-collision
+    property is checked per shape.
+    """
+    import re as _re
+    for name, src, _run, _expected in _SHAPES:
+        for _ in range(120):
+            out = _oram(src)
+            slots = [int(v) for v in _re.findall(r"\.write\((\d+),", out)]
+            assert len(set(slots)) == len(slots), (
+                "shape %r: variables share ORAM slot(s) %r on some draw:\n%s"
+                % (name, sorted(slots), out))
+
+
+def test_semantic_equivalence_across_shapes_and_seeds():
+    """Every shape returns its original answer, on every draw, 120x each.
+
+    The differential check the reviewer asked for: the ORAM transform must
+    be answer-preserving over the shape space, not only over the shape that
+    originally caught the 2% collision.
+    """
+    for name, _src, run, expected in _SHAPES:
+        for _ in range(120):
+            assert run() == expected, (
+                "shape %r: the ORAM transform changed the program's answer "
+                "on some draw" % name)

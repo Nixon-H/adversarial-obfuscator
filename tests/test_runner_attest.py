@@ -143,6 +143,37 @@ def test_the_embedded_driver_compiles():
     compile(driver, "<farm-driver>", "exec")
 
 
+def test_the_driver_and_yaml_carry_no_control_characters():
+    """A backslash escape inside the f-string template becomes a control char.
+
+    Measured run 44868914170: the template text 'Installer\\vswhere.exe' (a
+    backslash-vee sequence) was consumed by the OUTER f-string as a vertical
+    tab escape before the inner raw-string prefix applied. The rendered YAML
+    carried a 0x0B, GitHub rejected the workflow, and the farm run died in
+    zero seconds at parse time. This is the same trap as the braces dict
+    (three strikes now), so the guard is mechanical: neither the driver nor
+    the YAML may contain ANY C0 control character except tab and newline.
+    """
+    from obfuscator.core.utils import render_farm_driver, render_farm_yaml
+
+    driver = render_farm_driver("payload.py")
+    yaml_text = render_farm_yaml("payload.py")
+    assert driver and yaml_text
+    bad_driver = [pos for pos, ch in enumerate(driver)
+                  if ord(ch) < 32 and ch not in "\t\n"]
+    bad_yaml = [pos for pos, ch in enumerate(yaml_text)
+                if ord(ch) < 32 and ch not in "\t\n"]
+    assert not bad_driver, (
+        "the rendered driver contains control char(s) at %r -- a backslash "
+        "escape inside the f-string template was consumed at render time; "
+        "context: %r" % (bad_driver[:3],
+                         driver[bad_driver[0] - 60:bad_driver[0] + 60]
+                         if bad_driver else ""))
+    assert not bad_yaml, (
+        "the rendered YAML contains control char(s) at %r -- GitHub will "
+        "reject the workflow at parse time" % (bad_yaml[:3],))
+
+
 def test_the_embedded_driver_emits_the_attestation_fields():
     from obfuscator.core.utils import render_farm_driver
 

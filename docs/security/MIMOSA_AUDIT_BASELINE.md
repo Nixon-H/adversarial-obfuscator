@@ -110,3 +110,33 @@ Two things this baseline does **not** claim:
 Run the audit command above and compare the per-file/per-line list. A new
 high-severity class that is *not* one of the three above is a regression and
 should be triaged on its own.
+
+## Independent self-sampling — 2026-11-21 (review register, P1)
+
+The 2026-11-20 triage sampled its own conclusions. This section is a second
+pass with fresh line numbers from a NEW scan of the current tree (1,482
+files; 921 high / 8 medium / 259 low — the +2 high are the farm driver's new
+subprocess `cl`/`link` calls in the CET probe and smoke-test paths), sampling
+findings the first pass did not touch, including two files the baseline never
+sampled. This is still a self-review, not the independent reviewer the
+register asks for; it narrows what that reviewer must re-check.
+
+| class | fresh sample | verdict per line |
+|---|---|---|
+| path traversal | pipeline.py 752, 798, 858, 1742, 4146 | **all 5 trace to `confined_path()`** within 1–36 lines of the sink (727 pyx_path, 797 setup_path, 843 dest, 1712 src_path, 4110 bat_path) — same class as the 2026-11-20 sample |
+| SSRF | pipeline.py 2232 | geofence gate's **hardcoded** service list (`ip-api.com`), emitted inside a loader string — same class as the baseline's SSRF row |
+| SSRF | **licensing.py 420** (never sampled before) | `rpc_url` comes from the **signed licence payload** and is HTTPS-enforced (`must use HTTPS`). Contained by signature: an attacker redirects the ownership check only by holding a validly-signed licence pointing at their node, which requires the publisher's private key — the same trust boundary as every other control. Nuance recorded, not smoothed over. |
+| code injection | pipeline.py 3103 | `exec(code, _nx_ns)` executes the **decrypted payload** after `_nx_hg` (hostguard) — the product's purpose; classified correctly |
+| code injection | **section_split.py 30** (never sampled before) | the flagged line is a **DOCSTRING** containing the word "exec" ("who must _nx_wipe it after exec") — a scanner false positive on a comment. Recorded as a scanner limitation: rule counts include prose. |
+| unsafe deserialisation (medium) | pipeline.py 823 | `marshal.loads` of bytecode **this build compiled moments earlier** — unchanged from the baseline's flagged item; still the one to re-examine if the threat model gains a scratch-directory attacker |
+
+**What this sampling adds.** The three-class explanation survives an
+independent pass over fresh lines and previously unsampled files; one false
+positive (docstring) was found and recorded; the licensing SSRF's containment
+by signature is now stated with its exact precondition instead of being
+lumped into "our own API clients". What it cannot do is replace the
+independent reviewer the register requires — it hands that reviewer a
+smaller, sharper surface: the 619-path-traversal class resolves to
+`confined_path` dataflow the scanner cannot follow, the SSRF class is 4
+hardcoded endpoints + the signature-gated RPC, and the injection class is
+the product executing its own output.

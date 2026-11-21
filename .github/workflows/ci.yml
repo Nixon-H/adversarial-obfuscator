@@ -29,6 +29,17 @@ jobs:
     # `if: event != 'schedule'`, so Monday's "success" only meant lint-pin
     # had run and the suite could rot for weeks unnoticed.
     runs-on: ubuntu-latest
+    # RELEASE-BUILDER POLICY AT JOB SCOPE (review register, P1: "verify
+    # coverage of all jobs"). These env vars were scoped to the pytest step,
+    # but three MORE steps in this job build artefacts -- "Build native
+    # artefacts", "End-to-end artifact check" (e2e_build_check.py invokes the
+    # real pipeline) and the py_compile sweep -- and an artefact built by a
+    # drifted toolchain in any of them would only have WARNED. Every
+    # artefact-producing step now inherits the policy: a drifted toolchain is
+    # a failed CI run, wherever in this job the build happens.
+    env:
+      NIXON_REQUIRE_ARTEFACTS: "1"
+      NIXON_REQUIRE_DEP_LOCK: "1"
     strategy:
       max-parallel: 8
       fail-fast: false

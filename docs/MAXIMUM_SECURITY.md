@@ -881,3 +881,57 @@ The full addendum-by-measurement lives in
   (full flag set), `max-legacy` (the 2026-11-10 baseline, kept for
   comparability), `absolute`, `absolute-native-only`. The §8 numbers in
   the matrix below were taken on the legacy shape.
+
+### 5.6 Release trust-chain policy (2026-11-21, review register P0)
+
+The §5s-bis measurement is the reason this section exists: on an UNSIGNED
+artefact, tamper + recompute of both internal stamps RAN (rc 0, payload
+executed). An unsigned artefact's integrity is one hash recomputed twice.
+The reviewer register requires signed provenance to be mandatory for
+production releases, so the build now enforces it:
+
+```bash
+# RELEASE BUILDS: an artefact that would ship without a load-time
+# signature FAILS the build instead of printing a warn.
+export NIXON_REQUIRE_PROVENANCE=1
+export NIXON_ARTEFACT_SIGN_KEY=$NIXON_ARTEFACT_SIGN_KEY   # from §5.2
+NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD \
+python3 -m obfuscator.core.pipeline build payload.py ...
+```
+
+Without the flag the default stays a warn, so a deliberate test artefact
+(the unsigned control in tests/test_failure_modes.py, which demonstrates WHY
+signing cannot be optional) remains buildable.
+
+**The full release trust chain, as the register requires it:**
+
+1. **Every release artefact is signed.** `NIXON_REQUIRE_PROVENANCE=1` makes
+   an unsigned build a failed build (§5z.6).
+2. **The signing key is release-infrastructure-owned.** `NIXON_ARTEFACT_SIGN_KEY`
+   is an environment variable read at BUILD time only, from the operator's
+   secret store — never embedded in the artefact, never in source or tests.
+   The artefact carries only the signature and the PUBLIC-key fingerprint.
+3. **The verification pin travels out-of-band.** `NIXON_PROVENANCE_PUBKEY`
+   is exported at RUN time from the launcher or protected configuration —
+   NOT from inside the artefact, which an attacker can edit. The pin must be
+   distributed with the release notes through a channel the attacker does
+   not control (the deployment step §5r records as operator-owned).
+4. **Missing credentials or pin fail closed at run time.** The loader's
+   provenance check is fatal when both slots are populated and the signature
+   does not verify (all eight attack routes die there, §5s-bis); a missing
+   RUN-time pin means the check cannot be satisfied and the artefact refuses.
+5. **Key rotation and revocation.** Rotation: issue the next key with
+   `python3 -m obfuscator.licensing` (§5.2), ship it as the new
+   `NIXON_ARTEFACT_SIGN_KEY`, and publish the new pin as the expected
+   `NIXON_PROVENANCE_PUBKEY` — artefacts signed by the old key are refused
+   by holders of the new pin, which IS the revocation of that key's future.
+   For a compromised key: publish a new pin IMMEDIATELY (revocation is pin
+   replacement, since verification is local and offline); all artefacts
+   signed by the compromised key stop verifying for every holder that picks
+   up the new pin. Record the rotation in the release notes with the old and
+   new fingerprints.
+6. **Unsigned artefacts are labelled development/test-only.** The build
+   prints the warn with exactly that meaning; manifests record
+   `signed: false`; the provenance slots ship empty. A release artefact
+   marked `signed: false` in its build manifest must not be distributed to
+   customers — that is checkable from the artefact's own manifest.
