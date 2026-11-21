@@ -161,6 +161,28 @@ def _nx_prov_msg():
 _nx_prov_pk_s = bool(globals().get({pk!r}, ""))
 _nx_prov_sig_s = bool(globals().get({sig!r}, ""))
 _nx_prov_ok = True   # unset until verified; `del` below needs a binding
+# RELEASE-MODE PIN ENFORCEMENT (review register, second pass, item 3).
+# Measured on a release-candidate build (acceptance run 2026-11-21): the
+# out-of-band pin (NIXON_PROVENANCE_PUBKEY) was NEVER consulted by this
+# non-token-derived check — it verified the signature against the EMBEDDED
+# key, so a missing run-time pin AND a wrong pin were both ACCEPTED (rc 0).
+# The embedded key self-check is self-referential by construction; the
+# out-of-band pin is what makes the check mean "this artefact came from the
+# publisher". When the build ran under the release policy, a missing or
+# mismatching pin is FATAL; without the policy the pin is still honoured
+# whenever it is present (wrong pin refuses), so existing deployments keep
+# running while every release build gains the anchor.
+_nx_prov_pin_required = {pin_required}
+_nx_prov_pin_hex = ""
+try:
+    import os as _nx_prov_pin_os
+    _nx_prov_pin_hex = _nx_prov_pin_os.environ.get(
+        {pinned_env!r}, "").strip()
+except Exception:
+    _nx_prov_pin_hex = ""
+if _nx_prov_pin_required and not _nx_prov_pin_hex:
+    {fail}("provenance: run-time pin missing (release policy requires the "
+           "out-of-band trust anchor)")
 if _nx_prov_pk_s and _nx_prov_sig_s:
     try:
         # The build may prefix the key with a fingerprint of itself:
@@ -184,6 +206,19 @@ if _nx_prov_pk_s and _nx_prov_sig_s:
             _nx_prov_pk_b,
             _nx_prov_b64.b64decode({sig}),
             _nx_prov_msg())
+        # THE PIN IS THE TRUST ANCHOR (2026-11-21). The signature verified
+        # against the EMBEDDED key proves self-consistency only; the pin is
+        # the out-of-band anchor, so when it is present it must MATCH the
+        # embedded key — an untrusted publisher is refused even though the
+        # embedded signature "verifies" against itself.
+        if _nx_prov_ok and _nx_prov_pin_hex:
+            try:
+                _nx_prov_pin_b = bytes.fromhex(_nx_prov_pin_hex)
+            except ValueError:
+                {fail}("provenance: run-time pin is malformed")
+            if _nx_prov_pin_b != _nx_prov_pk_b:
+                {fail}("provenance: run-time pin does not match the "
+                       "artefact's signing key (untrusted publisher)")
     except Exception:
         _nx_prov_ok = False
     if not _nx_prov_ok:
@@ -221,6 +256,7 @@ def emit_snippet(sig_slot: str = SIG_SLOT, pk_slot: str = PK_SLOT,
                  fail_name: str = "_nx_self_fail",
                  pinned_key_env: str = "NIXON_PROVENANCE_PUBKEY",
                  token_derived: bool = False,
+                 pin_required: bool = False,
                  definitions_only: bool = False) -> str:
     """Verifier definition plus the check, as loader source.
 
@@ -258,7 +294,8 @@ def emit_snippet(sig_slot: str = SIG_SLOT, pk_slot: str = PK_SLOT,
     if definitions_only:
         return VERIFIER_SOURCE
     source = VERIFIER_SOURCE + CHECK_SOURCE.format(
-        pk=pk_slot, sig=sig_slot, fail=fail_name)
+        pk=pk_slot, sig=sig_slot, fail=fail_name,
+        pin_required=bool(pin_required), pinned_env=pinned_key_env)
     if not token_derived:
         return source
     return source + '''
