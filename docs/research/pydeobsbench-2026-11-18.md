@@ -2928,7 +2928,7 @@ TODO without a reason.
 | **P1** 3-platform parity on one revision | **CLOSED** | the smoke-test step above: same revision, each blob imported and executed on its own runner, results in the attestation |
 | **P1** Independent review of section encryption | **partially closed: the two recorded limitations are fixed; the AEAD migration is rejected with a reason** | v2 scheme: role-separated enc/mac keys (`nx-section-enc:` / `nx-section-mac:` domains) and the MAC now binds `index‖total‖nonce‖plaintext` (the AAD role) — 6 new tests including a v1-compatibility pack and a relabel/total-tamper pair. The full AES-GCM migration is REJECTED for the section path because the loader must run on customer machines with STDLIB ONLY (no `cryptography` wheel) — the GCM helper stays for environments that have it, and the register's "if the review supports that change" resolves to "the standard construction that satisfies the constraint is the domain-separated HMAC construction, now hardened". |
 | **P1** Human/Ghidra semantic analysis | **deepened in-session; the independent human review stays external** | (a) BigFnSurvey now EXPORTS the decompiled C of the top-3 functions (the claim is checkable against text, not a count); (b) the semantic surface is mapped: 7 PyNumber_Multiply + 16 PyNumber_Add + 3 PyNumber_Xor call sites and 109 distinct CPython/Cython API references are findable in the binary — an analyst CAN locate the payload's arithmetic via the interpreter's own imports; (c) dynamic: under gdb the blob load happens in a FORKED CHILD through a memfd/namespace path — a name breakpoint stays PENDING forever and even `follow-fork-mode child` lands in `?? ()` frames (no symbols, no library mapping); the static symbol table is stripped. Honest conclusion: names/strings are unrecoverable; SEMANTICS are reconstructable with effort at known API sites — the register's human review remains the open item. |
-| **P1** Independent review of the Mimosa baseline | **self-sampling done; independent reviewer external** | fresh scan (1,482 files, 921 high) + fresh samples in MIMOSA_AUDIT_BASELINE.md: 5 traversal re-traced to confined_path; the licensing SSRF is SIGNATURE-GATED (rpc_url from the signed licence, HTTPS-enforced); one scanner FALSE POSITIVE found (section_split.py:30 — a docstring mentioning exec). |
+| **P1** Independent review of the Mimosa baseline | **self-sampling done; independent reviewer external — and the register's fourth pass keeps this PARTIAL: self-sampling is validation, not review** | fresh scan (1,482 files, 921 high) + fresh samples in MIMOSA_AUDIT_BASELINE.md: 5 traversal re-traced to confined_path; the licensing SSRF is SIGNATURE-GATED (rpc_url from the signed licence, HTTPS-enforced); one scanner FALSE POSITIVE found (section_split.py:30 — a docstring mentioning exec). |
 | **P1** Dependency-lock on every release builder | **CLOSED** | the env was scoped to the pytest step; three more artefact-producing steps were unguarded. Moved to JOB scope in ci.yml. |
 | **P2** Expand ORAM differential tests | **CLOSED** | 5 expression shapes × 120 draws × (no-collision + semantic-equivalence), reusing the crash tests' executor: 27 tests pass |
 | **P2** Broaden RE payloads | **CLOSED** | two targets added: `ledger` (stateful class with a sliding window) and `memo_fib` (self-recursive memoised), each with an independently written equivalent (deque-based; iterative table walk) verified against the recorded output — 6 targets total |
@@ -3035,6 +3035,22 @@ tests/fixtures (hand-written minimal PE) has NO debug directory at all
   traversal/SSRF/code-execution categories, inspect the accepted-risk
   rationale, and challenge the claimed false positives (including the
   docstring one this baseline itself claims).
+* **Replay/rollback (third pass)**: PARTIAL — the machinery is
+  unit-tested, but "actual release-artefact attack tests" (replaying a
+  captured licence, rolling back to build N) against a live artefact need
+  the licence-chain setup and stay open.
+* **Dependency-lock coverage (third pass)**: PARTIAL — the job-scope fix
+  covers the `test` job; the register wants every release-producing
+  workflow and reusable workflow enumerated, with a deliberate mismatch
+  proven to fail each path.
+* **Replay/rollback (third pass)**: PARTIAL — the machinery is
+  unit-tested, but "actual release-artefact attack tests" (replaying a
+  captured licence, rolling back to build N) against a live artefact need
+  the licence-chain setup and stay open.
+* **Dependency-lock coverage (third pass)**: PARTIAL — the job-scope fix
+  covers the `test` job; the register wants every release-producing
+  workflow and reusable workflow enumerated, with a deliberate mismatch
+  proven to fail each path.
 
 ## 6c. Release-candidate acceptance run: two real defects found, one fixed, one measured blocked
 
@@ -3091,16 +3107,33 @@ detects.
 
 ### Threat-model probes against the shipped Linux artefact
 
-**Memory dumping: BLOCKED BY THE ARTEFACT'S OWN ENFORCEMENT.** Scanning the
-live process's writable memory — the register's "memory dumping" capability —
-fails at `/proc/<pid>/maps` with **PermissionError**: `nx_apply_protections()`
-sets `PR_SET_DUMPABLE=0` and `RLIMIT_CORE=0`, so the process refuses
-`/proc` inspection for a non-root analyst. Measured live: `CoreDumping: 0`,
-`TracerPid: 0`, maps unreadable. The honest limits, stated rather than
-hidden: a ROOT analyst reads /proc regardless, and the bytecode fallback
-keeps plaintext resident for builds that ship one (native-only removes that
-surface). The dumpability probe is a loader-level regression guard for the
-enforcement shim.
+**Unprivileged process inspection: blocked in the tested configuration.
+Privileged inspection remains outside the protection guarantee** (scope
+corrected 2026-11-21, third pass). What the measurement demonstrates:
+`CoreDumping: 0`, `TracerPid: 0`, `/proc/<pid>/maps` denied to the
+inspecting process, and `PR_SET_DUMPABLE=0` + `RLIMIT_CORE=0` applied. What
+it does NOT demonstrate: that memory extraction is universally blocked.
+`PR_SET_DUMPABLE` blocks ordinary `PTRACE_ATTACH` for an unprivileged
+caller, but the ptrace permission checks allow a caller with
+`CAP_SYS_PTRACE` to bypass the dumpable restriction, and `/proc/pid/mem`
+has stricter requirements than `/proc/pid/maps` — both remain available to
+a privileged inspector. The measured guarantee is against ordinary,
+unprivileged process inspection only. The full permission matrix, measured
+LIVE on the shipped artefact (2026-11-21, third pass):
+
+| inspector | result |
+|---|---|
+| same-UID unprivileged: /proc/pid/maps | **PermissionError** |
+| same-UID unprivileged: /proc/pid/mem | **PermissionError** (stricter than maps, also denied) |
+| same-UID: gdb attach | **refused** ("The program has no registers now" — the tracer never gains the inferior) |
+| core file on a real SIGSEGV | **none produced** (RLIMIT_CORE=0, measured on the crash itself, not inferred from status) |
+| root with CAP_SYS_PTRACE | bypasses the dumpable restriction (ptrace man page) — **OUTSIDE the guarantee** |
+| root without CAP_SYS_PTRACE | same refusal as unprivileged |
+| container / user-namespace variants | configuration-dependent |
+
+The bytecode fallback keeps plaintext resident for builds that ship one;
+native-only removes that surface. The privileged rows are the stated
+boundary of the guarantee, not claims.
 
 **Loader patching: refused** — a one-byte patch inside the integrity-anchor
 region dies at the merkle check (rc 1/137 depending on path).

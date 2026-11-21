@@ -31,7 +31,10 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from obfuscator.build_manifest import write_manifest  # noqa: E402
+from obfuscator.build_manifest import (  # noqa: E402
+    MANIFEST_SUFFIX, build_manifest, sign_manifest, verify_manifest,
+    write_manifest,
+)
 
 
 def _artefact(tmp_path, body="print('x')\n"):
@@ -111,3 +114,94 @@ def test_native_blob_path_still_works_for_callers_that_have_a_file(tmp_path):
     rec = _record(tmp_path, native_blob_path=str(blob))
     assert rec["bytes"] == 68, rec
     assert rec["sha256"] == hashlib.sha256(blob.read_bytes()).hexdigest(), rec
+
+
+# ── manifest trust anchor (review register, third pass, item 2) ───────────
+#
+# The RC acceptance found that the provenance key and the manifest key are
+# two INDEPENDENT signing inputs, and the anchor question applies to both: a
+# manifest that authenticates itself through its own embedded key would
+# recreate the exact fail-open the provenance fix just closed. The anchor is
+# the NIXON_BUILD_MANIFEST_PUBKEY out-of-band pin; under the release policy a
+# signed manifest with NO trusted anchor is a failed verdict.
+
+
+def test_manifest_re_signed_by_untrusted_key_rejected_under_publisher_pin(
+        tmp_path, monkeypatch):
+    """The publisher's pin refuses a manifest re-signed by another key.
+
+    An attacker re-signs the manifest with their own Ed25519 key: the hash
+    still matches, the 'signed' flag is still true, and the signature is
+    valid FOR THE ATTACKER KEY. Only the out-of-band publisher pin rejects
+    it.
+    """
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey)
+    art = _artefact(tmp_path)
+    attacker = Ed25519PrivateKey.generate()
+    mpath = write_manifest(art, private_key=attacker)
+    assert mpath
+    publisher = Ed25519PrivateKey.generate()
+    monkeypatch.setenv("NIXON_BUILD_MANIFEST_PUBKEY",
+                       publisher.public_key().public_bytes_raw().hex())
+    res = verify_manifest(art)
+    assert res["ok"] is False, (
+        "a manifest re-signed by an untrusted key was accepted under the "
+        "publisher's pin")
+    assert "signature invalid" in res["reason"], res["reason"]
+
+
+def test_manifest_with_the_correct_pin_verifies(tmp_path, monkeypatch):
+    """The publisher's own pin verifies the publisher's manifest."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey)
+    art = _artefact(tmp_path)
+    publisher = Ed25519PrivateKey.generate()
+    write_manifest(art, private_key=publisher)
+    monkeypatch.setenv("NIXON_BUILD_MANIFEST_PUBKEY",
+                       publisher.public_key().public_bytes_raw().hex())
+    res = verify_manifest(art)
+    assert res["ok"] is True, res["reason"]
+    assert res["signed"] is True
+
+
+def test_release_policy_refuses_a_signed_manifest_with_no_anchor(
+        tmp_path, monkeypatch):
+    """No anchor + release policy = failed verdict, never hash-only trust.
+
+    With NIXON_REQUIRE_PROVENANCE=1 a signed manifest whose signature cannot
+    be checked against a trusted anchor FAILS instead of trusting the hash.
+    """
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey)
+    art = _artefact(tmp_path)
+    write_manifest(art, private_key=Ed25519PrivateKey.generate())
+    monkeypatch.delenv("NIXON_BUILD_MANIFEST_PUBKEY", raising=False)
+    monkeypatch.setenv("NIXON_REQUIRE_PROVENANCE", "1")
+    res = verify_manifest(art)
+    assert res["ok"] is False, (
+        "a signed manifest passed WITHOUT any trusted anchor under the "
+        "release policy")
+    assert "trusted anchor" in res["reason"]
+
+
+def test_unsigned_manifest_reports_unsigned_without_policy(tmp_path,
+                                                           monkeypatch):
+    """Without the release policy the old contract holds: no anchor and no
+    signature means 'unsigned', which is reported rather than fatal."""
+    art = _artefact(tmp_path)
+    write_manifest(art)
+    monkeypatch.delenv("NIXON_BUILD_MANIFEST_PUBKEY", raising=False)
+    monkeypatch.delenv("NIXON_REQUIRE_PROVENANCE", raising=False)
+    res = verify_manifest(art)
+    assert res["ok"] is True and res["signed"] is False
+
+
+def test_the_manifest_pin_env_var_matches_the_documented_name():
+    """The policy doc names the SAME env var the implementation reads."""
+    from obfuscator.build_manifest import MANIFEST_PIN_ENV
+    doc = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "..", "docs", "MAXIMUM_SECURITY.md"),
+               encoding="utf-8").read()
+    assert "NIXON_BUILD_MANIFEST_PUBKEY" in doc
+    assert MANIFEST_PIN_ENV == "NIXON_BUILD_MANIFEST_PUBKEY"
