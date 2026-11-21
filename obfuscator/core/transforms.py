@@ -376,7 +376,17 @@ class SymbolRenamer(ast.NodeTransformer):
             return old_name
         if old_name not in self.mapping:
             for _ in range(100):
-                new = get_random_var_name(old_name)
+                # ascii_only MUST FOLLOW self._ascii_ids (measured 2026-11-21).
+                # This is the site the farm run actually exercises -- a
+                # top-level function such as `mix` becomes
+                # `_nixon_<babel chars>` here -- and it was missed when the
+                # scoped ascii_ids flag was threaded through: only the string
+                # sealer's generator received it, so a native payload still
+                # carried non-ASCII identifiers and Cython's latin-1
+                # intermediate stream failed on the runners with
+                #   UnicodeEncodeError: 'latin-1' codec can't encode ...
+                new = get_random_var_name(old_name,
+                                          ascii_only=self._ascii_ids)
                 if new not in self.reserved and new not in self.mapping.values():
                     self.mapping[old_name] = new
                     self.reverse_mapping[old_name] = new

@@ -825,7 +825,7 @@ Updated 2026-11-19 after building a real MSVC-ABI object on this host.
 | mingw PE carries CFG | **no**, and cannot: GNU ld has no CFG option |
 | **MSVC-compatible path exercised** | **YES** — `clang --target=x86_64-pc-windows-msvc` + `lld-link 19` produced a real PE, `DllCharacteristics = 0x4160` (ASLR\|DEP\|CFG\|HEPA), and `check(windows, "msvc")` passes |
 | **CFG is a real mechanism, not just a bit** | **PARTIAL** — load config present (288 B, GuardFlags 0x100 = CF_INSTRUMENTED) but no function table: `partial: [cfg_no_function_table]` |
-| **CET** (`/CETCOMPAT`) | **NOT INSTRUMENTED** — measured GuardFlags carries no XFG/shadow-stack bits, so the flag is a declaration; reported as `partial: [cet_not_instrumented]` |
+| **CET** (`/CETCOMPAT`) | **COMPAT-MARKED on the lld-link probe, ABSENT on the farm .pyd** — CET's opt-in is DllCharacteristics 0x8000 (the lld-link probe measured 0xC160, the farm .pyd 0x4160); the GuardFlags "CET bits" this row used to cite were export-suppression/longjump metadata, renamed 2026-11-21 (see the correction under "Windows CET") |
 | **PE import/export inspection** | **verified** — export table names and the full import surface (DLLs + symbols) enumerated from real objects (`KERNEL32.dll`, `msvcrt.dll`) |
 | macOS Hardened Runtime | **not verified**; it lives in the CodeDirectory and a freshly compiled object is unsigned |
 | Authenticode | **IMPLEMENTED and measured** on a real PE: digest identical before/after signing, WIN_CERTIFICATE rev 2.0 / type 0x0002, PKCS#7 parses with the signer cert. Gated on an operator-supplied certificate. |
@@ -2208,29 +2208,52 @@ it only does that when the MSVC CRT's guard symbols (`__guard_fids_table`,
 headers — so installing headers would not have helped, and the earlier
 diagnosis was wrong in a way that would have wasted someone's afternoon.
 
-### Windows CET: the 2026-11-19 "inert" verdict was a measurement defect
+### Windows CET: the 2026-11-19 "inert" verdict was a measurement defect, and so was its correction
 
-The same probe sequence showed CET bits DO land in the PE once the structure
-is correctly sized:
+The same probe sequence showed guard metadata DOES land in the PE once the
+structure is correctly sized:
 
     GuardFlags = 0x144100
       CF_INSTRUMENTED          (0x100)    set
-      CET_XFG_ENABLED          (0x4000)   set
-      CET_SHADOW_STACK_PRESENT (0x40000)  set
-      CET_UserCETCompat        (0x100000) set
+      0x4000                              set
+      0x40000                             set
+      0x100000                            set
 
-and the linked binary carries **3 `endbr64` instructions**, emitted by
-default on this target (`-fcf-protection=full` changed nothing because it was
-already on). The earlier "CET is inert in the generated artifact" was
-measured without a correctly-sized load config, so the bits never reached the
-PE — the same class of error as the MBA probe measuring the wrong emitter.
+**CORRECTION 2026-11-21, measured with llvm-readobj --coff-load-config over
+per-bit probes AND over the real probe object.** The three labels above were
+wrong, and so was the "CET verified reachable" conclusion drawn from them:
+llvm names 0x4000 **CF_EXPORT_SUPPRESSION_INFO_PRESENT**, leaves 0x40000 and
+0x100000 **unnamed**, and names 0x400000 (a value some SDKs call XFG)
+**EH_CONTINUATION_TABLE_PRESENT**. The GuardFlags word has NO CET bits at
+all. Where CET's opt-in really lives, measured on the same probe object:
 
-**Honest scope on CET:** header bits + `endbr64` mean the image is *marked
-CET-compatible and its indirect-branch targets are ENDBR-guarded*. Whether a
-Windows loader enforces shadow stack for it depends on the CPU, the OS
-mitigation policy and whether the process opts in — none of which exists on
-this Linux host. The claim that improved is "the artifact carries valid CET
-metadata", not "shadow stack is enforced at runtime".
+    DllCharacteristics = 0xC160
+      CET_COMPAT   (0x8000)   set   <- the real /CETCOMPAT result
+      GUARD_CF     (0x4000)   set
+      NX_COMPAT / DYNAMIC_BASE / HIGH_ENTROPY_VA
+
+and on the FARM .pyd (run 44853081762): DllCharacteristics 0x4160 — GUARD_CF
+set, **CET compat ABSENT** — so the /CETCOMPAT link flag did not produce a
+CET-compat image there, and `native_harden` now reports that in a
+`cet_compat` field instead of implying one from mislabeled GuardFlags bits.
+The parser's constants were renamed to the authoritative names
+(`PE_GUARD_EXPORT_SUPPRESSION_INFO_PRESENT` et al.), and
+`test_guard_flag_bit_names_match_the_authoritative_parser` pins each name
+against llvm-readobj so the next mislabel is caught before it reaches a
+document.
+
+The linked binary carries **3 `endbr64` instructions**, emitted by default on
+this target (`-fcf-protection=full` changed nothing because it was already
+on). The `endbr64` half of this record stands — the indirect-branch targets
+ARE ENDBR-guarded — but the earlier claim that the GuardFlags bits represented
+CET metadata was a mislabeled measurement, corrected above.
+
+**Honest scope on CET:** `endbr64` + DllCharacteristics CET_COMPAT (on the
+lld-link probe) mean the image is *marked CET-compatible and its
+indirect-branch targets are ENDBR-guarded*. Whether a Windows loader enforces
+shadow stack for it depends on the CPU, the OS mitigation policy and whether
+the process opts in — none of which exists on this Linux host. The farm .pyd
+is NOT CET-compat marked; that remains a real, measured gap.
 
 ### 5v. The Authenticode signature was never Windows-valid, and could never be checked
 
@@ -2671,3 +2694,144 @@ the same run.
 
 
 
+
+## 5z. CFG function table: the flag reached the linker, and the gate that refuses a partial result
+
+§5x-bis closed with "setuptools does not forward link flags" and two named
+workarounds that were "not claimed here". Both halves of that sentence were
+wrong, and the farm run that found it also exposed a second latent defect in
+the ASCII fix.
+
+### 5z.1 The diagnosis was wrong: extra_link_args DOES reach link.exe
+
+The claim came from reading a job log, not the toolchain. Reading the installed
+setuptools instead:
+
+    setuptools/_distutils/compilers/C/msvc.py:link() builds
+        ld_args = ldflags + lib_opts + export_opts + objects + /OUT:
+    then does
+        if extra_postargs: ld_args.extend(extra_postargs)
+    and build_ext.build_extension() passes
+        extra_postargs = ext.extra_link_args or []
+
+So `extra_link_args` is forwarded verbatim to link.exe. What is NEVER read is
+`LDFLAGS`: the MSVC compiler class has no reference to that variable at all,
+so the environment route — the one the previous attempt switched to after
+"extra_link_args did not work" — could not have worked for a different reason
+than the one recorded. And the extra_link_args attempt failed for a simpler
+reason still: the farm driver hard-coded `_extra_ld = []` in its msvc branch,
+so the list was empty before `Extension()` ever saw it.
+
+The fix is one line plus an explanation: `_extra_ld = ["/GUARD:CF"]` on the
+msvc branch, and `/guard:cf` stays on the compile side, where MSVC documents
+the duplicate as ignored.
+
+### 5z.2 A gate, because "recorded" is not "refused"
+
+The runner already parsed the produced PE and recorded the CFG verdict — which
+is how three runs shipped a `.pyd` with `CF_INSTRUMENTED` and no function
+table while every log line said hardening was applied. Recording a shortfall
+is not refusing it. `native_harden.cfg_function_table_gate(report, toolchain)`
+now returns a reason or None, the driver raises `SystemExit` on the reason
+when `NIXON_REQUIRE_CFG=1`, and the workflow arms that variable on the build
+step. The gate lives in `native_harden` (which the runner already uploads)
+rather than inline in the driver, so the same code runs in the unit tests and
+on the runner; enforcement is scoped to the `msvc` toolchain because GNU ld
+has no CFG at all and a mingw windows build must keep building.
+
+### 5z.3 The farm run that verified the fix also caught the ASCII leak again
+
+The first re-run failed on ALL THREE runners, inside Cython, with the same
+latin-1 error the ASCII fix was supposed to have closed:
+
+    UnicodeEncodeError: 'latin-1' codec can't encode characters in
+    position 118427-118434: ordinal not in range(256)
+
+The earlier verification had used a friendly subset of the native option
+dict. The farm compiles with the FULL `_native_ast_opts`, and one emitter in
+that path had never received the flag: `SymbolRenamer.get_new_name` still
+called `get_random_var_name(old_name)` with no `ascii_only` — the string
+sealer's generator had been fixed and this one had not. Rebuilt with the exact
+dict, the leak reproduces locally (6 babel names); fixed, 0.
+
+The ASCII name shape also changed, in the stricter direction: the first
+variant embedded the original name as a stem (`mix_aBcDeFgH`), which survives
+into the Cython-generated C as a readable hint about the source name. The
+babel pool gives the analyst nothing, so the ASCII pool now has the same
+shape — `_nixon_<suffix>`, no stem — and the renamer test that asserts the
+original name no longer appears anywhere passes again.
+
+**Tests.** `tests/test_native_ascii_ids.py` (3): the exact dict produces 0
+non-ASCII; the leak site itself generates ASCII; and the pure-Python path
+STILL gets babel names (a global switch would be a protection regression).
+`tests/test_native_harden.py` (+5): the gate refuses a table-less MSVC
+object, passes a full-CFG one, never fires for gcc/mingw/clang, tolerates a
+malformed report, and the rendered driver/YAML carry the flag and the armed
+gate.
+
+### 5z.4 CLOSED: the CFG function table, verified on real cl.exe by llvm-readobj
+
+The §5x-bis gap ("setuptools does not forward link flags") is closed, but not
+by a custom build_ext — by reading the toolchain and fixing two wrong
+assumptions, then re-running the farm until the evidence landed.
+
+**The chain of measured defects that hid the real one:**
+
+1. "setuptools does not forward extra_link_args" — FALSE. The installed
+   `msvc.link()` does `if extra_postargs: ld_args.extend(extra_postargs)`,
+   and `build_ext` passes `extra_link_args` in. The driver hard-coded
+   `_extra_ld = []`, so nothing was ever forwarded.
+2. `LDFLAGS` — never read by the MSVC compiler class at all. The environment
+   route was dead on arrival; setting it changed nothing and the log was
+   read as "a setuptools limitation".
+3. The toolchain detection mis-labelled cl.exe/link.exe as "gcc" (Windows
+   CPython records NO `CC` in sysconfig, `VSCMD_ARG_TGT_ARCH` is unset, no CC
+   env), so the driver shipped Linux flags to MSVC:
+   `cl: D9002 ignoring '-fstack-protector-strong'`,
+   `LINK: LNK4044 unrecognized '/Wl,--dynamicbase'` — and the new CFG gate
+   did not fire, correctly, because the LABEL was gcc while the linker was
+   MSVC. Fixed by defaulting Windows to MSVC unless CC explicitly names a GNU
+   toolchain.
+4. The compile flag list carried linker options: `cl: D8021 invalid numeric
+   argument '/HIGHENTROPYVA'`. Compile-side is now `/GS /wd4244 /wd4127
+   /guard:cf`; the hardening set (/GUARD:CF /DYNAMICBASE /NXCOMPAT /CETCOMPAT
+   /HIGHENTROPYVA) travels on `extra_link_args`.
+
+**The verified result (farm run 44853081762, windows-latest, cl.exe
+14.52.37025, link.exe 14.52.37025, 3/3 jobs green), read by llvm-readobj
+--coff-load-config:**
+
+    GuardCFFunctionTable: 0x18001B578      (non-zero)
+    GuardCFFunctionCount: 48               (non-zero)
+    GuardFlags (0x10017500):
+        CF_INSTRUMENTED (0x100)
+        CF_FUNCTION_TABLE_PRESENT (0x400)
+        PROTECT_DELAYLOAD_IAT (0x1000)
+        DELAYLOAD_IAT_IN_ITS_OWN_SECTION (0x2000)
+        CF_EXPORT_SUPPRESSION_INFO_PRESENT (0x4000)
+        CF_LONGJUMP_TABLE_PRESENT (0x10000)
+    GuardFidTable: 48 real entries (0x1800011A0, 0x1800011C0, ...)
+
+`native_harden.verify_pe_bytes` on the same object: `cfg=True`,
+`cfg_data=True`, `cfg_instrumented=True`, `cfg_function_table=True`,
+`check(windows, msvc)` verdict `ok` with no `partial`. The gate
+(`NIXON_REQUIRE_CFG=1`, armed in the workflow env) passed because the table
+is real — and had any of the three intermediate states shipped, it would have
+failed the job with the GuardFlags value in the message.
+
+**Correction made while verifying (the CET mislabel).** Cross-checking the
+flags with llvm-readobj exposed that this project's own parser had the wrong
+names for the upper GuardFlags bits: 0x4000 is
+CF_EXPORT_SUPPRESSION_INFO_PRESENT, not "XFG"; 0x400000 is
+EH_CONTINUATION_TABLE_PRESENT; 0x40000/0x100000 are unnamed. The earlier
+"CET verified reachable (0x144100)" conclusion measured export-suppression
+metadata. CET's real opt-in is DllCharacteristics 0x8000: set on the lld-link
+probe (0xC160), **absent on the farm .pyd (0x4160)** — so /CETCOMPAT did not
+yield a CET-compat image on the farm, and that is now a measured, reported
+fact (`cet_compat`) rather than an implied one. Constants renamed, every
+name pinned against llvm per bit, and the CET records above corrected.
+
+**Also fixed en route:** the same farm run caught a second ASCII leak the
+friendly-subset measurement had missed (§5z.3), and the commit retry loop now
+prints `diff --cached --stat` before committing after 8e200f2 shipped edits
+under a message that denied them.

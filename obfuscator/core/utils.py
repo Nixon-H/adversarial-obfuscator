@@ -422,7 +422,14 @@ def get_random_var_name(prefix="NX", ascii_only=False):
     # leaked into later calls and broke the renamer tests, which legitimately
     # expect a babel name. Callers pass ascii_only explicitly instead.
     if ascii_only:
-        return "%s_%s" % (prefix, "".join(
+        # SAME SHAPE AS THE BABEL POOL: `_nixon_<suffix>`, with the caller's
+        # prefix ignored. The first ASCII variant embedded the original name
+        # (`mix_aBcDeFgH`), which is a protection regression, not a readability
+        # feature: the stem survives into the Cython-generated C as a readable
+        # hint about the source name, while the babel pool gave the analyst
+        # nothing. Measured on the renamer tests, which assert the original
+        # name no longer appears in the output at all.
+        return "_nixon_%s" % ("".join(
             random.choice("abcdefghijklmnopqrstuvwxyz"
                           "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
             for _ in range(random.randint(8, 14))))
@@ -922,6 +929,28 @@ def render_farm_driver(payload_filename="payload.py"):
     return getattr(farm, "_nx_last_driver", "")
 
 
+def render_farm_yaml(payload_filename="payload.py"):
+    """Return the workflow YAML the controller would upload, for inspection.
+
+    Same trick as render_farm_driver: no token, no network. The YAML is where
+    the RUNNER-side environment lives (the matrix, the env block, artifact
+    names), so a test can assert what a job will see before dispatching one.
+    """
+    farm = object.__new__(GitHubBuildFarm)
+    farm.token = ""
+    farm.tor_proxy = None
+    farm.proxies = None
+    farm.headers = {}
+    farm.base_url = "https://api.github.com"
+    farm.repo_name = "inspect"
+    farm.username = "inspect"
+    try:
+        farm.create_workflow(payload_filename)
+    except Exception:
+        pass
+    return getattr(farm, "_nx_last_yaml", "") or ""
+
+
 class GitHubBuildFarm:
     def __init__(self,token, use_tor=False, tor_proxy=None):
         self.token=token
@@ -1268,27 +1297,85 @@ if _hsys.platform.startswith("win"):
         if _sep in _tail:
             _tail = _tail.rsplit(_sep, 1)[-1]
     _base = _tail.replace(".exe", "").strip()
-    _msvc = _base == "cl" or bool(_os.environ.get("VSCMD_ARG_TGT_ARCH")) or (
-        _cc_hint.startswith("cl ") and not _cc_hint.startswith("clang"))
+    # MSVC IS THE DEFAULT ON WINDOWS (measured 2026-11-21, run 44851032002).
+    # The detection above still mis-labelled the windows-latest job as gcc:
+    # Windows CPython records NO CC in sysconfig at all (get_config_var("CC")
+    # is None there, unlike Linux), VSCMD_ARG_TGT_ARCH is unset outside a
+    # Developer Command Prompt, and the job sets no CC. Every guard fell
+    # through, _msvc went False, and the driver shipped GCC FLAGS TO MSVC:
+    #
+    #   cl    : warning D9002 : ignoring unknown option
+    #           '-fstack-protector-strong'
+    #   LINK  : warning LNK4044: unrecognized option '/Wl,--dynamicbase'
+    #           (and --high-entropy-va, --nxcompat)
+    #
+    # /GUARD:CF was therefore never on the link line, the .pyd shipped with
+    # GuardFlags 0x100 and no function table, and the new CFG gate did not
+    # fire -- correctly, because the toolchain LABEL was "gcc" while the
+    # actual linker was MSVC link.exe 14.52.37025. Two wrongs made a right
+    # label for three runs.
+    #
+    # The inference that matches what setuptools actually does on this
+    # platform: on Windows the extension is built by MSVC unless the operator
+    # EXPLICITLY named a GNU toolchain (CC=gcc / mingw / clang). Defaulting to
+    # the linker the runner image provably uses (the log names link.exe) is
+    # the same "trust what will actually run" rule the CC read was meant to
+    # implement.
+    _gnu_on_windows = any(_g in _base for _g in ("gcc", "mingw", "clang", "g++"))
+    _msvc = (not _gnu_on_windows) or _base == "cl" or (
+        bool(_os.environ.get("VSCMD_ARG_TGT_ARCH")) or (
+            _cc_hint.startswith("cl ") and not _cc_hint.startswith("clang")))
     if _msvc:
         _toolchain = "msvc"
-        # MSVC flag names. /wd4244 and /wd4127 silence the Cython-generated
-        # conversion and constant-conditional warnings so the log stays
-        # readable.
-        _extra_cc = ["/" + f for f in ("DYNAMICBASE", "NXCOMPAT", "GUARD:CF",
-                                       "CETCOMPAT", "HIGHENTROPYVA", "GS",
-                                       "wd4244", "wd4127")]
-        # LINK FLAGS VIA THE ENVIRONMENT, NOT extra_link_args (measured
-        # 2026-11-20 on the windows runner). The link line in the job log had
-        # /DLL and NO /GUARD:CF, so the PE shipped without the CFG bit and
-        # with an empty function table even though cl.exe compiled with
-        # /guard:cf. setuptools' MSVC path does not reliably forward
-        # extra_link_args to link.exe; distutils reads LDFLAGS from the
-        # environment and appends it to the link command, which is the
-        # documented route for exactly this.
+        # COMPILE-ONLY FLAGS (measured 2026-11-21, run 44851987321). The
+        # previous list carried /DYNAMICBASE /NXCOMPAT /GUARD:CF /CETCOMPAT
+        # /HIGHENTROPYVA as compile args, and cl.exe rejected the first run
+        # that actually reached it:
+        #
+        #   cl : Command line error D8021 : invalid numeric argument
+        #        '/HIGHENTROPYVA'
+        #
+        # Those are LINKER options: /GS (stack buffers) and the /wd silencers
+        # are compile-side; /guard:cf IS valid at compile time but belongs
+        # there in its lowercase compile spelling (the linker spelling
+        # /GUARD:CF stays in _extra_ld below). ASLR/DEP/CFG-table/CET are set
+        # by link.exe, which is where they now travel.
+        _extra_cc = ["/GS", "/wd4244", "/wd4127", "/guard:cf"]
+        # THE LINKER FLAG GOES IN extra_link_args (measured 2026-11-21).
+        #
+        # Two earlier attempts were recorded as failures: os.environ["LDFLAGS"]
+        # and extra_link_args, with the job log showing a link line that carried
+        # /DLL and no /GUARD:CF. Reading the INSTALLED toolchain rather than
+        # guessing a third time:
+        #
+        #   setuptools/_distutils/compilers/C/msvc.py:link() builds
+        #       ld_args = ldflags + lib_opts + export_opts + objects + /OUT:
+        #   then does
+        #       if extra_postargs: ld_args.extend(extra_postargs)
+        #
+        #   and build_ext.build_extension() passes
+        #       extra_postargs = ext.extra_link_args or []
+        #
+        # So extra_link_args IS forwarded verbatim to link.exe. What is NOT
+        # read is LDFLAGS: the MSVC compiler class never mentions that variable
+        # (no hits for it in msvc.py), so the environment route could never
+        # have worked on this toolchain -- the flag was set and silently
+        # discarded.
+        #
+        # The extra_link_args attempt then failed for a simpler reason: this
+        # branch hard-coded _extra_ld = [], so the list was already empty by
+        # the time Extension() received it.
+        #
+        # LINK-SIDE HARDENING, ON THE LINK LINE (measured 2026-11-21).
+        # /GUARD:CF is what makes link.exe reserve the guard function table
+        # and set CF_FUNCTION_TABLE_PRESENT (0x400); /DYNAMICBASE /NXCOMPAT
+        # /HIGHENTROPYVA are ASLR/DEP/HEASLR; /CETCOMPAT requests CET. The
+        # LDFLAGS write stays only for any subprocess that re-reads it -- the
+        # compiler class itself never consults it.
         _os.environ["LDFLAGS"] = ("/GUARD:CF /DYNAMICBASE /NXCOMPAT "
                                   "/CETCOMPAT /HIGHENTROPYVA")
-        _extra_ld = []
+        _extra_ld = ["/GUARD:CF", "/DYNAMICBASE", "/NXCOMPAT",
+                     "/CETCOMPAT", "/HIGHENTROPYVA"]
     else:
         _toolchain = "gcc"
         _extra_cc = ["-fstack-protector-strong"]
@@ -1523,6 +1610,23 @@ try:
         # that flag as `unavailable` instead, naming the gap rather than
         # hiding it.
         _hard_verdict = _nh.check(_rep, _sys.platform, _toolchain)
+        # HARD GATE ON THE CFG FUNCTION TABLE (2026-11-21). The verdict was
+        # recorded and then ignored, which is how three farm runs shipped a
+        # .pyd with CF_INSTRUMENTED and NO function table while every log line
+        # said the hardening had been applied. Recording a shortfall is not
+        # the same as refusing it: with NIXON_REQUIRE_CFG=1 the build now
+        # FAILS with the numbers that explain why.
+        #
+        # The gate lives in native_harden.cfg_function_table_gate so the same
+        # code the runner executes is unit-testable without MSVC; enforcement
+        # is scoped to the msvc toolchain inside that function.
+        if _os.environ.get("NIXON_REQUIRE_CFG") == "1" and _raw[:2] == bytes((0x4d, 0x5a)):
+            _cfg_reason = _nh.cfg_function_table_gate(_rep, _toolchain)
+            if _cfg_reason:
+                raise SystemExit(_cfg_reason)
+            if isinstance(_rep, dict) and _rep.get("cfg_function_table"):
+                print("CFG function table present: GuardFlags=%s"
+                      % (_rep.get("cfg_guard_flags"),))
 except Exception as _hx:
     _hardening = "error: " + str(_hx)[:200]
 _top = [
@@ -1573,6 +1677,10 @@ print("runner attestation:", dict(_top)["payload_sha256"][:16],
             script_content = ("# -*- coding: utf-8 -*-\n"
                               + script_content.lstrip("\n"))
         indented_script = "\n".join(["          " + line for line in script_content.strip().split('\n')])
+        # Retained beside the driver for the same reason: a test must be able
+        # to assert what the RUNNER will execute (the env block, the matrix,
+        # the artifact names) without a token or a network round trip.
+        self._nx_last_yaml = None  # assigned after the f-string below
         workflow_yaml = f"""name: Nixon Native Build
 on:
   workflow_dispatch:
@@ -1627,6 +1735,13 @@ jobs:
           PYTHONIOENCODING: "utf-8"
           LC_ALL: C.UTF-8
           LANG: C.UTF-8
+          # CFG FUNCTION TABLE IS REQUIRED, NOT PREFERRED (2026-11-21). The
+          # driver scopes this to the MSVC toolchain internally: mingw/ld has
+          # no CFG and keeps its recorded `partial`. On the windows job the
+          # linker is link.exe and /GUARD:CF now travels on extra_link_args;
+          # a .pyd whose GuardFlags lacks CF_FUNCTION_TABLE_PRESENT fails the
+          # job instead of shipping a weaker image under a green check.
+          NIXON_REQUIRE_CFG: "1"
         run: ${{{{ matrix.build_cmd }}}}
       - name: List Files (Debug)
         run: ls -R || dir
@@ -1641,6 +1756,7 @@ jobs:
           path: payload${{{{ matrix.suffix }}}}
           retention-days: 1
 """
+        self._nx_last_yaml = workflow_yaml
         import requests
         url = f"{self.base_url}/repos/{self.username}/{self.repo_name}/contents/.github/workflows/build.yml"  
         with UI.Task("Build Config", "Updating Workflow...") as t:

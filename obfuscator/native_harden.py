@@ -89,21 +89,32 @@ PE_GUARD_CF_INSTRUMENTED = 0x00000100
 PE_GUARD_CFW_INSTRUMENTED = 0x00000200
 PE_GUARD_CF_FUNCTION_TABLE_PRESENT = 0x00000400
 
-#: CET (Control-flow Enforcement Technology) and shadow-stack bits, from the
-#: same GuardFlags word. Windows 10 2004+ uses these to decide whether to enable
-#: the hardware shadow stack for the image:
+#: THE REST OF THE GUARD-FLAG WORD, named from llvm-readobj
+#: (--coff-load-config), verified bit by bit with per-bit probe PEs
+#: (tests/test_native_harden.py::test_guard_flag_bit_names_match_the_authoritative_parser).
 #:
-#:   IMAGE_GUARD_XFG_ENABLED               0x00004000  eXtended Flow Guard
-#:   IMAGE_GUARD_CET_SHADOW_STACK_PRESENT  0x00040000  shadow-stack metadata
-#:   IMAGE_GUARD_CET_UserCETCompat         0x00100000  user-mode CET opt-in
+#: CORRECTION 2026-11-21: this table previously called 0x4000 "XFG_ENABLED"
+#: and 0x40000/0x100000 "CET shadow-stack / user-compat". Both were wrong:
+#: llvm names 0x4000 CF_EXPORT_SUPPRESSION_INFO_PRESENT, leaves 0x40000 and
+#: 0x100000 unnamed, and names 0x400000 EH_CONTINUATION_TABLE_PRESENT — so the
+#: earlier "CET verified reachable" record measured export-suppression and
+#: longjump metadata, not CET. There are NO CET bits in GuardFlags: CET's
+#: image opt-in is DllCharacteristics 0x8000 (read as `cet_compat` in
+#: verify_pe_bytes).
 #:
-#: The /CETCOMPAT compiler flag alone does NOT set these. The linker must see
-#: CET metadata from the objects, or the image is marked "CET compatible" with
-#: nothing behind the claim — the same trap as the CFG bit. They are read and
-#: reported separately from CFG so the two cannot be conflated.
-PE_GUARD_XFG_ENABLED = 0x00004000
-PE_GUARD_CET_SHADOW_STACK_PRESENT = 0x00040000
-PE_GUARD_CET_USER_COMPAT = 0x00100000
+#:   0x00001000  PROTECT_DELAYLOAD_IAT
+#:   0x00002000  DELAYLOAD_IAT_IN_ITS_OWN_SECTION
+#:   0x00004000  CF_EXPORT_SUPPRESSION_INFO_PRESENT
+#:   0x00008000  CF_ENABLE_EXPORT_SUPPRESSION
+#:   0x00010000  CF_LONGJUMP_TABLE_PRESENT
+#:   0x40000000? EH_CONTINUATION_TABLE_PRESENT (llvm names 0x00400000 this)
+PE_GUARD_EXPORT_SUPPRESSION_INFO_PRESENT = 0x00004000
+PE_GUARD_ENABLE_EXPORT_SUPPRESSION = 0x00008000
+PE_GUARD_LONGJUMP_TABLE_PRESENT = 0x00010000
+PE_GUARD_EH_CONTINUATION_TABLE_PRESENT = 0x00400000
+
+#: DllCharacteristics CET opt-in (what /CETCOMPAT asks the linker for).
+DLL_CHARS_CET_COMPAT = 0x00008000
 
 #: Offset of GuardFlags inside IMAGE_LOAD_CONFIG_DIRECTORY64, computed from the
 #: field layout rather than assumed: the naive 0x70 this module first used is
@@ -398,8 +409,12 @@ def verify_pe_bytes(data):
            # contain. A caller iterating the report must not get KeyError for
            # an object that happens to declare no load config.
            "cfg_guard_flags": 0, "cfg_instrumented": False,
-           "cfg_function_table": False, "cet_xfg": False,
-           "cet_shadow_stack": False, "cet_user_compat": False}
+           "cfg_function_table": False,
+           "guard_export_suppression_info": False,
+           "guard_longjump_table": False,
+           "guard_eh_continuation_table": False,
+           "dll_characteristics": None, "cet_compat": False,
+           "dll_guard_cf": False}
     if not data or data[:2] != b"MZ":
         return out
     try:
@@ -482,17 +497,39 @@ def verify_pe_bytes(data):
                 out["cfg_instrumented"] = bool(flags & PE_GUARD_CF_INSTRUMENTED)
                 out["cfg_function_table"] = bool(
                     flags & PE_GUARD_CF_FUNCTION_TABLE_PRESENT)
-                # CET is read from the SAME word but reported separately: the
-                # /CETCOMPAT flag does not set these bits, so conflating them
-                # would repeat the CFG mistake one abstraction up.
-                out["cet_xfg"] = bool(flags & PE_GUARD_XFG_ENABLED)
-                out["cet_shadow_stack"] = bool(
-                    flags & PE_GUARD_CET_SHADOW_STACK_PRESENT)
-                out["cet_user_compat"] = bool(flags & PE_GUARD_CET_USER_COMPAT)
-        # CET can ALSO be declared in DllCharacteristics (bit 0x8000 is
-        # TERMINAL_SERVER_AWARE, so this is not it) -- Windows' CET opt-in for
-        # an image is the GuardFlags bits above, not a DllCharacteristics bit.
-        # Recorded here so a reader does not go looking for one.
+                # THE GUARD-FLAG WORD HAS NO CET BITS (measured 2026-11-21,
+                # llvm-readobj --coff-load-config over per-bit probes and over
+                # the real farm .pyd). This module used to name 0x4000
+                # "XFG_ENABLED", 0x40000 "CET_SHADOW_STACK" and 0x100000
+                # "CET_USER_COMPAT" and reported a 0x4000-bearing object as
+                # "CET verified reachable". LLVM names those bits
+                # CF_EXPORT_SUPPRESSION_INFO_PRESENT, an unnamed word and
+                # CF_LONGJUMP-adjacent metadata, and names 0x400000 — the
+                # value some SDKs call IMAGE_GUARD_XFG_ENABLED —
+                # EH_CONTINUATION_TABLE_PRESENT. Every CET label in this word
+                # was measuring export-suppression and longjump metadata.
+                # The authoritative names are now recorded, and CET's real
+                # opt-in is read where it lives: DllCharacteristics 0x8000
+                # (IMAGE_DLLCHARACTERISTICS_CET_COMPAT, what /CETCOMPAT sets).
+                out["guard_export_suppression_info"] = bool(
+                    flags & PE_GUARD_EXPORT_SUPPRESSION_INFO_PRESENT)
+                out["guard_longjump_table"] = bool(
+                    flags & PE_GUARD_LONGJUMP_TABLE_PRESENT)
+                out["guard_eh_continuation_table"] = bool(
+                    flags & PE_GUARD_EH_CONTINUATION_TABLE_PRESENT)
+        # CET's image-level opt-in is DllCharacteristics 0x8000
+        # (IMAGE_DLLCHARACTERISTICS_CET_COMPAT, what /CETCOMPAT asks for).
+        # The old comment here claimed 0x8000 was TERMINAL_SERVER_AWARE and
+        # that CET "is not a DllCharacteristics bit" — both wrong: 0x8000 in
+        # DllCharacteristics IS CET compat, and the farm .pyd measures
+        # DllCharacteristics 0x4160 with llvm-readobj, i.e. GUARD_CF set and
+        # CET compat ABSENT despite the /CETCOMPAT link flag. Reported as its
+        # own field so the claim is checkable instead of asserted.
+        if num_dirs > 0:
+            _dll_chars = struct.unpack_from("<H", data, opt + 70)[0]
+            out["dll_characteristics"] = _dll_chars
+            out["cet_compat"] = bool(_dll_chars & 0x8000)
+            out["dll_guard_cf"] = bool(_dll_chars & 0x4000)
         #
         # EVERY load-config-derived key is defaulted, not just the CET ones.
         # Measured 2026-11-19: an object with no load-config directory raised
@@ -504,9 +541,12 @@ def verify_pe_bytes(data):
         out.setdefault("cfg_guard_flags", 0)
         out.setdefault("cfg_instrumented", False)
         out.setdefault("cfg_function_table", False)
-        out.setdefault("cet_xfg", False)
-        out.setdefault("cet_shadow_stack", False)
-        out.setdefault("cet_user_compat", False)
+        out.setdefault("guard_export_suppression_info", False)
+        out.setdefault("guard_longjump_table", False)
+        out.setdefault("guard_eh_continuation_table", False)
+        out.setdefault("dll_characteristics", None)
+        out.setdefault("cet_compat", False)
+        out.setdefault("dll_guard_cf", False)
         out["sections"] = num_sections
         out["opt_size"] = opt_size
     except (struct.error, IndexError):
@@ -822,13 +862,15 @@ def check(object_report, platform_name, toolchain=None):
             partial.append("cfg_not_instrumented")
         if not object_report.get("cfg_function_table"):
             partial.append("cfg_no_function_table")
-    # CET: the /CETCOMPAT flag is a REQUEST, not a result. Measured 2026-11-19
-    # on the MSVC-ABI object: GuardFlags carried 0x100 (CF_INSTRUMENTED) and
-    # NONE of the CET bits, so the image declares CET compatibility with no
-    # shadow-stack metadata behind it. That is the same inert-flag trap as the
-    # CFG bit one level up, and it is reported rather than assumed.
-    if object_report.get("cfg") and not (object_report.get("cet_xfg")
-                                         or object_report.get("cet_shadow_stack")):
+    # CET COMPAT IS A DllCharacteristics BIT (measured 2026-11-21 with
+    # llvm-readobj over the farm .pyd: DllCharacteristics 0x4160 = GUARD_CF
+    # set, CET compat ABSENT, while GuardFlags carried export-suppression and
+    # longjump bits that this module used to mislabel as CET). The image
+    # declares CET compatibility only when 0x8000 is set in DllCharacteristics;
+    # the GuardFlags word has no CET bits at all. When the image claims CFG
+    # without CET compat, that is a recorded `partial` — a request (/CETCOMPAT)
+    # is not a result.
+    if object_report.get("cfg") and not object_report.get("cet_compat"):
         partial.append("cet_not_instrumented")
     return {"ok": (not missing and not wrong and not inert
                    and bool(object_report.get("valid"))),
@@ -836,3 +878,32 @@ def check(object_report, platform_name, toolchain=None):
             "unavailable": unavailable, "inert": inert,
             "partial": partial,
             "report": object_report}
+
+
+def cfg_function_table_gate(object_report, toolchain):
+    """The hard gate behind NIXON_REQUIRE_CFG=1, as a callable.
+
+    Returns None when the build may proceed, or a reason string when it must
+    fail. Living here rather than inline in the farm driver means the same
+    code the runner executes is unit-testable on a machine without MSVC, and
+    the driver stays a thin call into it.
+
+    Enforcement is scoped to the MSVC toolchain on purpose: GNU ld has no CFG
+    at all, so demanding a guard table from a mingw build would fail every
+    such build forever while adding nothing. For that toolchain the verdict
+    stays a recorded `partial` (see check()), which the controller surfaces.
+    """
+    if not isinstance(object_report, dict):
+        return None
+    if str(toolchain or "").lower() != "msvc":
+        return None
+    if not object_report.get("cfg_function_table"):
+        return (
+            "CFG function table MISSING: GuardFlags=%s "
+            "(CF_INSTRUMENTED=%s, CF_FUNCTION_TABLE_PRESENT=False). The "
+            "linker did not reserve a guard table, so indirect calls have "
+            "nothing to validate against at load time. NIXON_REQUIRE_CFG=1 "
+            "refuses to ship that as hardened."
+            % (object_report.get("cfg_guard_flags"),
+               bool(object_report.get("cfg_instrumented"))))
+    return None
