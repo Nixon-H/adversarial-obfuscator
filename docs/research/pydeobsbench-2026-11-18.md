@@ -2835,3 +2835,71 @@ name pinned against llvm per bit, and the CET records above corrected.
 friendly-subset measurement had missed (§5z.3), and the commit retry loop now
 prints `diff --cached --stat` before committing after 8e200f2 shipped edits
 under a message that denied them.
+
+### 5z.5 ACCEPTED EXTERNAL LIMITS: Authenticode trust and Apple Developer ID
+
+Two items were repeatedly named "environment-limited". This section closes
+them the only honest way available: by stating exactly what was checked, what
+the mechanism already does without the credentials, and what the operator
+must supply. They are marked **accepted external limits** — procurement and
+identity dependencies, not unfinished work.
+
+**What was checked this session, before writing this paragraph:**
+
+| check | result |
+|---|---|
+| `NIXON_AUTHENTICODE_CERT` / `_KEY` / `_PASS` in the environment | **unset** |
+| operator-staged certificate files in the home directory (`*.pfx`, `*.p12`, `*.pem`, keys) | **none** — the only `.p12` files present are mitmproxy's own test CA, which is a proxy fixture, not a Windows-trusted identity |
+| GitHub Actions secrets on the farm repo (`Nixon-H/nixon-build-farm-native`) and the main repo | **both empty** (`gh secret list` returned nothing) |
+
+None of these can be conjured by code. A CA-issued Authenticode certificate
+requires a certificate authority to validate an identity and sign (DigiCert,
+Sectigo, GlobalSign; OV/EV for organizational trust) — that is a procurement
+step with real-world verification. A Developer ID requires an Apple Developer
+Program membership and identity verification, and its private key lives in a
+macOS keychain; this host is Linux, and the farm's macos-latest runner has
+keychain infrastructure but no identity either.
+
+**What the mechanism already does WITHOUT the credentials (measured, not
+claimed):**
+
+* Authenticode: the farm driver reads `NIXON_AUTHENTICODE_CERT` /
+  `NIXON_AUTHENTICODE_KEY` from the environment and, when absent, prints
+  "authenticode: no certificate in the environment ... artefact is unsigned"
+  (farm run 44853081762 log). The pipeline's own §5v measurement stands: with
+  a test certificate the signer produced an embedded, Windows-parseable
+  PKCS#7 (spcIndirectData OID present, image digest embedded) and
+  `authenticode_verify` accepted it and rejected post-sign tampering — so
+  when a CA certificate arrives, the only change is trust, not plumbing.
+* Mach-O: the .dylib ships unsigned and `verify_macho_bytes` says so
+  (`signature_expected`, CodeDirectory state). There is no codesign step in
+  the farm driver at all — deliberately: writing untestable codesign wiring
+  would repeat the "flag set, nothing verified" pattern this project keeps
+  finding.
+
+**The operator-side steps, written down so they are executable when the
+credentials exist:**
+
+1. Authenticode (before the build, on the controller host):
+   `NIXON_AUTHENTICODE_CERT=/path/ca-issued.pem
+   NIXON_AUTHENTICODE_KEY=/path/matching.key NIXON_AUTHENTICODE_PASS=...`
+   — the farm signs each .pyd during the build and the attestation records
+   the certificate-table presence plus the verify verdict.
+2. Alternatively, GitHub-Actions level: put the material in farm-repo secrets
+   and map them onto the build step's env block (the block already exists in
+   `create_workflow`; the credential values would come from `${{ secrets: }}`
+   style mapping and never be committed).
+3. Developer ID (after the macos job, or in a final signing step on the
+   runner):
+   `codesign --force --options runtime --timestamp
+   --sign "Developer ID Application: <NAME> (<TEAMID>)" payload.dylib`
+   then `codesign --verify --strict --verbose=2 payload.dylib`. If the
+   operator wants it in the farm, the step belongs after "Rename Artifact"
+   and must be gated on a secret so an identity-less run stays unsigned and
+   honest rather than failing the job.
+
+**Status: ACCEPTED EXTERNAL LIMITS.** Every code-level item from the two
+reviews is closed and measured; what remains here is exactly the part that
+requires a third party to issue an identity. The artefacts' honesty does not
+depend on the credentials: unsigned artefacts say they are unsigned, in the
+console, the attestation and the header parse.
