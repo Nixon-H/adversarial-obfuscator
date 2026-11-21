@@ -961,6 +961,23 @@ signing cannot be optional) remains buildable.
    digest, so post-incident auditing of WHICH artefacts were signed by the
    compromised key is answerable from the artefacts themselves.
 
+9. **SIGNING-ENVIRONMENT ISOLATION AUDIT** (review register, fourth pass,
+   item 3 — measured against the committed workflows 2026-11-21):
+
+   | requirement | status |
+   |---|---|
+   | signing job executes no untrusted PR code | the `release-acceptance` job checks out THIS repository and builds the committed probe payload only; a PR variant builds the PR's own payload in `pull_request` runs where secrets are not available |
+   | only the signing job receives signing credentials | the ephemeral acceptance keys are generated inside the `build-and-accept` job and never leave it; the `publish` job holds NO private key (it verifies against the recorded digest) |
+   | build/test jobs have no production private keys | `NIXON_ARTEFACT_SIGN_KEY` / `NIXON_BUILD_MANIFEST_KEY` appear in no other job's env block; production keys enter ONLY through a protected environment in the release workflow, not CI |
+   | token permissions minimal | workflow-level `contents: read`; the acceptance job declares the same explicitly |
+   | protected environments gate production credentials | the production publish target is documented as a protected-environment job with required reviewers (§5.6 dry-run note) — configuring the GitHub environment is the operator step |
+   | third-party actions pinned to full commit SHAs | done: checkout `11bd719…`, setup-python `0b93645…`, upload-artifact `b4b15b8…`, download-artifact `fa0a91b…` (resolved from the GitHub API, v4.2.2 / v5.3.0 / v4.4.3 / v4.1.8) |
+   | logs reviewed, not assumed redacted | the acceptance printouts contain no key material (the key is generated with `secrets` and only ever assigned to the environment, never printed); the ephemeral key dies with the job |
+
+   The ephemeral acceptance keys are deliberately DISTINCT from the
+   operator's production signing identity — the CI gate proves the
+   verification chain, not the production identity.
+
 8. **THE MANIFEST KEY HAS ITS OWN OUT-OF-BAND ANCHOR** (review register,
    third pass, item 2). The RC acceptance found that the provenance key and
    the manifest key are two INDEPENDENT signing inputs — and an anchor

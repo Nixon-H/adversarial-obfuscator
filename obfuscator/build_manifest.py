@@ -271,34 +271,64 @@ def write_manifest(artefact_path, source_path=None, *, private_key=None,
 MANIFEST_PIN_ENV = "NIXON_BUILD_MANIFEST_PUBKEY"
 
 
-def _manifest_trusted_key(public_key):
-    """Resolve the trusted manifest key, or None.
+def _pub_raw(key):
+    """Raw 32-byte public key material from an Ed25519 key object."""
+    from cryptography.hazmat.primitives import serialization
+    return key.public_bytes(encoding=serialization.Encoding.Raw,
+                            format=serialization.PublicFormat.Raw)
 
-    TRUST-ANCHOR RULE (review register, third pass, item 2): a manifest that
-    authenticates itself through its own embedded key would recreate the
-    fail-open the provenance fix just closed. The anchor is the OUT-OF-BAND
-    pin (NIXON_BUILD_MANIFEST_PUBKEY, hex Ed25519 public key from the
-    infrastructure trust store); an explicit ``public_key`` argument wins,
-    the pin is used when the argument is absent, and the release policy
-    (NIXON_REQUIRE_PROVENANCE=1) makes a MISSING anchor a failed verdict for
-    any manifest claiming ``signed: true``.
+
+def _manifest_trusted_key(public_key):
+    """Resolve the trusted manifest key and the refusal reason, if any.
+
+    Returns ``(key_or_None, reason_or_None)``.
+
+    TRUST-ANCHOR PRECEDENCE (review register, FOURTH pass, item 1 — the
+    rule the reviewer specified). The third-pass implementation returned an
+    explicitly supplied key BEFORE consulting the pin, which meant a caller
+    could bypass the out-of-band anchor by passing an attacker-controlled
+    key argument. The release policy must have ONE unambiguous trust
+    authority:
+
+    * release policy (NIXON_REQUIRE_PROVENANCE=1):
+        - the OUT-OF-BAND PIN is the authority; a missing pin is a refusal;
+        - an explicit key that DIFFERS from the pin is a refusal — the
+          caller cannot override the anchor through the key argument;
+        - an explicit key EQUAL to the pin verifies (the caller is then not
+          an authority, it agrees with one).
+    * without the release policy: explicit key first, then the pin if
+      configured — the documented pre-policy behaviour for existing
+      callers.
     """
-    if public_key is not None:
-        return public_key
-    pinned = os.environ.get(MANIFEST_PIN_ENV, "").strip()
-    if pinned:
+    release = os.environ.get("NIXON_REQUIRE_PROVENANCE") == "1"
+    pinned_hex = os.environ.get(MANIFEST_PIN_ENV, "").strip()
+    pinned = None
+    if pinned_hex:
         try:
             from cryptography.hazmat.primitives.asymmetric.ed25519 import (
                 Ed25519PublicKey)
-            return Ed25519PublicKey.from_public_bytes(bytes.fromhex(pinned))
+            pinned = Ed25519PublicKey.from_public_bytes(
+                bytes.fromhex(pinned_hex))
         except Exception:
-            return None
-    if os.environ.get("NIXON_REQUIRE_PROVENANCE") == "1":
-        # Release policy: no anchor, no pass. A signed manifest whose
-        # signature nobody can verify is exactly the decorative-signature
-        # class, so the verdict fails instead of trusting the hash alone.
-        return "policy"
-    return None
+            pinned = None
+    if release:
+        if pinned is None:
+            return None, ("release policy requires "
+                          "%s (out-of-band trust anchor)" % MANIFEST_PIN_ENV)
+        if public_key is not None:
+            try:
+                same = _pub_raw(public_key) == _pub_raw(pinned)
+            except Exception:
+                same = False
+            if not same:
+                return None, ("explicit key does not match the release "
+                              "pin; the pin is the trust authority")
+        return pinned, None
+    if public_key is not None:
+        return public_key, None
+    if pinned is not None:
+        return pinned, None
+    return None, None
 
 
 def verify_manifest(artefact_path, public_key=None):
@@ -332,12 +362,17 @@ def verify_manifest(artefact_path, public_key=None):
             declared[:12], actual[:12])
         return result
     result["signed"] = bool(manifest.get("signed"))
-    # RESOLVE THE TRUSTED ANCHOR (see _manifest_trusted_key): explicit key,
-    # out-of-band pin, or the release policy's refuse-without-anchor rule.
-    public_key = _manifest_trusted_key(public_key)
-    if public_key == "policy":
+    # RESOLVE THE TRUSTED ANCHOR (see _manifest_trusted_key): under the
+    # release policy the OUT-OF-BAND PIN is the single authority, and an
+    # explicit key that differs from it is a refusal — the caller cannot
+    # override the anchor through the key argument.
+    public_key, anchor_reason = _manifest_trusted_key(public_key)
+    if public_key is None and anchor_reason:
+        result["reason"] = anchor_reason
+        return result
+    if public_key is None and result["signed"]:
         result["reason"] = ("manifest signature not verified against a "
-                            "trusted anchor (release policy)")
+                            "trusted anchor")
         return result
     if public_key is not None and result["signed"]:
         try:
