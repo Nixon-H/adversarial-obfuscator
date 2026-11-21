@@ -166,12 +166,55 @@ def build_manifest(artefact_path, source_path=None, *, transforms=None,
         "build": {
             "id": build_id or "",
             "timestamp": int(time.time()),
+            # RELEASE TRUST CHAIN (review register, second pass, item 3):
+            # the attestation must bind WHAT was built and WITH WHAT
+            # dependency set, so a downloaded artefact is answerable to its
+            # source revision and its lock file without trusting anyone's
+            # memory. Both are recorded, never asserted: an absent git repo
+            # (sdist installs, CI checkouts without metadata) records None
+            # and the digest records the file bytes, not a version label.
+            "commit": _git_commit(),
+            "dependency_lock_digest": _dependency_lock_digest(),
         },
         "signed": False,
     }
     if extra:
         manifest["extra"] = extra
     return manifest
+
+
+def _git_commit():
+    """The HEAD commit this build ran from, or None when unavailable.
+
+    Deliberately read from git rather than imported from a module constant:
+    the point is to bind the artefact to the tree it was actually built
+    from, and a stale constant would bind it to nothing.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True,
+            timeout=15).stdout.strip()
+        return out or None
+    except Exception:
+        return None
+
+
+def _dependency_lock_digest():
+    """sha256 of requirements.lock beside this module, or None.
+
+    Recorded as the digest of the BYTES so a post-hoc question -- "was this
+    artefact built under the approved dependency set?" -- is answered by
+    hashing the lock file the build actually used, not by trusting a version
+    label that can drift.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    lock = os.path.join(os.path.dirname(here), "requirements.lock")
+    if not os.path.isfile(lock):
+        return None
+    try:
+        return hashlib.sha256(open(lock, "rb").read()).hexdigest()
+    except Exception:
+        return None
 
 
 def _cython_version():

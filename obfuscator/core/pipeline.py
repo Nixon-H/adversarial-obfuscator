@@ -3555,7 +3555,14 @@ if __name__ in ("__main__", "__mp_main__"):
                                          key=_eff_key)
             assert _ss_key == _eff_key, "section key must be the loader key"
             _section_pack_val = base64.b85encode(_ss_json).decode('ascii')
-            _section_snippet = _ss_emit()
+            # RELEASE-MODE DOWNGRADE POLICY (review register, item 2): a
+            # release build must not ship a loader that silently accepts v1
+            # section packs. NIXON_REQUIRE_PACK_V2=1 bakes the refusal into
+            # all three decrypt paths; the default keeps v1 acceptance so
+            # old artefacts stay loadable -- the policy decision is the
+            # operator's, and the tests cover both sides.
+            _require_pack_v2 = (os.environ.get("NIXON_REQUIRE_PACK_V2") == "1")
+            _section_snippet = _ss_emit(require_v2=_require_pack_v2)
             # Moving decryption, ON BY DEFAULT: the per-section walker is
             # always emitted alongside the whole-payload join.  It decrypts
             # one section at a time, hands it to the sink, and zeros the
@@ -3566,14 +3573,14 @@ if __name__ in ("__main__", "__mp_main__"):
             # Emitted ADDITIVELY: the existing join is untouched, so no
             # current behaviour changes.  There is no opt-in flag -- this is
             # a security improvement that ships in every sectioned build.
-            _section_snippet += "\n" + _ss_moving()
+            _section_snippet += "\n" + _ss_moving(require_v2=_require_pack_v2)
             # The STREAMING decryptor is the one the loader actually calls:
             # it decrypts each section and pushes it straight through an
             # incremental decompressor, so neither the whole ciphertext nor
             # the whole compressed stream is ever resident.  This is what
             # makes "moving decryption" real rather than a helper nothing
             # calls.
-            _section_snippet += "\n" + _ss_stream()
+            _section_snippet += "\n" + _ss_stream(require_v2=_require_pack_v2)
             # Hostile-host handling at the point of use, with no flag to
             # propagate: the detection runs here, in the loader's module,
             # and rewrites the join helper so the key it is handed is

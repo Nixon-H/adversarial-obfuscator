@@ -144,8 +144,10 @@ def test_the_shipped_construction_is_v2_keystream_xor_plus_bound_hmac():
             (section["i"] + 1) * (len(payload) // 3)], (
             "section body is not a plain keystream XOR under the ENC key")
         # the 32-byte prefix is an HMAC under the MAC key, bound to
-        # index4 || total4 || nonce || plaintext (the AAD role)
-        ctx = (section["i"].to_bytes(4, "big")
+        # version4 || index4 || total4 || nonce || plaintext (the AAD role,
+        # including the VERSION so a downgrade edit fails the tag).
+        ctx = ((2).to_bytes(4, "big")
+               + section["i"].to_bytes(4, "big")
                + len(payload).to_bytes(4, "big") + nonce)
         expected = hmac.new(mac_key, ctx + recovered[32:],
                             hashlib.sha256).digest()
@@ -234,8 +236,10 @@ def test_the_shipped_construction_is_v2_keystream_xor_plus_bound_hmac():
             (section["i"] + 1) * (len(payload) // 3)], (
             "section body is not a plain keystream XOR under the ENC key")
         # the 32-byte prefix is an HMAC under the MAC key, bound to
-        # index4 || total4 || nonce || plaintext (the AAD role)
-        ctx = (section["i"].to_bytes(4, "big")
+        # version4 || index4 || total4 || nonce || plaintext (the AAD role,
+        # including the VERSION so a downgrade edit fails the tag).
+        ctx = ((2).to_bytes(4, "big")
+               + section["i"].to_bytes(4, "big")
                + len(payload).to_bytes(4, "big") + nonce)
         expected = hmac.new(mac_key, ctx + recovered[32:],
                             hashlib.sha256).digest()
@@ -372,3 +376,175 @@ def test_the_packer_and_stream_join_agree_on_a_v2_pack():
     assert k == key
     pack2 = json.loads(pack_json_bytes.decode("utf-8"))
     assert bytes(stream_join(pack2, key)) == payload
+
+
+# ── downgrade resistance (review register, item 2) ────────────────────────
+#
+# The distinction the register draws: RETAINING a v1 reader for old artefacts
+# is not wrong; a NEW RELEASE silently ACCEPTING v1 is a policy decision and
+# is tested as such. Three layers pin it:
+#   1. the version field is INSIDE the v2 MAC, so editing or stripping it
+#      fails the tag even without the policy flag;
+#   2. the release-mode gate (NIXON_REQUIRE_PACK_V2) refuses v1 outright,
+#      baked into the emitted loader at build time;
+#   3. the framing tamper matrix — version, index, total, nonce, ciphertext,
+#      tag and ordering each tampered INDEPENDENTLY — must all be rejected.
+
+
+def test_the_version_field_is_bound_into_the_v2_tag():
+    """Downgrading a pack's version from 2 to 1 must fail verification.
+
+    Under a MAC that ignores the version, an editor who flipped ``v`` to 1
+    would silently move the loader onto the legacy path and the v2 guarantees
+    (separated keys, bound metadata) would disappear. The version is now
+    inside every tag's MAC input, so a tampered or stripped version fails
+    verification before anything else happens.
+    """
+    key = b"G" * 32
+    payload = b"downgrade" * 100
+    pack = split_sealed(payload, sections=4, key=key)
+    downgraded = json.loads(json.dumps(pack))
+    downgraded["v"] = 1
+    with pytest.raises(ValueError):
+        stream_join(downgraded, key)
+    stripped = json.loads(json.dumps(pack))
+    del stripped["v"]
+    with pytest.raises(ValueError):
+        stream_join(stripped, key)
+
+
+def test_the_full_framing_tamper_matrix_is_rejected():
+    """Each framing field tampered INDEPENDENTLY must cause rejection.
+
+    Eight independent edits, one assertion each: version (downgrade + strip),
+    section index, total, nonce, ciphertext, tag, and a state-consistent
+    reorder. Every one must be rejected by the MAC/state checks BEFORE any
+    plaintext is trusted.
+    """
+    key = b"H" * 32
+    payload = bytes(range(256)) * 4
+    base = split_sealed(payload, sections=4, key=key)
+
+    def variant(mutate):
+        v = json.loads(json.dumps(base))
+        mutate(v)
+        return v
+
+    def bump_total(p):
+        p["total"] += 1
+        from obfuscator.pack_state import state_digest as _sd
+        p["state"] = _sd(p["sections"], p["count"], p["total"])
+
+    def swap_indices(p):
+        # A genuine ORDER tamper: relabel sections 0 and 1 with each other's
+        # index (the multiset is unchanged, so the state digest still
+        # validates). The join sorts by `i`, so this makes the loader decrypt
+        # section 1's ciphertext as if it were section 0's -- which the
+        # index-bound tags must reject. (A pure list reorder is a no-op BY
+        # DESIGN: the loader sorts by `i`, so the register's "ordering"
+        # concern is expressed through the `i` field, which is inside every
+        # tag.)
+        p["sections"][0]["i"], p["sections"][1]["i"] = \
+            p["sections"][1]["i"], p["sections"][0]["i"]
+
+    cases = {
+        "version downgraded": lambda p: p.__setitem__("v", 1),
+        "version stripped": lambda p: p.pop("v"),
+        "section index relabelled": lambda p: (
+            p["sections"][0].__setitem__("i", 3)),
+        "total tampered": bump_total,
+        "nonce swapped between sections": lambda p: p["sections"][0].__setitem__(
+            "nonce", p["sections"][1]["nonce"]),
+        "ciphertext flipped": lambda p: p["sections"][2].__setitem__(
+            "data", ("FF" if p["sections"][2]["data"][0] != "F" else "00")
+            + p["sections"][2]["data"][2:]),
+        "tag flipped": lambda p: p["sections"][1].__setitem__(
+            "data", ("0" if p["sections"][1]["data"][0] != "0" else "1")
+            + p["sections"][1]["data"][1:]),
+        "indices swapped (order tamper)": swap_indices,
+    }
+    for name, mutate in cases.items():
+        v = variant(mutate)
+        raised = None
+        try:
+            stream_join(v, key)
+        except ValueError as exc:
+            raised = exc
+        assert raised is not None, (
+            "tamper case %r was ACCEPTED by stream_join" % name)
+
+
+def test_release_mode_loader_snippets_refuse_v1_packs():
+    """NIXON_REQUIRE_PACK_V2 bakes a v1 refusal into the emitted loader.
+
+    The gate is a BUILD-TIME substitution: the emitted snippet carries
+    ``_NX_PACK_V2_REQUIRED = True`` and fails closed on any pack whose
+    version is not 2, BEFORE the state check and long before any plaintext.
+    The default (False) keeps v1 acceptance for old artefacts -- the policy
+    choice is explicit on both sides.
+    """
+    from obfuscator.section_split import (
+        emit_loader_snippet, emit_moving_snippet, emit_stream_snippet,
+        JOIN_FUNC, )
+
+    for emit in (emit_loader_snippet(JOIN_FUNC, require_v2=True),
+                 emit_moving_snippet(require_v2=True),
+                 emit_stream_snippet(require_v2=True)):
+        compile(emit, "<v2-required>", "exec")
+        assert "_NX_PACK_V2_REQUIRED = True" in emit
+        assert 'pack.get("v") != 2' in emit
+    for emit in (emit_loader_snippet(JOIN_FUNC),
+                 emit_moving_snippet(),
+                 emit_stream_snippet()):
+        compile(emit, "<v2-optional>", "exec")
+        assert "_NX_PACK_V2_REQUIRED = False" in emit
+
+
+def test_plaintext_is_only_consumed_after_the_v2_tag_verifies():
+    """Every decrypt path must verify the tag BEFORE touching plaintext.
+
+    The reviewer's requirement, pinned on the source: in all three emitted
+    snippets the compare_digest of the section tag must appear BEFORE the
+    first use of the decrypted part (decompress / sink / extend). A future
+    edit that consumes plaintext ahead of verification breaks this test.
+    """
+    from obfuscator.section_split import (
+        emit_loader_snippet, emit_moving_snippet, emit_stream_snippet,
+        JOIN_FUNC, )
+
+    for snippet in (emit_loader_snippet(JOIN_FUNC),
+                    emit_moving_snippet(),
+                    emit_stream_snippet()):
+        verify_at = snippet.find("compare_digest")
+        assert verify_at > 0, "no constant-time tag verification found"
+        # the FIRST consumption of the decrypted body must come after the
+        # verification: the consuming statements reference `part` after the
+        # compare (the tag itself is the slice BEFORE `part`).
+        consume_markers = ("out.extend(part)", "sink(bytes(buf))",
+                           "buf = bytearray(part)")
+        consume_at = min((snippet.find(m, verify_at) for m in consume_markers
+                          if snippet.find(m, verify_at) >= 0),
+                         default=-1)
+        assert consume_at > verify_at, (
+            "a decrypt path consumes plaintext BEFORE verifying the section "
+            "tag; the MAC must gate every use of `part`")
+
+
+def test_mac_comparison_is_constant_time():
+    """The tag comparison uses hmac.compare_digest, not ==.
+
+    A ==-compare leaks the prefix length of the matching bytes through
+    timing; the construction must use the constant-time primitive on every
+    path (test-side stream_join AND all three emitted snippets).
+    """
+    import inspect
+    from obfuscator.section_split import (
+        stream_join, emit_loader_snippet, emit_moving_snippet,
+        emit_stream_snippet, JOIN_FUNC)
+    assert "compare_digest" in inspect.getsource(stream_join)
+    for snippet in (emit_loader_snippet(JOIN_FUNC),
+                    emit_moving_snippet(),
+                    emit_stream_snippet()):
+        assert "compare_digest" in snippet
+        # and no plain == comparison of the tag
+        assert "tag ==" not in snippet

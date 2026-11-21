@@ -637,6 +637,87 @@ def _pe_with_load_config(guard_flags, dll=PE_HARDENED):
     return bytes(body)
 
 
+def _pe_with_debug_ext(extended_word, dll=PE_HARDENED):
+    """A PE whose DEBUG DIRECTORY carries a type-20 extended-characteristics
+    record, mapped into a real section — the minimum needed to verify a
+    cet_compat claim (see the second-correction notes in native_harden).
+    """
+    e_lfanew = 0x80
+    head = bytearray(e_lfanew)
+    head[0:2] = b"MZ"
+    struct.pack_into("<I", head, 0x3C, e_lfanew)
+    coff = bytearray(20)
+    struct.pack_into("<H", coff, 0, 0x8664)
+    struct.pack_into("<H", coff, 2, 1)
+    struct.pack_into("<H", coff, 16, 0xF0)
+    opt = bytearray(0xF0)
+    struct.pack_into("<H", opt, 0, 0x20B)
+    struct.pack_into("<H", opt, 70, dll)
+    struct.pack_into("<I", opt, 108, 16)
+    # Data directory 6 = DEBUG. One 28-byte entry.
+    dbg_rva = 0x1200
+    struct.pack_into("<II", opt, 112 + 6 * 8, dbg_rva, 28)
+    headers = bytes(head) + b"PE\0\0" + bytes(coff) + bytes(opt)
+    raw_ptr = 0x200
+    section = bytearray(40)
+    section[0:5] = b".data"
+    struct.pack_into("<IIII", section, 8, 0x100, dbg_rva, 0x100, raw_ptr)
+    body = bytearray(headers) + bytes(section)
+    while len(body) < raw_ptr + 0x100:
+        body.append(0)
+    entry = bytearray(28)
+    struct.pack_into("<I", entry, 0x0C, 20)      # Type = EX_DLLCHARACTERISTICS
+    struct.pack_into("<I", entry, 0x10, 4)       # SizeOfData
+    struct.pack_into("<I", entry, 0x14, dbg_rva + 0x40)  # AddressOfRawData
+    struct.pack_into("<I", entry, 0x18, raw_ptr + 0x40)  # PointerToRawData
+    body[raw_ptr:raw_ptr + 28] = entry
+    struct.pack_into("<I", body, raw_ptr + 0x40, extended_word)
+    return bytes(body)
+
+
+def test_cet_compat_lives_in_the_debug_directory_type_20_record():
+    """THE CET BIT IS IN THE EXTENDED RECORD, NOT THE OPTIONAL HEADER.
+
+    Second correction, 2026-11-21, reviewer-flagged. The parser first read
+    CET bits from GuardFlags (wrong), then from optional-header
+    DllCharacteristics 0x8000 (wrong — that is TERMINAL_SERVER_AWARE). The
+    reviewer's cite is authoritative and llvm-verified against the REAL farm
+    .pyd: a Debug Directory entry of type 20
+    (IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS) whose 4-byte payload holds
+    IMAGE_DLL_CHARACTERISTICS_EX_CET_COMPAT = 0x0001. The first correction
+    had therefore reported a CET-compatible artefact (the farm .pyd, which
+    llvm shows carries ExtendedCharacteristics 0x1) as non-CET.
+    """
+    # Positive: a type-20 record with the CET bit set.
+    report = nh.verify_pe_bytes(
+        _pe_with_debug_ext(nh.IMAGE_DLL_CHARACTERISTICS_EX_CET_COMPAT))
+    assert report["cet_compat"] is True
+    assert report["ex_dllcharacteristics"] == 1
+    assert report["debug_directory"] is True
+    assert "cet_not_instrumented" not in nh.check(
+        report, "windows", "msvc")["partial"]
+
+    # Negative: a type-20 record WITHOUT the CET bit (other extended flags).
+    report = nh.verify_pe_bytes(_pe_with_debug_ext(0x0002))
+    assert report["cet_compat"] is False
+    assert report["ex_dllcharacteristics"] == 2
+
+    # Negative: NO type-20 record at all.
+    report = nh.verify_pe_bytes(
+        _pe_with_load_config(nh.PE_GUARD_CF_INSTRUMENTED))
+    assert report["cet_compat"] is False
+    assert report["ex_dllcharacteristics"] == 0
+
+    # The optional-header word with 0x8000 set must NOT read as CET: that bit
+    # is Terminal-Server-Aware, and the first correction mistook it.
+    report = nh.verify_pe_bytes(
+        _pe_with_debug_ext(0, dll=PE_HARDENED | 0x8000))
+    assert report["terminal_server_aware"] is True
+    assert report["cet_compat"] is False, (
+        "optional-header 0x8000 is Terminal-Server-Aware, not CET — reading "
+        "it as cet_compat is the error the reviewer caught")
+
+
 def test_the_guard_word_has_no_cet_bits_names_are_the_authoritative_ones():
     """GuardFlags carries export-suppression and longjump bits, NOT CET.
 
@@ -658,25 +739,29 @@ def test_the_guard_word_has_no_cet_bits_names_are_the_authoritative_ones():
     assert report["guard_export_suppression_info"] is True
     assert report["guard_longjump_table"] is True
     assert report["guard_eh_continuation_table"] is True
-    # No CET claim follows from any of those bits.
+    # No CET claim follows from any of those bits, and none from the optional
+    # header either: CET lives in the debug-directory type-20 record
+    # (test_cet_compat_lives_in_the_debug_directory_type_20_record).
     assert report["cet_compat"] is False
     assert "cet_not_instrumented" in nh.check(
         report, "windows", "msvc")["partial"]
 
 
-def test_cet_compat_is_a_dllcharacteristics_bit():
-    """/CETCOMPAT lands in DllCharacteristics 0x8000, or nowhere.
+def test_the_optional_header_0x8000_bit_is_terminal_server_aware():
+    """THE FIRST CORRECTION'S OWN CLAIM WAS WRONG — pinned so it stays fixed.
 
-    The farm .pyd measured DllCharacteristics 0x4160 (GUARD_CF set, CET compat
-    absent) — the /CETCOMPAT link flag alone did not produce a CET-compat
-    image, and the report says so instead of implying one.
+    The 2026-11-20 -> 2026-11-21 first correction replaced "CET bits in
+    GuardFlags" with "CET's image opt-in is DllCharacteristics 0x8000", and
+    built a probe measurement and a farm .pyd conclusion on that field. The
+    reviewer caught it: 0x8000 in the OPTIONAL header is
+    TERMINAL_SERVER_AWARE. This test keeps the field named truthfully so the
+    mistake cannot be re-introduced under the old name.
     """
     report = nh.verify_pe_bytes(
         _pe_with_load_config(nh.PE_GUARD_CF_INSTRUMENTED, dll=0x8000))
-    assert report["cet_compat"] is True
+    assert report["terminal_server_aware"] is True
+    assert report["cet_compat"] is False
     assert report["dll_guard_cf"] is False  # not set in this minimal probe
-    assert "cet_not_instrumented" not in nh.check(
-        report, "windows", "msvc")["partial"]
 
 
 def test_a_cfg_object_without_cet_bits_is_reported_as_partial():
@@ -1000,12 +1085,13 @@ CET_PROBE_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 CET_BUILD_SH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             "fixtures", "build_cet_probe.sh")
 #: Measured on the REAL lld-link object this fixture builds, with
-#: llvm-readobj --coff-load-config naming the bits: 0x100 CF_INSTRUMENTED,
-#: 0x4000 CF_EXPORT_SUPPRESSION_INFO_PRESENT, and 0x40000/0x100000 unnamed by
-#: llvm (they are NOT "CET shadow stack" / "CET user compat" as an earlier
-#: version of this constant claimed). The REAL CET opt-in on this object is
-#: DllCharacteristics 0xC160 — CET_COMPAT (0x8000) set by /CETCOMPAT — which
-#: is what the corrected `cet_compat` field reads.
+#: llvm-readobj naming the bits: 0x100 CF_INSTRUMENTED, 0x4000
+#: CF_EXPORT_SUPPRESSION_INFO_PRESENT, and 0x40000/0x100000 unnamed by llvm
+#: (they are NOT "CET shadow stack" / "CET user compat" as an earlier version
+#: of this constant claimed). The 0xC160 DllCharacteristics on this object is
+#: GUARD_CF(0x4000) + TERMINAL_SERVER_AWARE(0x8000) — NOT a CET marker. The
+#: real CET opt-in is the Debug Directory type-20 record, which the corrected
+#: parser reads (`cet_compat`); the assertion below checks the record.
 CET_EXPECTED_FLAGS = 0x100 | 0x4000 | 0x40000 | 0x100000
 
 
@@ -1050,12 +1136,24 @@ def test_a_real_cet_marked_object_is_read_correctly(tmp_path):
         "GuardFlags changed: expected %#x "
         "(CF_INSTRUMENTED|EXPORT_SUPPRESSION_INFO|two lld-link words), "
         "got %#x" % (CET_EXPECTED_FLAGS, report["cfg_guard_flags"]))
-    # The CET opt-in is real but lives in DllCharacteristics, not GuardFlags:
-    # llvm-readobj measured 0xC160 on this exact object (CET_COMPAT set by
-    # /CETCOMPAT). The corrected fields below are what a reader should trust.
-    assert report["cet_compat"] is True, (
-        "the /CETCOMPAT link must produce a CET-compat image")
+    # CET: this lld-link probe has NO DEBUG DIRECTORY at all (measured:
+    # DebugRVA 0x0 / DebugSize 0x0 — the hand-written minimal build reserves
+    # no data directory 6), so there is NOWHERE for the type-20 extended
+    # record to go even though /CETCOMPAT was passed. The corrected parser
+    # therefore reports cet_compat False for THIS object — the opposite of
+    # the MSVC-built farm .pyd, which llvm shows carries the record with
+    # CET_COMPAT 0x1. Two toolchains, two answers, both now measured instead
+    # of assumed; the DllCharacteristics 0xC160 on this object is GUARD_CF +
+    # TERMINAL_SERVER_AWARE and is not a CET marker.
+    assert report["debug_directory"] is False
+    assert report["cet_compat"] is False, (
+        "this lld-link probe has no debug directory, so it cannot carry the "
+        "type-20 extended record")
+    assert report["ex_dllcharacteristics"] == 0
+    assert report["terminal_server_aware"] is True
     assert report["guard_export_suppression_info"] is True
+    assert "cet_not_instrumented" in nh.check(
+        report, "windows", "msvc")["partial"]
     # and the function table is genuinely absent -- a caller-defined
     # structure is why, recorded in the boundary document
     assert report["cfg_function_table"] is False
