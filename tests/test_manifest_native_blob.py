@@ -182,7 +182,7 @@ def test_release_policy_refuses_a_signed_manifest_with_no_anchor(
     assert res["ok"] is False, (
         "a signed manifest passed WITHOUT any trusted anchor under the "
         "release policy")
-    assert "trusted anchor" in res["reason"]
+    assert "NIXON_BUILD_MANIFEST_PUBKEY" in res["reason"], res["reason"]
 
 
 def test_unsigned_manifest_reports_unsigned_without_policy(tmp_path,
@@ -205,3 +205,132 @@ def test_the_manifest_pin_env_var_matches_the_documented_name():
                encoding="utf-8").read()
     assert "NIXON_BUILD_MANIFEST_PUBKEY" in doc
     assert MANIFEST_PIN_ENV == "NIXON_BUILD_MANIFEST_PUBKEY"
+
+
+# ── KEY-PRECEDENCE MATRIX (review register, fourth pass, item 1) ──────────
+#
+# The crucial test: an attacker-supplied EXPLICIT key while a legitimate
+# pin exists must be REJECTED. Under the release policy the pin is the
+# single trust authority; the explicit argument cannot override it.
+# Expected-result table from the register, row for row:
+#
+#   explicit key     out-of-band pin     expected in release mode
+#   absent           correct             accept (publisher signature)
+#   absent           missing             reject
+#   absent           incorrect           reject
+#   publisher key    same key            accept
+#   attacker key     correct publisher pin  reject
+#   publisher key    attacker pin        reject
+#   attacker key     missing             reject
+
+
+def test_precedence_matrix_rows(tmp_path, monkeypatch):
+    """Rows 1, 4, 5, 6, 7 of the register's table.
+
+    Row 5 is the crucial one: an attacker-supplied EXPLICIT key while a
+    legitimate pin exists must be REJECTED. The third-pass implementation
+    accepted it because the explicit argument won over the pin.
+    """
+    from obfuscator.build_manifest import MANIFEST_PIN_ENV
+    from obfuscator.licensing import private_key_from_hex
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey)
+    from cryptography.hazmat.primitives import serialization
+
+    def raw(sk):
+        return sk.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw).hex()
+
+    publisher = Ed25519PrivateKey.generate()
+    attacker = Ed25519PrivateKey.generate()
+    art = _artefact(tmp_path)
+    write_manifest(art, private_key=publisher)
+    monkeypatch.setenv("NIXON_REQUIRE_PROVENANCE", "1")
+
+    # Row 1: absent explicit, correct pin -> ACCEPT.
+    monkeypatch.setenv(MANIFEST_PIN_ENV, raw(publisher))
+    assert verify_manifest(art)["ok"] is True, "row 1"
+
+    # Row 4: publisher key explicit + same pin -> ACCEPT (the caller
+    # agrees with the authority; it does not override it).
+    res = verify_manifest(art, public_key=publisher.public_key())
+    assert res["ok"] is True, "row 4: %s" % res["reason"]
+
+    # Row 5: ATTACKER key explicit + correct publisher pin -> REJECT.
+    res = verify_manifest(art, public_key=attacker.public_key())
+    assert res["ok"] is False, (
+        "ROW 5 FAIL: an attacker-supplied explicit key overrode the "
+        "release pin — the trust anchor is bypassable")
+    assert "pin" in res["reason"], res["reason"]
+
+    # Row 6: publisher key explicit + ATTACKER pin -> REJECT (the pin is
+    # the authority; the attacker's pin does not trust the publisher).
+    monkeypatch.setenv(MANIFEST_PIN_ENV, raw(attacker))
+    res = verify_manifest(art, public_key=publisher.public_key())
+    assert res["ok"] is False, "row 6: %s" % res["reason"]
+
+    # Row 7: attacker key explicit + MISSING pin -> REJECT.
+    monkeypatch.delenv(MANIFEST_PIN_ENV, raising=False)
+    res = verify_manifest(art, public_key=attacker.public_key())
+    assert res["ok"] is False, "row 7: %s" % res["reason"]
+
+
+def test_precedence_matrix_rows_absent_explicit(tmp_path, monkeypatch):
+    """Rows 2 and 3: absent explicit key, missing/incorrect pin -> reject."""
+    from obfuscator.build_manifest import MANIFEST_PIN_ENV
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey)
+    from cryptography.hazmat.primitives import serialization
+    publisher = Ed25519PrivateKey.generate()
+    attacker = Ed25519PrivateKey.generate()
+    art = _artefact(tmp_path)
+    write_manifest(art, private_key=publisher)
+    wrong_hex = attacker.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw).hex()
+
+    # Row 2: absent explicit, MISSING pin -> reject.
+    monkeypatch.delenv("NIXON_BUILD_MANIFEST_PUBKEY", raising=False)
+    monkeypatch.delenv(MANIFEST_PIN_ENV, raising=False)
+    monkeypatch.setenv("NIXON_REQUIRE_PROVENANCE", "1")
+    res = verify_manifest(art)
+    assert res["ok"] is False, "row 2: %s" % res["reason"]
+
+    # Row 3: absent explicit, INCORRECT pin -> reject (signature invalid
+    # against the pin's key).
+    monkeypatch.setenv("NIXON_BUILD_MANIFEST_PUBKEY", wrong_hex)
+    res = verify_manifest(art)
+    assert res["ok"] is False, "row 3: %s" % res["reason"]
+    assert "signature invalid" in res["reason"]
+
+
+def test_without_release_policy_the_explicit_key_still_works(
+        tmp_path, monkeypatch):
+    """The documented pre-policy contract for existing callers: explicit
+    key first, pin next. This is the compatibility behaviour, NOT the
+    release-mode authority."""
+    from obfuscator.build_manifest import MANIFEST_PIN_ENV
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+        Ed25519PrivateKey)
+    publisher = Ed25519PrivateKey.generate()
+    attacker = Ed25519PrivateKey.generate()
+    art = _artefact(tmp_path)
+    write_manifest(art, private_key=publisher)
+    monkeypatch.delenv("NIXON_REQUIRE_PROVENANCE", raising=False)
+    # explicit publisher key, no pin -> accept
+    assert verify_manifest(
+        art, public_key=publisher.public_key())["ok"] is True
+    # no explicit, correct pin configured -> accept (pin honoured)
+    monkeypatch.setenv("NIXON_BUILD_MANIFEST_PUBKEY",
+                       publisher.public_key().public_bytes_raw().hex())
+    assert verify_manifest(art)["ok"] is True
+    # explicit ATTACKER key with the publisher pin present, but WITHOUT the
+    # release policy: the explicit key is honoured (documented
+    # compatibility — the caller is part of the trust boundary outside
+    # release mode), which is why release mode exists.
+    monkeypatch.delenv("NIXON_BUILD_MANIFEST_PUBKEY", raising=False)
+    res = verify_manifest(art, public_key=attacker.public_key())
+    assert res["ok"] is False, (
+        "even without the release policy, a manifest signed by the "
+        "publisher cannot verify under an attacker key")

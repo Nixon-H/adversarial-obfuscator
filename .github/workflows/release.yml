@@ -1,0 +1,214 @@
+name: Release candidate
+
+# BUILD ONCE, PROMOTE THE SAME BYTES (review register, fourth pass, item 2).
+#
+# The chain is deliberately linear:
+#   clean checkout -> build release candidate -> sign and package ->
+#   hash the FINAL artefact -> run the acceptance matrix against those
+#   exact bytes -> upload the immutable artefact + acceptance report ->
+#   download them back -> recompute SHA-256 -> compare with the accepted
+#   digest -> the publish job runs ONLY after every gate, and re-verifies
+#   the digest of the bytes it was handed.
+#
+# The publish job here is a DRY RUN: it verifies the chain and prints the
+# decision it would make. The operator's production publish target is a
+# protected-environment job (GitHub environments with required reviewers)
+# that consumes the same artefact — wiring it to real credentials is the
+# operator step recorded in MAXIMUM_SECURITY §5.6.
+#
+# Dependency properties the register demands:
+#   * the publish job CANNOT run when acceptance fails or is skipped
+#     (`needs:` is a hard dependency);
+#   * the artefact the publish job receives is the artefact that passed
+#     acceptance (uploaded once, downloaded, digest-compared);
+#   * the ephemeral keys exist only in the build job's environment — the
+#     publish job verifies against the PUBLIC pin and holds no private key.
+
+on:
+  # Callable from the all-checks umbrella (a push runs every tier — the
+  # architecture test asserts every workflow is reachable from a push) and
+  # dispatchable standalone for a release-candidate run.
+  workflow_call:
+  workflow_dispatch:
+  merge_group:
+  pull_request:
+    paths:
+      - "obfuscator/**"
+      - "scripts/**"
+      - ".github/workflows/release.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-accept:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      NIXON_LOG_REDIRECT: "0"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+        with:
+          python-version: "3.11"
+      - name: Install build dependencies
+        run: pip install cython==3.0.12 setuptools wheel && sudo apt-get update && sudo apt-get install -y upx
+      - name: Build, sign and run the acceptance matrix
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, os, secrets, subprocess, sys
+          from obfuscator.build_manifest import (
+              verify_manifest, sign_manifest, build_manifest)
+          from obfuscator.attestation import stamp_artefact
+          from obfuscator.licensing import (
+              private_key_from_hex, public_key_hex)
+          from cryptography.hazmat.primitives import serialization
+
+          results = []
+
+          def rec(name, ok, detail=""):
+              results.append(dict(name=name, ok=bool(ok), detail=str(detail)[:120]))
+              print("%-4s %-48s %s" % ("PASS" if ok else "FAIL", name, detail[:110]))
+              return bool(ok)
+
+          # The EPHEMERAL release-candidate key: generated per run, never
+          # printed, never committed. The production identity is an
+          # operator secret referenced through a protected environment.
+          sign_key = secrets.token_hex(32)
+          pin_hex = private_key_from_hex(sign_key).public_key().public_bytes(
+              encoding=serialization.Encoding.Raw,
+              format=serialization.PublicFormat.Raw).hex()
+
+          build = subprocess.run(
+              [sys.executable, "-m", "obfuscator.core.pipeline", "build",
+               "tests/fixtures/payload_probe.py", "--skip-cloud",
+               "--section-count", "4", "--watermark", "NX-REL-001",
+               "--transforms", "data", "--access", "trial=7d",
+               "--package", "native"],
+              capture_output=True, text=True, timeout=1500,
+              env=dict(os.environ, NIXON_ARTEFACT_SIGN_KEY=sign_key,
+                       NIXON_BUILD_MANIFEST_KEY=sign_key,
+                       NIXON_REQUIRE_PROVENANCE="1",
+                       NIXON_PROVENANCE_PUBKEY=pin_hex))
+          assert build.returncode == 0, "build failed: " + (build.stderr or "")[-500:]
+
+          art = None
+          for root, _dirs, files in os.walk("."):
+              if "payload_protected.py" in files and \
+                      "payload_protected.py.build-manifest.json" in files:
+                  art = os.path.join(root, "payload_protected.py")
+                  break
+          assert art, "no artefact produced"
+          published = open(art, "rb").read()
+          digest = hashlib.sha256(published).hexdigest()
+          rec("build: signed release candidate from clean checkout", True,
+              "%d bytes, sha256=%s" % (len(published), digest[:16]))
+
+          # ACCEPTANCE against the exact published bytes.
+          text = published.decode("utf-8", "replace")
+          m = re.search(r'_NX_PROV_PK = "([0-9a-f]{16}): ([A-Za-z0-9+/=]+)"',
+                        text)
+          pin_raw = base64.b64decode(m.group(2))
+          rec("provenance pin self-consistent",
+              m.group(1) == hashlib.sha256(pin_raw).hexdigest()[:16])
+          pin = pin_raw.hex()
+          manifest = json.load(open(art + ".build-manifest.json",
+                                    encoding="utf-8"))
+          pub = private_key_from_hex(sign_key).public_key()
+          rec("manifest verify on published bytes",
+              verify_manifest(art, pub)["ok"] is True)
+          rec("manifest binds the source commit",
+              (manifest.get("build") or {}).get("commit") ==
+              subprocess.run(["git", "rev-parse", "HEAD"],
+                             capture_output=True,
+                             text=True).stdout.strip())
+          rec("manifest binds the dependency-lock digest",
+              bool((manifest.get("build") or {}).get(
+                  "dependency_lock_digest")))
+
+          def run(path, pin_hex=pin):
+              return subprocess.run([sys.executable, path],
+                                    capture_output=True, text=True,
+                                    timeout=120,
+                                    env=dict(os.environ,
+                                             NIXON_PROVENANCE_PUBKEY=pin_hex))
+          rec("accept: correct key + correct pin",
+              run(art).returncode == 0)
+          rec("reject: missing pin",
+              run(art, pin_hex="").returncode != 0)
+          rec("reject: incorrect pin",
+              run(art, pin_hex=private_key_from_hex(
+                  secrets.token_hex(32)).public_key().public_bytes(
+                  encoding=serialization.Encoding.Raw,
+                  format=serialization.PublicFormat.Raw).hex()).returncode != 0)
+          nosig = art.replace(".py", "_nosig.py")
+          open(nosig, "w", encoding="utf-8").write(re.sub(
+              r'_NX_PROV_SIG = "[^"]*"', '_NX_PROV_SIG = ""', text, count=1))
+          rec("reject: missing provenance signature",
+              run(nosig).returncode != 0)
+          tam = bytearray(published)
+          tam[len(tam) // 2] ^= 0x01
+          tam_path = art.replace(".py", "_modified.py")
+          open(tam_path, "wb").write(bytes(tam))
+          rec("reject: modified artefact", run(tam_path).returncode != 0)
+
+          # Digest of the accepted artefact, recorded for the publish gate.
+          with open("accepted_digest.txt", "w", encoding="utf-8") as fh:
+              fh.write(digest)
+          with open("accepted_artefact.py", "wb") as fh:
+              fh.write(published)
+          verdict = "PASS" if all(r["ok"] for r in results) else "FAIL"
+          with open("acceptance_report.json", "w", encoding="utf-8") as fh:
+              json.dump(dict(schema="nx-release-acceptance/v1",
+                             artefact_sha256=digest,
+                             manifest_commit=(manifest.get("build") or
+                                              {}).get("commit"),
+                             checks=results, verdict=verdict),
+                        fh, indent=2, sort_keys=True)
+          print("\nacceptance verdict:", verdict)
+          assert verdict == "PASS", "the acceptance matrix failed"
+          PY
+      - name: Upload immutable release artefact + report
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882
+        with:
+          name: release-candidate
+          path: |
+            accepted_artefact.py
+            accepted_digest.txt
+            acceptance_report.json
+          retention-days: 7
+
+  publish:
+    # HARD DEPENDENCY: this job cannot run when build-and-accept fails or
+    # is skipped — `needs:` makes acceptance mandatory for publication.
+    needs: build-and-accept
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          name: release-candidate
+      - name: Re-verify the downloaded bytes against the accepted digest
+        run: |
+          python3 - <<'PY'
+          import hashlib, json
+          downloaded = open("accepted_artefact.py", "rb").read()
+          accepted = open("accepted_digest.txt", encoding="utf-8").read().strip()
+          report = json.load(open("acceptance_report.json", encoding="utf-8"))
+          actual = hashlib.sha256(downloaded).hexdigest()
+          print("attested digest  :", report["artefact_sha256"])
+          print("accepted digest  :", accepted)
+          print("downloaded digest:", actual)
+          assert actual == accepted, (
+              "the downloaded bytes differ from the accepted digest")
+          assert actual == report["artefact_sha256"], (
+              "the downloaded bytes differ from the attested digest")
+          assert report["verdict"] == "PASS"
+          print("PUBLISH DECISION: all checks pass — these exact bytes "
+                "passed provenance, integrity and the refusal matrix")
+          # The production publish step replaces this line and runs ONLY
+          # inside a protected environment with required reviewers; the
+          # dry run is the committed, verifiable form of the gate.
+          print("dry run complete (publish target is operator-owned)")
+          PY

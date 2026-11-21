@@ -2,6 +2,11 @@ name: CI
 
 on:
   workflow_call:
+  # PR + merge-queue coverage (review register, fourth pass, item 2): a
+  # required check must run for pull_request AND merge_group events, or
+  # GitHub's merge queue cannot use it as a gate.
+  pull_request:
+  merge_group:
   # Weekly run: the full matrix (the `test` job has no schedule guard any
   # more) plus the ruff-pin review. A green cron now means the suite is
   # green, not merely that lint-pin ran.
@@ -49,8 +54,8 @@ jobs:
         # otherwise ship silently (CI previously pinned 3.12 only).
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
         with:
           python-version: ${{ matrix.python-version }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -146,11 +151,17 @@ jobs:
     timeout-minutes: 60
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
+    # LEAST PRIVILEGE (review register, fourth pass, item 3): the
+    # acceptance job generates its own ephemeral keys and needs NO
+    # repository write access — the default read-only workflow permission
+    # is narrowed to nothing beyond contents:read it already inherits.
+    permissions:
+      contents: read
     env:
       NIXON_LOG_REDIRECT: "0"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
         with:
           python-version: "3.11"
       - name: Install build dependencies
@@ -313,8 +324,8 @@ jobs:
     # vulnerable indirect dependency is only visible there.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
         with:
           python-version: "3.11"
       - name: Install pip-audit
@@ -335,7 +346,7 @@ jobs:
     # for v3 migration.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
@@ -349,7 +360,7 @@ jobs:
     # human review. Always exits 0 (|| true); reviewers check the log.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
       - name: Show requirements.txt diff (informational)
@@ -366,8 +377,8 @@ jobs:
     # `make lint-upgrade` prints the same thing locally.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
         with:
           python-version: "3.11"
       - name: Compare the pinned ruff with the latest release

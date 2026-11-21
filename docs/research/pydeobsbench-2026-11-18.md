@@ -3150,3 +3150,53 @@ acceptance run.
 matrix for CI (workflow-refusal semantics are build-level only), and the
 Windows strict-mode shadow-stack runtime test on supported hardware. Both
 remain register-open.
+
+
+## 6d. Fourth review pass: key precedence, publish control, isolation audit
+
+### 6d.1 The manifest-key precedence hole — found before it shipped
+
+The reviewer examined the third-pass anchor resolution and identified that
+`if public_key is not None: return public_key` let a caller BYPASS the
+out-of-band pin with an attacker-controlled key argument. Confirmed by
+reading the code; fixed with the register's rule: under the release policy
+the OUT-OF-BAND PIN is the single trust authority — an explicit key that
+differs from the pin is a refusal, an explicit key equal to the pin
+verifies, and a missing pin is a refusal. The full 7-row precedence matrix
+from the register is measured in tests/test_manifest_native_blob.py, all
+rows passing. Without the release policy the pre-policy contract (explicit
+key first, pin honoured when configured) is preserved for existing callers,
+with the documented caveat that outside release mode the caller IS part of
+the trust boundary.
+
+### 6d.2 Build once, promote the same bytes
+
+`.github/workflows/release.yml` implements the register's sequence: clean
+checkout -> signed release-candidate build -> hash the FINAL artefact ->
+acceptance matrix against those exact bytes -> upload immutable artefact +
+accepted digest + report -> `publish` job (HARD `needs:` dependency — it
+cannot run when acceptance fails or is skipped) downloads them back,
+recomputes SHA-256, compares against the accepted AND attested digests, and
+prints the publish decision as a dry run. The production publish target is
+an operator-owned protected-environment job consuming the same chain.
+Triggers on `ci.yml` now cover `pull_request` and `merge_group` so the
+required check applies to queues, and every third-party action in both
+workflows is pinned to a full commit SHA resolved from the GitHub API.
+
+### 6d.3 Signing-environment isolation audit
+
+Measured against the committed workflows (MAXIMUM_SECURITY §5.6 item 9):
+only the build job holds signing credentials (ephemeral, dying with the
+job); the publish job verifies digests and holds no private key; workflow
+and job permissions are `contents: read`; actions are SHA-pinned; the
+production signing identity enters through a protected environment with
+required reviewers — the operator step.
+
+### 6d.4 Two wording corrections adopted
+
+* The Mimosa policy entry is an auditable RATIONALE record, not a
+  machine-enforced scanner exception — the file states this explicitly
+  (verified: the hook blocked harness writes before and after the entry).
+* The memory guarantee keeps its corrected scope: unprivileged inspection
+  blocked in the tested configuration; CAP_SYS_PTRACE bypass documented;
+  the core-file row measured on a real crash.

@@ -57,6 +57,10 @@ jobs:
     name: CI (lint, unit suite, supply chain)
     uses: ./.github/workflows/ci.yml
 
+  release-acceptance:
+    name: Release acceptance (refusal matrix)
+    uses: ./.github/workflows/release.yml
+
   build:
     name: Nixon Build Pipeline
     uses: ./.github/workflows/build.yml
