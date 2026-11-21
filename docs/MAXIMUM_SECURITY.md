@@ -978,6 +978,25 @@ signing cannot be optional) remains buildable.
    operator's production signing identity — the CI gate proves the
    verification chain, not the production identity.
 
+   SHA PROVENANCE (review register, FIFTH pass, item 4): all four pinned
+   SHAs were resolved from the OFFICIAL action repositories via the GitHub
+   API and correspond to their expected releases — checkout `11bd719…`
+   (actions/checkout, "Prepare 4.2.2 Release"), setup-python `0b93645…`
+   (actions/setup-python, v5.3.0), upload-artifact `b4b15b8…`
+   (actions/upload-artifact, v4.4.3 — v4+ immutable archive semantics), and
+   download-artifact `fa0a91b…` (actions/download-artifact, v4.1.8). No
+   fork is involved, and `overwrite: true` appears nowhere in the release
+   workflow.
+
+   PRODUCTION ENVIRONMENT (review register, FIFTH pass, item 2): the
+   release workflow's publish job now DECLARES `environment: production`.
+   Declaring it does not prove protection — an auto-created environment has
+   no rules — so the ADMINISTRATOR checklist stands: configure required
+   reviewers, prevent self-review, restrict to release tags, disallow
+   admin bypass, and make production credentials available only after
+   approval. Those five checks are admin-side evidence and remain on the
+   operator register.
+
 8. **THE MANIFEST KEY HAS ITS OWN OUT-OF-BAND ANCHOR** (review register,
    third pass, item 2). The RC acceptance found that the provenance key and
    the manifest key are two INDEPENDENT signing inputs — and an anchor
