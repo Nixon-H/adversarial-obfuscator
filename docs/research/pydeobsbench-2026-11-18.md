@@ -4529,3 +4529,121 @@ an analyst, an independent Mimosa reviewer, an Authenticode certificate, an
 Apple Developer ID, Windows shadow-stack hardware, and a production
 environment with required reviewers. None of those can be manufactured by a
 maintainer, and this record does not pretend otherwise.
+
+## 6q. Fifteenth pass: a standalone bundle, and a category error avoided
+
+The instruction was to hand the crypto package to a cryptographer "through the
+now-live channel at `security/advisories/new`". That is a category error worth
+recording, because acting on it would have produced a misleading artefact
+rather than a review.
+
+`security/advisories/new` is a **vulnerability disclosure** mechanism. An
+advisory titled "please review my cryptography" is not a disclosure; a
+maintainer opening one on their own repository to solicit work misuses the
+channel, and the advisory has no recipient until some human chooses to read it.
+No tool summons a reviewer. Filing it would have created the appearance of an
+engagement with none of the substance — the exact pattern this project has
+spent several passes removing.
+
+So the pass did the part that is real: it produced the artefact that would be
+sent.
+
+### 6q.1 The standalone bundle
+
+`docs/security/CRYPTO_REVIEW_BUNDLE_STANDALONE.md` is written for a reviewer
+who will **not clone the repository**. The existing package assumes a checkout
+and points at source files; a cryptographer engaged for two hours needs the
+construction in front of them immediately. The bundle carries:
+
+* the construction written out completely — key derivation with domain
+  separation, the 28-byte authenticated context, seal and open equations, the
+  SHA-256 counter-mode keystream, and the separate unkeyed structural digest;
+* the **seven weaknesses** the maintainers already know about;
+* eight questions, led by whether MAC-then-encrypt over a bespoke keystream is
+  acceptable here or must become a standardised AEAD;
+* an explicit "what we are not claiming" section — no soundness claim, no
+  preference over a standard AEAD, and a scoped list of what is in play;
+* how to verify our measurements, with the expected test count;
+* how to return findings.
+
+### 6q.2 A third broken reproduction command, found by running it
+
+The crypto package's commands had never been executed. Measured:
+
+```
+python3 -m obfuscator.core.pipeline build --help
+-> ModuleNotFoundError: No module named 'obfuscator'
+```
+
+The same missing `PYTHONPATH` the RE protocol had — third instance of the same
+defect class across the packages. And a second, different one:
+
+```
+python3 -m pytest -q ...
+-> No module named pytest.__main__; 'pytest' is a package and cannot be
+   directly executed
+```
+
+pytest is installed as a library on this host, not a runnable module. The
+project's own release gate already uses the `console_main()` form; the package
+now matches it and says why, so a reviewer on a similar host is not left
+guessing.
+
+After the fix the documented command was **run**: `40 passed`, confirming §4's
+tamper-matrix count against the suite it names. The package now tells the
+reviewer that a different number means the table is stale rather than leaving
+them to wonder.
+
+### 6q.3 What the tests pin, and what they deliberately do not
+
+`tests/test_crypto_bundle_standalone.py` (15 tests) pins the bundle to the
+implementation, because a bundle that misdescribes the construction sends the
+review at a design that does not exist and its findings attach to nothing:
+
+* the documented domains reproduce `_section_keys_v2` exactly;
+* the documented 28-byte context reproduces `_mac_context_v2` field for field;
+* the documented keystream reproduces `_keystream` byte for byte;
+* the tag is 32 bytes plus plaintext; the digest schema matches;
+* verification still precedes plaintext use; `key_hint` really is
+  `SHA256(K)[:16]`;
+* all seven weaknesses stay listed.
+
+One test failed on its first run for a good reason: a plain substring check for
+"is secure" flagged the sentence "we are **not** claiming it is secure". The
+check now examines each occurrence for a negation in the preceding clause.
+Negative control: a denial reads False, a real claim reads True.
+
+**No test asserts cryptographic soundness.** A green suite means the
+description is accurate, not that the design is good — stated in the module
+docstring so a future reader cannot mistake one for the other.
+
+### 6q.4 Pass-16 gate
+
+```
+run_id:            rc-gate-20261123T014740-1521236
+commit:            fdc3d4180b3fcf2939a79d57e1c855c4d2d300f8
+tree:              155d85c054762d5646c318bb13f69274272901d5
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 452
+shards_with_failures: 0
+passed 30,384 / skipped 9 / collected 30,393
+```
+
+The aggregate rose 30,369 → 30,384, exactly the 15 tests in the new module,
+which is the independent confirmation they ran; the module is assigned to
+shard 2 (`rc=0`, re-read from `gate/shards/`).
+
+### 6q.5 The boundary, stated once more
+
+Three packages are now specified, executable, independently pinned to their
+implementations, accompanied by a live private intake channel, and — for the
+cryptographic one — packaged for a reviewer with no repository access.
+
+**No review has happened.** All three still carry `NOT PERFORMED` / `NOT RUN`.
+The distance from here to a reviewed release is: a cryptographer, an analyst,
+an independent Mimosa reviewer, an Authenticode certificate, an Apple Developer
+ID, Windows shadow-stack hardware, and a production environment with required
+reviewers. Every one of those is a person, a purchase, or an administrator
+decision. None can be produced by writing more documents, and producing more
+documents in place of them would be the failure this register exists to catch.
