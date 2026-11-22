@@ -3742,3 +3742,100 @@ two-layer reproducibility section. Every number in it came from a blob on
 this host or a farm run cited by its ID; none of it is restated from a
 register.
 
+### 6j.5 The gate run that failed, and what it found
+
+The first pass-8 gate run was not clean: shard 7 reported one failure. That
+is recorded here rather than omitted, because the resolution is the most
+useful part of this pass. The failure was NOT treated as flakiness.
+
+Two runs are relevant:
+
+| run | commit | shards | result |
+|---|---|---|---|
+| `rc-gate-20261122T153655-406189` | `45f6541` | 10 | 9 rc=0, shard 5 FAILED (3 tests) — **my own defect** |
+| `rc-gate-20261122T162104-476578` | `d0750b5` | 10 | 9 rc=0, shard 7 FAILED (1 test) — a real race |
+| `rc-gate-20261122T171336-572239` | `a0ea66a` | 10 | **10/10 rc=0** |
+
+**Failure 1 — the generated facade (my defect, caught by the gate).**
+Adding `checked_url` to `obfuscator/core/pipeline.py` put the generated
+`obfuscator/core/__init__.py` out of date. Three tests assert that the facade
+exposes exactly the star-import surface and resolves each name to the same
+object, and they failed:
+
+```
+test_the_facade_exposes_the_same_names                 FAILED
+test_the_facade_resolves_each_name_to_the_same_object   FAILED
+test_the_facade_file_is_generated_and_up_to_date        FAILED
+```
+
+Fixed by running the project's own generator
+(`scripts/lint/generate_core_facade.py`, 325 names) and committing the
+result. A hand-maintained re-export list would have silently omitted the
+guard, and a caller importing it from `obfuscator.core` would have got an
+ImportError only on the path that needs it.
+
+**Failure 2 — two real races (both silent, both security-relevant).**
+Reproducing the shard-7 failure under load did not confirm "flaky test": it
+found two defects that each returned `None` on a path a caller cannot
+distinguish from a legitimate negative answer.
+
+*Remote-unlock registration raced its own request.* `connect()` sent the
+register message and closed the socket **without reading the acknowledgement**.
+The server dispatches each connection to a daemon thread, so the client could
+open its `request_token` connection before the registration had been applied
+to `_client_secrets`; `validate_request` then found no secret and
+`unlock_fragment` returned `None`. Measured: 24 concurrent instances of
+`TestRemoteUnlockIntegration` produced roughly three failures per batch.
+`connect()` now waits for the sealed acknowledgement and requires
+`status == "ok"`, with a bounded retry; a refused registration raises instead
+of leaving an unregistered client behind.
+
+*Watermark extraction silently discarded shares.* `extract_multiprocess` did
+one `q.get(timeout=5)` per share inside `except Exception: pass`. A child
+process that had not been scheduled when the timeout fired meant its share
+was **dropped**; `extract_full` then reconstructed from a short list and
+returned `None`. Under 40 concurrent test processes each forking four
+children this happened about one run in twenty. Collection now retries with a
+15 s budget, and a **partial** set raises — half a share set must never be
+treated as a whole one. `None` is reserved for "every share was missing",
+which is a real absence.
+
+Measured after both fixes: 40 concurrent runs of
+`tests/test_distributed_integration.py`, **0 failures** (was 2/40).
+
+### 6j.6 The authoritative pass-8 gate record
+
+```
+run_id:        rc-gate-20261122T171336-572239
+commit:        a0ea66a69df9145538f18dd811285b42e12f2116
+tree:          2f59a4cdab6ea85bcf08437d7e30d10e01023b27
+dirty_files:   0
+identity_stable: true
+shard_files_total: 444          (derived from tests/** and asserted complete)
+shards_with_failures: 0
+passed:        30,286
+skipped:       9
+collected:     30,295          (30,286 + 9 = 30,295)
+```
+
+Per-shard, every one `rc=0` with the commit and tree above and `dirty=0`
+recorded independently on its own line: 542, 573, 450, 644, 555, 834, 597,
+25,059, 538, and the final shard. This is the same evidence shape the
+fifth-round review asked for — each shard carries its own commit, tree,
+dirty count, run id and exit code, so the aggregate is reproducible from the
+record rather than asserted.
+
+Two distinctions stay explicit, as required:
+
+* **source identity** — all ten shards tested this one revision, and the
+  identity was re-read at the end (`identity_stable: true`);
+* **reproducible builds** — separate and answered in 6j.2: the transform
+  layer is byte-identical at a pinned seed, the shipped artefact is not by
+  design.
+
+And one caveat on the aggregate: 30,295 is the count for THIS tree, which now
+includes `tests/test_fuzz_harness.py` (6 tests) and
+`tests/test_reproducible_build.py` (4 tests). The earlier 29,938 remains in
+the record as belonging to its own shard composition; see 6e.1.
+
+
