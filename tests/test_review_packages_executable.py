@@ -120,13 +120,23 @@ def test_the_protocol_states_the_measured_equivalence_result():
 
 def test_the_crypto_package_reproduction_step_works():
     """§8 tells the reviewer to call split_sealed and read the pack dict."""
-    from obfuscator.section_split import split_sealed
+    from obfuscator import section_split as ss
 
-    pack = split_sealed(b"payload for review" * 4, sections=4,
-                        key=b"\x11" * 32)
+    pack = ss.split_sealed(b"payload for review" * 4, sections=4,
+                           key=b"\x11" * 32)
     assert set(pack) >= {"sections", "count", "total", "v", "state",
                          "key_hint", "per_section"}
-    assert pack["v"] == 2 and pack["count"] == 4
+    # Compared against the live constant, not a literal. Hardcoding 2 here is
+    # how this test passed while the shipped format was still v2 and then
+    # failed when it became v3 -- and it is the same mistake that let the
+    # review documents drift. A version assertion must track the code.
+    assert pack["v"] == ss.SECTION_PACK_VERSION
+    assert pack["count"] == 4
+    # v3 packs carry the pack identity the reviewer is told about.
+    if ss.SECTION_PACK_VERSION >= 3:
+        assert "pack_nonce" in pack, (
+            "a v3 pack must carry its pack nonce; §4.1 of the crypto package "
+            "documents it and the reviewer will look for it")
     section = pack["sections"][0]
     assert set(section) >= {"i", "salt", "nonce", "data"}
     assert len(bytes.fromhex(section["nonce"])) == 16, (
