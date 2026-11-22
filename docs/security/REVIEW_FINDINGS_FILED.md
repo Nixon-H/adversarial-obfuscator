@@ -126,3 +126,86 @@ field is recorded rather than defended.
   because a wire-format change made to close a self-found finding — without the
   independent review that was commissioned to judge exactly this construction —
   is the kind of unilateral redesign the register's §2 warns against.
+
+---
+
+## MIMOSA-INTAKE-002
+
+```
+FINDING MIMOSA-INTAKE-002
+  package:      crypto
+  reviewer:     maintainer (self-reported; NOT an independent review)
+  received:     2026-11-23
+  severity:     low
+  claim:        split_sealed() derives section nonces deterministically from
+                nonce_seed, so two packs built with the SAME session key AND
+                the same nonce_seed reuse the keystream, and the XOR of their
+                ciphertexts reveals the XOR of their plaintexts (a two-time
+                pad). The API permits this; the shipped call path does not
+                currently trigger it.
+  evidence:     Two packs, same key, same nonce_seed, different plaintext:
+
+                  a = split_sealed(b'A'*32, sections=4, key=K, nonce_seed=b'reused')
+                  b = split_sealed(b'B'*32, sections=4, key=K, nonce_seed=b'reused')
+                  ca = bytes.fromhex(a['sections'][0]['data'])
+                  cb = bytes.fromhex(b['sections'][0]['data'])
+                  xor = bytes(p^q for p,q in zip(ca, cb))
+                  xor[-4:] == b'\x03\x03\x03\x03'
+
+                The trailing 4 bytes equal A^B for the plaintext. The 32-byte
+                prefix is the tag difference (the tags differ because their
+                contexts differ), so the tag does NOT prevent plaintext
+                recovery from the body. pack_nonce and per-section nonces are
+                byte-identical across the two packs.
+
+                SCOPE, measured rather than assumed: in the shipped path
+                (pipeline.py:3763) the honey pack derives its seed from
+                _section_pack_val, and build_id is _hp_seed[:16].hex() -- i.e.
+                the key and the nonces are BOTH functions of the same per-build
+                input. Distinct builds therefore give distinct (key, nonce)
+                pairs and the hazard does not fire in normal operation.
+
+                The hazard is API-level: nonce_seed exists so the decoy pack is
+                reproducible across builds of the SAME inputs, and any caller
+                that reuses a seed across two DIFFERENT payloads under one key
+                gets keystream reuse. Nothing in split_sealed refuses that.
+  reproducible: yes (the two lines above; no repository state needed)
+  affects:      obfuscator/section_split.py — split_sealed() nonce_seed path;
+                obfuscator/honeypayload.py build_honey_pack()
+  maintainer-response:
+                accept
+  resolution:   OPEN. Two candidate fixes, neither chosen unilaterally:
+                  (a) refuse a nonce_seed that repeats for a different payload
+                      (requires build-level state, which split_sealed does not
+                      have and should not acquire);
+                  (b) derive the per-section nonces from
+                      SHA256(key ‖ nonce_seed ‖ i) rather than
+                      SHA256(nonce_seed ‖ i), so the same seed under a
+                      different key cannot collide -- this is the surgical fix
+                      and does not change what a caller must supply.
+                Candidate (b) is a wire-format change again (v2/v3 nonce
+                derivation), so it belongs with the independent review that is
+                already looking at this construction, not ahead of it.
+  reviewed-by:  NOBODY. Maintainer-found, maintainer-graded `low` on the
+                argument that the shipped path cannot trigger it. A reviewer
+                should check that argument specifically: it rests on
+                build_id = f(seed), and if any future caller passes a seed and
+                a build_id that are not so related, the exposure becomes real.
+```
+
+## Why this one is `low` and not higher
+
+The shipped path cannot reach it: `build_id` is derived from the same
+`_section_pack_val` that seeds the nonces, so a colliding nonce implies a
+colliding key (and therefore a colliding pack, which is the same artefact).
+
+It is filed anyway, for two reasons:
+
+1. **The API is public surface.** `split_sealed(payload, key=..., nonce_seed=...)`
+   is called by `build_honey_pack`, exported through `pack_json`, and used by
+   tests. A future caller — including the decoy path after a refactor — can
+   satisfy the collision condition without noticing.
+2. **It is the same class as `key_hint`** in the bundle's §8 item 3: a
+   hazard that is currently unreachable but that a reviewer should judge rather
+   than accept on the maintainer's say-so. That is exactly what the register's
+   §6 means by "your own sampling is not independent verification".
