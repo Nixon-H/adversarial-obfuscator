@@ -234,19 +234,61 @@ class RemoteUnlockClient:
         self._host = host
         self._port = port
         self._server = server
+        # Registration must be ACKNOWLEDGED before connect() returns.
+        #
+        # The previous version sent the register message and closed the socket
+        # immediately, without reading the reply. The server dispatches each
+        # connection to a daemon thread, so the client could open its
+        # request_token connection BEFORE the registration had been applied to
+        # self._client_secrets. validate_request then found no secret, answered
+        # "validation_failed", and unlock_fragment returned None -- a failure
+        # that only appeared under load and looked like flakiness. Waiting for
+        # the acknowledgement makes connect() mean what callers assume it
+        # means: after it returns, the client is registered.
+        last_exc = None
+        for _attempt in range(3):
+            try:
+                self._register_once(host, port, server)
+                return
+            except (socket.error, OSError, json.JSONDecodeError,
+                    ValueError, InvalidTag) as exc:
+                last_exc = exc
+                if _attempt < 2:
+                    time.sleep(0.05 * (2 ** _attempt))
+        if last_exc is not None:
+            raise last_exc
+
+    def _register_once(self, host, port, server):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(5.0)
-        sock.connect((host, port))
-        auth = hmac.new(
-            server.enrollment_token, self._client_id, hashlib.sha256).hexdigest()
-        reg_msg = _seal_message({
-            "action": "register",
-            "client_id": self._client_id.hex(),
-            "client_secret": self.local_secret.hex(),
-            "auth": auth,
-        }, server.transport_key)
-        sock.sendall(reg_msg)
-        sock.close()
+        try:
+            sock.settimeout(5.0)
+            sock.connect((host, port))
+            auth = hmac.new(
+                server.enrollment_token, self._client_id,
+                hashlib.sha256).hexdigest()
+            reg_msg = _seal_message({
+                "action": "register",
+                "client_id": self._client_id.hex(),
+                "client_secret": self.local_secret.hex(),
+                "auth": auth,
+            }, server.transport_key)
+            sock.sendall(reg_msg)
+            sock.shutdown(socket.SHUT_WR)
+            ack = b""
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                ack += chunk
+            if not ack:
+                raise ValueError("registration was not acknowledged")
+            response = _open_message(ack, server.transport_key)
+            if response.get("status") != "ok":
+                raise ValueError(
+                    "registration refused: %s"
+                    % (response.get("reason", "unknown"),))
+        finally:
+            sock.close()
 
     def _make_request_sig(self, fragment_id: int) -> bytes:
         data = struct.pack(">I", fragment_id) + self._client_id
@@ -257,36 +299,26 @@ class RemoteUnlockClient:
             return self._fallback(fragment_id)
 
         if self._host is not None and self._port is not None:
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(5.0)
-                sock.connect((self._host, self._port))
-                sig = self._make_request_sig(fragment_id)
-                req_msg = _seal_message({
-                    "action": "request_token",
-                    "fragment_id": fragment_id,
-                    "client_id": self._client_id.hex(),
-                    "signature": sig.hex(),
-                }, self._server.transport_key)
-                sock.sendall(req_msg)
-                sock.shutdown(socket.SHUT_WR)
-                response_data = b""
-                while True:
-                    chunk = sock.recv(4096)
-                    if not chunk:
-                        break
-                    response_data += chunk
-                sock.close()
-                if not response_data:
+            # A bounded retry around the single transport attempt. The
+            # previous version made ONE attempt with a 5 s timeout and fell
+            # back to None on any failure, which made the integration test
+            # flaky under load: the server's accept loop runs in a daemon
+            # thread with a 1 s socket timeout and a listen(5) backlog, so
+            # when the machine is saturated (the release gate runs ten shards
+            # concurrently, one collecting 25,059 tests) the accept thread can
+            # be scheduled late enough that the connection is refused. That is
+            # a real robustness bug in a retryable operation, not a test
+            # artefact: a client that gives up after one scheduling hiccup and
+            # silently returns no key is worse than one that retries.
+            for _attempt in range(3):
+                try:
+                    return self._request_unlock_once(fragment_id)
+                except (socket.error, OSError, json.JSONDecodeError,
+                        ValueError, InvalidTag):
+                    if _attempt < 2:
+                        time.sleep(0.05 * (2 ** _attempt))
+                        continue
                     return self._fallback(fragment_id)
-                response = _open_message(response_data, self._server.transport_key)
-                if response.get("status") == "ok" and "token" in response:
-                    token = UnlockToken.from_dict(response["token"])
-                    self._cached_tokens[fragment_id] = token
-                    return token
-                return self._fallback(fragment_id)
-            except (socket.error, OSError, json.JSONDecodeError, ValueError, InvalidTag):
-                return self._fallback(fragment_id)
 
         if self._server is not None:
             sig = self._make_request_sig(fragment_id)
@@ -300,6 +332,36 @@ class RemoteUnlockClient:
             self._cached_tokens[fragment_id] = token
             return token
 
+        return self._fallback(fragment_id)
+
+    def _request_unlock_once(self, fragment_id: int) -> Optional[UnlockToken]:
+        """One transport attempt. Raises on a transport or decode failure."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5.0)
+        sock.connect((self._host, self._port))
+        sig = self._make_request_sig(fragment_id)
+        req_msg = _seal_message({
+            "action": "request_token",
+            "fragment_id": fragment_id,
+            "client_id": self._client_id.hex(),
+            "signature": sig.hex(),
+        }, self._server.transport_key)
+        sock.sendall(req_msg)
+        sock.shutdown(socket.SHUT_WR)
+        response_data = b""
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            response_data += chunk
+        sock.close()
+        if not response_data:
+            return self._fallback(fragment_id)
+        response = _open_message(response_data, self._server.transport_key)
+        if response.get("status") == "ok" and "token" in response:
+            token = UnlockToken.from_dict(response["token"])
+            self._cached_tokens[fragment_id] = token
+            return token
         return self._fallback(fragment_id)
 
     def _fallback(self, fragment_id: int) -> Optional[UnlockToken]:
