@@ -305,18 +305,43 @@ class DistributedWatermark:
             processes.append(p)
             queues.append(q)
         collected = []
-        for q in queues:
-            try:
-                share_data = q.get(timeout=5)
+        # Collect with a longer per-queue budget and a retry, rather than one
+        # 5 s wait followed by `except: pass`.
+        #
+        # That silent drop was a data-integrity bug, not just a slow test: a
+        # child process that had not been scheduled yet when the timeout fired
+        # meant its share was DISCARDED, extract_full then reconstructed from a
+        # short list and returned None, and the caller could not tell "the
+        # watermark is absent" from "a worker was slow". Under load -- forty
+        # concurrent test processes each forking four children -- that happened
+        # roughly one run in twenty.
+        #
+        # A dropped share is now only tolerated if it happens for EVERY share
+        # (in which case there is genuinely nothing to reconstruct); a partial
+        # collection raises, because half a watermark set must never be
+        # silently treated as a whole one.
+        for idx, q in enumerate(queues):
+            share_data = None
+            for _attempt in range(4):
+                try:
+                    share_data = q.get(timeout=15)
+                    break
+                except Exception:
+                    if _attempt == 3:
+                        break
+            if share_data is not None:
                 collected.append(share_data)
-            except Exception:
-                pass
         for p in processes:
             if p.is_alive():
                 p.terminate()
             p.join(timeout=1)
         if not collected:
             return None
+        if len(collected) != len(queues):
+            raise RuntimeError(
+                "extract_multiprocess lost %d of %d shares; refusing to "
+                "reconstruct a watermark from an incomplete share set"
+                % (len(queues) - len(collected), len(queues)))
         return self.extract_full(collected)
 
 
