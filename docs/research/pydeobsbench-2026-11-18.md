@@ -3259,3 +3259,140 @@ seeds, nonces and ephemeral keys, so same-tree builds are semantically
 equivalent but not byte-identical), and the digest-verification chain is
 implemented while the production environment still requires
 administrator-side confirmation.
+
+
+### 6f. Replay/rollback attack matrix against the real artefact
+
+The register's "actual release-artefact attack tests" row, measured on the
+fresh v2 artefact (NX-V2M-001, pack v=2, 4 sections, signed=True):
+
+| attack | result |
+|---|---|
+| replay a previously valid section into another slot | **rejected** (rc 1) |
+| version metadata modified (downgrade 2 -> 1) | **rejected** (rc 1) |
+| section content replaced, OLD authentication data retained | **rejected** (rc 1) |
+| truncated section record | **rejected** (rc 1) |
+| duplicate section indices | **rejected** (rc 1) |
+| control: unmodified artefact | runs (rc 0) |
+
+The v2 tag binding is what rejects the first three: the tag covers version
+|| index || total || nonce || plaintext, so replaying a section, downgrading
+the version, or swapping content under old authentication data all fail the
+MAC before any plaintext is released. The report is preserved as
+`replay_rollback_report.json` beside the artefact.
+
+The rollback high-water mark keeps its documented limit (a determined local
+attacker deletes the mark file); replay-after-key-rotation follows the pin
+replacement procedure (old artefacts verify only against the old pin).
+
+
+### 6f.1 Malformed-input fuzz suite: two real defects found and fixed
+
+The sixth-pass parser suite (tests/test_parser_fuzz.py) fed systematically
+malformed framing into the security-sensitive parsers — 16 structural
+malformations of the pack (count/total/sections/index/nonce/data/hint/state
+fields, wrong types, wrong lengths, wrong signs), non-JSON and wrong-schema
+manifests, oversized declared hashes, truncated binary headers, and binary
+garbage into the join — with the goal stated as proving that malformed
+input cannot produce an UNINTENDED ACCEPTANCE. Two real defects were found:
+
+1. **`verify_manifest` crashed on the JSON literal `null`.** `null` parses
+   successfully to None, passed the exception check, and then died with an
+   uncaught AttributeError on `.get` — malformed input producing a crash
+   instead of a structured refusal. Fixed: any non-object manifest document
+   is refused with a reason.
+
+2. **`stream_join` accepted a corrupted `state` field.** The in-process
+   join enforced count/key-hint/index/tags/total but never the §1
+   declared-structure digest — only the EMITTED loader checked it, so the
+   two verification paths had silently diverged. Fixed: the in-process
+   join now enforces the same state digest. The fuzz suite also drove out
+   two uncaught exceptions (OverflowError on negative count/total/index in
+   the derivation) which are now structured ValueErrors, with bounds
+   validated BEFORE the state digest because the digest itself would
+   overflow on the malformed values.
+
+Also found and fixed en route: the emitted moving/stream templates
+referenced `_declared_total` without defining it — the NameError was
+swallowed by their `except Exception` and EVERY pack silently failed to
+decrypt — caught by the moving-walker round-trip test rather than by a
+green suite, which is why the emitted-snippet tests exercise the real
+snippets and not a re-implementation.
+
+The fuzz suite is retained in the committed tree (tests/test_parser_fuzz.py)
+with the malformed-input matrix as regression fixtures; a future parser
+change that accepts malformed framing breaks the suite. The register's
+coverage-guided fuzzing (Atheris/honggfuzz against the binary parsers)
+remains the next engineering step beyond this structured matrix.
+
+
+## 6g. Sixth-pass register disposition, compatibility matrix, and the remaining documented procedures
+
+### Identity reconciliation and the sixth-pass register
+
+| register row | disposition |
+|---|---|
+| Final commit/evidence identity reconciliation | **CLOSED** — 1b7a07f's diff from 9ee68f4 touches only two .md files (verified: zero executable/test/workflow files); 9ee68f4 remains the code revision with the measured gate; 1b7a07f is the docs/evidence revision on top |
+| Actual protected production release | **administrator action** — the workflow chain and dry run are committed (release.yml); the protected-environment configuration and the live RC promotion are the operator steps |
+| Independent cryptographic review | **external** — with the review material now defined (§6h) |
+| Real artefact replay/rollback acceptance | **CLOSED** — the attack matrix measured on the real v2 artefact (§6f): replayed section, downgrade, old-auth replacement, truncation, duplicate indices — all rejected; control runs |
+| Windows strict shadow-stack testing | **external hardware/runtime** |
+| Full supported-platform compatibility matrix | **defined and documented** (§6g.1 below); per-combination measurement needs the cross-platform runners |
+| Independent payload semantic review | **external** |
+| Independent Mimosa baseline review | **external** |
+| Parser fuzzing and malformed-input testing | **CLOSED as the structured matrix** — 16-field malformed-input matrix + JSON/binary garbage rows, two real defects found and fixed; coverage-guided fuzzing remains the next step beyond it |
+| Authenticode and Apple Developer ID | **external** |
+| Build provenance expansion | **partially closed** — the manifest binds compiler/linker identities, toolchain versions, transforms, dependency-lock digest, source commit and the artefact digest; workflow/action identities are recorded in the CI logs; pack format version is the `v: 2` field |
+| Incident-response and key-compromise exercises | **procedures documented** (§5.6 items 5/8: pin replacement as revocation, old-pin clients as the limitation, artefact-side auditing via the manifest) — live exercises are operational |
+
+### 6g.1 The supported compatibility matrix, explicitly
+
+| dimension | supported (measured where marked) |
+|---|---|
+| OS | Windows (cl.exe 14.52 farm build + load measured), Linux (gcc local + farm, load + run measured), macOS (Apple clang farm build + load measured) |
+| architectures | x86-64 (all three platforms measured); ARM64 macOS builds and loads via the farm runners (macos-latest is arm64) but runtime loading was measured on the runner only |
+| CPython | 3.10–3.14 tested in CI for the suite; the native blobs measured on 3.11 (farm) and the local 3.13 |
+| Python ABI | the Cython blob is version-specific by design (cp311 extensions); an ABI mismatch is a LOAD failure that fails closed, never a silent fallback |
+| Linux environments | glibc measured; musl (Alpine) is NOT claimed — the blobs link glibc |
+| compilers | gcc 14, clang-cl/lld-link 19, MSVC cl/link 14.52 measured; older toolchains are not claimed |
+| runtime policy | CFG verified via the debug-dir record; CET compat per artefact measured; Linux dumpability measured live |
+
+**Unsupported combinations fail with an explicit diagnostic, not a silent
+fallback** — that property is pinned by the failure-modes tests (missing
+blob -> refusal, wrong pin -> refusal, ABI mismatch -> ImportError that the
+loader reports rather than hides).
+
+### 6g.2 The reverse-engineering evaluation protocol, ready for the external analyst
+
+1. Hand the analyst the released artefact ONLY (no source, no build tree).
+2. Fixed budget: 40 analyst-hours, tools unrestricted, process documented.
+3. Objectives: recover (a) the payload's entry function, (b) one numeric
+   algorithm, (c) the string surface, (d) the integrity-check semantics.
+4. Record: tools, wall time, recovered functions/strings/algorithms,
+   behavioural equivalence against the unobfuscated control.
+5. Repeat the protocol against the unobfuscated control for the baseline.
+6. Preserve the analyst's raw notes as the evidence.
+
+The Ghidra exports (§5u), arithmetic-site inventory (§6d) and gdb
+observations (§6c) are the preparation material for this protocol.
+
+### 6g.3 Why the stdlib-only loader rules out the AEAD alternatives
+
+The shipped loader runs on customer machines where the only guaranteed
+crypto is the Python standard library. AES-GCM and ChaCha20-Poly1305 both
+require the `cryptography` wheel; a loader that imports it changes the
+deployment contract from "stdlib only, no install" to "install a native
+dependency before the artefact runs", which is a product decision, not a
+code decision. The small-audited-native-dependency alternative (vendoring a
+minimal, audited AEAD in C) is operationally acceptable in principle but
+introduces a C crypto surface that would itself need the independent
+review this register defers — so the domain-separated HMAC construction
+with the v2 hardening is the measured interim, and the constraint is
+documented rather than hidden.
+
+### 6g.4 Wording adopted
+
+Independently generated artefacts are described as **intended to be
+functionally equivalent** until equivalence is measured across independent
+builds — the phrasing is in MAXIMUM_SECURITY §5.6 item 3's neighbourhood
+(reproducible-build distinction) and this log.

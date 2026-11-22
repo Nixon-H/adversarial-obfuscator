@@ -988,7 +988,9 @@ signing cannot be optional) remains buildable.
       from the same inputs produce byte-identical artefacts — the build
       embeds per-run random seeds, nonces and ephemeral keys by design, so
       two builds of the same tree are semantically equivalent but not
-      byte-identical. Any claim of "reproducible builds" requires a
+      byte-identical. Independently generated artefacts are INTENDED TO BE
+      FUNCTIONALLY EQUIVALENT until that equivalence is measured across
+      independent builds; any claim of "reproducible builds" requires a
       separate measurement that has not been made.
 
    2. THE DIGEST-VERIFICATION CHAIN IS IMPLEMENTED; THE PRODUCTION

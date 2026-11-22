@@ -220,7 +220,38 @@ def stream_join(pack: dict, key: bytes) -> bytearray:
     returned buffer after use.
     """
     sections = pack["sections"]
-    if len(sections) != pack["count"]:
+    # FRAMING BOUNDS FIRST (malformed-input fuzz finding): a negative or
+    # non-integer count/total crashed the state digest with an uncaught
+    # OverflowError instead of a structured refusal. Bounds precede every
+    # other check.
+    try:
+        _declared_count = int(pack["count"])
+        _declared_total = int(pack["total"])
+        _declared_count.to_bytes(4, "big")
+        _declared_total.to_bytes(8, "big")
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("section pack framing values are not sane lengths")
+    if _declared_count < 0 or _declared_total < 0:
+        raise ValueError("section pack framing values must be non-negative")
+    # SECTION INDEX BOUNDS precede the state digest too: pack_state.state
+    # digests each index as a 4-byte unsigned value, so a negative index
+    # crashed it with an uncaught OverflowError instead of refusing.
+    for _sec in sections:
+        try:
+            _si = int(_sec["i"])
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("section index is missing or not an integer")
+        if _si < 0 or _si >= _declared_count:
+            raise ValueError("section index out of range")
+    # RUNTIME STATE VALIDATION (§1) — the in-process join must enforce the
+    # same declared-structure digest the loader enforces. Found by the
+    # malformed-input fuzz suite: a corrupted `state` field was ACCEPTED
+    # here because only the emitted loader checked it.
+    from obfuscator.pack_state import state_digest as _state_digest
+    if pack.get("state") != _state_digest(sections, _declared_count,
+                                          _declared_total):
+        raise ValueError("section pack state invalid")
+    if len(sections) != _declared_count:
         raise ValueError("section count mismatch")
     expect_hint = hashlib.sha256(bytes(key)).hexdigest()[:16]
     if expect_hint != pack.get("key_hint"):
@@ -233,12 +264,18 @@ def stream_join(pack: dict, key: bytes) -> bytearray:
     v2 = pack.get("v") == SECTION_PACK_VERSION
     total_declared = int(pack["total"])
     for sec in ordered:
+        # PER-SECTION INDEX BOUNDS (malformed-input fuzz finding): a
+        # negative or oversized index crashed the derivation with an
+        # uncaught OverflowError instead of a structured refusal.
+        sec_index = int(sec["i"])
+        if sec_index < 0 or sec_index >= len(ordered):
+            raise ValueError("section index out of range")
         nonce = bytes.fromhex(sec["nonce"])
         enc = bytes.fromhex(sec["data"])
         if v2 and per_section:
             # v2: role-separated keys and a MAC bound to index/total/nonce.
-            skey, mkey = _section_keys_v2(bytes(key), int(sec["i"]), nonce)
-            _ctx = _mac_context_v2(int(sec["i"]), total_declared, nonce)
+            skey, mkey = _section_keys_v2(bytes(key), sec_index, nonce)
+            _ctx = _mac_context_v2(sec_index, total_declared, nonce)
         elif per_section:
             # Legacy v1 path: packs built before the scheme change stay
             # loadable. The v1 MAC is hmac(skey + nonce, plaintext) -- the
