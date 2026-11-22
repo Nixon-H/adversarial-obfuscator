@@ -3755,7 +3755,6 @@ Two runs are relevant:
 | `rc-gate-20261122T153655-406189` | `45f6541` | 10 | 9 rc=0, shard 5 FAILED (3 tests) — **my own defect** |
 | `rc-gate-20261122T162104-476578` | `d0750b5` | 10 | 9 rc=0, shard 7 FAILED (1 test) — a real race |
 | `rc-gate-20261122T171336-572239` | `a0ea66a` | 10 | **10/10 rc=0** |
-
 **Failure 1 — the generated facade (my defect, caught by the gate).**
 Adding `checked_url` to `obfuscator/core/pipeline.py` put the generated
 `obfuscator/core/__init__.py` out of date. Three tests assert that the facade
@@ -3837,5 +3836,106 @@ And one caveat on the aggregate: 30,295 is the count for THIS tree, which now
 includes `tests/test_fuzz_harness.py` (6 tests) and
 `tests/test_reproducible_build.py` (4 tests). The earlier 29,938 remains in
 the record as belonging to its own shard composition; see 6e.1.
+
+## 6k. Ninth pass: the acceptance matrix was YAML, and the fingerprint was not signed
+
+Two register rows looked "in progress" and one of them turned out to have
+never been executed at all.
+
+### 6k.1 The release acceptance matrix existed only inside a workflow
+
+`.github/workflows/release.yml` carries a substantial acceptance matrix as an
+inline Python heredoc: build a signed candidate, then probe that a correct
+pin accepts while a missing pin, wrong pin, stripped provenance signature and
+modified artifact are all refused. It is good work, and it had two problems:
+
+* it only ever ran on GitHub. The derived shard list is
+  `tests/**/*.py`, so no local gate run has ever executed it — the release
+  path's own logic was outside the gate that is supposed to prove it;
+* the probe payload's docstring, and
+  `.mimosa/security-policy.json`'s audited-exception entry, both cite
+  `tests/test_release_acceptance.py`. **That file has never existed in this
+  repository** (`git log --all -- tests/test_release_acceptance.py` returns
+  nothing). Two records pointed at an artefact that was not there.
+
+Fixed by writing the module for real: `tests/test_release_acceptance.py`
+(6 tests), in the derived shard set, so the gate runs it on every invocation.
+It builds through the project's own pipeline and attacks THOSE bytes, rather
+than replaying the YAML against fixtures.
+
+### 6k.2 DEFECT: `signature.key_fingerprint` was outside the signature
+
+Found while writing the incident-response runbook, because §0 triage depends
+on the claim being true. `sign_manifest` computed its signed body as
+
+```python
+body = {k: v for k, v in manifest.items()
+        if k not in ("signature", "signed")}
+```
+
+and stored the fingerprint at `signature.key_fingerprint`. The whole
+`signature` object is excluded, so the fingerprint was **not covered by the
+signature** — while the docstring said it was ("covered by the signature, so
+it cannot be edited without breaking the signature it identifies").
+
+Measured before the fix:
+
+```
+expected fp: 830051885477bb61
+recorded fp: 830051885477bb61      <- correct
+verify ok: True
+edit signature.key_fingerprint -> "0000000000000000"
+verify after fp edit: True         <- STILL ACCEPTED
+```
+
+That is not a documentation nit. The fingerprint is the single field
+`docs/security/INCIDENT_RESPONSE.md` §0 uses to answer "which artefacts did
+the compromised key sign?". An attacker who can write a manifest could
+re-attribute an artefact signed by a compromised key to a clean one and
+escape the affected set entirely — inverting the one query the field exists
+to serve.
+
+Fixed by binding it at TOP LEVEL as `signed_key_fingerprint`, set BEFORE
+signing so it is inside the payload, with the nested copy retained for
+existing readers, and `verify_manifest` now refuses a manifest whose two
+copies disagree. Measured after:
+
+```
+verify clean:                                   True
+edit nested signature.key_fingerprint:          False  (fingerprint mismatch)
+edit top-level signed_key_fingerprint:          False  (signature invalid)
+```
+
+Both tampering directions are pinned as a regression test:
+`test_the_signed_fingerprint_cannot_be_re_attributed`.
+
+### 6k.3 The incident-response row is now a runbook with executable checks
+
+The register's P2 row asks for operational procedures for six scenarios.
+`docs/security/INCIDENT_RESPONSE.md` states each one, marks the human steps
+`[operator]` rather than simulating them, and — because a procedure document
+rots — `tests/test_incident_response.py` (13 tests) enforces every step that
+can be checked in code:
+
+| runbook section | enforced by |
+|---|---|
+| §0 triage from the artefact alone | fingerprint is signed and matches the key |
+| §1 key compromise / revocation | retired key refused under new pin; **and the offline limit asserted as a measurement** |
+| §2 emergency pin replacement | missing pin refuses under release policy; explicit key cannot override the pin |
+| §3 manifest-key rotation | old manifests stop verifying under the new pin |
+| §4 artefact retirement | lowering `protection_level` breaks the signature; forged mark reads 0; downgrade raises |
+| §5 dependency discovery | lock digest distinguishes dependency sets |
+| §6 revocation mechanism | asserts NO network call or revocation-list exists in the verification path |
+
+The last one is deliberate: the document claims revocation is pin
+replacement because verification is offline. If someone later adds a network
+fetch to `build_manifest`, the document becomes false, so a test fails.
+
+A final test asserts the runbook still names the variables and fields the
+implementation depends on, and still carries its "NOT covered here" section
+naming Authenticode, Apple Developer ID and the missing independent
+cryptographic review — so the document cannot quietly start implying coverage
+it does not have.
+
 
 
