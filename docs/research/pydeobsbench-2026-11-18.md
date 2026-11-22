@@ -3396,3 +3396,54 @@ Independently generated artefacts are described as **intended to be
 functionally equivalent** until equivalence is measured across independent
 builds — the phrasing is in MAXIMUM_SECURITY §5.6 item 3's neighbourhood
 (reproducible-build distinction) and this log.
+
+
+## 6h. The gate itself had a coverage hole, and the aggregate count proved it
+
+The fifth-pass instruction was "do not carry forward the previous test count
+unless the new gate report independently confirms it". Computing the
+sixth-pass aggregate from its own shard logs produced **29,938 passed / 7
+skipped — identical to the 9ee68f4 run**, which cannot be right: pass six
+added `tests/test_parser_fuzz.py` with ~20 cases.
+
+The count was the tell. The gate's shard lists were STATIC FILES, and they
+had silently drifted from the tree. A diff of the shard lists against
+`tests/**` found **41 unassigned files**, of which four were suites added
+in passes one to six:
+
+    tests/test_provenance_pin.py        (the release-mode pin enforcement)
+    tests/test_manifest_native_blob.py  (the 7-row pin-precedence matrix)
+    tests/test_native_ascii_ids.py      (the native ASCII identifier contract)
+    tests/test_parser_fuzz.py           (the malformed-input regression suite)
+
+plus 33 files under `tests/advanced_protection/` that had NEVER been in a
+shard. So every "10/10 shards passed" result since those files were added
+was true about the files it ran and silent about the files it did not:
+including the very tests that pin the trust-boundary fix and the fuzz
+findings. That is the same class of failure the register keeps naming — a
+green result that does not cover what it appears to cover.
+
+**Fix: coverage is derived, not hard-coded.** `release_gate.sh` now
+enumerates `tests/**/*.py`, excludes non-suite material (fixtures,
+`test_data` transform debris, `*.decoy`/`*.attention_poison` artefacts),
+round-robins the 440 suite files over ten shards, and **refuses to run** if
+any suite file is unassigned or duplicated. The record now carries
+`shard_files_total` so a later shrink is visible.
+
+**Re-measured on the same commit and tree** (eb1f1e2 / 3925385, dirty=0,
+run rc-gate-20261122T113132-16361):
+
+| metric | before the fix | after the fix |
+|---|---|---|
+| suite files in the gate | 404 (with stale entries) | **440** (coverage asserted) |
+| tests passed | 29,938 | **30,263** |
+| tests skipped | 7 | **9** |
+| collected | 29,945 | **30,272** |
+| shards | 10/10 rc=0 | 10/10 rc=0, identity_stable |
+
+The 327-test difference is the previously invisible material: the four
+pass-one-to-six suites plus the 33 advanced-protection files. The earlier
+figures (29,928 for the pre-pass-six composition, 29,938 for the drifted
+composition) are retained as historical records of what those gates
+actually covered — they were never wrong about the files they ran, only
+about the files they omitted.
