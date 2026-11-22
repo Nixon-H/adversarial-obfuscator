@@ -3985,6 +3985,96 @@ does not pretend otherwise:
 Each is named in `docs/security/INCIDENT_RESPONSE.md` under "NOT covered
 here", so the documentation and the register agree about what is unproven.
 
+## 6l. Tenth pass: the cryptographic review is commissioned, not performed
+
+The register's highest-priority external row is the independent cryptographic
+review of the pack-v2 construction. A maintainer cannot close it — an
+independent review requires a reviewer. What CAN be closed is the
+**commissioning**: a package complete enough that a cryptographer can start
+without interviewing anyone, and honest enough that the review is not spent
+rediscovering weaknesses we already know about.
+
+`docs/security/CRYPTO_REVIEW_PACKAGE.md` is that package. It states in its
+first paragraph that **the review has not been performed**, and it is
+structured so a reviewer can attack it:
+
+* the full construction written out precisely (§3): domain-separated key
+  derivation, the 28-byte authenticated context, the seal and open equations,
+  nonce generation, and the separate unkeyed state digest;
+* the threat model, including what is explicitly NOT claimed (§1) — side
+  channels, post-reassembly memory, and key acquisition by other means are
+  out of scope, stated rather than implied;
+* **seven weaknesses named by the maintainers** (§5) so the reviewer starts
+  from our own list rather than paying to rediscover it;
+* eight specific questions (§6), including the one that matters most: whether
+  MAC-then-encrypt over a SHA-256 counter-mode keystream is acceptable for
+  this threat model, or whether it must become a standardised AEAD — and if
+  so, whether a small audited native dependency is operationally acceptable
+  given the loader must run without a compiler;
+* reproduction commands (§8) for every number in it.
+
+### 6l.1 The weaknesses, named plainly
+
+The package's §5 is the part that makes it worth sending. In summary:
+
+1. **MAC-then-encrypt, not an AEAD.** No reduction to a named security
+   notion. This is the single most important thing to review.
+2. **The stream cipher is bespoke** — SHA-256 in counter mode over
+   `key ‖ nonce ‖ ctr8`. "Reasonable looking" is not a security argument.
+3. **`key_hint` is an unkeyed oracle.** Measured: the pack carries
+   `SHA256(K)[:16]` in the clear, checked BEFORE the MACs. A reviewer should
+   assess whether that materially helps an offline attacker given the session
+   key is derived partly from licence/HWID material the holder may know.
+4. **No nonce-reuse protection at load.** Key derivation includes the index,
+   so cross-section reuse is harmless, but same-section reuse across two
+   packs under one key would XOR two keystreams. Random nonces per build make
+   this improbable, not impossible.
+5. **Section length is implicit**, bound only indirectly via `total` and the
+   final join check.
+6. **`salt` is unkeyed and unverified** — used only in the state digest,
+   which is by design not a security boundary.
+7. **The v1 legacy path remains**, with a single key for both roles and no
+   metadata binding.
+
+### 6l.2 What was measured while writing it
+
+Three claims in the package were verified rather than asserted, because a
+review package that is wrong about its own code wastes the reviewer's time:
+
+* **downgrade resistance** — editing `v` from 2 to 1, or deleting it, makes
+  `stream_join` raise `section 0 integrity failure`. The version IS inside
+  the tag context. (Control: the unmodified pack joins to the right length,
+  so the refusal is about the edit.)
+* **verification precedes plaintext use** — in `stream_join` the
+  `joined.extend(part)` at line 80 is strictly after the `compare_digest` at
+  line 77, and the three emitted loader templates have the same ordering. No
+  plaintext is accumulated or sunk before its section's tag verifies.
+* **every tag comparison is constant-time** — four sites, all
+  `hmac.compare_digest`, and no bare `==` comparison of a tag anywhere.
+
+`tests/test_crypto_review_package.py` (12 tests) pins the package to the code:
+the documented domains are the implemented ones, the documented context is
+the implemented 28-byte layout, the role-separated keys really are
+independent and really do depend on index and nonce, the composition ordering
+claim holds, `key_hint` really is `SHA256(K)[:16]`, and the package still
+carries its NOT PERFORMED banner, its non-claims section and its eight
+questions. If the construction changes shape, the package stops matching and
+a test fails — the right outcome, because a review package describing code
+that no longer exists would attach a reviewer's findings to the wrong
+construction.
+
+Explicitly: **no test in that module asserts cryptographic soundness.** That
+is the reviewer's judgement. A green suite there must never be read as one.
+
+### 6l.3 Status of the row
+
+The register row stays OPEN. What changed is that it is now *commissionable*:
+a named reviewer can be handed one document that specifies the construction,
+lists the known weaknesses, asks the right questions, and lets them reproduce
+every measurement. When findings come back, they join this register alongside
+every other measured item rather than arriving as an unstructured report.
+
+
 
 
 
