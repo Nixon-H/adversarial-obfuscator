@@ -3512,15 +3512,22 @@ only counting crashes.
 
 Measured on this host: Atheris 3.0.0 installed, 300 to 800 runs per target
 across all six targets, zero crashes and zero acceptance findings. The
-honest limitation: libFuzzer reports that no interesting inputs were found
-and that the symbolize helper is unavailable, on both CPython 3.13 and a
-purpose-built 3.11 environment, because the sanitizer coverage runtime is
-absent from these interpreter builds. The campaign is therefore
-mutation-driven rather than truly coverage-guided, and that is an
-environment limit recorded rather than glossed. The structured
-malformed-input matrix in tests/test_parser_fuzz.py, 16 field-level rows
-plus binary and JSON garbage, remains the coverage-independent backstop,
-and it is what found the two defects recorded in 6f.1.
+campaign reported no interesting inputs and no symbolize helper, on both
+CPython 3.13 and a purpose-built 3.11 environment, and this pass attributed
+that to the sanitizer coverage runtime being absent from the interpreter.
+
+**That attribution was wrong — corrected in 6j.3.** The real causes were in
+the harness: a `REPO` one directory short, parser imports inside the fuzz
+body (after instrumentation had finished), no seed corpus, and an oracle that
+rejected legitimate packs. A re-run with Atheris 3.1.0 and clang 19's
+libFuzzer runtime after those fixes reached `cov: 61` on pack and `cov: 64` on
+PE across 34.5 million executions, growing the corpus from 1 entry to 24 and
+70 respectively. The lesson kept below is the one worth keeping: a `cov: 1`
+result says nothing about the target until the harness is proven able to
+observe coverage at all. The structured malformed-input matrix in
+tests/test_parser_fuzz.py, 16 field-level rows plus binary and JSON garbage,
+remains the coverage-independent backstop, and it is what found the two
+defects recorded in 6f.1.
 
 ### 6i.6 Section 4: compatibility matrix, the locally reachable row measured
 
@@ -3539,4 +3546,199 @@ for the combination this host can actually exercise:
 The cross-platform rows for Windows MSVC and macOS arm64 are recorded from
 the farm runs in 5x and 6e rather than re-measured here, and the musl and
 older-ABI rows remain explicitly unsupported and unclaimed.
+
+## 6j. Eighth pass: all three §4 rows measured, and the P2 reproducibility question answered in two layers
+
+The completion verifier left three rows open, and they turned out to be two
+different kinds of work: the §4 matrix needed the Windows and macOS rows
+filled in properly, and P2 needed an experiment rather than more prose.
+
+### 6j.1 The Windows and macOS rows, measured from the shipped blobs
+
+The per-runner attestation JSONs from the farm were **not preserved** — only
+the artefacts themselves survive at `/home/nixon/nx_cfg/dl4` and `dl5`. So
+the six properties were measured directly from the binaries with the
+project's own `native_harden` readers, `readelf`, and a hand-rolled FAT
+Mach-O header parse (the reader reports mitigation flags, not the fat
+container's per-slice headers).
+
+**Windows — `payload.pyd`, 126,976 B, valid PE.** This is the strongest of
+the three rows and it is strongest for a reason worth stating: the
+mitigations are not declarations in a manifest, they are present in the
+image and the project's parser agrees with llvm-readobj bit for bit.
+
+* CFG is **complete**: `GuardFlags 0x10017500` carries
+  `IMAGE_GUARD_CF_INSTRUMENTED` (0x100) + `CF_FUNCTION_TABLE_PRESENT`
+  (0x400) + `CF_EXPORT_SUPPRESSION_INFO_PRESENT` (0x800) +
+  `CF_LONGJUMP_TABLE_PRESENT` (0x10000). A populated function table means
+  the guard set is real, not a linker flag with nothing behind it.
+* CET compatibility is present in the **Debug Directory type-20 record**
+  (`IMAGE_DEBUG_TYPE_EX_DLLCHARACTERISTICS`, value `0x1` =
+  `IMAGE_DLLCHARACTERISTICS_EX_CET_COMPAT`). This is the §6b correction
+  holding up under a second, independent read: the bit is *not* the
+  optional-header 0x8000 (that is `TERMINAL_SERVER_AWARE`), and a check
+  against the wrong field would have produced a false "CET present" on a
+  binary that lacked it.
+* ASLR + DEP + HIGH_ENTROPY_VA all set.
+* Loader initialisation and payload execution: the farm driver imports the
+  blob on the producing runner and records `smoke_test.loaded: true` (§5x).
+
+**macOS — `payload.dylib`, 350,928 B, valid FAT Mach-O with two slices
+(x86_64 + arm64).** This is the weakest row, and the measurement made it
+weaker than the prose had implied:
+
+* `MH_PIE` (0x200000) is **CLEAR** on both slices. `-pie` is not accepted
+  on a `-bundle` (`filetype 8`), which is what a `.dylib` built for CPython
+  actually is — the same class of error as passing `-pie` to a `-shared`
+  Linux link. A loadable bundle is relocated by dyld regardless, so the
+  absence is not a runtime hole, but it is also not "PIE" and the matrix
+  must not claim it.
+* `MH_NO_HEAP_EXEC` (0x1000000) is **CLEAR**: the image does not request
+  hardware NX for the heap.
+* `LC_CODE_SIGNATURE` (0x1d) is present on **arm64 only** — the linker's
+  ad-hoc signature. Neither slice carries a Developer ID signature, so
+  Hardened Runtime and notarisation are absent. That is the external
+  dependency already on the frozen list, now measured rather than assumed.
+
+**Linux — `payload.so`, 1,052,904 B, ELF64 `DYN`.** `GNU_STACK` is RW (NX),
+`GNU_RELRO` is present, symbols are stripped — and **BIND_NOW is absent**.
+`-Wl,-z,now` cannot be used because setuptools' `-Bsymbolic-functions` turns
+it into a link failure (measured in §5x). Partial RELRO instead of full is a
+documented trade, and it is recorded rather than glossed.
+
+The unsupported rows are stated as such in the matrix instead of omitted:
+musl/Alpine (blobs link glibc), a mismatched CPython ABI (the suffix encodes
+it; the `native-only` profile has no fallback by construction), mingw (loads,
+but CFG is `unavailable` — GNU ld has no such option), and older toolchains
+and ARM64 Windows/Linux, which are **not measured** and therefore not
+claimed.
+
+### 6j.2 P2: reproducibility is two different answers, and both were measured
+
+The register's assessment said "Reproducible builds — Not yet demonstrated".
+That is now measured, and the single-verdict framing was wrong in both
+directions. The build has two layers:
+
+**Layer 1 — the transform layer IS reproducible.** Measured on this host,
+same tree, `build_pipeline(SRC, seed=424242)` twice:
+
+```
+run 1  sha256 b51a2b129103ddd8...  7,528 B
+run 2  sha256 b51a2b129103ddd8...  7,528 B
+identical: YES
+```
+
+`seed=999999` produces different output, so the seed is load-bearing rather
+than passing by accident. `NX_BUILD_SEED` reaches this layer by seeding
+`random` and patching `secrets` for the duration of the transform, restored
+in a `finally`.
+
+**Layer 2 — the shipped artefact is NOT byte-identical, and should not be.**
+Two full `build` runs at `NX_BUILD_SEED=424242`:
+
+```
+run 1  sha256 f58d0e2bf0b03277...  267,811 B
+run 2  sha256 de68859c31144560...  267,818 B
+identical: NO
+```
+
+The 7-byte delta is **attributed, not hand-waved**: the emitted loader
+contains
+
+```python
+_nx_name = "%s%s%s" % (prefix, _nx_secrets.token_hex(8), suffix)
+_nx_now  = _nx_time.time()
+_tb_now  = float(_tb_time.time())
+```
+
+— a per-build helper identifier and a clock read drawn at *runtime*, after
+the seeded transform has already finished and restored the global patch.
+`NX_BUILD_SEED` does not cover them, and covering them would be a security
+regression: a loader whose identifiers were predictable from a build seed
+would defeat the reason they are minted. `NIXON_REPRODUCIBLE=1` seeds the
+**farm driver's** C-transform seed only.
+
+Both layers are pinned in `tests/test_reproducible_build.py` (4 tests), which
+also asserts a subtle property that a naive reproducibility test would miss:
+a seeded transform must leave `secrets.token_bytes` **unpatched** afterwards.
+A leaked patch would make every later nonce, key and challenge drawn in the
+process predictable — the failure mode `_patch_secrets` documents at length.
+
+What remains open is a build mode that also pins the loader's runtime draws.
+That is recorded as a **design decision with a named security cost** rather
+than implemented silently, because the cost is real.
+
+### 6j.3 §5: the coverage limit was a HARNESS defect, not an environment limit
+
+The seventh pass recorded §5 as partial: "libFuzzer reports the sanitizer
+coverage runtime is absent from these interpreter builds, so the campaign is
+mutation-driven rather than truly coverage-guided". That was wrong, and the
+record has to say so plainly because it was a **self-serving explanation of a
+bug in my own harness**.
+
+Three defects, all in `scripts/fuzz/nx_fuzz.py`, all found by re-running the
+campaign after Atheris 3.1.0 and clang 19's `libclang_rt.fuzzer-x86_64.a`
+turned out to be present on this host:
+
+1. **`REPO` was one directory short.** `os.path.dirname` was applied twice
+   to `scripts/fuzz/nx_fuzz.py`, yielding `.../scripts` instead of the
+   repository root, so `sys.path` never contained the package. Every target
+   died with `ModuleNotFoundError: obfuscator` before fuzzing a byte -- and
+   libFuzzer reports that as `fuzz target exited`, which reads like a
+   finding. Fixed with a third `dirname` and a comment explaining why.
+2. **The parsers were imported inside the fuzz body,** i.e. after Atheris
+   had already finished instrumenting. The result is the diagnostic that was
+   mistaken for the environment limit:
+
+   ```
+   WARNING: no interesting inputs were found so far. Is the code instrumented for coverage?
+   #8534315  DONE  cov: 1 ft: 1 corp: 2/3b exec/s: 185528
+   ```
+
+   8.5 million executions, 46 seconds, **one** new unit and `cov: 1`. The
+   harness was fast and measuring nothing. Fixed by importing under
+   `atheris.instrument_imports()` in `_load_parsers()`, before `Setup`.
+3. **No seed corpus, and a wrong oracle.** With random bytes, `json.loads`
+   never succeeds, so neither the pack nor the state target could reach the
+   parser. And the pack oracle asserted `stream_join` *never* returns data --
+   which a legitimate pack does, so the first seed tripped it immediately
+   with `UNINTENDED ACCEPTANCE: stream_join returned data`. An oracle that
+   fires on correct behaviour is worse than none; it invites being loosened
+   until it detects nothing. Replaced with the real invariant: an acceptance
+   is legitimate only for a pack whose structure the builder actually
+   produced, and the returned length must equal the declared total.
+
+**Measured after the fixes** (`NX_FUZZ_SECONDS` per target, one run each):
+
+| target | execs | coverage | corpus | new units | findings |
+|---|---|---|---|---|---|
+| pack | 4,075,415 | cov 61 / ft 185 | 24 / 9,166 B | 614 | none |
+| manifest | 454,922 | cov 8 / ft 8 | 3 / 4 B | 6 | none |
+| elf | 9,163,257 | cov 15 / ft 22 | 4 / 28 B | 9 | none |
+| pe | 2,960,101 | cov 64 / ft 163 | 70 / 29 KB | 547 | none |
+| macho | 7,652,368 | cov 27 / ft 52 | 17 / 1,764 B | 79 | none |
+| state | 10,173,000 | cov 5 / ft 23 | 10 / 1,428 B | 670 | none |
+| **total** | **34,479,063** | — | — | **1,925** | **zero** |
+
+The campaign is now genuinely coverage-guided: libFuzzer grows the corpus
+(pack 1 → 24 entries, pe 1 → 70), prints a recommended dictionary of the
+16-byte structure tokens it learned, and `cov`/`ft` climb instead of sitting
+at 1. A `cov: 1` result is now recognisable as a harness failure rather than
+reported as an absence of coverage in the interpreter.
+
+What the seed corpus enables is the important part: mutations now land
+*inside* the JSON pack and *inside* the PE/Mach-O headers, which is where the
+v2 MAC context, the declared-structure digest and the CFG load-config check
+live. That is the register's actual ask — "not simply zero crashes ... prove
+that malformed input cannot produce an unintended acceptance or bypass" —
+and an oracle that can distinguish a legitimate pack from a mutated one is
+the mechanism that makes the claim testable.
+
+### 6j.4 The matrix is now a measured document, not a summary
+
+`docs/security/COMPATIBILITY_MATRIX.md` carries all six properties for all
+three shipped rows, the four unsupported rows with how each fails, and the
+two-layer reproducibility section. Every number in it came from a blob on
+this host or a farm run cited by its ID; none of it is restated from a
+register.
 

@@ -474,6 +474,91 @@ def swizzle_bytecode(data, key):
 #: a path is confined to its root.
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 
+#: Hosts that must never be the target of a server-side request. Loopback,
+#: private, link-local, CGNAT and the reserved/documentation ranges.
+_RESERVED_NETS = (
+    "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
+    "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24",
+    "192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24",
+    "224.0.0.0/4", "240.0.0.0/4", "255.255.255.255/32",
+    "::1/128", "fc00::/7", "fe80::/10", "ff00::/8",
+)
+
+
+def checked_url(url, allowed_hosts=None):
+    """Validate a server-side request URL. Returns the URL or raises.
+
+    The outbound calls in this module (block-explorer verification, the
+    Cloudflare deployer) build a URL from operator configuration. "Operator
+    configuration" is not the same as "trusted at request time": the value can
+    come from a config file, an environment variable or a wizard prompt, and a
+    redirect or a typo can point it at anything on the host's network. The
+    request is therefore validated where it is made, not where it is configured.
+
+    Rules, applied in this order:
+      1. scheme must be https (http is refused: every endpoint this module
+         talks to is TLS-only, so a plain-http URL is either a mistake or an
+         attempt to strip transport security);
+      2. a host must be present;
+      3. the host must resolve to no loopback/private/link-local/reserved
+         address, so ``http://127.0.0.1:8080`` and ``http://[::1]/`` and
+         ``http://169.254.169.254/`` (cloud metadata) are all refused;
+      4. when ``allowed_hosts`` is given, the host must be one of them.
+
+    Literal IPs are checked directly; hostnames are resolved and EVERY
+    candidate address must pass, so a DNS entry with one public and one
+    private record cannot smuggle the private one through.
+    """
+    import ipaddress
+    import socket
+    import urllib.parse as _up
+
+    if not isinstance(url, str) or not url:
+        raise ValueError("URL must be a non-empty string")
+    parsed = _up.urlsplit(url)
+    if parsed.scheme != "https":
+        raise ValueError("refusing non-https URL: %r" % (parsed.scheme or "<none>",))
+    host = parsed.hostname
+    if not host:
+        raise ValueError("refusing URL with no host")
+    if allowed_hosts is not None and host not in allowed_hosts:
+        raise ValueError("host %r is not in the allowlist %r"
+                         % (host, tuple(sorted(allowed_hosts))))
+
+    def _bad(addr_text):
+        try:
+            addr = ipaddress.ip_address(addr_text)
+        except ValueError:
+            return False
+        if addr.is_loopback or addr.is_private or addr.is_link_local:
+            return True
+        if addr.is_reserved or addr.is_multicast or addr.is_unspecified:
+            return True
+        return any(addr in ipaddress.ip_network(n) for n in _RESERVED_NETS)
+
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        if _bad(str(literal)):
+            raise ValueError("refusing request to reserved address %s" % (host,))
+    else:
+        try:
+            infos = socket.getaddrinfo(host, parsed.port or 443,
+                                       proto=socket.IPPROTO_TCP)
+        except OSError as exc:
+            raise ValueError("cannot resolve %r: %s" % (host, exc))
+        if not infos:
+            raise ValueError("cannot resolve %r" % (host,))
+        for info in infos:
+            sockaddr = info[4]
+            if _bad(sockaddr[0]):
+                raise ValueError(
+                    "refusing request to %r: resolves to reserved address %s"
+                    % (host, sockaddr[0]))
+    return url
+
 
 def confined_path(root, name, allow_subdirs=False):
     """Return ``root/name``, refusing anything that escapes ``root``.
@@ -1357,6 +1442,14 @@ def verify_on_blockscout(explorer_url, contract_address, source_code, compiler_v
             'contractSourceCode': source_code
         }
         data = urllib.parse.urlencode(params).encode()
+        # Validate where the request is MADE, not where the URL was configured:
+        # explorer_url arrives from CLI flags, config files and the wizard, and
+        # "operator-supplied" is not the same as "safe to fetch at request time".
+        try:
+            api_url = checked_url(api_url)
+        except ValueError as _url_err:
+            print(f"    [!] Refusing explorer request: {_url_err}")
+            return False
         req = urllib.request.Request(api_url, data=data)
         resp = urllib.request.urlopen(req, timeout=30)
         try:
@@ -1501,6 +1594,16 @@ class CloudflareDeployer:
         for attempt in range(3):
             try:
                 url = f"{self.base_url}/accounts/{self.account_id}/{endpoint}"
+                # The Cloudflare deployer's base_url is a class constant today,
+                # but account_id and endpoint are interpolated into the path and
+                # the validator is what keeps that safe if either ever becomes
+                # caller-supplied. Host allowlist is exact: this client talks to
+                # one host and nothing else.
+                try:
+                    checked_url(url, allowed_hosts=("api.cloudflare.com",))
+                except ValueError as _url_err:
+                    print(f" [!] Refusing Cloudflare request: {_url_err}")
+                    return None
                 body = json.dumps(data).encode() if data else None
                 req = urllib.request.Request(url, data=body, headers=self.headers, method=method)
                 with urllib.request.urlopen(req, timeout=15, encoding='utf-8') as r:
@@ -1532,6 +1635,11 @@ class CloudflareDeployer:
         with UI.Task("License Auth", f"Authorizing {hwid_hash[:8]}...") as t:
             import urllib.request
             url = f"{self.base_url}/accounts/{self.account_id}/storage/kv/namespaces/{kv_id}/values/{hwid_hash}"
+            try:
+                checked_url(url, allowed_hosts=("api.cloudflare.com",))
+            except ValueError as _url_err:
+                t.fail(str(_url_err))
+                return False
             req = urllib.request.Request(url, data=encrypted_bytecode.encode() if isinstance(encrypted_bytecode, str) else encrypted_bytecode, headers={"Authorization": f"Bearer {self.api_token}", "Content-Type": "text/plain"}, method='PUT')
             try:
                 urllib.request.urlopen(req, timeout=10)
@@ -1617,6 +1725,10 @@ export default {
         boundary=f"----WebKitFormBoundary{secrets.token_hex(8)}"
         body=f'--{boundary}\r\nContent-Disposition: form-data; name="metadata"\r\nContent-Type: application/json\r\n\r\n{json.dumps(metadata)}\r\n--{boundary}\r\nContent-Disposition: form-data; name="worker.js"; filename="worker.js"\r\nContent-Type: application/javascript+module\r\n\r\n{worker_js}\r\n--{boundary}--\r\n'
         url=f"{self.base_url}/accounts/{self.account_id}/workers/scripts/{self.worker_name}"
+        try:
+            checked_url(url, allowed_hosts=("api.cloudflare.com",))
+        except ValueError:
+            return None
         req=urllib.request.Request(url,data=body.encode(),method='PUT')
         req.add_header("Authorization",f"Bearer {self.api_token}")
         req.add_header("Content-Type",f"multipart/form-data; boundary={boundary}")
