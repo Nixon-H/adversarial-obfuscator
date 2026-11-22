@@ -80,7 +80,7 @@ def _source_files(source_path):
 
 def build_manifest(artefact_path, source_path=None, *, transforms=None,
                    native_blob_path=None, native_blobs=None, seed_classes=None,
-                   build_id=None, extra=None):
+                   build_id=None, extra=None, protection_level=None):
     """Assemble the manifest dict. Never raises on missing optional inputs.
 
     ``native_blobs`` is the alternative to ``native_blob_path`` for the normal
@@ -96,6 +96,12 @@ def build_manifest(artefact_path, source_path=None, *, transforms=None,
     produced this" from the artefact alone.
     """
     artefact_path = os.path.abspath(artefact_path)
+    if protection_level is None:
+        # Derive a monotonic level from what the build recorded. It only has
+        # to INCREASE across releases for rollback protection to mean
+        # something; the transform count is a real, per-build measure that
+        # rises as protections are added.
+        protection_level = int(len(transforms or ()))
     _nb_sha = ""
     _nb_bytes = 0
     _nb_platforms = {}
@@ -145,6 +151,13 @@ def build_manifest(artefact_path, source_path=None, *, transforms=None,
             "cython": _cython_version(),
         },
         "transforms": sorted(transforms or []),
+        # MONOTONIC PROTECTION LEVEL (review register, sixth/seventh pass).
+        # rollback.py's docstring says this is "recorded IN THE SIGNED BUILD
+        # MANIFEST", but NOTHING ever wrote it: the anti-rollback check could
+        # never fire because its input never existed. Recorded here, inside
+        # the signed body, so an attacker who lowers it changes what the
+        # signature covers.
+        "protection_level": protection_level,
         "native_blob": {
             # WHAT THE HASH COVERS (2026-11-20). These are hashes of the
             # DECODED, PLAINTEXT object image -- the ELF/Mach-O/PE as the
@@ -241,9 +254,20 @@ def sign_manifest(manifest, private_key=None):
     try:
         signature = private_key.sign(payload)
         import base64
+        # SIGNING-KEY IDENTIFIER (review register, seventh pass, §7). The
+        # record carried the algorithm but not WHICH key signed it, so an
+        # incident ("was this artefact signed by the compromised key?") could
+        # not be answered from the artefact itself. The fingerprint is
+        # sha256(raw public key)[:16] -- the same form the loader embeds --
+        # and it is covered by the signature, so it cannot be edited
+        # without breaking the signature it identifies.
+        from cryptography.hazmat.primitives import serialization as _s
+        _pk_raw = private_key.public_key().public_bytes(
+            encoding=_s.Encoding.Raw, format=_s.PublicFormat.Raw)
         manifest["signature"] = {
             "algo": "ed25519",
             "sig": base64.b64encode(signature).decode("ascii"),
+            "key_fingerprint": hashlib.sha256(_pk_raw).hexdigest()[:16],
         }
         manifest["signed"] = True
     except Exception as exc:
