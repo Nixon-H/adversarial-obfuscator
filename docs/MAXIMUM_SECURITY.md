@@ -978,6 +978,31 @@ signing cannot be optional) remains buildable.
    operator's production signing identity — the CI gate proves the
    verification chain, not the production identity.
 
+   TWO DISTINCTIONS THAT MUST STAY EXPLICIT (review register, FIFTH pass,
+   item 3):
+
+   1. A STABLE, CLEAN SOURCE IDENTITY IS NOT A REPRODUCIBLE BUILD. The
+      9ee68f4 gate demonstrates that all ten shards validated the same
+      source tree (commit + tree object + dirty=0 on every shard line,
+      identity_stable). It does NOT demonstrate that independent builds
+      from the same inputs produce byte-identical artefacts — the build
+      embeds per-run random seeds, nonces and ephemeral keys by design, so
+      two builds of the same tree are semantically equivalent but not
+      byte-identical. Any claim of "reproducible builds" requires a
+      separate measurement that has not been made.
+
+   2. THE DIGEST-VERIFICATION CHAIN IS IMPLEMENTED; THE PRODUCTION
+      ENVIRONMENT IS NOT YET CONFIRMED. release.yml implements upload ->
+      download -> recompute -> compare, and the publish job is gated by
+      `needs:` — but the actual production environment and its protections
+      (required reviewers, self-review prevention, release-tag scoping,
+      credential gating) require ADMINISTRATOR-SIDE configuration and
+      verification before any claim of controlled release. Confirmed test
+      count for the authoritative 9ee68f4 gate run (run id
+      rc-gate-20261122T033433-2604693): 29,938 passed, 7 skipped —
+      independently re-derived from the per-shard logs rather than carried
+      forward from an earlier run.
+
    SHA PROVENANCE (review register, FIFTH pass, item 4): all four pinned
    SHAs were resolved from the OFFICIAL action repositories via the GitHub
    API and correspond to their expected releases — checkout `11bd719…`
