@@ -3447,3 +3447,96 @@ figures (29,928 for the pre-pass-six composition, 29,938 for the drifted
 composition) are retained as historical records of what those gates
 actually covered — they were never wrong about the files they ran, only
 about the files they omitted.
+
+## 6i. Seventh pass: the remaining section-3 rows, and four more defects
+
+### 6i.1 Section 3 rows 4-7: the whole attack table is now measured
+
+The first three rows were measured on the real v2 artefact in 6f. The
+remaining four are now measured, and measuring them kept finding defects
+rather than confirming the prose:
+
+| attack | measured result |
+|---|---|
+| restore an older manifest | REJECTED. The protection level sits inside the signed body, so lowering it breaks the signature; a genuinely older manifest re-signed by another key is rejected under the publisher pin |
+| restore an older signed artefact | REJECTED. A level below the high-water mark raises the downgrade refusal; re-installing the same level is allowed |
+| replay after key rotation | REJECTED under the rotated pin, and the documented OFFLINE limit is asserted rather than claimed away: a client still holding the old pin keeps verifying until it receives the new one |
+| remove or corrupt persistent state | removed means fresh install and the mark is re-created; corrupt falls back to fresh-install semantics, never to a trusted level; a forged MAC is not trusted |
+
+All four are permanent tests in tests/test_replay_rollback_rows.py (nine
+cases), and they run in the gate because shard derivation is now automatic.
+
+### 6i.2 The protection level was documented but never emitted
+
+The rollback module states that a monotonic protection level is recorded in
+the signed build manifest, and nothing ever wrote it. The anti-rollback
+check could never fire, because its input never existed. Measured: both
+artefacts on this host carried a null level while claiming to be
+rollback-protected.
+
+Fixed: the manifest emits the level inside the signed body, derived from
+the build's recorded transforms when the caller does not supply one, which
+is a real per-build measure that rises as protections are added. Measured
+on a fresh build: level 4 alongside 4 transforms.
+
+### 6i.3 The mark reader returned the level without checking the MAC
+
+The writer MACs the recorded level and its docstring promises that a
+hand-edited mark cannot lower it without also knowing the key. The read
+path never verified that MAC, so an attacker editing the level downward was
+obeyed: the MAC bound the value but nothing checked the binding. Fixed: the
+reader verifies with a constant-time compare and a mismatch reads as zero,
+which is fresh-install semantics and never a trusted lower level. The
+forged-mark case is a permanent regression test.
+
+### 6i.4 Section 7: the manifest now identifies its signing key
+
+The signed manifest recorded the algorithm and the signature but not which
+key signed it, so a post-incident question, was this artefact signed by the
+compromised key, could not be answered from the artefact itself. It is now
+recorded as a key fingerprint, the sha256 of the raw public key truncated to
+16 hex digits, in the same form the loader embeds, and it is covered by the
+signature, so it cannot be edited without breaking the signature it
+identifies. The record already binds the compiler and linker identity, the
+toolchain versions, the transforms, the dependency-lock digest, the source
+commit and the artefact digest.
+
+### 6i.5 Section 5: coverage-guided fuzzing, harness committed and campaign run
+
+The harness at scripts/fuzz/nx_fuzz.py implements all six of the register's
+targets (pack, manifest, ELF, PE, Mach-O, pack-state) with strict resource
+limits, a 64 KiB input cap, a section-count cap and per-case temp
+directories, and it treats an unintended acceptance as the finding: a
+parser returning a valid-looking result for hostile bytes raises instead of
+only counting crashes.
+
+Measured on this host: Atheris 3.0.0 installed, 300 to 800 runs per target
+across all six targets, zero crashes and zero acceptance findings. The
+honest limitation: libFuzzer reports that no interesting inputs were found
+and that the symbolize helper is unavailable, on both CPython 3.13 and a
+purpose-built 3.11 environment, because the sanitizer coverage runtime is
+absent from these interpreter builds. The campaign is therefore
+mutation-driven rather than truly coverage-guided, and that is an
+environment limit recorded rather than glossed. The structured
+malformed-input matrix in tests/test_parser_fuzz.py, 16 field-level rows
+plus binary and JSON garbage, remains the coverage-independent backstop,
+and it is what found the two defects recorded in 6f.1.
+
+### 6i.6 Section 4: compatibility matrix, the locally reachable row measured
+
+The matrix is defined in 6g.1. The six required properties are now recorded
+for the combination this host can actually exercise:
+
+| property | Linux x86_64, CPython 3.13.5, glibc 2.41, gcc 14.2 |
+|---|---|
+| 1. build success | yes |
+| 2. artefact produced | yes, with the native blob embedded |
+| 3. payload execution | yes, measured in the acceptance rows |
+| 4. integrity enforcement | yes: merkle plus HMAC plus the provenance pin, and the pin refuses a missing or wrong anchor |
+| 5. failure behaviour | fails closed: a missing blob, a wrong pin and a bad signature all exit non-zero |
+| 6. mitigation status | RELRO, NX and a stripped local blob; CFG and CET measured on the Windows artefact in 6e |
+
+The cross-platform rows for Windows MSVC and macOS arm64 are recorded from
+the farm runs in 5x and 6e rather than re-measured here, and the musl and
+older-ABI rows remain explicitly unsupported and unclaimed.
+

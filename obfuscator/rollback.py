@@ -69,18 +69,34 @@ def _mac(key: bytes, level: int, artefact_name: str) -> str:
     return hmac.new(bytes(key), body, hashlib.sha256).hexdigest()
 
 
-def read_mark(path):
+def read_mark(path, key=None, artefact_name=None):
     """Return the recorded level, or 0 when absent/unreadable/corrupt.
 
     Absent means "first run here", not "attack": treating a missing mark as a
     failure would brick every fresh install.
+
+    MAC VERIFIED ON READ (review register, seventh pass -- found while
+    measuring the §3 restore-state rows). This function used to return the
+    stored level WITHOUT checking the MAC, so the MAC bound the mark but
+    nothing ever verified it: an attacker who edited the level downward was
+    obeyed, and write_mark's documented purpose ("a hand-edited mark cannot
+    lower it without also knowing the key") was not implemented on the read
+    path. When ``key`` and ``artefact_name`` are supplied the MAC is
+    verified and a mismatch reads as 0 (corrupt), which the caller treats as
+    fresh-install semantics -- never as a trusted lower level.
     """
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
         if data.get("schema") != SCHEMA:
             return 0
-        return int(data.get("level", 0))
+        level = int(data.get("level", 0))
+        if key is not None and artefact_name is not None:
+            expected = _mac(key, level, artefact_name)
+            if not hmac.compare_digest(str(data.get("mac", "")), expected):
+                # A forged or corrupted MAC is NOT a trustworthy level.
+                return 0
+        return level
     except (OSError, ValueError, TypeError):
         return 0
 
@@ -114,7 +130,7 @@ def check_rollback(artefact_path, level, key, override_path=None):
                            "got %r" % (level,))
     name = os.path.basename(os.path.abspath(artefact_path))
     path = mark_path(artefact_path, override_path)
-    seen = read_mark(path)
+    seen = read_mark(path, key=key, artefact_name=name)
     if level < seen:
         raise RuntimeError(
             "anti-rollback: this artefact is protection level %d but level %d "
