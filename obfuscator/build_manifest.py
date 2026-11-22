@@ -243,31 +243,44 @@ def sign_manifest(manifest, private_key=None):
 
     The signature covers canonical JSON of the manifest WITHOUT the signature
     field, so verification cannot be fooled by re-serialisation order.
+
+    THE KEY FINGERPRINT IS SIGNED. Measured 2026-11-22: the fingerprint was
+    stored only at ``signature.key_fingerprint``, and because the whole
+    ``signature`` object is excluded from the signed body, editing that field
+    left ``verify_manifest`` returning ``ok: True``. The docstring claimed the
+    opposite ("covered by the signature"). That is a real defect, not a
+    documentation nit: the fingerprint is what
+    ``docs/security/INCIDENT_RESPONSE.md`` §0 uses to answer "which artefacts
+    did the compromised key sign?", so an attacker able to write a manifest
+    could re-attribute an artefact from a compromised key to a clean one.
+
+    The fix binds it at TOP LEVEL as ``signed_key_fingerprint``, which IS
+    inside the signed body (only ``signature`` and ``signed`` are excluded).
+    The nested ``signature.key_fingerprint`` is still written so existing
+    readers keep working, and verify_manifest refuses a manifest whose two
+    copies disagree.
     """
     if private_key is None:
         manifest["signed"] = False
         manifest["signature"] = None
+        manifest.pop("signed_key_fingerprint", None)
         return manifest
+    import base64
+    from cryptography.hazmat.primitives import serialization as _s
+    _pk_raw = private_key.public_key().public_bytes(
+        encoding=_s.Encoding.Raw, format=_s.PublicFormat.Raw)
+    _fingerprint = hashlib.sha256(_pk_raw).hexdigest()[:16]
+    # Set BEFORE signing, so it is part of the payload.
+    manifest["signed_key_fingerprint"] = _fingerprint
     body = {k: v for k, v in manifest.items()
             if k not in ("signature", "signed")}
     payload = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
     try:
         signature = private_key.sign(payload)
-        import base64
-        # SIGNING-KEY IDENTIFIER (review register, seventh pass, §7). The
-        # record carried the algorithm but not WHICH key signed it, so an
-        # incident ("was this artefact signed by the compromised key?") could
-        # not be answered from the artefact itself. The fingerprint is
-        # sha256(raw public key)[:16] -- the same form the loader embeds --
-        # and it is covered by the signature, so it cannot be edited
-        # without breaking the signature it identifies.
-        from cryptography.hazmat.primitives import serialization as _s
-        _pk_raw = private_key.public_key().public_bytes(
-            encoding=_s.Encoding.Raw, format=_s.PublicFormat.Raw)
         manifest["signature"] = {
             "algo": "ed25519",
             "sig": base64.b64encode(signature).decode("ascii"),
-            "key_fingerprint": hashlib.sha256(_pk_raw).hexdigest()[:16],
+            "key_fingerprint": _fingerprint,
         }
         manifest["signed"] = True
     except Exception as exc:
@@ -409,6 +422,22 @@ def verify_manifest(artefact_path, public_key=None):
     if public_key is not None and result["signed"]:
         try:
             import base64
+            # THE KEY FINGERPRINT MUST AGREE IN BOTH PLACES. The nested
+            # signature.key_fingerprint is excluded from the signed body (the
+            # whole `signature` object is), so it is only trustworthy when it
+            # matches the signed top-level copy. Measured 2026-11-22: editing
+            # the nested copy alone left ok:True, which let an attacker
+            # re-attribute an artefact to an uncompromised key and break the
+            # incident triage in docs/security/INCIDENT_RESPONSE.md.
+            nested = (manifest.get("signature") or {}).get("key_fingerprint")
+            signed_copy = manifest.get("signed_key_fingerprint")
+            if signed_copy is not None and nested is not None:
+                if str(nested) != str(signed_copy):
+                    result["reason"] = (
+                        "signing-key fingerprint mismatch: signature block "
+                        "claims %r but the signed body records %r"
+                        % (nested, signed_copy))
+                    return result
             body = {k: v for k, v in manifest.items()
                     if k not in ("signature", "signed")}
             payload = json.dumps(body, sort_keys=True,
