@@ -119,3 +119,8 @@ tests/fixtures/portable/*_adaptive.py
 # Generated per-arm artefacts from the AI layer benchmark. The harness writes
 # them beside the results; only results.json and RESULTS.md are tracked.
 docs/research/ai-layer-bench-*/[a-z]*.py
+
+# libFuzzer/Atheris artifacts (empty-input initialisation writes one)
+crash-*
+leak-*
+timeout-*
