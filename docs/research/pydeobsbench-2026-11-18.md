@@ -4754,3 +4754,111 @@ administrator decisions.
 The finding in §6r.1 is the strongest argument for the first item on that list:
 a maintainer attacking a documented weakness found a splice attack within
 minutes. The review being commissioned is not a formality.
+
+## 6s. Seventeenth pass: pack format v3, and the gate run that caught my own slip
+
+The repository owner directed the fix for MIMOSA-INTAKE-001, which had been
+left OPEN pending independent review. Pack format v3 is implemented, and the
+gate found a defect in my own work along the way.
+
+### 6s.1 The v3 construction
+
+```
+pack_id = SHA256(b"nx-pack-id:" ‖ K ‖ pack_nonce)[:16]
+ctx_i   = u32be(v) ‖ u32be(i) ‖ u32be(total) ‖ N_i ‖ pack_id
+```
+
+`pack_nonce` is 16 random bytes per build, carried in the pack header and NOT
+secret; the key mixing is what binds. Measured: the splice that previously
+produced `b'BBBBBBBBBBBBBBBBAAAAAAAAAAAAAAAA'` now raises
+`section 0 integrity failure`.
+
+End-to-end verified: an artefact built with `--section-count 4` from a
+scratch directory runs and prints its marker, so all three emitted loader
+templates agree with the builder on the new context.
+
+### 6s.2 DEFECT: the change would have unloaded every existing artefact
+
+`_mac_context_v2` prefixed the MODULE CONSTANT `SECTION_PACK_VERSION` rather
+than the pack's declared version. The moment that constant became 3, every v2
+pack hashed version 3 into its context and failed its own tags — meaning the
+v3 change would have made **every previously built artefact unloadable**, which
+is precisely the compatibility cliff format versioning exists to prevent. It
+would have shipped silently.
+
+Caught by `test_the_v2_path_still_has_the_splice_weakness`, written BEFORE the
+fix, which reconstructs a genuine v2 pack by hand. Fixed by taking the version
+as a parameter. That test now does double duty: it asserts v2 packs still load
+AND that they still carry the splice weakness, so the "the fix only protects
+v3" trade cannot be quietly forgotten.
+
+### 6s.3 The gate failed, and it was right to
+
+The first v3 gate (`07b7010`) was **not a pass**: 9/10 shards `rc=0`, shard 10
+failed with
+
+```
+tests/test_review_packages_executable.py:129
+assert pack["v"] == 2 and pack["count"] == 4
+E   assert (3 == 2)
+```
+
+I had updated three other hardcoded version assertions and missed this one. It
+is the same defect class that let the review documents go stale, and the gate
+caught it in the place it was least visible. Fixed in `4e9661e` by comparing
+against `ss.SECTION_PACK_VERSION`.
+
+Worth recording separately: while fixing it I dropped two assertions (the
+16-byte per-section nonce and the `split_sealed` reference) and caught it on
+re-reading, not from a test. **An edit that deletes coverage does not fail
+anything** — that is a real gap in the safety net and the reason every edit in
+this pass was re-read after writing.
+
+### 6s.4 The v2 weakness is asserted, not just described
+
+`test_the_v2_path_still_has_the_splice_weakness` builds two genuine v2 packs by
+hand, confirms one loads, performs the splice, and confirms it STILL JOINS with
+mixed plaintext. If a future change makes v2 refuse the splice, that test fails
+and the documentation claiming the trade must be updated. The register's claim
+about what the fix protects is therefore pinned in both directions.
+
+### 6s.5 Pass-18 gate
+
+```
+run_id:            rc-gate-20261123T040943-1748806
+commit:            4e9661ebdd959bfd4e29bb5e31c4cb3de8622ef4
+tree:              9785361de1952bb308057582829926fa97c85f0e
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 453
+shards_with_failures: 0
+passed 30,392 / skipped 9 / collected 30,401
+```
+
+Every shard `rc=0` with this commit and tree; shard 10 — the one that failed on
+`07b7010` — now reports 467 passed, 0 failed. The arithmetic checks:
+30,392 + 9 = 30,401.
+
+The aggregate moved by exactly the failed test: the run on `07b7010` was
+30,391 passed / 9 skipped / **1 failed** / 30,401 collected, and this run is
+30,392 / 9 / **0** / 30,401. Same total collected, one more passing, one fewer
+failing — the expected shape when a fix repairs a broken assertion rather than
+adding coverage.
+
+### 6s.6 What closing MIMOSA-INTAKE-001 does and does not mean
+
+It means the splice is fixed for artefacts built from now on, with a test that
+fails if the fix regresses and another that fails if the v2 limitation is
+misdescribed.
+
+It does NOT mean the construction has been reviewed. The v3 context is
+maintainer design answering a maintainer finding, at owner direction, and the
+filed row carries `reviewed-by: NOBODY` for that reason. Both review packages
+now describe v3 and explicitly ask the reviewer to treat the fix as unreviewed
+design — it is, if anything, the part of the construction most in need of an
+independent opinion.
+
+The external register rows remain open and unchanged: three reviews
+commissioned but unperformed, plus a certificate purchase, an Apple Developer
+ID, Windows shadow-stack hardware, and a production environment with required
+reviewers.
