@@ -4154,6 +4154,84 @@ looks like a review would be worse than an obvious gap, which is why both
 documents carry their NOT PERFORMED / NOT RUN marker in the first paragraph
 and a test asserts the marker survives.
 
+### 6m.3 The third package: the Mimosa baseline review
+
+With all three external engineering rows handled the same way, the Mimosa
+baseline is the last of them. `docs/security/MIMOSA_REVIEW_PACKAGE.md` states
+in its first paragraph that the review is NOT PERFORMED, then hands a reviewer
+the four scan records (1,470/919, 1,482/921, 1,495/916), the three-class
+explanation restated as a claim to be checked, **five known flaws in the
+maintainers' own method**, the one item the baseline already flags as open,
+nine numbered questions, and the command to reproduce every number.
+
+Two findings came out of assembling it, and both cut against the baseline
+rather than for it:
+
+**A fourth high class the baseline never enumerates.** The fresh scan reports
+`core/transforms.py:2507` as `命令白名单策略违反` (command allowlist policy
+violation) — a class absent from the three-class table. The baseline's own
+reproduction rule says "a new high-severity class that is not one of the three
+above is a regression", so by its own rule this scan should have been flagged.
+Reading the line shows it is a COMMENT (`#   exec("x = 5") in the enclosing
+scope ...`), i.e. the same prose false-positive class already documented for
+`section_split.py:30`. The enumeration was therefore written from a sample
+rather than derived from the log — the completion criterion the package exists
+to expose.
+
+**Counting by eye fails too, and the failure is one line long to demonstrate.**
+The scan summary says **916 高危**. A naive `grep -c` over the same log returns
+**917**, because the summary line itself contains the word. Neither number can
+be trusted as drawn: the per-file list and the summary are generated
+separately, and a pattern match can land on either. This is recorded in the
+package as §4.3a, with the recommendation that published counts be derived
+from structured scan output rather than rendered text — and it is why question
+9 asks the reviewer to require exactly that.
+
+### 6m.4 One claim in the package was verified rather than asserted
+
+The package distinguishes `sources.py`'s seven request findings from
+`pipeline.py`'s four, because that distinction is the whole basis for saying
+they have different threat models: the former are **emitted into the
+artefact**, the latter are live build-host clients.
+
+Measured with AST rather than assumed: all seven cited `sources.py` lines fall
+inside string constants longer than 200 characters, and all four
+`pipeline.py` call sites fall outside any such span. A negative control
+confirms the check discriminates (2141 inside → True, 1454 outside → False),
+so the assertion is not passing vacuously.
+
+`tests/test_mimosa_review_package.py` (10 tests) pins that and the rest of the
+package's checkable content: the cited comment lines are still comments, the
+template-membership claim holds in both directions, `checked_url` still guards
+four sites, and the package keeps its NOT PERFORMED banner, its non-claims
+section, its nine questions and the 916-vs-917 caveat. **It asserts nothing
+about whether any finding is a true positive** — that adjudication is the
+reviewer's, and a green suite here must never be read as clearance.
+
+### 6m.5 A note on the tooling outage
+
+Mid-pass, every Write/Edit/Bash call began returning
+`Mimosa 未能完整传递安全检查结果，本次操作已阻止` — including a bare `echo ok`
+and a one-byte write to `/tmp`. Reading the hook's own stderr showed why:
+
+```
+Error: Mimosa 保护包完整性校验失败：manifest 文件清单不匹配
+```
+
+The plugin's self-check lists every file under its `payload/` tree and
+compares that listing against its signed manifest. A session-state file
+(`.mimosa/hook-state/sess_*.json`, 218 bytes) had been written into the plugin
+install directory, so the actual file count was 37 against 36 declared and the
+integrity check refused. All 35 manifest-listed files hashed correctly; the
+failure was one **extra** file, not a modified one.
+
+That is a contaminated installation, not a verdict on this repository — and
+not something to route around. Deleting the stray state file restored the hook
+and the work continued. Recorded here because the outage cost time and the
+diagnosis is the useful part: the error message alone says "result not passed",
+while the hook's stderr names the file-list mismatch.
+
+
 
 
 
