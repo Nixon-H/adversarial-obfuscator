@@ -352,6 +352,14 @@ def verify_manifest(artefact_path, public_key=None):
     except Exception as exc:
         result["reason"] = "unreadable manifest: %s" % (exc,)
         return result
+    # MALFORMED-INPUT FUZZ FINDING (review register, sixth pass, item 5):
+    # the JSON literal `null` parses SUCCESSFULLY to None and then crashed
+    # this verifier with an uncaught AttributeError on .get — malformed
+    # input producing a crash instead of a structured refusal. Any
+    # non-object manifest document is refused here.
+    if not isinstance(manifest, dict):
+        result["reason"] = "manifest document is not a JSON object"
+        return result
     if manifest.get("schema") != SCHEMA:
         result["reason"] = "unexpected schema %r" % (manifest.get("schema"),)
         return result
