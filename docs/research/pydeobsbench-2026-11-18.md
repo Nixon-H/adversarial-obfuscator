@@ -4343,3 +4343,102 @@ shard 8 (`rc=0`, re-read from `gate/shards/`).
 
 
 
+
+## 6o. Thirteenth pass: the intake channel, and the one decision that is not mine
+
+The three external-review rows are blocked on a single missing thing: there is
+no route for a reviewer to return findings through. I cannot name a security
+contact or engage a vendor — that needs the repository owner's identity,
+procurement authority and money. Inventing an address would be worse than the
+gap, because a plausible-looking `security@` nobody monitors sends real
+disclosures into a void.
+
+So this pass did the part that is mine and left exactly one decision to the
+owner.
+
+### 6o.1 The channel is named, and its current state is dated
+
+`SECURITY.md` previously said "No dedicated security contact or bug-bounty is
+configured for this repository" — true, but it left a reader unable to tell
+whether that was still the case and gave no path to fixing it. It now names
+GitHub private vulnerability reporting as the intended channel, and records:
+
+* the exact enabling command, so turning it on is one copy-paste;
+* the CURRENT state with a verification date — **NOT ENABLED**, checked
+  2026-11-23 against the live repository (setting absent, repo public,
+  Dependabot and secret scanning and push protection already on);
+* why the three review rows stay open because of it;
+* an explicit sentence that the absent address is deliberate, and that
+  "not configured" is not "reports unwelcome".
+
+The setting itself was NOT changed. The repository is public and this is an
+owner-level outward-facing change; the session asked and received no answer, so
+the default was to leave it alone rather than assume consent for something
+irreversible-in-perception. It is now a documented two-minute action instead of
+an unstated precondition.
+
+### 6o.2 The findings-intake format
+
+The instruction was to "record the returned findings as new register rows".
+`docs/security/REVIEW_FINDINGS_INTAKE.md` is the mechanism: a fifteen-field row
+(package, reviewer, received, severity, claim, evidence, reproducible, affects,
+maintainer-response, resolution, …) plus four rules that keep it honest:
+
+1. quote the reviewer verbatim — paraphrase loses the difference between "the
+   tag is not bound to the version" and "the tag seems weakly bound";
+2. never resolve without a measurement — the row cites the commit and the test,
+   or states plainly that nothing changed and why;
+3. a disputed finding **stays in the register**, which is the entire point;
+4. out-of-scope findings are recorded as out-of-scope with the `SECURITY.md`
+   paragraph that excludes them, not as "the reviewer was wrong".
+
+It also says there is no parser on purpose: reports arrive as prose and differ
+in shape, and forcing them into a form biases what gets reported. The format
+constrains the maintainers' response, not the reviewer's report — stated in the
+document, addressed to the reviewer.
+
+The document's first line is that **no findings have been returned**, so it
+cannot be mistaken for a record of one.
+
+### 6o.3 What guards all of it
+
+`tests/test_review_channel.py` (13 tests) keeps the claims true: the status
+carries a date, the enabling command is present, each package still carries its
+own `NOT PERFORMED` / `NOT RUN` banner so SECURITY.md's table cannot misreport
+it, and no document in the set ever claims a review occurred. One test asserts
+SECURITY.md contains **no email address at all**; a negative control confirms
+the detector fires on `security@example.com` and not on prose. That is the
+check that stops the next pass from "helpfully" inventing a contact.
+
+### 6o.4 Pass-14 gate
+
+```
+run_id:            rc-gate-20261123T001803-1377335
+commit:            431ee1f63e1a93dc3f4a002bbc5a64d02a88d461
+tree:              621e33cbc887515c412683e6b75419f333c6f39b
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 451
+shards_with_failures: 0
+passed 30,367 / skipped 9 / collected 30,376
+```
+
+The aggregate rose 30,354 → 30,367, exactly the 13 tests in the new module,
+which is the independent confirmation they ran; the module is assigned to
+shard 8 (`rc=0`, re-read from `gate/shards/`).
+
+### 6o.5 State of the register
+
+| row | state |
+|---|---|
+| every engineering row | closed, measured, gate-verified |
+| three external reviews | commissioned; packages verified executable; intake format defined; **channel named but not enabled** |
+| Authenticode / Developer ID | blocked: purchase |
+| Windows strict shadow-stack | blocked: hardware |
+| production release | blocked: administrator decision |
+
+The honest summary is that the repository side of every external row is now
+complete — specification, known weaknesses, questions, reproduction commands
+that work, a filing format, and a named intake route with its state dated. What
+remains is one settings toggle and several people. Neither is something a
+maintainer can fabricate.
