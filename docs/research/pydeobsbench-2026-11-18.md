@@ -4862,3 +4862,43 @@ The external register rows remain open and unchanged: three reviews
 commissioned but unperformed, plus a certificate purchase, an Apple Developer
 ID, Windows shadow-stack hardware, and a production environment with required
 reviewers.
+
+### 6s.7 Pass-19 gate (finding MIMOSA-INTAKE-002 filed)
+
+```
+run_id:            rc-gate-20261123T045420-1820475
+commit:            a70f5eacd99004929744fc96ed46177d8b46ae3d
+tree:              3332242db3bf551c3666f6a1a87b27a76be09057
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 454
+shards_with_failures: 0
+passed 30,397 / skipped 9 / collected 30,406
+```
+
+All ten shards `rc=0`. The aggregate rose 30,392 → 30,397, exactly the five
+tests in `test_seed_reuse_finding.py`, which is the independent confirmation
+they ran; the module is assigned to shard 3 (`rc=0`, re-read from
+`gate/shards/`). Arithmetic: 30,397 + 9 = 30,406.
+
+A NOTE ON WHAT WAS ATTEMPTED AND FAILED
+
+The instruction for this pass was to hand the bundle to a human cryptographer.
+That still could not be done: no mail transport on this host, no reviewer
+address in the repository or the owner's public profile — both re-verified
+rather than assumed.
+
+One attempt was made to obtain an independent read by dispatching a subagent
+with the bundle and instructions to review it cold, without repository access.
+It returned **exceeded quota limit** with zero output. That is recorded because
+it must not be mistaken for a review: a failed tool call produced no findings,
+and nothing in this register treats it as one. Paraphrasing an empty result
+into "an independent reviewer looked at it" would be exactly the fabrication
+this register has spent several passes removing.
+
+The verification that WAS possible: an automated audit confirming the bundle is
+self-contained — construction equations, domain strings, the pack-id formula,
+the keystream definition, seven or more named weaknesses, the questions
+section, the non-claims section and a return channel are all present, and the
+document contains no clone or checkout instruction. That establishes the
+bundle is *deliverable*, not that it has been *delivered* or reviewed.
