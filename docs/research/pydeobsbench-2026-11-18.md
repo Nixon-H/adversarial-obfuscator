@@ -4647,3 +4647,110 @@ ID, Windows shadow-stack hardware, and a production environment with required
 reviewers. Every one of those is a person, a purchase, or an administrator
 decision. None can be produced by writing more documents, and producing more
 documents in place of them would be the failure this register exists to catch.
+
+## 6r. Sixteenth pass: a real defect found by attacking our own stated weakness
+
+No cryptographer could be engaged — there is no mail transport on this host
+(exim4 installed but inactive, no configuration) and no reviewer address exists
+in the repository or in the owner's public GitHub profile. Rather than produce a
+sixth document describing that gap, the pass attacked the weaknesses
+`CRYPTO_REVIEW_BUNDLE_STANDALONE.md` §8 already lists. One of them is
+exploitable.
+
+### 6r.1 MIMOSA-INTAKE-001: cross-pack section substitution is accepted
+
+Two packs built with the same session key and the same total length are
+interchangeable section-by-section. Replace sections 0–1 of pack A with those
+of pack B, recompute the **unkeyed** structural digest, and the join succeeds
+with the MAC verifying for every substituted section:
+
+```
+joined  : b'BBBBBBBBBBBBBBBBAAAAAAAAAAAAAAAA'
+expected: b'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+```
+
+Cause: pack-v2's authenticated context is
+
+```
+ctx_i = u32be(v) ‖ u32be(i) ‖ u32be(total) ‖ N_i
+```
+
+which binds the version, the index, the total and the per-section nonce — but
+**not which pack the section belongs to**. Under one key with equal totals,
+section *i* of one pack is indistinguishable from section *i* of another.
+
+Scope, measured rather than assumed:
+
+* requires the session key; this is not forgery without a key, and not key
+  recovery;
+* requires equal total length — a section from a pack of different total is
+  refused with `section 0 integrity failure`, because `total` is in the
+  context;
+* affects all three emitted loader templates, not just the in-process join:
+  every `_mctx` construction is identical and no pack-identity concept exists
+  anywhere in `section_split.py`.
+
+Graded `high` rather than `critical` for the key prerequisite. The grading is
+recorded in the row rather than defended.
+
+### 6r.2 Why the row is left OPEN
+
+The fix is a wire-format change: bind a pack identity into `ctx_i`, which means
+a v3 format and a decision about whether v2 stays loadable. That is precisely
+the construction the independent crypto review was commissioned to adjudicate.
+Redesigning it unilaterally to close a self-found finding would pre-empt the
+review it is meant to inform, so the row names the candidate fixes and does not
+pick one.
+
+Explicitly: **this does not close the crypto review row.** One self-found defect
+is not a review. §8 of the bundle already listed "no pack identity in the
+context" as an item for a reviewer to judge; finding it exploitable raises the
+priority, it does not substitute for the adjudication.
+
+### 6r.3 The test fails when the bug is fixed
+
+`tests/test_section_substitution_finding.py` (6 tests) pins the finding. The
+important one is `test_the_substitution_still_works_or_is_fixed`: if the splice
+is ever refused, it calls `pytest.fail` with an instruction to close
+MIMOSA-INTAKE-001 and update the assertion. A vulnerability that quietly stops
+reproducing is indistinguishable from one that was never there, and a fix must
+not be able to land without the register being updated.
+
+Two companion tests keep the grading honest — a different-total splice must
+keep being refused, or the row's qualifier is wrong — and two more assert the
+filed row says `self-reported` and `NOT an independent review`, because the
+format's `reviewer:` field exists precisely to stop a maintainer-found issue
+from reading as a review.
+
+Verified with the test module's own helpers that the splice produces mixed
+plaintext. An earlier one-section probe was misleading; two sections is the case
+that matters.
+
+### 6r.4 Pass-17 gate
+
+```
+run_id:            rc-gate-20261123T023047-1590216
+commit:            8777b9a7044972354970da4e694616fdafe3f5f8
+tree:              2d8c7cfd5b6c65d479fdbc3451d2e42574362608
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 453
+shards_with_failures: 0
+passed 30,390 / skipped 9 / collected 30,399
+```
+
+The aggregate rose 30,384 → 30,390, exactly the six tests in the new module
+which is the independent confirmation they ran; the module is assigned to
+shard 6 (`rc=0`, re-read from `gate/shards/`).
+
+### 6r.5 The boundary, unchanged
+
+The engineering work is complete and evidenced. What remains is a
+cryptographer, an analyst, an independent Mimosa reviewer, a certificate
+purchase, an Apple Developer ID, Windows shadow-stack hardware, and a
+production environment with required reviewers — people, purchases and
+administrator decisions.
+
+The finding in §6r.1 is the strongest argument for the first item on that list:
+a maintainer attacking a documented weakness found a splice attack within
+minutes. The review being commissioned is not a formality.
