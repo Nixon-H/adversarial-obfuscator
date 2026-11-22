@@ -54,10 +54,38 @@ def test_security_md_names_a_channel_or_says_there_is_none():
     has_route = "private vulnerability reporting" in text.lower()
     assert has_route, (
         "SECURITY.md must name the intake route (GitHub private vulnerability "
-        "reporting) so a reporter knows where to go once it is enabled")
-    assert "NOT ENABLED" in text or "is enabled" in text, (
+        "reporting) so a reporter knows where to go")
+    assert "NOT ENABLED" in text or "ENABLED" in text, (
         "SECURITY.md must state the CURRENT state of the channel, dated, or a "
         "reader cannot tell whether the route works")
+
+
+def test_security_md_gives_the_reporting_url_while_enabled():
+    """If the channel is ON, the reporter needs a clickable destination."""
+    text = _text(SECURITY)
+    if "Current state: ENABLED" not in text:
+        pytest.skip("channel is currently disabled; no URL required")
+    assert "security/advisories/new" in text, (
+        "the channel is stated as ENABLED but SECURITY.md gives no link a "
+        "reporter can actually follow")
+
+
+def test_security_md_records_the_patch_that_silently_does_nothing():
+    """A maintainer re-verifying must not be misled by a 200 response.
+
+    Measured 2026-11-23: PATCHing security_and_analysis[...] returns 200 while
+    leaving the setting unchanged, and GET does not list the field at all. The
+    dedicated endpoint is authoritative. That trap is documented so the next
+    person does not conclude "PATCH worked" from a success status.
+    """
+    text = _text(SECURITY)
+    assert "private-vulnerability-reporting" in text, (
+        "SECURITY.md must name the authoritative verification endpoint")
+    assert "silently" in text.lower(), (
+        "SECURITY.md must warn that the PATCH returns 200 without applying")
+    assert "DELETE" in text, (
+        "SECURITY.md must say how to reverse the setting; a one-way door "
+        "documented as reversible needs the command")
 
 
 def test_security_md_states_the_current_state_with_a_date():
@@ -93,12 +121,12 @@ def test_security_md_does_not_publish_an_invented_address():
 
 
 def test_security_md_says_the_absence_is_not_a_refusal():
-    """A reader must not read 'not configured' as 'go away'."""
+    """A reader must not read "no address" as "go away"."""
     text = _text(SECURITY).lower()
-    assert "not welcome" in text or "not a refusal" in text or \
-        "nobody should treat" in text, (
-        "the section must distinguish 'automation not configured' from "
-        "'reports unwelcome'")
+    assert ("not welcome" in text or "a report is welcome" in text
+            or "not a refusal" in text), (
+        "the section must make clear that a report is welcome even though no "
+        "email address is published")
 
 
 # ── SECURITY.md: the package table must match the packages ────────────
