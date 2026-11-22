@@ -1,15 +1,17 @@
 # Review findings — filed register rows
 
-**Status: one finding filed, self-reported.** No independent reviewer has
-returned anything; the channel is live and empty. The row below was found by
-the maintainer while testing the weaknesses documented in
-`CRYPTO_REVIEW_BUNDLE_STANDALONE.md` §8, and is filed in this format so the
-first real returned finding has a worked example to sit beside — and because a
-defect found by attacking our own documented weakness belongs in the register
-regardless of who found it.
+**Status: one finding filed, self-reported; now RESOLVED in code, still
+unreviewed.** No independent reviewer has returned anything; the channel is
+live and empty. The row below was found by the maintainer while testing the
+weaknesses documented in `CRYPTO_REVIEW_BUNDLE_STANDALONE.md` §8, filed in
+this format so the first real returned finding has a worked example to sit
+beside, and then fixed at the repository owner's explicit direction.
 
-The `reviewer:` field says so plainly. A maintainer-found issue is not an
-independent review, and the register must not let the format blur that.
+The `reviewer:` field says so plainly, and the resolution records a second
+field for the same reason: `reviewed-by: NOBODY`. A maintainer finding closed
+by maintainer design is not an independent review, and the register must not
+let the format blur that. The fix is exactly the thing a cryptographer should
+now look at hardest.
 
 ---
 
@@ -60,14 +62,42 @@ FINDING MIMOSA-INTAKE-001
                 it inline
   maintainer-response:
                 accept
-  resolution:   OPEN. Fix requires a pack identity inside ctx_i. Candidate:
-                bind sha256(first N bytes of the joined plaintext) or a random
-                per-build pack nonce carried in the pack header, appended to
-                ctx_i for every section. Either changes the wire format, so it
-                needs a version bump to v3 and a decision about keeping v2
-                loadable — which is exactly the kind of trade the independent
-                crypto review should adjudicate rather than the maintainer
-                choosing unilaterally.
+  resolution:   RESOLVED in pack format v3, at the repository owner's explicit
+                direction (not a unilateral maintainer call). v3 appends a
+                16-byte per-pack identity to every section's MAC context:
+
+                  pack_id = SHA256(b"nx-pack-id:" || K || pack_nonce)[:16]
+
+                where pack_nonce is 16 random bytes per build carried in the
+                pack header. A section spliced from another pack now fails
+                its tag even under the same key and the same total.
+
+                MEASURED AFTER: the same splice that produced
+                b'BBBBBBBBBBBBBBBBAAAAAAAAAAAAAAAA' now raises
+                "section 0 integrity failure".
+
+                COMPATIBILITY: v2 packs remain loadable and STILL CARRY the
+                weakness -- the fix protects v3 artefacts, not already-shipped
+                ones. That trade is recorded in the bundle's section 8 item 8
+                and asserted by
+                test_the_v2_path_still_has_the_splice_weakness, so it cannot
+                be quietly forgotten.
+
+                DEFECT FOUND WHILE IMPLEMENTING: `_mac_context_v2` prefixed
+                the module constant SECTION_PACK_VERSION rather than the
+                PACK's declared version, so the moment the constant became 3
+                every v2 pack hashed version 3 into its context and failed its
+                own tags -- i.e. the change would have made every previously
+                built artefact unloadable, the exact compatibility cliff
+                versioning exists to avoid. Fixed by taking the version as a
+                parameter; caught by the v2-compatibility test, which was
+                written before the fix specifically to catch it.
+
+  reviewed-by:  NOBODY. This is a maintainer finding closed by maintainer
+                design at owner direction. The v3 context is UNREVIEWED and
+                the bundle asks a reviewer to treat it as such (section 8 item
+                9, section 4.1). Closing this row does not close the crypto
+                review row.
 ```
 
 ## Why this row is severity `high` and not `critical`

@@ -79,9 +79,34 @@ def test_the_bundle_context_layout_is_the_implementation():
 
 
 def test_the_bundle_states_the_right_pack_version():
+    """The bundle's headline version must be the shipped one, not a literal.
+
+    Asserting a hardcoded 2 here is how the docs went stale once already: the
+    constant moved and the assertion kept passing. It now compares against
+    ``ss.SECTION_PACK_VERSION`` so a bump fails here until the document is
+    updated.
+    """
     text = _text()
-    assert "v == 2" in text or "= 2" in text
-    assert ss.SECTION_PACK_VERSION == 2
+    assert ss.SECTION_PACK_VERSION == 3, (
+        "if the format version changed, update the bundle's construction "
+        "sections and this assertion together")
+    assert "v3" in text, "the bundle must name the shipped format version"
+    assert "pack format v3" in text or "format v3" in text
+
+
+def test_the_documented_context_length_matches_the_implementation():
+    """§4 documents 28 bytes (v2) or 44 bytes (v3); the code must agree."""
+    import inspect
+    from obfuscator import section_split as ss
+
+    v2_ctx = ss._mac_context_v2(0, 32, b"\x00" * 16,
+                                version=ss.SECTION_PACK_VERSION_V2)
+    v3_ctx = ss._mac_context_v2(0, 32, b"\x00" * 16,
+                                pack_id=b"\x00" * ss.PACK_ID_BYTES)
+    assert len(v2_ctx) == 28, "§4 documents a 28-byte v2 context"
+    assert len(v3_ctx) == 44, "§4 documents a 44-byte v3 context"
+    text = _text()
+    assert "28 or 44 bytes" in text or "28 bytes" in text
 
 
 # ── §5/§6 the keystream and composition ───────────────────────────────

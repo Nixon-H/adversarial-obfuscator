@@ -122,7 +122,7 @@ def test_the_shipped_construction_is_v2_keystream_xor_plus_bound_hmac():
     key = b"A" * 32
     payload = b"shipped-path" * 50
     pack = split_sealed(payload, sections=3, key=key)
-    assert pack["v"] == 2, "the pack must declare its scheme version"
+    assert pack["v"] == 3, "the pack must declare its scheme version"
     for section in pack["sections"]:
         nonce = bytes.fromhex(section["nonce"])
         ciphertext = bytes.fromhex(section["data"])
@@ -146,9 +146,12 @@ def test_the_shipped_construction_is_v2_keystream_xor_plus_bound_hmac():
         # the 32-byte prefix is an HMAC under the MAC key, bound to
         # version4 || index4 || total4 || nonce || plaintext (the AAD role,
         # including the VERSION so a downgrade edit fails the tag).
-        ctx = ((2).to_bytes(4, "big")
+        ctx = ((3).to_bytes(4, "big")
                + section["i"].to_bytes(4, "big")
-               + len(payload).to_bytes(4, "big") + nonce)
+               + len(payload).to_bytes(4, "big") + nonce
+               + hashlib.sha256(
+                   b"nx-pack-id:" + key
+                   + bytes.fromhex(pack["pack_nonce"])).digest()[:16])
         expected = hmac.new(mac_key, ctx + recovered[32:],
                             hashlib.sha256).digest()
         assert recovered[:32] == expected
@@ -214,7 +217,7 @@ def test_the_shipped_construction_is_v2_keystream_xor_plus_bound_hmac():
     key = b"A" * 32
     payload = b"shipped-path" * 50
     pack = split_sealed(payload, sections=3, key=key)
-    assert pack["v"] == 2, "the pack must declare its scheme version"
+    assert pack["v"] == 3, "the pack must declare its scheme version"
     for section in pack["sections"]:
         nonce = bytes.fromhex(section["nonce"])
         ciphertext = bytes.fromhex(section["data"])
@@ -238,9 +241,12 @@ def test_the_shipped_construction_is_v2_keystream_xor_plus_bound_hmac():
         # the 32-byte prefix is an HMAC under the MAC key, bound to
         # version4 || index4 || total4 || nonce || plaintext (the AAD role,
         # including the VERSION so a downgrade edit fails the tag).
-        ctx = ((2).to_bytes(4, "big")
+        ctx = ((3).to_bytes(4, "big")
                + section["i"].to_bytes(4, "big")
-               + len(payload).to_bytes(4, "big") + nonce)
+               + len(payload).to_bytes(4, "big") + nonce
+               + hashlib.sha256(
+                   b"nx-pack-id:" + key
+                   + bytes.fromhex(pack["pack_nonce"])).digest()[:16])
         expected = hmac.new(mac_key, ctx + recovered[32:],
                             hashlib.sha256).digest()
         assert recovered[:32] == expected
@@ -342,7 +348,8 @@ def test_every_emitted_loader_snippet_compiles_and_matches_the_v2_scheme():
     payload = b"snippet-parity" * 200
     pack_json_bytes, _ = pack_json(payload, sections=4, key=key)
     pack = json.loads(pack_json_bytes.decode("utf-8"))
-    assert pack["v"] == 2
+    assert pack["v"] == 3
+    assert "pack_nonce" in pack, "a v3 pack must carry its pack nonce"
 
     from obfuscator.section_split import (
         emit_loader_snippet, emit_moving_snippet, emit_stream_snippet,
@@ -352,14 +359,31 @@ def test_every_emitted_loader_snippet_compiles_and_matches_the_v2_scheme():
                     emit_moving_snippet(),
                     emit_stream_snippet()):
         compile(snippet, "<emitted-snippet>", "exec")
-        # The v2 branch must exist, key off the pack version field ...
-        assert 'pack.get("v") == 2' in snippet
+        # The version dispatch must exist and must treat 2 as legacy-but-
+        # loadable, not as the current scheme ...
+        assert "_pv == 3" in snippet, (
+            "the emitted loader must branch on the v3 scheme")
+        assert "_pv == 2" in snippet, (
+            "the emitted loader must still accept v2 packs")
         # ... derive BOTH role keys from the identical basis the packer
         # uses (master || index4 || nonce) ...
         assert 'b"nx-section-enc:"' in snippet
         assert 'b"nx-section-mac:"' in snippet
         assert snippet.count('b"nx-section-key:"') >= 1, \
             "the v1 legacy path remains for packs built before v2"
+        # ... bind the PACK IDENTITY into the context (MIMOSA-INTAKE-001) ...
+        assert 'b"nx-pack-id:"' in snippet, (
+            "the emitted loader must derive the pack identity, or a built "
+            "artefact cannot decrypt its own v3 pack")
+        assert '_pack_ident' in snippet, (
+            "the pack identity must be appended to the MAC context")
+        # ... and refuse a v3 pack that omits its pack nonce rather than
+        # silently falling back to v2, which would restore the splice.
+        assert 'pack_nonce' in snippet, (
+            "the emitted loader must read the pack nonce from the header")
+        assert "missing its pack nonce" in snippet, (
+            "the emitted loader must refuse a v3 pack with no pack nonce "
+            "instead of downgrading to the v2 context")
         # ... and feed the MAC the context the packer binds.
         assert "_mctx + part" in snippet
         assert 'int(pack["total"]).to_bytes(4, "big")' in snippet

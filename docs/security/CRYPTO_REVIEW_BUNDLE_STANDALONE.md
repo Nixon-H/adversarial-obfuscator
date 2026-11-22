@@ -12,8 +12,11 @@ document is what a reviewer would be sent, not a record of a review.
 the longer version, with the threat model, the tamper-matrix mapping and
 reproduction commands. This bundle is the extract that stands alone.
 
-Target: `obfuscator/section_split.py` (pack format v2), commit
-`71eff21081785eb4bf588e7dd8542d0e4c279d79`.
+Target: `obfuscator/section_split.py` (pack format v3). The exact commit is
+recorded in `REVIEW_FINDINGS_FILED.md` MIMOSA-INTAKE-001 and pinned by
+`tests/test_section_substitution_finding.py`; no hash is restated here,
+because a hand-copied hash in a document goes stale and a *fabricated* one is
+worse than none.
 
 ---
 
@@ -66,11 +69,41 @@ derivation, so the two keys differ per section even under a repeated nonce.
 ## 4. Authenticated context (the AAD role)
 
 ```
-ctx_i = u32be(v) ‖ u32be(i) ‖ u32be(T) ‖ N_i          (28 bytes)
+ctx_i = u32be(v) ‖ u32be(i) ‖ u32be(T) ‖ N_i ‖ pack_id          (28 or 44 bytes)
 ```
 
-`v` is bound so a pack cannot be downgraded to the v1 scheme by editing the
-`v` field. `T` is bound so the pack cannot be re-pointed at a different total.
+`v` is the PACK's declared version (bound so a pack cannot be downgraded to the
+v1 scheme by editing `v`). `T` is bound so the pack cannot be re-pointed at a
+different total.
+
+**`pack_id` is new in v3** — see §4.1. It is empty for v2 packs, which makes
+the context 28 bytes there and 44 bytes for v3.
+
+```
+pack_id = SHA256(b"nx-pack-id:" ‖ K ‖ pack_nonce)[:16]
+```
+
+`pack_nonce` is 16 random bytes per build, carried in the pack header and NOT
+secret. The key mixing is what gives the id its binding force: an attacker
+holding only the pack cannot compute the id another pack would accept.
+
+### 4.1 Why pack_id exists — a defect found and fixed during this work
+
+The v2 context bound `(v, i, T, N_i)` and nothing identifying the pack. Two
+packs built with the same session key and the same total length were therefore
+**interchangeable section-by-section**. Measured before the fix:
+
+```
+splice pack B's sections 0-1 into pack A, recompute the unkeyed digest:
+joined  : b'BBBBBBBBBBBBBBBBAAAAAAAAAAAAAAAA'
+expected: b'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+```
+
+Every substituted section's MAC verified. The fix binds a per-pack identity.
+
+**Please review this fix as unreviewed maintainer design.** It is our answer to
+our own finding, which is precisely the independence gap this review exists to
+close. §8 item 8 covers what it does *not* fix.
 
 ## 5. Seal
 
@@ -134,6 +167,18 @@ Listed so the review does not spend its budget rediscovering them.
 6. **`salt` is unkeyed and unverified**, used only in the structural digest.
 7. **The v1 legacy path remains** (single key for both roles, no metadata
    binding), kept so older artefacts stay loadable.
+8. **v2 packs still carry the splice weakness.** The v3 fix protects v3 packs
+   only. A v2 pack has no pack identity in its context and remains
+   interchangeable section-by-section under one key and one total. We kept v2
+   loadable deliberately, so **the fix does not retroactively protect already
+   shipped artefacts** — an operator who wants the property must rebuild. A
+   reviewer should say whether that trade is acceptable, and whether v2 should
+   be refused at load under a policy flag the way v1 already can be
+   (`NIXON_REQUIRE_PACK_V2`).
+9. **The v3 fix is maintainer design.** It binds a per-pack identity derived
+   from the session key and a header nonce. It was not reviewed by anyone
+   independent, and the nonce is attacker-visible, so the security rests
+   entirely on the key mixing. That is a question for §9, not a claim.
 
 ## 9. Questions
 
