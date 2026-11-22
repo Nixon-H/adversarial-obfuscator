@@ -31,29 +31,44 @@ steps, and impact assessment. Allow reasonable time for a fix before
 any public disclosure.
 
 **Intake channel.** GitHub private vulnerability reporting on
-`Nixon-H/adversarial-obfuscator` is the intended channel: it needs no
-address to be published, keeps the report private until a fix ships, and
-gives the reporter a thread they can point at later. Enable it under
-*Settings → Code security → Private vulnerability reporting*; the
-maintainer's command is
+`Nixon-H/adversarial-obfuscator` is the channel. It needs no address to be
+published, keeps the report private until a fix ships, and gives the reporter
+a thread they can point at later. Report at:
+
+<https://github.com/Nixon-H/adversarial-obfuscator/security/advisories/new>
+
+**Current state: ENABLED** (verified 2026-11-23).
+`repos/Nixon-H/adversarial-obfuscator/private-vulnerability-reporting` returns
+`{"enabled": true}`, queried three times for stability; the advisories API
+is readable and currently holds zero advisories.
+
+Note for anyone re-verifying: the `security_and_analysis` object on
+`GET /repos/{owner}/{repo}` does **not** list
+`private_vulnerability_reporting` on this repository, and a `PATCH` against
+that path returns 200 while silently leaving the setting unchanged. The
+authoritative check is the dedicated endpoint:
 
 ```
-gh api -X PATCH repos/Nixon-H/adversarial-obfuscator \
-    -f 'security_and_analysis[private_vulnerability_reporting][status]=enabled'
+gh api repos/Nixon-H/adversarial-obfuscator/private-vulnerability-reporting
+# {"enabled": true}
 ```
 
-**Current state: NOT ENABLED** (verified 2026-11-23:
-`security_and_analysis.private_vulnerability_reporting` is absent, the
-repository is public, and Dependabot alerts, secret scanning and push
-protection are already on). Until it is enabled there is no configured
-intake route, and this paragraph is the whole process — which means the
-three independent-review packages in `docs/security/` have no channel to
-be returned through, and their register rows stay open for that reason.
+To disable it again (it is one command, and reversible):
 
-No security email address is published here **on purpose**. Inventing one
-would send disclosures into a void; a real address has to come from the
-maintainer, not from this document. Nobody should treat the absence as
-"reports are unwelcome" — it means the automation is not configured yet.
+```
+gh api -X DELETE repos/Nixon-H/adversarial-obfuscator/private-vulnerability-reporting
+```
+
+No security email address is published here **on purpose**. An address has to
+come with someone who reads it; a plausible-looking one that nobody monitors
+sends disclosures into a void. The GitHub advisory channel is monitored by the
+repository's own notification settings instead, which is a real commitment
+rather than a string in a document.
+
+A report is welcome. If something in this repository looks wrong, the advisory
+channel is the fastest way to say so privately, and a finding that invalidates
+a security claim is more useful than a green test — that is the whole reason
+the three review packages in `docs/security/` exist.
 
 ## Independent review packages awaiting a channel
 
