@@ -28,9 +28,49 @@ unsupported.
 Do not open a public issue for a suspected vulnerability. Contact the
 repository maintainer privately with: affected commit, reproduction
 steps, and impact assessment. Allow reasonable time for a fix before
-any public disclosure. (No dedicated security contact or bug-bounty is
-configured for this repository — this paragraph is the whole process
-until one is.)
+any public disclosure.
+
+**Intake channel.** GitHub private vulnerability reporting on
+`Nixon-H/adversarial-obfuscator` is the intended channel: it needs no
+address to be published, keeps the report private until a fix ships, and
+gives the reporter a thread they can point at later. Enable it under
+*Settings → Code security → Private vulnerability reporting*; the
+maintainer's command is
+
+```
+gh api -X PATCH repos/Nixon-H/adversarial-obfuscator \
+    -f 'security_and_analysis[private_vulnerability_reporting][status]=enabled'
+```
+
+**Current state: NOT ENABLED** (verified 2026-11-23:
+`security_and_analysis.private_vulnerability_reporting` is absent, the
+repository is public, and Dependabot alerts, secret scanning and push
+protection are already on). Until it is enabled there is no configured
+intake route, and this paragraph is the whole process — which means the
+three independent-review packages in `docs/security/` have no channel to
+be returned through, and their register rows stay open for that reason.
+
+No security email address is published here **on purpose**. Inventing one
+would send disclosures into a void; a real address has to come from the
+maintainer, not from this document. Nobody should treat the absence as
+"reports are unwelcome" — it means the automation is not configured yet.
+
+## Independent review packages awaiting a channel
+
+These are written to be handed to an external reviewer, and each states in
+its first paragraph that the review has not happened:
+
+| package | register row | status |
+|---|---|---|
+| `docs/security/CRYPTO_REVIEW_PACKAGE.md` | P1 independent cryptographic review | commissioned, **NOT PERFORMED** |
+| `docs/security/RE_EVALUATION_PROTOCOL.md` | P1 independent payload semantic review | commissioned, **NOT RUN** |
+| `docs/security/MIMOSA_REVIEW_PACKAGE.md` | P1 independent Mimosa baseline review | commissioned, **NOT PERFORMED** |
+
+The suite asserts none of them ever claims a review occurred, and that each
+keeps its banner: `tests/test_review_packages_executable.py`. Returned
+findings are meant to be filed as new register rows; see
+`docs/security/REVIEW_FINDINGS_INTAKE.md` for the format.
+
 
 ## Hardcoded-secret policy
 
