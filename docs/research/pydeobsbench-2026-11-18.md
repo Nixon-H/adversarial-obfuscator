@@ -3240,3 +3240,22 @@ Remaining open (unchanged, external or admin-side): the production publish
 target in a protected environment, the two independent reviews, CA-issued
 Authenticode identity, Apple Developer ID, and the Windows strict-mode
 runtime test on supported hardware.
+
+### 6e.1 The aggregate test count, independently confirmed
+
+The reviewer's caution not to carry forward the earlier 29,928 figure was
+warranted: the per-shard logs of the authoritative run (rc-gate-20261122
+T033433-2604693, commit 9ee68f4, tree 54185e71) sum to **29,938 passed,
+7 skipped — 29,945 collected**, not 29,928. The difference is real, not
+arithmetic drift: the fourth- and fifth-pass additions changed shard
+composition (shard 4 grew to 835 with the precedence matrix, shard 5 to
+750). The per-shard counts are now recorded in the gate evidence file next
+to the identity lines, so the aggregate is re-derivable from the record
+rather than remembered.
+
+Two distinctions are now explicit in MAXIMUM_SECURITY §5.6: a stable clean
+source identity is NOT a reproducible build (the build embeds per-run
+seeds, nonces and ephemeral keys, so same-tree builds are semantically
+equivalent but not byte-identical), and the digest-verification chain is
+implemented while the production environment still requires
+administrator-side confirmation.
