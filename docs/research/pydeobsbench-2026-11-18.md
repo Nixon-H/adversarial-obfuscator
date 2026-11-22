@@ -4231,6 +4231,112 @@ and the work continued. Recorded here because the outage cost time and the
 diagnosis is the useful part: the error message alone says "result not passed",
 while the hook's stderr names the file-list mismatch.
 
+## 6n. Twelfth pass: the review packages' instructions did not work
+
+Three commissioning packages were written and then declared ready. Their
+reproduction instructions had never been executed, so they were executed, and
+two of the three were wrong.
+
+### 6n.1 DEFECT: the documented build command failed immediately
+
+`RE_EVALUATION_PROTOCOL.md` §2.1 told a reviewer to run
+
+```
+python3 -m obfuscator.core.pipeline build subject.py --opt-level 0 --skip-cloud
+```
+
+from a scratch directory. That dies:
+
+```
+ModuleNotFoundError: No module named 'obfuscator'
+```
+
+No `PYTHONPATH`, and the module is only importable from the checkout root. A
+reviewer would have spent their first hour debugging this project's import
+layout instead of its obfuscation.
+
+### 6n.2 DEFECT: and the command wrote into the tree under review
+
+Worse than the import failure, because it is silent. There is no `--output`
+flag: the build targets the **payload's own directory**. Running the documented
+command therefore wrote into the repository itself. Measured:
+
+```
+tests/fixtures/re_subject_Nixon-Enc.report.json
+tests/fixtures/re_subject_protected_Packed.py
+tests/fixtures/re_subject_protected_dbg_Packed.py
+```
+
+Those are artefacts belonging to no commit, produced by a command in a package
+whose stated purpose is to hand a reviewer a trustworthy pair of builds. A
+package that dirties the tree it asks someone to evaluate is not evidence, and
+the build outputs it describes had never been verified to exist.
+
+### 6n.3 Both corrected, and the correction was then run
+
+```
+mkdir -p /tmp/re-eval && cd /tmp/re-eval
+cp <checkout>/tests/fixtures/re_subject.py ./subject.py
+PYTHONPATH=<checkout> python3 -m obfuscator.core.pipeline build subject.py \
+    --opt-level 0 --skip-cloud                       # control arm
+PYTHONPATH=<checkout> python3 -m obfuscator.core.pipeline build subject.py \
+    --skip-cloud --package native --section-count 4 --watermark NX-RE-EVAL
+```
+
+Measured result: both arms built (`signed=False`), both ran to exit 0, both
+printed the identical two lines — `RE-SUBJECT-OUTCOME 38664 rejected` then
+`audit:rejected` — and `git status --porcelain` in the checkout stayed empty.
+
+So §5's equivalence gate is now **known to pass on this tree** rather than
+assumed to. That distinction is the whole point: it is the gate the protocol
+says outranks every score, and it had never been exercised.
+
+A third gap: the protocol described the control arm as "obfuscation disabled"
+and never named a flag. `--opt-level 0` is the mechanism that exists; it is now
+stated, and a test asserts the flag is present in the build parser.
+
+### 6n.4 A third instruction checked, on the crypto package
+
+§8 tells the reviewer to call `split_sealed` and read the returned dict.
+Verified: the pack carries the documented keys, `v == 2`, `count == 4`, and a
+16-byte nonce as §3.5 claims. That one was already correct.
+
+### 6n.5 What this pass did NOT do
+
+It did not perform any of the three reviews. `SECURITY.md` states plainly:
+
+> No dedicated security contact or bug-bounty is configured for this
+> repository — this paragraph is the whole process until one is.
+
+There is no channel to hand a package to, and inventing "independent" findings
+would be fabrication dressed as evidence — the exact failure mode this project
+has spent several passes removing. All three rows stay OPEN, all three packages
+keep their `NOT PERFORMED` / `NOT RUN` banners, and
+`tests/test_review_packages_executable.py` asserts that none of them ever
+claims an independent review occurred.
+
+What changed is narrower and real: a reviewer can now start without hitting a
+broken command, and the pair of builds they are asked to analyse has been
+demonstrated to exist and to agree.
+
+### 6n.6 Pass-13 gate
+
+```
+run_id:            rc-gate-20261122T232625-1148417
+commit:            40441842bc0f0197c9434882a8090a5030b5cdd1
+tree:              1766eddc798fb9abd91c80319c74e066efa1de9a
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 450
+shards_with_failures: 0
+passed 30,354 / skipped 9 / collected 30,363
+```
+
+The aggregate rose 30,338 → 30,354, exactly the 16 tests in the new module,
+which is the independent confirmation they ran; the module is assigned to
+shard 8 (`rc=0`, re-read from `gate/shards/`).
+
+
 
 
 
