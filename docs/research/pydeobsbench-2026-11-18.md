@@ -3937,5 +3937,54 @@ naming Authenticode, Apple Developer ID and the missing independent
 cryptographic review — so the document cannot quietly start implying coverage
 it does not have.
 
+### 6k.4 The authoritative pass-9 gate record
+
+```
+run_id:        rc-gate-20261122T195557-810977
+commit:        8b4cb91503e46637295e0046d833b80f3cd42173
+tree:          fe3e73cd6343fc0702265adb5247cc2111c7b54d
+dirty_files:   0
+identity_stable: true
+shard_files_total: 446          (444 + the two new modules)
+shards_with_failures: 0
+passed:        30,305
+skipped:       9
+collected:     30,314          (30,305 + 9 = 30,314)
+```
+
+Per-shard, all `rc=0` with this commit and tree and `dirty=0` on every line:
+543+1s, 576, 442+1s, 675+1s, 487+1s, 804+3s, 735, 25,020+1s, and shards 9-10.
+
+The aggregate rose from 30,286 to 30,305 — **exactly the 19 tests in the two
+new modules**, which is the independent confirmation that they ran rather
+than merely being present. Verified again by name on the committed tree:
+`tests/test_release_acceptance.py` (6) plus `tests/test_incident_response.py`
+(13) = 19 passed, 0 skipped.
+
+Shard assignment re-read from `gate/shards/`: `test_incident_response.py` is
+in shard 5 and `test_release_acceptance.py` in shard 8, both of which returned
+`rc=0`. This matters because the earlier failure mode in this project was a
+suite file that existed but was assigned to no shard at all; the derivation
+assertion (`shard_files_total` plus a refusal on any unassigned file) is what
+makes "present in the tree" and "ran in the gate" the same claim.
+
+### 6k.5 What remains, and why it is not being closed here
+
+The register's remaining rows are external or administrative, and this pass
+does not pretend otherwise:
+
+| row | why it cannot close in this repository |
+|---|---|
+| independent cryptographic review of pack-v2 | needs a cryptographer; passing the tamper matrix shows specific attacks were rejected, not that the construction is sound |
+| independent payload semantic review | needs an analyst given the artefact and a budget, with the source withheld |
+| independent Mimosa baseline review | our own sampling is not independent verification |
+| Authenticode / Apple Developer ID | purchased identities and a CA relationship |
+| Windows strict shadow-stack hardware | needs a host with CET shadow stack enabled |
+| production environment + protected release | a GitHub environment with required reviewers, and a real release decision |
+
+Each is named in `docs/security/INCIDENT_RESPONSE.md` under "NOT covered
+here", so the documentation and the register agree about what is unproven.
+
+
 
 
