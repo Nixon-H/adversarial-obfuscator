@@ -34,8 +34,8 @@ The subject is built twice:
 
 | arm | build | given to analyst |
 |---|---|---|
-| **obfuscated** | full protection stack, `--package native`, section split | yes |
-| **control** | same source, obfuscation disabled | yes, as the baseline |
+| **obfuscated** | `--package native --section-count 4` | yes |
+| **control** | `--opt-level 0` (protection ladder disabled) | yes, as the baseline |
 
 The analyst receives BOTH artefacts and is told which is which. The control
 establishes their personal cost floor: if they take 20 hours on the control
@@ -43,6 +43,62 @@ and 22 on the obfuscated build, the obfuscation bought 10%, and that is a
 finding worth recording rather than hiding.
 
 The analyst is NOT given the source, the build tree, or this document's §4.
+
+### 2.1 Building the two arms — read this before trying
+
+Both commands were RUN while preparing this package, and the first version of
+them was wrong in two ways that would have cost a reviewer an hour. Corrected:
+
+**The build writes beside the payload, not into the current directory.**
+There is no `--output` flag; `--in-place` targets the source's own directory
+and without it the build uses `tests/fixtures/dist`. Running the documented
+command from anywhere therefore writes into the **repository**, dirtying the
+tree the reviewer is meant to be evaluating.
+
+**`PYTHONPATH` must point at the checkout** when the build runs from a
+directory that is not the checkout root, or `python3 -m
+obfuscator.core.pipeline` fails with `ModuleNotFoundError`.
+
+Correct procedure, which keeps the repository clean:
+
+```sh
+# 1. work in scratch, and give the subject a name that is not the fixture's
+mkdir -p /tmp/re-eval && cd /tmp/re-eval
+cp <checkout>/tests/fixtures/re_subject.py ./subject.py
+
+# 2. control arm: protection ladder off
+PYTHONPATH=<checkout> python3 -m obfuscator.core.pipeline build subject.py \
+    --opt-level 0 --skip-cloud
+
+# 3. obfuscated arm: full stack, native package, section split
+PYTHONPATH=<checkout> python3 -m obfuscator.core.pipeline build subject.py \
+    --skip-cloud --package native --section-count 4 --watermark NX-RE-EVAL
+```
+
+Both arms land in `/tmp/re-eval`; the checkout is untouched. Verify with
+`git -C <checkout> status --porcelain` returning empty after step 3 — if it
+does not, stop and report it as a build defect, because a build that writes
+into its own checkout is a finding in its own right.
+
+**Both arms must produce the same observable output**
+(`RE-SUBJECT-OUTCOME 38664 rejected`, then `audit:rejected`). That is §5's
+equivalence gate. If they differ, it is a build-correctness defect and it
+outranks every score.
+
+**Measured 2026-11-22** while preparing this package, following the procedure
+above exactly: the control arm (`--opt-level 0`) and the obfuscated arm
+(`--package native --section-count 4 --watermark NX-RE-EVAL`) both built
+(`signed=False`), both ran to exit 0, and both printed the identical two lines.
+The checkout stayed clean across both builds. So the equivalence gate is known
+to pass on this tree rather than assumed to — the reviewer starts from a
+working pair, not from a build to debug.
+
+**The signing keys must be EPHEMERAL.** The obfuscated arm above builds
+unsigned (`signed=False`), which is correct for an evaluation artefact: there
+is no release identity involved and no key should be minted for the exercise.
+If a signed build is wanted, generate the key at run time with `secrets` and
+pass it only through the environment — never a literal in a script, a note or
+this document.
 
 ## 3. Budget and conditions
 
