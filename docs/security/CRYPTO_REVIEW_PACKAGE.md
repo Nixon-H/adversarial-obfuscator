@@ -230,30 +230,78 @@ binding `2` into `ctx_i` genuinely prevents downgrade (the claim tested in
 
 ## 8. How to reproduce the measurements
 
+Run everything from the checkout root, or set `PYTHONPATH` to it. Without one
+of those the module is unimportable and the first command fails with
+`ModuleNotFoundError` — verified 2026-11-23, and the reason the commands below
+are written with `PYTHONPATH` explicit rather than assuming a cwd.
+
 ```
-python3 -m pytest -q tests/test_section_split.py tests/test_pack_state.py \
-    tests/test_reorder_pack.py tests/test_byte_tamper_sweep.py
+cd <checkout>
+export PYTHONPATH="$PWD"
+
+python3 -c 'import sys; from pytest import console_main; sys.exit(console_main())' \
+    -q tests/test_section_split.py tests/test_pack_state.py \
+       tests/test_reorder_pack.py tests/test_byte_tamper_sweep.py
 ```
+
+Expected: **40 passed**. Verified 2026-11-23 on the target commit. (If it says
+fewer, the tamper matrix has changed and the package's §4 table is stale —
+stop and report that, because the claims below were measured against this
+suite.)
+
+`python3 -m pytest` is used elsewhere in this repository and is the more
+familiar form, but it fails on this host with `No module named pytest.__main__`
+because pytest is installed as a library rather than a runnable module. The
+`console_main()` form above is what the project's own release gate uses, so it
+is the one that is known to work here.
 
 Fuzzing (needs atheris; 45 s per target is enough to see coverage grow):
 
 ```
 python3 -m venv /tmp/fv && /tmp/fv/bin/pip install atheris
-NX_FUZZ_TARGET=pack NX_FUZZ_SECONDS=45 /tmp/fv/bin/python scripts/fuzz/nx_fuzz.py
+NX_FUZZ_TARGET=pack NX_FUZZ_SECONDS=45 \
+    /tmp/fv/bin/python scripts/fuzz/nx_fuzz.py
 ```
 
-A build that produces a v2 pack, for inspection:
+Expected: `cov` climbs past 1 and the corpus grows beyond one entry. **`cov: 1`
+across millions of executions means the harness is not instrumenting, not that
+the parser is clean** — that exact misreading is recorded in
+`docs/research/pydeobsbench-2026-11-18.md` §6j.3, and `tests/test_fuzz_harness.py`
+exists to keep it from recurring.
+
+A build that produces a v2 pack, for inspection. The keys are EPHEMERAL and
+must be generated at run time — never literals, never committed:
 
 ```
-NIXON_ARTEFACT_SIGN_KEY=<hex> NIXON_BUILD_MANIFEST_KEY=<hex> \
-NIXON_REQUIRE_PROVENANCE=1 NIXON_PROVENANCE_PUBKEY=<hex> \
+export PYTHONPATH="$PWD"
+export NIXON_ARTEFACT_SIGN_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')
+export NIXON_BUILD_MANIFEST_KEY="$NIXON_ARTEFACT_SIGN_KEY"
+export NIXON_REQUIRE_PROVENANCE=1
+export NIXON_PROVENANCE_PUBKEY=$(python3 - <<'PY'
+import os
+from obfuscator.licensing import private_key_from_hex
+from cryptography.hazmat.primitives import serialization
+k = private_key_from_hex(os.environ["NIXON_ARTEFACT_SIGN_KEY"])
+print(k.public_key().public_bytes(
+    encoding=serialization.Encoding.Raw,
+    format=serialization.PublicFormat.Raw).hex())
+PY
+)
+
 python3 -m obfuscator.core.pipeline build tests/fixtures/payload_probe.py \
     --skip-cloud --section-count 4 --package native
 ```
 
+**The build writes beside the payload, not into the current directory.** There
+is no `--output` flag. Copy the probe to a scratch directory first if you want
+the checkout to stay clean; `git status --porcelain` returning empty afterwards
+is the check.
+
 The pack JSON is embedded in the emitted loader as a sealed literal; to
 inspect it, call `obfuscator.section_split.split_sealed(payload, key=K)` in a
-REPL and read the returned dict directly.
+REPL and read the returned dict directly. Verified: it carries `sections`,
+`count`, `total`, `v == 2`, `state`, `key_hint`, `per_section`, and each section
+carries `i`, `salt`, `nonce` (16 bytes), `data`.
 
 ## 9. Why this package exists
 
