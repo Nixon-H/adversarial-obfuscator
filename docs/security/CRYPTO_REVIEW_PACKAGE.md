@@ -1,4 +1,4 @@
-# Cryptographic review package — section pack v2
+# Cryptographic review package — section pack v3
 
 **Purpose.** This is the evidence bundle for the register's P1 row *independent
 cryptographic review of the production section encryption*. It is written to
@@ -79,12 +79,47 @@ build (see 3.5).
 ### 3.2 Authenticated context (the AAD role)
 
 ```
-ctx_i = u32be(2) ‖ u32be(i) ‖ u32be(total) ‖ N_i
+ctx_i = u32be(v) ‖ u32be(i) ‖ u32be(total) ‖ N_i ‖ pack_id
 ```
 
-where `2` is the pack format version and `total` is the pack's declared
+`v` is the PACK's declared format version and `total` is the pack's declared
 plaintext length. Version is bound so a pack cannot be downgraded to the v1
 scheme by editing the `v` field.
+
+**`pack_id` is new in v3** (finding MIMOSA-INTAKE-001, below). It is a 16-byte
+per-pack identity derived as
+
+```
+pack_id = SHA256(b"nx-pack-id:" ‖ K ‖ pack_nonce)[:16]
+```
+
+where `pack_nonce` is 16 random bytes per build, carried in the pack header
+(not secret). Binding it means a section copied from a *different* pack fails
+its tag even when the key and the total are identical — which they were in the
+v2 scheme, making v2 packs interchangeable section-by-section.
+
+The context is therefore 28 bytes for a v2 pack (no `pack_id`) and 44 bytes
+for a v3 pack. A v3 pack that omits `pack_nonce` is REFUSED rather than
+silently treated as v2, because that fallback would restore the splice.
+
+### 3.2.1 Finding MIMOSA-INTAKE-001 — resolved in v3
+
+The v2 context bound `(v, i, total, N_i)` and nothing else. Two packs built
+with the same session key and the same total length were therefore
+interchangeable section-by-section: replace sections 0–1 of pack A with those
+of pack B, recompute the (unkeyed) structural digest, and every substituted
+section's MAC still verified. Measured output before the fix:
+
+```
+joined  : b'BBBBBBBBBBBBBBBBAAAAAAAAAAAAAAAA'
+expected: b'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+```
+
+The row is filed in `REVIEW_FINDINGS_FILED.md`; the regression test is
+`tests/test_section_substitution_finding.py`. **A reviewer should treat the v3
+fix as maintainer-designed and unreviewed** — it is the maintainers' answer to
+a maintainers' finding, which is precisely the situation this review exists to
+provide independence for.
 
 ### 3.3 Seal (build side)
 

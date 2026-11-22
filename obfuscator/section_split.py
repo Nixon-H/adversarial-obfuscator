@@ -108,35 +108,91 @@ def _section_key(master: bytes, index: int, nonce: bytes) -> bytes:
 # a compatibility cliff.
 SECTION_ENC_DOMAIN = b"nx-section-enc:"
 SECTION_MAC_DOMAIN = b"nx-section-mac:"
-SECTION_PACK_VERSION = 2
+#: v3 adds a PACK IDENTITY to the authenticated context.
+#:
+#: Finding MIMOSA-INTAKE-001 (2026-11-23): v2 bound (version, index, total,
+#: nonce) but NOT which pack a section belonged to. Two packs built with the
+#: same session key and the same total were therefore interchangeable
+#: section-by-section -- splice pack B's section 0 into pack A, recompute the
+#: (unkeyed) structural digest, and the MAC verified. Mixed plaintext ran.
+#:
+#: v3 binds a 16-byte per-pack identity, derived from the session key and a
+#: random per-build pack nonce carried in the pack header, into ctx. A section
+#: from another pack now fails its tag even under the same key and total.
+#:
+#: v2 REMAINS LOADABLE: packs carrying "v": 2 use the empty-id context, so
+#: existing artefacts keep working. Only new builds emit v3. This is a
+#: deliberate trade and it is stated where it matters: a v2 pack still carries
+#: the splice weakness, because that weakness is inherent to its format.
+SECTION_PACK_VERSION = 3
+SECTION_PACK_VERSION_V2 = 2
+PACK_ID_BYTES = 16
 
 
 def _section_keys_v2(master: bytes, index: int, nonce: bytes):
-    """Role-separated (encryption, MAC) keys for a pack-v2 section."""
+    """Role-separated (encryption, MAC) keys for a section (v2 or v3).
+
+    The derivation is UNCHANGED between v2 and v3: the pack identity enters
+    the MAC context, not the key schedule. Keeping the key schedule stable
+    means a v2 pack and a v3 pack built from the same key still derive the
+    same per-section keys, so the only thing distinguishing them is the tag.
+    """
     basis = bytes(master) + index.to_bytes(4, "big") + nonce
     enc = hashlib.sha256(SECTION_ENC_DOMAIN + basis).digest()
     mac = hashlib.sha256(SECTION_MAC_DOMAIN + basis).digest()
     return enc, mac
 
 
-def _mac_context_v2(index: int, total: int, nonce: bytes) -> bytes:
-    """The metadata a v2 MAC binds: position, declared total, nonce.
+def _pack_id(key: bytes, pack_nonce: bytes) -> bytes:
+    """Derive the per-pack identity bound into every v3 section's MAC.
+
+    Depends on BOTH the session key and a random per-build pack nonce:
+
+    * the nonce makes two packs under one key differ with overwhelming
+      probability, which is what defeats the splice;
+    * the key stops an attacker who reads the pack from choosing a colliding
+      id -- they would need the key to compute the id any other pack would
+      accept.
+
+    The nonce itself is not secret (it travels in the pack header); it is the
+    key mixing that gives the id its binding force.
+    """
+    return hashlib.sha256(
+        b"nx-pack-id:" + bytes(key) + bytes(pack_nonce)).digest()[:PACK_ID_BYTES]
+
+
+def _mac_context_v2(index: int, total: int, nonce: bytes,
+                    pack_id: bytes = b"", version: int = None) -> bytes:
+    """The metadata a section MAC binds: version, position, total, nonce, id.
 
     Editing any of these to redirect the loader (mis-slice, reorder, point
     the pack at another payload length) invalidates the tag.
 
-    DOWNGRADE RESISTANCE (review register, item 2): the VERSION FIELD is not
-    currently inside the MAC — an editor who changed a pack's ``v`` from 2 to
-    1 (or stripped the field) would flip the loader onto the legacy v1 path,
-    where the plaintext MAC verifies under the v1 derivation and the v2
-    guarantees (separated keys, bound metadata) silently disappear. The
-    version is therefore bound into every tag as a fixed-width 4-byte field,
-    so a tampered or stripped version fails verification outright.
+    ``version`` is the version of the pack being checked, NOT the module's
+    current constant. Passing the constant here was a real defect caught by
+    the v2-compatibility test: a v2 pack hashed version 3 into its context
+    and failed its own tags, so every previously built artefact became
+    unloadable -- the exact compatibility cliff the format versioning exists
+    to avoid.
+
+    DOWNGRADE RESISTANCE: the VERSION FIELD is bound into every tag as a
+    fixed-width 4-byte field, so a tampered or stripped version fails
+    verification outright rather than flipping the loader onto the legacy v1
+    path where the guarantees silently disappear.
+
+    PACK IDENTITY (v3, MIMOSA-INTAKE-001): ``pack_id`` binds the section to
+    the pack it was built for. It is EMPTY for v2 packs -- which is exactly
+    why v2 stays loadable and why a v2 pack still carries the splice
+    weakness. That trade is deliberate and documented rather than silent.
     """
-    return (SECTION_PACK_VERSION.to_bytes(4, "big")
-            + index.to_bytes(4, "big")
-            + total.to_bytes(4, "big")
-            + nonce)
+    ver = SECTION_PACK_VERSION if version is None else int(version)
+    ctx = (ver.to_bytes(4, "big")
+           + index.to_bytes(4, "big")
+           + total.to_bytes(4, "big")
+           + nonce)
+    if pack_id:
+        ctx += bytes(pack_id)
+    return ctx
 
 
 def split_sealed(payload: bytes, *, sections: int = DEFAULT_SECTIONS,
@@ -159,6 +215,17 @@ def split_sealed(payload: bytes, *, sections: int = DEFAULT_SECTIONS,
         key = bytes(key)
     n = min(sections, max(1, len(data)))
     chunk = (len(data) + n - 1) // n
+    # v3 PACK IDENTITY (MIMOSA-INTAKE-001). The pack nonce is random per
+    # build and travels in the header; the id derived from it is what every
+    # section's tag commits to. nonce_seed makes both deterministic for the
+    # decoy pack, exactly as it does for the per-section nonces, so
+    # reproducible-build checks still hold.
+    if nonce_seed is None:
+        pack_nonce = os.urandom(PACK_ID_BYTES)
+    else:
+        pack_nonce = hashlib.sha256(
+            b"nx-pack-nonce:" + bytes(nonce_seed)).digest()[:PACK_ID_BYTES]
+    pack_id = _pack_id(key, pack_nonce)
     out_sections = []
     for i in range(n):
         part = data[i * chunk:(i + 1) * chunk]
@@ -174,16 +241,16 @@ def split_sealed(payload: bytes, *, sections: int = DEFAULT_SECTIONS,
             nonce = hashlib.sha256(b"nx-nonce:" + bytes(nonce_seed) +
                                    i.to_bytes(4, "big")).digest()[:16]
         # Each section is sealed under its OWN role-separated keys, derived
-        # from the master key, the section index and the section nonce (v2
-        # scheme; see the derivation notes above _section_keys_v2).
+        # from the master key, the section index and the section nonce.
         skey, mkey = _section_keys_v2(key, i, nonce)
         # Keyed tag, not a bare sha256: an unkeyed digest detects corruption
         # but is not a MAC, so anyone able to touch the ciphertext could
-        # recompute it.  The v2 tag additionally binds the section's index,
-        # the pack's declared total and the nonce -- the metadata a pack
-        # editor would change to redirect the loader (AAD role).
+        # recompute it.  The tag binds the section's index, the pack's
+        # declared total, the nonce AND (v3) the pack identity -- the
+        # metadata a pack editor would change to redirect the loader, and the
+        # one that stops a section being spliced in from another pack.
         _tag = hmac.new(
-            mkey, _mac_context_v2(i, len(data), nonce) + part,
+            mkey, _mac_context_v2(i, len(data), nonce, pack_id) + part,
             hashlib.sha256).digest()
         tagged = _tag + part
         enc = bytes(a ^ b for a, b in zip(tagged, _keystream(skey, nonce, len(tagged))))
@@ -199,9 +266,15 @@ def split_sealed(payload: bytes, *, sections: int = DEFAULT_SECTIONS,
         "total": len(data),
         "key_hint": hashlib.sha256(key).hexdigest()[:16],
         "per_section": True,
-        # Pack scheme version: the loader branches on this to pick the v2
-        # derivation/MAC or the v1 legacy path (see SECTION_PACK_VERSION).
+        # Pack scheme version: the loader branches on this to pick the v3
+        # derivation/MAC, the v2 legacy path, or the pre-v2 v1 path (see
+        # SECTION_PACK_VERSION).
         "v": SECTION_PACK_VERSION,
+        # v3 PACK IDENTITY: the nonce the id was derived from travels here so
+        # the loader can recompute the same id. The nonce is NOT secret; what
+        # binds is that the id is mixed with the session key, so a spliced
+        # section from a different pack fails its tag.
+        "pack_nonce": pack_nonce.hex(),
         # Runtime state validation (§1): a digest over the pack's DECLARED
         # structure, so a hand-edited pack that changes count/total/index
         # ordering fails on internal inconsistency instead of only on the
@@ -261,8 +334,31 @@ def stream_join(pack: dict, key: bytes) -> bytearray:
         raise ValueError("section index mismatch")
     joined = bytearray()
     per_section = bool(pack.get("per_section"))
-    v2 = pack.get("v") == SECTION_PACK_VERSION
+    # VERSION DISPATCH (v3 / v2 / v1). Each branch reproduces exactly what
+    # the matching builder emitted; a pack cannot claim a version it was not
+    # built under, because the tag is checked with that version's context and
+    # the version itself is inside the context.
+    pack_version = pack.get("v")
+    v3 = pack_version == SECTION_PACK_VERSION and per_section
+    v2 = pack_version == SECTION_PACK_VERSION_V2 and per_section
     total_declared = int(pack["total"])
+    if v3:
+        # v3 binds the per-pack identity. A pack that omits or mangles
+        # pack_nonce is a refusal rather than a silent fall back to v2 --
+        # falling back would hand an attacker exactly the downgrade the v3
+        # context exists to prevent.
+        pack_nonce_hex = pack.get("pack_nonce")
+        if not isinstance(pack_nonce_hex, str) or not pack_nonce_hex:
+            raise ValueError("v3 pack is missing its pack nonce")
+        try:
+            pack_nonce = bytes.fromhex(pack_nonce_hex)
+        except ValueError:
+            raise ValueError("v3 pack nonce is not valid hex")
+        if len(pack_nonce) != PACK_ID_BYTES:
+            raise ValueError("v3 pack nonce has the wrong length")
+        _pack_identity = _pack_id(bytes(key), pack_nonce)
+    else:
+        _pack_identity = b""
     for sec in ordered:
         # PER-SECTION INDEX BOUNDS (malformed-input fuzz finding): a
         # negative or oversized index crashed the derivation with an
@@ -272,10 +368,16 @@ def stream_join(pack: dict, key: bytes) -> bytearray:
             raise ValueError("section index out of range")
         nonce = bytes.fromhex(sec["nonce"])
         enc = bytes.fromhex(sec["data"])
-        if v2 and per_section:
-            # v2: role-separated keys and a MAC bound to index/total/nonce.
+        if v3 or v2:
+            # Role-separated keys and a MAC bound to version/index/total/
+            # nonce, plus the pack identity in v3. The version passed here is
+            # the PACK's declared version, not the module constant, so a v2
+            # pack verifies under v2 rules instead of failing its own tags.
             skey, mkey = _section_keys_v2(bytes(key), sec_index, nonce)
-            _ctx = _mac_context_v2(sec_index, total_declared, nonce)
+            _ctx = _mac_context_v2(sec_index, total_declared, nonce,
+                                   _pack_identity,
+                                   version=SECTION_PACK_VERSION_V2 if v2
+                                   else SECTION_PACK_VERSION)
         elif per_section:
             # Legacy v1 path: packs built before the scheme change stay
             # loadable. The v1 MAC is hmac(skey + nonce, plaintext) -- the
@@ -693,23 +795,46 @@ LOADER_JOIN_SOURCE = '''def {FUNC}(pack_b85, key):
             raise ValueError("section index mismatch")
         out = bytearray()
         _per_section = bool(pack.get("per_section"))
+        # PACK-SCHEME DISPATCH (v3 / v2 / v1). Each branch must reproduce
+        # split_sealed exactly; a mismatch shows up as "section integrity
+        # failure" on a legitimately built pack, which the moving-walker
+        # round-trip test catches.
+        _pv = pack.get("v")
+        _v3 = (_pv == 3) and _per_section
+        _v2 = (_pv == 2) and _per_section
+        if _v3:
+            # A v3 pack without a usable pack nonce is a REFUSAL, never a
+            # fall back to v2: falling back would hand an attacker the exact
+            # downgrade v3 exists to prevent.
+            _pn_hex = pack.get("pack_nonce")
+            if not isinstance(_pn_hex, str) or not _pn_hex:
+                raise ValueError("v3 pack is missing its pack nonce")
+            _pn = bytes.fromhex(_pn_hex)
+            if len(_pn) != 16:
+                raise ValueError("v3 pack nonce has the wrong length")
+            _pack_ident = _nx_sh.sha256(
+                b"nx-pack-id:" + bytes(key) + _pn).digest()[:16]
+        else:
+            _pack_ident = b""
         for sec in ordered:
             nonce = bytes.fromhex(sec["nonce"])
             enc = bytes.fromhex(sec["data"])
-            # Pack-scheme branch. v2 (see SECTION_PACK_VERSION in the build
-            # module): role-separated keys + MAC bound to index/total/nonce.
-            # v1 (packs built before the change): single derived key, MAC
-            # over the plaintext only. Must match split_sealed exactly.
+            # Pack-scheme branch. v3: role-separated keys, MAC bound to
+            # version/index/total/nonce AND the pack identity. v2: the same
+            # without the identity (still loadable, still spliceable). v1
+            # (pre-scheme packs): single derived key, MAC over the plaintext
+            # only. Must match split_sealed exactly.
             _i = int(sec["i"])
-            if pack.get("v") == 2 and _per_section:
+            if _v3 or _v2:
                 _basis = bytes(key) + _i.to_bytes(4, "big") + nonce
                 skey = _nx_sh.sha256(
                     b"nx-section-enc:" + _basis).digest()
                 mkey = _nx_sh.sha256(
                     b"nx-section-mac:" + _basis).digest()
-                _mctx = (int(pack["v"]).to_bytes(4, "big")
+                _mctx = (_pv.to_bytes(4, "big")
                          + _i.to_bytes(4, "big")
-                         + int(pack["total"]).to_bytes(4, "big") + nonce)
+                         + int(pack["total"]).to_bytes(4, "big") + nonce
+                         + _pack_ident)
             elif _per_section:
                 skey = _nx_sh.sha256(
                     b"nx-section-key:" + bytes(key)
@@ -794,21 +919,38 @@ LOADER_MOVING_SOURCE = '''def {FUNC}(pack_b85, key, sink):
             return False
         total = 0
         _per_section = bool(pack.get("per_section"))
+        # v3/v2/v1 dispatch, matching split_sealed.
+        _pv = pack.get("v")
+        _v3 = (_pv == 3) and _per_section
+        _v2 = (_pv == 2) and _per_section
+        if _v3:
+            _pn_hex = pack.get("pack_nonce")
+            if not isinstance(_pn_hex, str) or not _pn_hex:
+                raise ValueError("v3 pack is missing its pack nonce")
+            _pn = bytes.fromhex(_pn_hex)
+            if len(_pn) != 16:
+                raise ValueError("v3 pack nonce has the wrong length")
+            _pack_ident = _nx_mh.sha256(
+                b"nx-pack-id:" + bytes(key) + _pn).digest()[:16]
+        else:
+            _pack_ident = b""
         for entry in ordered:
             nonce = bytes.fromhex(entry["nonce"])
             enc = bytes.fromhex(entry["data"])
             # Pack-scheme branch, matching split_sealed and the whole-payload
-            # join (v2 = role-separated keys + bound MAC; v1 = legacy).
+            # join (v3 = bound pack identity; v2 = bound metadata only;
+            # v1 = legacy).
             _i = int(entry["i"])
-            if pack.get("v") == 2 and _per_section:
+            if _v3 or _v2:
                 _basis = bytes(key) + _i.to_bytes(4, "big") + nonce
                 skey = _nx_mh.sha256(
                     b"nx-section-enc:" + _basis).digest()
                 mkey = _nx_mh.sha256(
                     b"nx-section-mac:" + _basis).digest()
-                _mctx = (int(pack["v"]).to_bytes(4, "big")
+                _mctx = (_pv.to_bytes(4, "big")
                          + _i.to_bytes(4, "big")
-                         + int(pack["total"]).to_bytes(4, "big") + nonce)
+                         + int(pack["total"]).to_bytes(4, "big") + nonce
+                         + _pack_ident)
             elif _per_section:
                 skey = _nx_mh.sha256(
                     b"nx-section-key:" + bytes(key)
@@ -897,21 +1039,38 @@ LOADER_STREAM_SOURCE = '''def {FUNC}(pack_b85, key):
         out = bytearray()
         total = 0
         _per_section = bool(pack.get("per_section"))
+        # v3/v2/v1 dispatch, matching split_sealed.
+        _pv = pack.get("v")
+        _v3 = (_pv == 3) and _per_section
+        _v2 = (_pv == 2) and _per_section
+        if _v3:
+            _pn_hex = pack.get("pack_nonce")
+            if not isinstance(_pn_hex, str) or not _pn_hex:
+                raise ValueError("v3 pack is missing its pack nonce")
+            _pn = bytes.fromhex(_pn_hex)
+            if len(_pn) != 16:
+                raise ValueError("v3 pack nonce has the wrong length")
+            _pack_ident = _nx_sh.sha256(
+                b"nx-pack-id:" + bytes(key) + _pn).digest()[:16]
+        else:
+            _pack_ident = b""
         for idx, entry in enumerate(ordered):
             nonce = bytes.fromhex(entry["nonce"])
             enc = bytes.fromhex(entry["data"])
             # Pack-scheme branch, matching split_sealed and the other two
-            # emitted joins (v2 = role-separated keys + bound MAC; v1 legacy).
+            # emitted joins (v3 = bound pack identity; v2 = bound metadata
+            # only; v1 = legacy).
             _i = int(entry["i"])
-            if pack.get("v") == 2 and _per_section:
+            if _v3 or _v2:
                 _basis = bytes(key) + _i.to_bytes(4, "big") + nonce
                 skey = _nx_sh.sha256(
                     b"nx-section-enc:" + _basis).digest()
                 mkey = _nx_sh.sha256(
                     b"nx-section-mac:" + _basis).digest()
-                _mctx = (int(pack["v"]).to_bytes(4, "big")
+                _mctx = (_pv.to_bytes(4, "big")
                          + _i.to_bytes(4, "big")
-                         + int(pack["total"]).to_bytes(4, "big") + nonce)
+                         + int(pack["total"]).to_bytes(4, "big") + nonce
+                         + _pack_ident)
             elif _per_section:
                 skey = _nx_sh.sha256(
                     b"nx-section-key:" + bytes(key)

@@ -174,6 +174,16 @@ def test_the_package_documents_reproduction_commands():
 
 
 def test_the_package_matches_the_current_pack_version():
+    """The package's header must name the shipped format, not a literal.
+
+    This was hardcoded to v2 and kept passing after the constant moved --
+    exactly the staleness this module exists to catch.
+    """
     text = _package_text()
-    assert str(ss.SECTION_PACK_VERSION) in text
-    assert "SECTION_PACK_VERSION" in text or "pack format version" in text
+    expected_title = "section pack v%d" % (ss.SECTION_PACK_VERSION,)
+    assert expected_title in text, (
+        "the package title must name the shipped format version (%d)"
+        % (ss.SECTION_PACK_VERSION,))
+    assert "pack_id" in text or "pack identity" in text, (
+        "the package must describe the v3 pack identity; a reviewer with the "
+        "v2 context would be reviewing a construction that no longer ships")
