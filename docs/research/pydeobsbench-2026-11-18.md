@@ -4074,6 +4074,87 @@ lists the known weaknesses, asks the right questions, and lets them reproduce
 every measurement. When findings come back, they join this register alongside
 every other measured item rather than arriving as an unstructured report.
 
+## 6m. Eleventh pass: the reverse-engineering evaluation is commissionable too
+
+The same treatment for the register's other external engineering row. Its
+§6 specification said *what* to measure ("give an independent analyst the
+artefact, no source, fixed budget, semantic-recovery objectives, repeat
+against an unobfuscated control") but provided no subject, no control arm and
+no scoring key — so two analysts would have produced two incomparable
+reports, and "did the obfuscation help?" would have remained unanswerable.
+
+`docs/security/RE_EVALUATION_PROTOCOL.md` closes the commissioning gap:
+
+* **two arms** from the same source — the obfuscated build and an
+  obfuscation-disabled control. The control is the analyst's cost floor;
+  without it a 22-hour result is uninterpretable, because we cannot know
+  whether the 22 hours are the protection or the analyst.
+* **a finite, checkable subject** (`tests/fixtures/re_subject.py`, 60 lines,
+  integer arithmetic, `sys` the only import). Chosen so an analyst either
+  recovers a specific formula or does not, and the score is not a matter of
+  impression.
+* **a scoring key** with four objectives — entry function, numeric algorithm,
+  string surface, integrity-check semantics — each 0/1/2, marked
+  *DO NOT GIVE THIS SECTION TO THE ANALYST*.
+* **behavioural equivalence as a gate that outranks every score**: if the two
+  arms disagree on output, that is a build-correctness defect and the scores
+  do not matter.
+* **four prohibitions on the maintainers**, including "must not report a
+  favourable arm alone".
+* **five stated limitations**, including that one 60-line subject cannot
+  characterise a large codebase and that a good score is not a certification.
+
+### 6m.1 The scoring key had a hole, found by attacking my own key
+
+`tests/test_re_protocol.py` (11 tests) pins the answer key to the subject, on
+the reasoning that if the subject drifts and the key does not, the protocol
+silently grades a correct analyst as failing — an error invisible to both
+parties.
+
+Writing that check, the FIRST version of the case list was wrong in a way
+that matters. The key was compared against the subject over eight inputs
+including `[50000]` and `[100000]`. Perturbing the key and re-running showed:
+
+```
+correct    matches=True   OK
+decay=6    matches=False  OK
+thr=49999  matches=False  OK
+thr=50001  matches=True   GAP     <- the key was NOT pinning the boundary
+```
+
+With no input landing above 50000 but below 50002, a threshold of 50001
+matched every case. The list now includes `[50001]`, and all three
+perturbations diverge while the correct key matches. **A scoring key that
+cannot detect a wrong constant is worse than no key**, because it would have
+graded analysts against a threshold the product does not use.
+
+The module also asserts the protocol keeps its `NOT RUN` banner, its
+withhold marker, the both-arms-and-delta requirement, its limitations
+section, and that the subject stays under 80 lines importing nothing but
+`sys` — since the 40-hour budget assumes that size.
+
+Nothing in it asserts anything about obfuscation strength. That is the
+analyst's measurement, and the row stays OPEN.
+
+### 6m.2 Both external engineering rows are now commissioned
+
+| register row | status after this pass |
+|---|---|
+| P1 independent cryptographic review | **commissioned** — `CRYPTO_REVIEW_PACKAGE.md`, review NOT performed |
+| P1 independent payload semantic review | **commissioned** — `RE_EVALUATION_PROTOCOL.md`, evaluation NOT run |
+| P1 independent Mimosa baseline review | not ours to commission; our sampling is not verification |
+| P1 Authenticode / Apple Developer ID | external purchase |
+| P1 Windows strict shadow-stack | external hardware |
+| P0 production environment + release | administrator action |
+
+Two rows moved from "blocked" to "ready to hand over". That is the most a
+repository can do for a row that by definition requires someone else, and it
+is worth being precise about: **neither review has happened.** A package that
+looks like a review would be worse than an obvious gap, which is why both
+documents carry their NOT PERFORMED / NOT RUN marker in the first paragraph
+and a test asserts the marker survives.
+
+
 
 
 
