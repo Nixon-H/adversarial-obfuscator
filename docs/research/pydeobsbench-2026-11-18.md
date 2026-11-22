@@ -4442,3 +4442,90 @@ complete — specification, known weaknesses, questions, reproduction commands
 that work, a filing format, and a named intake route with its state dated. What
 remains is one settings toggle and several people. Neither is something a
 maintainer can fabricate.
+
+## 6p. Fourteenth pass: the intake channel is live
+
+The register's three external-review rows were blocked on one thing — no route
+for a reviewer to return findings. That route now exists.
+
+### 6p.1 Enabled, and verified against the endpoint that actually reports it
+
+GitHub private vulnerability reporting is **ENABLED** on
+`Nixon-H/adversarial-obfuscator`, verified three times for stability:
+
+```
+gh api repos/Nixon-H/adversarial-obfuscator/private-vulnerability-reporting
+-> {"enabled": true}   (x3)
+```
+
+The advisories API is readable and holds zero advisories — the expected state
+for a channel that is open and has received nothing.
+
+### 6p.2 An API trap that nearly produced a false negative
+
+The first attempt used the command written in `SECURITY.md` itself:
+
+```
+gh api -X PATCH repos/Nixon-H/adversarial-obfuscator \
+    -f 'security_and_analysis[private_vulnerability_reporting][status]=enabled'
+```
+
+It returned **HTTP 200** with the full repository object — and the setting did
+not change. `GET /repos/{owner}/{repo}` does not list
+`private_vulnerability_reporting` inside `security_and_analysis` on this
+repository at all, and the PATCH is silently ignored.
+
+Both readings of that are wrong: "the PATCH returned 200, so it worked" and
+"the field is absent, so it is unsupported". The authoritative check is the
+dedicated endpoint above. `SECURITY.md` now carries the trap next to the
+working command, so the next person re-verifying does not have to rediscover
+it — and one of the tests asserts that warning stays.
+
+### 6p.3 What the document now says
+
+* the channel is **ENABLED**, with a verification date;
+* the advisory URL, so a reporter has a clickable destination:
+  <https://github.com/Nixon-H/adversarial-obfuscator/security/advisories/new>;
+* the dedicated verification endpoint, and the 200-but-inert PATCH beside it;
+* the one-line `DELETE` that reverses the setting, because a documented
+  setting should be documented as reversible;
+* a plain statement that a report is welcome. A test caught that I dropped
+  this sentence while rewriting the section — which is precisely what that
+  test is for, and worth recording as a case where the suite caught the
+  maintainer rather than the code.
+
+No email address appears, still enforced by a test. The advisories channel is
+monitored by the repository's own notification settings, so no address is
+needed and none is invented.
+
+### 6p.4 Pass-15 gate
+
+```
+run_id:            rc-gate-20261123T010331-1450120
+commit:            71eff21081785eb4bf588e7dd8542d0e4c279d79
+tree:              0a558473537511176694294e5be616bf28d88def
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 451
+shards_with_failures: 0
+passed 30,369 / skipped 9 / collected 30,378
+```
+
+The aggregate rose 30,367 → 30,369, the two added tests in
+`test_review_channel.py` (13 → 15). The channel was re-queried after the gate
+and still returns `{"enabled": true}`, so the settings change is stable and
+not something the API reported optimistically.
+
+### 6p.5 What is now genuinely different, and what is not
+
+Different: a reviewer can return findings. The three packages are
+specified, their reproduction commands execute, a fifteen-field filing format
+exists, and there is a live private channel to send results through.
+
+Not different: **no review has happened.** All three packages still carry
+`NOT PERFORMED` / `NOT RUN`, and the register rows stay open until someone
+reads them. The remaining blockers are people and purchases — a cryptographer,
+an analyst, an independent Mimosa reviewer, an Authenticode certificate, an
+Apple Developer ID, Windows shadow-stack hardware, and a production
+environment with required reviewers. None of those can be manufactured by a
+maintainer, and this record does not pretend otherwise.
