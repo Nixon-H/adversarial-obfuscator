@@ -4902,3 +4902,45 @@ the keystream definition, seven or more named weaknesses, the questions
 section, the non-claims section and a return channel are all present, and the
 document contains no clone or checkout instruction. That establishes the
 bundle is *deliverable*, not that it has been *delivered* or reviewed.
+
+### 6s.8 Pass-20 gate (finding MIMOSA-INTAKE-003 filed)
+
+```
+run_id:            rc-gate-20261123T053438-1886452
+commit:            4575168d37ecce90fee62708db9169c0781c4ab2
+tree:              0c2991ec98ba6119243720906a08dc1b8c6833c8
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 455
+shards_with_failures: 0
+passed 30,404 / skipped 9 / collected 30,413
+```
+
+All ten shards `rc=0`. The aggregate rose 30,397 → 30,404, exactly the seven
+tests in `test_salt_doc_finding.py`, assigned to shard 1 (`rc=0`, re-read from
+`gate/shards/`). Arithmetic: 30,404 + 9 = 30,413.
+
+The change was documentation-only (both review documents corrected on `salt`)
+plus one test module, so no wire-format or loader surface moved. The gate was
+run anyway rather than assumed unnecessary: an "it's only docs" claim is one
+this project has already had to retract once, when a documentation-only
+commit's diff actually contained a test change.
+
+### 6s.9 The communication blocker, stated as an engineering fact
+
+Three findings now, and the last two both came from forcing a document and the
+implementation to disagree — the move an independent reviewer makes
+mechanically. Every attempted substitute for a human reviewer has failed and is
+recorded rather than papered over:
+
+* no mail transport on this host (exim4 installed, inactive, unconfigured);
+* no reviewer address in `SECURITY.md`, the repository, or the owner's public
+  GitHub profile;
+* a subagent dispatched with the bundle and instructions to review it cold
+  returned `exceeded quota limit` with **zero output**, which this register
+  explicitly refuses to count as a review.
+
+The packages are deliverable and one needs no repository access at all. What
+does not exist is a recipient. That is not a gap more engineering can close,
+and continuing to produce passes that restate it would be motion rather than
+work.
