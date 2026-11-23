@@ -5102,3 +5102,63 @@ pass took two full builds to verify:
 The version is imported as `SECTION_PACK_VERSION` rather than written as a
 literal; a hardcoded 3 is the exact staleness defect this project has hit three
 times in its own documentation.
+
+### 6s.13 Pass-24 gate (§7 complete: CI workflow identities)
+
+```
+run_id:            rc-gate-20261123T093353-2259115
+commit:            2dd28a4951d57d156f4a7929d6625b7b9ccecd68
+tree:              e30589d1a7c7abb86663c8db8b5a246afc4fc8fe
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 458
+shards_with_failures: 0
+passed 30,434 / skipped 9 / collected 30,443
+```
+
+All ten shards `rc=0`. Aggregate rose 30,427 → 30,434, exactly the seven tests
+in `test_manifest_ci_identity.py`, assigned to shard 3 (`rc=0`).
+Arithmetic: 30,434 + 9 = 30,443.
+
+A CORRECTION TO MY OWN REASONING
+
+The previous pass recorded workflow/action identity as a gap a local build
+"cannot know", and left it open. That was half right and led to the wrong
+conclusion. A local build cannot know WHICH CI run produced an artefact -- but
+its honest answer is `null`, which is a FACT ("no CI ran"), not a forgotten
+field. GitHub Actions exports the identity in the environment, so a CI build
+can record it. The gap was closable, and the earlier reasoning had used a true
+premise to justify not looking.
+
+WHAT IS NOW RECORDED
+
+`build.ci` in the signed manifest, from eight GitHub Actions variables:
+workflow, run_id, run_attempt, job, repository, ref, sha, server_url.
+
+Three decisions that are the substance of the change:
+
+1. `null`, not an omitted key -- so a reader can distinguish "built locally"
+   from "somebody forgot". The same distinction the pack record makes with
+   `format_version: null`.
+2. Blank values are treated as unset. Recording `workflow: ""` would claim CI
+   ran and reported an empty name, which is a false claim of a different kind
+   than "no workflow".
+3. `build.ci.sha` and `build.commit` are kept SEPARATE. The first is the
+   revision CI checked out; the second is the revision the build actually ran
+   from. A mismatch between them is itself evidence, and merging the fields
+   would destroy it.
+
+The helper is a pure environment read: no subprocess, no network. A test makes
+`subprocess.run` and `subprocess.Popen` raise, so a future implementation that
+shelled out to `gh` would fail rather than quietly making builds depend on
+network reachability.
+
+§7 STATUS: complete, with one honest footnote. "pack format version" is written
+by the PIPELINE at build time (`extra.pack`, commit d6b1b31), not by
+`build_manifest` itself, so a bare `build_manifest()` call cannot see it. That
+is documented in the test rather than worked around, and the gate exercises the
+pipeline path.
+
+WHAT REMAINS is unchanged: six external register rows requiring a person, a
+purchase, hardware, or an administrator decision. No further engineering can
+move them.
