@@ -20,10 +20,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from obfuscator.section_split import (  # noqa: E402
-    emit_moving_snippet, pack_json,
+    emit_loader_snippet, emit_moving_snippet, emit_stream_snippet, pack_json,
+    split_sealed,
 )
 
 WALK = "_nx_section_walk"
+JOIN = "_nx_section_join"
 
 
 def _walk():
@@ -173,3 +175,71 @@ def test_per_section_pack_still_round_trips():
     assert _walk()(base64.b85encode(js).decode(), key,
                    lambda b: seen.append(b)) is True
     assert b"".join(seen) == payload
+
+
+# ── the release-mode version gate (defect found 2026-11-23) ───────────────
+#
+# NIXON_REQUIRE_PACK_V2=1 bakes a version gate into all three emitted decrypt
+# paths. It was written as `pack.get("v") != 2`, correct while v2 was current.
+# When the format moved to v3 the comparison silently became "refuse the
+# CURRENT scheme", so a release build could not decrypt a pack its own builder
+# had just produced. Measured before the fix:
+#
+#     require_v2=False -> OK, payload matches
+#     require_v2=True  -> returned None        <-- valid v3 pack refused
+#
+# ... while v1 was ALSO refused, which was the intent -- so a test that only
+# checked "v1 is refused" would have kept passing. Both halves are pinned here.
+
+POLICY_KEY = b"\x11" * 32
+POLICY_PAYLOAD = b"POLICY-GATE-PAYLOAD" * 3
+OLDEST_SUPPORTED = 2
+
+
+def _refuses(version_field):
+    """The policy predicate, as the emitted loader evaluates it.
+
+    Mirrors the emitted expression exactly:
+        int(pack.get("v") or 0) < OLDEST_SUPPORTED
+    Kept as a plain function so the test does not have to eval generated
+    source, and pinned against the emitted text in the next test.
+    """
+    return int(version_field or 0) < OLDEST_SUPPORTED
+
+
+def test_the_release_policy_does_not_pin_to_a_literal_version():
+    """THE REGRESSION, as a source property.
+
+    The check must refuse RETIRED schemes, not everything that is not 2. A
+    literal comparison is what turned a version bump into a loader that could
+    not read its own output.
+    """
+    for emit in (emit_loader_snippet, emit_moving_snippet,
+                 emit_stream_snippet):
+        src = emit(require_v2=True)
+        assert 'pack.get("v") != 2' not in src, (
+            "%s still refuses anything that is not exactly v2, so a future "
+            "version bump will again refuse the scheme it emits"
+            % emit.__name__)
+        assert 'int(pack.get("v") or 0) < 2' in src, (
+            "%s must compare against the OLDEST supported scheme"
+            % emit.__name__)
+
+
+def test_the_policy_admits_the_current_scheme_and_refuses_v1():
+    """Both directions of the gate, using the shipped predicate semantics."""
+    current = split_sealed(POLICY_PAYLOAD, sections=2, key=POLICY_KEY)["v"]
+    assert not _refuses(current), (
+        "the gate refuses v%d, the scheme the builder just emitted"
+        % (current,))
+    assert not _refuses(2), "the gate refuses v2"
+    assert _refuses(1), "the gate accepts retired v1"
+    assert _refuses(None), "the gate accepts a pack with no version field"
+    assert _refuses(0), "the gate accepts version 0"
+
+
+def test_the_state_check_runs_once_per_join():
+    """The duplicated back-to-back state check was removed (same pass)."""
+    src = emit_loader_snippet()
+    assert src.count("if not _nx_pack_state_ok(pack):") == 1, (
+        "the emitted join runs the structural state check more than once")

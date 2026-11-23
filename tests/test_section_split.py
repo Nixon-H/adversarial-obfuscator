@@ -499,13 +499,21 @@ def test_the_full_framing_tamper_matrix_is_rejected():
 
 
 def test_release_mode_loader_snippets_refuse_v1_packs():
-    """NIXON_REQUIRE_PACK_V2 bakes a v1 refusal into the emitted loader.
+    """NIXON_REQUIRE_PACK_V2 bakes a RETIRED-SCHEME refusal into the loader.
 
     The gate is a BUILD-TIME substitution: the emitted snippet carries
-    ``_NX_PACK_V2_REQUIRED = True`` and fails closed on any pack whose
-    version is not 2, BEFORE the state check and long before any plaintext.
-    The default (False) keeps v1 acceptance for old artefacts -- the policy
-    choice is explicit on both sides.
+    ``_NX_PACK_V2_REQUIRED = True`` and fails closed on any pack using a
+    RETIRED scheme, BEFORE the state check and long before any plaintext. The
+    default (False) keeps v1 acceptance for old artefacts -- the policy choice
+    is explicit on both sides.
+
+    CORRECTED 2026-11-23. This test previously asserted
+    ``pack.get("v") != 2`` in the emitted source, which pinned the defect
+    rather than the contract: that expression refuses the CURRENT scheme too,
+    so a release build could not decrypt a pack its own builder had emitted.
+    It now asserts the comparison is against the OLDEST supported scheme, so a
+    future version bump cannot silently re-break the loader. Both halves are
+    covered: the policy admits the current scheme and still refuses v1.
     """
     from obfuscator.section_split import (
         emit_loader_snippet, emit_moving_snippet, emit_stream_snippet,
@@ -516,7 +524,13 @@ def test_release_mode_loader_snippets_refuse_v1_packs():
                  emit_stream_snippet(require_v2=True)):
         compile(emit, "<v2-required>", "exec")
         assert "_NX_PACK_V2_REQUIRED = True" in emit
-        assert 'pack.get("v") != 2' in emit
+        # Refuses RETIRED schemes, not everything that is not exactly 2.
+        assert 'int(pack.get("v") or 0) < 2' in emit, (
+            "the release gate must compare against the OLDEST supported "
+            "scheme; a literal `!= 2` refuses the scheme the builder emits")
+        assert 'pack.get("v") != 2' not in emit, (
+            "the literal-version comparison is back, and it rejects the "
+            "current pack format")
     for emit in (emit_loader_snippet(JOIN_FUNC),
                  emit_moving_snippet(),
                  emit_stream_snippet()):
