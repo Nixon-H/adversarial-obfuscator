@@ -5274,3 +5274,56 @@ has been sent, and no reviewer findings exist to file. Submitting on the owner's
 behalf would begin a commercial relationship and disclose an unpatched
 construction (MIMOSA-INTAKE-002 is open) — both requiring their consent. The
 bundle, the route and the draft are prepared; the send is theirs.
+
+### 6s.16 Pass-27 gate (contact form requirements recorded)
+
+```
+run_id:            rc-gate-20261123T121818-2530249
+commit:            b2b5a65f608b2116b6afb08facd00d3952056319
+tree:              7c49e996f11d6213aada2b85b581be4d9f11cc4c
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 459
+shards_with_failures: 0
+passed 30,446 / skipped 9 / collected 30,455
+```
+
+All ten shards `rc=0`, verified to carry exactly ONE run ID. Arithmetic:
+30,446 + 9 = 30,455.
+
+THE SUBMISSION WAS ATTEMPTED, AND THE BLOCKER IS FACTUAL
+
+The instruction was to submit the enquiry. The contact form was loaded in a
+browser and read — it renders inside an iframe, which is why earlier static
+fetches could not see its fields. It requires:
+
+  FIRST NAME* / LAST NAME* / EMAIL* / COMPANY NAME*     (required)
+  INQUIRY TYPE*                                         (required dropdown)
+  WHAT CAN TRAIL OF BITS DO FOR YOU?*                   (required free text)
+  data-processing consent*                              (required checkbox)
+  reCAPTCHA                                             (present)
+
+Four of those are the repository owner's identity. This session does not have
+their name, email address or organisation name, and inventing them would
+fabricate a person and impersonate the owner to a third party — including
+ticking a data-processing consent agreement in their name. That is not a matter
+of the maintainer's willingness; the data does not exist here.
+
+The one useful thing the attempt produced: the form matches the ask closely.
+The INQUIRY TYPE dropdown carries "Cryptography (libraries, protocols, ZKPs &
+ZK EVMs, MPC & threshold crypto, & other cryptography reviews)", and the
+services checkboxes include "Design Review" — exactly what the brief asks for.
+Both are recorded verbatim in the brief so the sender picks them rather than
+paraphrasing.
+
+WHAT THE OWNER NEEDS IN HAND
+
+First name, last name, email, organisation name, agreement to Trail of Bits'
+privacy policy. Everything else is prepared: the text to paste (§1.2), which
+dropdown option, which checkbox, and the do-not-attach rule for the bundle
+itself.
+
+THE REVIEW ROW REMAINS OPEN, for exactly one reason: the form's required fields
+are the owner's identity. Not a missing channel, not a missing document, not a
+missing decision about which vendor — those are all settled. A person has to
+type their own name.
