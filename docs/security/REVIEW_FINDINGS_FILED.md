@@ -552,12 +552,35 @@ FINDING AI-PROTO-007
                 acceptance. 40/40 concurrent attempts were accepted.
   fixed-by:     nobody yet.
   regression-test:
-                none, deliberately. The race is timing-dependent, so a test that
-                passes today would be proving scheduler luck rather than the
-                property, and a flaky test in the derived gate is worse than an
-                honest absence. The 5/5 reproduction above is the evidence; a
-                deterministic test needs the atomic primitive that IS the
-                remediation, at which point it becomes writable.
+                tests/test_ledger_race_deterministic.py::
+                test_concurrent_presentations_accept_exactly_once, marked
+                xfail(strict=True).
+
+                The earlier row said this finding could not be tested because a
+                race is timing-dependent and a passing test would prove
+                scheduler luck. That was half right and is now corrected: relying
+                on natural timing is flaky, but the INTERLEAVING can be forced,
+                and once forced the test is deterministic.
+
+                The test wraps `_load` and `_store` on the ledger INSTANCE with
+                barrier-rendezvous functions: every worker must complete its read
+                before any worker may write. That reproduces the exact window
+                this finding is about without touching the ledger's logic, so a
+                correct implementation (O_EXCL, flock, atomic append) would still
+                fail the test only if it were wrong.
+
+                Measured with the barrier in place: all six workers read, then all
+                six wrote, and the outcome was
+                `[True, True, True, True, True, True]` -- 6/6 acceptances where
+                1 is required. Three consecutive runs, identical result, 0.16s
+                each; the 20s barrier timeout never fires, which is itself proof
+                the interleaving was forced rather than the test silently
+                degrading.
+
+                A positive control guards the test against becoming vacuous: an
+                `ok_flag` set when the barrier fails to release, asserted before
+                the outcome check, so a run that failed to force the interleaving
+                is reported as "proves nothing" instead of passing by luck.
 ```
 
 AI-PROTO-008
@@ -864,21 +887,280 @@ FINDING AI-PARSE-011
 
 ---
 
-## Scopes not worked in this round
+# Third assessment round — Binary Security and Supply-Chain scopes
 
-Two of the six requested scopes were not started: **Binary Security** (native
-loader, memory protections, CFG/CET, ABI) and **Supply-Chain** (provenance,
-signing keys, CI, publication). The Reverse-Engineering scope was not re-run
-either. Recording them as unstarted rather than implying coverage: a register
-that lists four scopes and reads as six is the same failure mode this file
-criticises in the documents.
+These two scopes were previously recorded as NOT STARTED. Subagent dispatch
+became available during this round, so they were delegated to separate agents
+against the frozen commit `2bb360d` — the first scopes in this programme that
+were genuinely worked by an agent other than the one that wrote the code. That
+is a real improvement in independence, and it is still **not** independent human
+review: the agents are AI, they read the same repository, and the maintainer
+verified each claim before filing.
 
-Also recorded plainly: **these findings are not an independent review.** The
-requested programme was six independent agents against a frozen snapshot.
-Subagent dispatch is unavailable in this environment (the provider returns
-`provider-not-found` for every model), so the scopes were worked in-session by
-the same assistant that wrote much of the code under review. The compensating
-measure is the reproduction discipline above -- every filed claim was executed,
-and two hypotheses died in the attempt. That is stronger than unreproduced
-opinion and weaker than independence, and the distinction is the whole point of
-the terminology change in the next section.
+Verification discipline was applied as before: every finding below was checked
+by the maintainer against the code, and one agent claim (that sealing is dead
+code in the shipped loader) was confirmed by exhaustive grep rather than
+accepted on the agent's word.
+
+## AI-SC-001 — the release-acceptance gate could never pass
+
+```
+FINDING AI-SC-001
+  package:      supply-chain
+  reviewer:     delegated AI agent (supply-chain scope); claim verified by maintainer
+  received:     2026-11-23
+  severity:     high (in the sense that the strongest automated check was dead)
+  confidence:   high (reproduced: NameError with the exact import list)
+  claim:        The acceptance blocks in .github/workflows/release.yml and
+                ci.yml import base64, hashlib, json, os, secrets, subprocess,
+                sys -- and then call re.search() and re.sub(). `re` was never
+                imported, so the step raised NameError AFTER the build and the
+                release-acceptance gate could never reach a verdict.
+  attacker-capability:
+                None needed. This is a functional defect, not an attack path.
+                Its security consequence is that the strongest automated gate
+                was non-functional, and a gate that always crashes is worse
+                than no gate: it reads as a green-looking step until someone
+                parses the failure.
+  technical-
+  explanation:  release.yml:59 imported the list without `re`; release.yml:109
+                calls re.search (the provenance-key pin check) and :145 calls
+                re.sub (stripping the pin from the no-signature copy). The same
+                pattern existed in ci.yml:172 with uses at :229 and :258. No
+                linter in this repository parses heredocs inside YAML, and the
+                surrounding workflow is valid YAML, so nothing caught it.
+  reproduction: python3 -I -c "import base64, hashlib, json, os, secrets,
+                subprocess, sys; re.search('x','x')"
+                -> NameError: name 're' is not defined
+  impact:       The acceptance matrix produced no verdict. A regression in the
+                trust-anchor path, the manifest checks or the acceptance
+                assertions would not have turned any job red.
+  remediation:  FIXED in this pass: `import re` added to both blocks with a
+                comment naming this finding. A structural regression test was
+                added so the whole class is covered.
+  disproof:     Would be disproved if either file imported `re`. Neither did.
+  fixed-by:     this pass.
+  regression-test:
+                tests/test_workflow_inline_python.py -- extracts every
+                `python3 - <<'PY'` block from every workflow, parses it with
+                ast, and asserts every name used as `mod.attr` is imported or
+                bound in that same block. 18 tests pass.
+                NEGATIVE CONTROLS RUN, so the test is not vacuous: fed the
+                original broken block it flags `re`; fed the same block with
+                `import re` it reports nothing. A test that could not fail on
+                the defect it documents would be worse than no test.
+```
+
+## AI-SC-002 — 91 action references are tag-pinned, not SHA-pinned
+
+```
+FINDING AI-SC-002
+  package:      supply-chain
+  reviewer:     delegated AI agent (supply-chain scope); measured by maintainer
+  received:     2026-11-23
+  severity:     high (builds and signs artefacts)
+  confidence:   high (counted from the YAML)
+  claim:        Of the 106 third-party action references in .github/workflows,
+                91 are pinned to a mutable tag or branch and 15 to a full
+                40-character commit SHA. A compromised or force-pushed upstream
+                tag executes attacker code inside the workflow that builds and
+                signs artefacts.
+  attacker-capability:
+                Control of an upstream action repository or its release tags --
+                the classic action-tampering vector. No access to this
+                repository required.
+  technical-
+  explanation:  Measured across all workflow files:
+                  SHA-pinned:        15
+                  tag-pinned:        91
+                  files with >=1 tag pin: 15
+                The repository demonstrably knows the practice -- ci.yml and
+                release.yml pin checkout/setup-python/upload/download by SHA --
+                but most other workflows use @v4 / @v5 / @nightly. The
+                artefact-building jobs are the ones that matter: a tag swap
+                there runs attacker code with the job's GITHUB_TOKEN in the
+                environment that produces signed deliverables.
+  reproduction: python3, iterating .github/workflows/*.yml, regex on `uses:`,
+                classify the ref as [0-9a-f]{40} vs anything else. Counts above.
+  impact:       Supply-chain compromise of the build. This is precisely the
+                scenario build_manifest.py says provenance exists to detect, so
+                the provenance system is undermined by the delivery mechanism
+                that produces it.
+  remediation:  Pin every `uses:` to a full commit SHA (Dependabot's
+                `github-actions` ecosystem can do this automatically and bump
+                the pins). Prioritise the workflows that build or sign:
+                release.yml, ci.yml, security-artifact.yml, shadow-build.yml,
+                build.yml.
+  disproof:     Would be disproved if the tag-pinned refs were immutable. They
+                are not; tags are mutable by design.
+  fixed-by:     nobody. Recorded, not fixed -- see the note below on why.
+  note:         NOT fixed in this pass, deliberately. Rewriting 91 refs to SHAs
+                requires resolving each upstream action's current commit, which
+                cannot be done offline and would be unverifiable here; a
+                wrong SHA is worse than an honest tag. This is an operator task
+                with a mechanical, reviewable diff.
+```
+
+## AI-SC-003 — dependency installs in artefact-producing workflows lack hash pinning
+
+```
+FINDING AI-SC-003
+  package:      supply-chain
+  reviewer:     delegated AI agent (supply-chain scope); verified by maintainer
+  received:     2026-11-23
+  severity:     medium
+  confidence:   high
+  claim:        Several jobs that produce artefacts install dependencies without
+                --require-hashes, and `setuptools`/`wheel` are entirely
+                unpinned, so a substituted or compromised wheel is not
+                detectable at install time.
+  attacker-capability:
+                PyPI account compromise, or registry/network interception on the
+                affected runner.
+  technical-
+  explanation:  The tamper-resistant path exists and is used in one place --
+                ci.yml:89 installs from requirements.lock with --require-hashes
+                (544 `--hash=` lines). But:
+                  * shadow-build.yml:30 and security-artifact.yml:74 run
+                    `pip install -r requirements.txt` with no --require-hashes;
+                  * release.yml:55 and ci.yml:168 run
+                    `pip install cython==3.0.12 setuptools wheel` -- the last
+                    two entirely unpinned;
+                  * requirements.txt:14 keeps a `setuptools>=68.0.0` floating
+                    floor.
+  reproduction: grep the four workflows for `pip install` and note the absence
+                of --require-hashes on the listed lines.
+  impact:       A compromised dependency executes inside the job that builds the
+                deliverable, before the manifest is signed. The manifest would
+                then faithfully record a build produced by attacker-controlled
+                code -- the signature attests provenance, not trustworthiness,
+                and this finding is about the gap between those two.
+  remediation:  Use requirements.lock with --require-hashes in every
+                artefact-producing job. For setuptools/wheel, add them to the
+                lock (generated with --generate-hashes) rather than installing
+                them by name.
+  disproof:     Would be disproved if those jobs used the lock. They do not.
+  fixed-by:     nobody. Operator task: regenerating the lock and proving every
+                job still installs is not something to do blind in a review pass.
+```
+
+## AI-BIN-001 — the read-only-after-load sealing API has no production caller
+
+```
+FINDING AI-BIN-001
+  package:      binary security
+  reviewer:     delegated AI agent (binary scope); confirmed by maintainer grep
+  received:     2026-11-23
+  severity:     low-medium
+  confidence:   high (exhaustive grep)
+  claim:        section_split.py documents and implements re-protecting decrypted
+                section buffers read-only (seal_joined, stream_join_sealed,
+                protect_after_load), but the emitted loader never calls any of
+                them. The protection exists, is tested, and is not wired to the
+                shipped path.
+  attacker-capability:
+                Same-host memory read or core dump of the running process.
+  technical-
+  explanation:  A repo-wide grep for the three symbols outside tests/ returns
+                only section_split.py itself -- the module docstring, the
+                function definitions, and internal cross-references. There is no
+                call site in obfuscator/core/pipeline.py or in any emitted
+                loader template. The shipped sectioned loader joins and hands the
+                buffer to the payload without re-protecting it.
+  reproduction: grep -rn 'seal_joined\|stream_join_sealed\|protect_after_load'
+                --include=*.py . | grep -v '/tests/'
+                -> only section_split.py lines (docstring + definitions).
+  impact:       A mitigation that the documentation describes as active is
+                inactive. A memory capture during execution sees the joined
+                plaintext in ordinary writable memory. This is a defence-in-depth
+                gap, not a direct code-execution path.
+  remediation:  Either wire the sealing API into the emitted loader's join path
+                (the moving-decryption walker already avoids accumulating the
+                whole plaintext, which is the stronger property), or remove the
+                functions and stop describing the mitigation as present. The
+                honest minimum is to state in the docs that the API is available
+                but not used by default.
+  disproof:     Would be disproved by any non-test call site. Grep finds none.
+  fixed-by:     nobody.
+```
+
+## AI-BIN-002 — the native self-check is fail-open on unstamped anchors
+
+```
+FINDING AI-BIN-002
+  package:      binary security
+  reviewer:     delegated AI agent (binary scope); verified by maintainer
+  received:     2026-11-23
+  severity:     medium (claim-vs-measurement)
+  confidence:   high
+  claim:        The native path's pre-execution self-check is skipped entirely
+                when _NX_SELF_CK is all-zero or absent, so an attacker who can
+                patch the loader can also disable the check that is supposed to
+                catch patching.
+  attacker-capability:
+                Ability to modify the artefact file before it runs. Such an
+                attacker already controls the delivered bytes, which bounds the
+                impact -- but the check is advertised as a tamper gate and it is
+                not one in that scenario.
+  technical-
+  explanation:  pipeline.py:3408-3421:
+                    _nx_stamped = globals().get("_NX_SELF_CK") not in (None, "", "0"*64)
+                    if _nx_late is not None and _nx_stamped:
+                        _nx_late()
+                The zero-anchor case is deliberate and reasonable for a loader
+                used directly by tests or embedders. The defect is that the
+                same predicate is the ONLY thing standing between a patched
+                artefact and a skipped check: zero-filling the anchor makes the
+                check not run, and the surrounding `except` only calls
+                _nx_self_fail under the same condition, so nothing reports it.
+                docs/SECURITY_FEATURES.md presents §1 as a tamper gate without
+                the fail-open dimension.
+  reproduction: read pipeline.py:3408-3421; the predicate gating the call and
+                the predicate gating the failure report are identical.
+  impact:       A shipped artefact whose anchor has been zeroed runs the payload
+                with no self-check and no failure. The mitigation is conditional
+                on a value inside the file it is protecting.
+  remediation:  Distinguish "emitted for tests" from "shipped" by an explicit
+                build-time constant rather than by testing the anchor's value;
+                or treat an all-zero anchor in a shipped artefact as a failure
+                rather than a skip. The documentation must also state the
+                fail-open case.
+  disproof:     Would be disproved if zeroing the anchor caused a failure. It
+                causes a skip.
+  fixed-by:     nobody.
+```
+
+---
+
+## Scope coverage — what was worked, by whom
+
+Six scopes were requested. Coverage at the end of the third round:
+
+| Scope | Worked? | By whom |
+|---|---|---|
+| Crypto | Yes | in-session, by the same session that wrote the code |
+| Protocol | Yes | in-session, same |
+| Parser | Yes | in-session, same |
+| **Binary Security** | **Yes (third round)** | **delegated AI agent, separate from the author, verified by maintainer** |
+| **Supply-Chain** | **Yes (third round)** | **delegated AI agent, separate from the author, verified by maintainer** |
+| Reverse-Engineering | Not re-run | — |
+
+Two of the six were originally recorded as unstarted. Subagent dispatch became
+available during the third round (`provider-not-found` had been returned for
+every model before), so both were delegated to agents working against the frozen
+commit `2bb360d`. Those two scopes are the first in this programme worked by an
+agent other than the one that wrote the code.
+
+**This is still not independent human review**, and the distinction matters
+more, not less, now that agents are involved: an AI agent reading a repository
+is not a cryptographer with a mandate, a time budget and liability. The agent
+claims were also not taken on trust — the maintainer verified each against the
+code, and one claim in the binary scope (that the sealing API has no production
+caller) was confirmed by exhaustive grep rather than accepted on the agent's
+word. One agent claim that could not be substantiated was NOT filed.
+
+The compensating measure throughout is the reproduction discipline: every filed
+claim was executed or measured. Two hypotheses died in the attempt and are
+recorded as disproved. That is stronger than unreproduced opinion and weaker
+than independence, and the terminology section in
+`docs/MAXIMUM_SECURITY.md` says exactly that.

@@ -170,6 +170,12 @@ jobs:
         run: |
           python3 - <<'PY'
           import base64, hashlib, json, os, secrets, subprocess, sys
+          # `re` is REQUIRED: this block calls re.search (provenance-key pin
+          # check at ~line 229) and re.sub (~line 258). It was missing from
+          # the import list, so the step raised NameError and the
+          # release-acceptance check could never reach a verdict. Found by
+          # the supply-chain auditor (AI-SC-001).
+          import re
           from obfuscator.build_manifest import verify_manifest, sign_manifest, build_manifest
           from obfuscator.attestation import stamp_artefact
           from obfuscator.licensing import private_key_from_hex, public_key_hex

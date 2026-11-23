@@ -26,11 +26,14 @@ Finding -> test:
   AI-PARSE-010   test_legacy_manifest_fingerprint_cannot_be_forged
   AI-PARSE-011   test_stream_join_raises_valuederror_for_every_malformed_class
 
-AI-PROTO-007 (the concurrent-ledger race) is not covered here: the race is
-timing-dependent, so a test that passes today would be proving scheduler luck
-rather than the property. It is recorded in the register with its 5/5
-reproduction instead. A deterministic test needs the atomic primitive to be
-present, which is the remediation.
+AI-PROTO-007 (the concurrent-ledger race) lives in its own file,
+tests/test_ledger_race_deterministic.py: the interleaving is FORCED with a
+multiprocessing barrier rather than relied on, so it is deterministic. An earlier
+revision of this docstring said the race could not be tested because "a test that
+passes today would be proving scheduler luck". That was half right -- natural
+timing is flaky -- but forcing every reader to finish before any writer starts
+makes the window reproducible, and the measured result is 6/6 acceptances where 1
+is required.
 """
 import base64
 import hashlib
