@@ -7987,6 +7987,15 @@ def main():
             # module hash, then sign it with Ed25519 when a key is set.
             try:
                 from obfuscator.build_manifest import write_manifest as _wm
+                # The pack format version is read from the module that DEFINES
+                # it, not restated as a literal here: a hardcoded 3 would go
+                # stale the next time the format moves, which is the exact
+                # defect this project has hit three times in its own docs.
+                try:
+                    from obfuscator.section_split import (
+                        SECTION_PACK_VERSION as _SECTION_PACK_FORMAT)
+                except Exception:
+                    _SECTION_PACK_FORMAT = None
                 _bf_key = None
                 try:
                     _kseed = os.environ.get("NIXON_BUILD_MANIFEST_KEY", "")
@@ -8026,6 +8035,46 @@ def main():
                                 "ok": (getattr(args, "_dep_drift", {}) or {}).get("ok"),
                                 "mismatched": (getattr(args, "_dep_drift", {}) or {}).get("mismatched", []),
                                 "missing": (getattr(args, "_dep_drift", {}) or {}).get("missing", []),
+                            },
+                            # §7 PACK FORMAT VERSION (review register). The
+                            # register asks the manifest to record which pack
+                            # format the artefact uses; it recorded
+                            # transforms, toolchain and dependency state but
+                            # not this, so "does this artefact carry a v2 or
+                            # v3 section pack?" was unanswerable from the
+                            # signed record.
+                            #
+                            # TWO MEASUREMENT ERRORS corrected here, both
+                            # found by building and reading the output rather
+                            # than trusting the code:
+                            #   1. an earlier attempt read `_section_armed`
+                            #      via globals(); that name is a LOCAL of
+                            #      generate_hybrid_loader_script, so it is
+                            #      always absent here and the field read
+                            #      False for every build.
+                            #   2. the next attempt read
+                            #      `args.no_section_split`, but argparse
+                            #      stores this flag as `section_split` with
+                            #      action='store_false' (see the parser), so
+                            #      the lookup always fell back to its default
+                            #      and reported requested=True even when the
+                            #      operator passed --no-section-split.
+                            # The `basis` field says what the value is
+                            # derived FROM, so a reader can tell it records
+                            # the requested configuration rather than the
+                            # loader's post-build state -- which main() cannot
+                            # see.
+                            "pack": {
+                                "requested": bool(
+                                    getattr(args, "section_split", True)),
+                                "format_version": (
+                                    _SECTION_PACK_FORMAT
+                                    if getattr(args, "section_split", True)
+                                    else None),
+                                "section_count": int(
+                                    getattr(args, "section_count", 4) or 4),
+                                "basis": "cli-args(section_split)+"
+                                         "module-constant",
                             },
                         },
                     )
