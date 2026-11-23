@@ -775,15 +775,18 @@ LOADER_JOIN_SOURCE = '''def {FUNC}(pack_b85, key):
         # release must not silently accept v1 packs. The flag is baked
         # in at BUILD time; v1 acceptance stays an explicit
         # compatibility option, not an automatic fallback.
-        if _NX_PACK_V2_REQUIRED and pack.get("v") != 2:
-            raise ValueError("section pack is not scheme v2; the "
-                             "release policy refuses v1")
+        # The policy refuses anything OLDER than the current scheme, not
+        # anything that is not exactly 2. Written as `!= 2` when v2 was
+        # current, it silently became a refusal of v3 the moment the
+        # version bumped, so a release build with this flag on could not
+        # load a pack its own builder had just produced. Measured: a
+        # valid v3 pack failed under require_v2=True.
+        if _NX_PACK_V2_REQUIRED and int(pack.get("v") or 0) < 2:
+            raise ValueError("section pack uses a retired scheme; the "
+                             "release policy refuses pre-v2 packs")
         sections = pack["sections"]
         # §1 runtime state validation: the declared structure must match the
         # content it describes. Fails closed on a pack without `state`.
-        if not _nx_pack_state_ok(pack):
-            raise ValueError("section pack state invalid")
-        # §1 runtime state validation (shared check; see pack_state.py).
         if not _nx_pack_state_ok(pack):
             raise ValueError("section pack state invalid")
         if len(sections) != pack["count"]:
@@ -903,7 +906,13 @@ LOADER_MOVING_SOURCE = '''def {FUNC}(pack_b85, key, sink):
     try:
         pack = _nx_mj.loads(_nx_mb64.b85decode(pack_b85).decode("utf-8"))
         # RELEASE-MODE DOWNGRADE GATE (see the whole-payload join).
-        if _NX_PACK_V2_REQUIRED and pack.get("v") != 2:
+        # The policy refuses anything OLDER than the current scheme, not
+        # anything that is not exactly 2. Written as `!= 2` when v2 was
+        # current, it silently became a refusal of v3 the moment the
+        # version bumped, so a release build with this flag on could not
+        # load a pack its own builder had just produced. Measured: a
+        # valid v3 pack failed under require_v2=True.
+        if _NX_PACK_V2_REQUIRED and int(pack.get("v") or 0) < 2:
             return False
         sections = pack["sections"]
         # §1 runtime state validation (shared check; see pack_state.py).
@@ -1020,7 +1029,13 @@ LOADER_STREAM_SOURCE = '''def {FUNC}(pack_b85, key):
     try:
         pack = _nx_sj.loads(_nx_sb64.b85decode(pack_b85).decode("utf-8"))
         # RELEASE-MODE DOWNGRADE GATE (see the whole-payload join).
-        if _NX_PACK_V2_REQUIRED and pack.get("v") != 2:
+        # The policy refuses anything OLDER than the current scheme, not
+        # anything that is not exactly 2. Written as `!= 2` when v2 was
+        # current, it silently became a refusal of v3 the moment the
+        # version bumped, so a release build with this flag on could not
+        # load a pack its own builder had just produced. Measured: a
+        # valid v3 pack failed under require_v2=True.
+        if _NX_PACK_V2_REQUIRED and int(pack.get("v") or 0) < 2:
             return None
         sections = pack["sections"]
         # §1 runtime state validation (shared check; see pack_state.py).
