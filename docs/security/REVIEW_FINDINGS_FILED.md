@@ -305,8 +305,7 @@ register, so the register does not accumulate plausible-sounding claims.
 
 ---
 
-## AI-CRYPTO-004
-
+AI-CRYPTO-004
 ```
 FINDING AI-CRYPTO-004
   package:      crypto
@@ -382,14 +381,19 @@ FINDING AI-CRYPTO-004
                 built artefact, not a reconstruction; the hint matched and the
                 decoy decrypted to its template text.
   fixed-by:     nobody yet. Code is unchanged.
-  regression-test-wanted:
-                a test that asserts the decoy key is NOT derivable from the
-                emitted source. It cannot pass today, which is why it is
-                specified rather than written.
+  regression-test:
+                WRITTEN. tests/test_ai_findings_regressions.py::
+                test_decoy_key_is_not_derivable_from_the_artefact, marked
+                xfail(strict=True) with this finding's id as the reason. It
+                runs in every derived-shard gate run and reports as xfailed;
+                when the defect is fixed it XPASSes and the strict marker turns
+                that into a failure demanding the marker be removed, so the fix
+                cannot land silently. An earlier revision of this row said such
+                a test "cannot pass today, which is why it is specified rather
+                than written" -- that was a way of not tracking it.
 ```
 
-## AI-CRYPTO-005
-
+AI-CRYPTO-005
 ```
 FINDING AI-CRYPTO-005
   package:      crypto
@@ -430,11 +434,14 @@ FINDING AI-CRYPTO-005
                 and keep 64 bits (16 hex chars) for key_hint and salt, and make
                 the byte-vs-hex distinction explicit on every line.
   disproof:     Would be disproved if PACK_ID_BYTES were 8. It is 16 (line 129).
-  fixed-by:     nobody yet.
+  fixed-by:     DOCUMENTATION FIXED in this pass -- both packages now state 128 bits
+                (16 bytes) for pack_id and explain the byte-vs-hex confusion.
+  regression-test:
+                tests/test_ai_findings_regressions.py::test_documents_state_the_true_pack_id_size
+                (PASSES -- pins that the documents do not regress to 64 bits)
 ```
 
-## AI-PROTO-006
-
+AI-PROTO-006
 ```
 FINDING AI-PROTO-006
   package:      protocol
@@ -492,10 +499,14 @@ FINDING AI-PROTO-006
                 if check_and_record() inspected _store()'s result. Neither is
                 the case.
   fixed-by:     nobody yet.
+  regression-test:
+                tests/test_ai_findings_regressions.py::test_unwritable_ledger_fails_closed
+                marked xfail(strict=True) with this finding id as the reason:
+                it runs every gate run, reports xfailed, and XPASSes into a
+                failure the moment the defect is fixed.
 ```
 
-## AI-PROTO-007
-
+AI-PROTO-007
 ```
 FINDING AI-PROTO-007
   package:      protocol
@@ -540,10 +551,16 @@ FINDING AI-PROTO-007
   disproof:     Would be disproved if concurrent attempts produced exactly one
                 acceptance. 40/40 concurrent attempts were accepted.
   fixed-by:     nobody yet.
+  regression-test:
+                none, deliberately. The race is timing-dependent, so a test that
+                passes today would be proving scheduler luck rather than the
+                property, and a flaky test in the derived gate is worse than an
+                honest absence. The 5/5 reproduction above is the evidence; a
+                deterministic test needs the atomic primitive that IS the
+                remediation, at which point it becomes writable.
 ```
 
-## AI-PROTO-008
-
+AI-PROTO-008
 ```
 FINDING AI-PROTO-008
   package:      protocol
@@ -593,10 +610,14 @@ FINDING AI-PROTO-008
   disproof:     Would be disproved if check_rollback raised on write failure or
                 reported it in the returned dict. It does neither.
   fixed-by:     nobody yet.
+  regression-test:
+                tests/test_ai_findings_regressions.py::test_rollback_refuses_when_the_mark_cannot_be_written
+                marked xfail(strict=True) with this finding id as the reason:
+                it runs every gate run, reports xfailed, and XPASSes into a
+                failure the moment the defect is fixed.
 ```
 
-## AI-PROTO-009
-
+AI-PROTO-009
 ```
 FINDING AI-PROTO-009
   package:      protocol
@@ -652,6 +673,11 @@ FINDING AI-PROTO-009
                 previous_issued_at. grep finds exactly one call site, and it
                 passes two positional arguments.
   fixed-by:     nobody yet.
+  regression-test:
+                tests/test_ai_findings_regressions.py::test_revocation_rollback_guard_is_wired
+                marked xfail(strict=True) with this finding id as the reason:
+                it runs every gate run, reports xfailed, and XPASSes into a
+                failure the moment the defect is fixed.
 ```
 
 ---
@@ -697,8 +723,7 @@ DISPROVED AI-CRYPTO-D2
 
 ---
 
-## AI-PARSE-010
-
+AI-PARSE-010
 ```
 FINDING AI-PARSE-010
   package:      parser (manifest)
@@ -762,12 +787,16 @@ FINDING AI-PARSE-010
                 field whenever signed is true. It only compares when both
                 copies exist.
   fixed-by:     nobody yet.
+  regression-test:
+                tests/test_ai_findings_regressions.py::test_legacy_manifest_fingerprint_cannot_be_forged
+                marked xfail(strict=True) with this finding id as the reason:
+                it runs every gate run, reports xfailed, and XPASSes into a
+                failure the moment the defect is fixed.
 ```
 
 ---
 
-## AI-PARSE-011
-
+AI-PARSE-011
 ```
 FINDING AI-PARSE-011
   package:      parser (pack)
@@ -826,6 +855,11 @@ FINDING AI-PARSE-011
   disproof:     Would be disproved if all five cases raised ValueError. They
                 do not; four raise TypeError.
   fixed-by:     nobody yet.
+  regression-test:
+                tests/test_ai_findings_regressions.py::test_stream_join_raises_valuederror_for_every_malformed_class
+                marked xfail(strict=True) with this finding id as the reason:
+                it runs every gate run, reports xfailed, and XPASSes into a
+                failure the moment the defect is fixed.
 ```
 
 ---

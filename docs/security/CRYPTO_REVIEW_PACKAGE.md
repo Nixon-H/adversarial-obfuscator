@@ -235,8 +235,16 @@ ENCRYPTION KEY, and it differs per section. The pack therefore publishes:
 ```
 key_hint = SHA256(K)[:16]                                64 bits per pack
 salt_i   = SHA256(K_enc_i ‖ N_i)[:16]                    64 bits per section
-pack_id  = SHA256("nx-pack-id:" ‖ K ‖ pack_nonce)[:16]   64 bits per pack
+pack_id  = SHA256("nx-pack-id:" ‖ K ‖ pack_nonce)[:16]  128 bits per pack
 ```
+
+`pack_id` is **16 bytes (128 bits)**, not 16 hex characters: `_pack_id` returns
+`digest()[:16]` from `PACK_ID_BYTES = 16`. `key_hint` and `salt` use
+`hexdigest()[:16]`, which is 16 hex characters and therefore 64 bits. The `[:16]`
+in the three lines above counts BYTES on the `pack_id` line and HEX CHARACTERS on
+the other two, which is what produced a 64-bit claim for a 128-bit value
+(finding AI-CRYPTO-005). Measured: `len(_pack_id(...)) == 16`, 32 hex chars,
+128 bits.
 
 Each is an offline oracle an attacker holding a pack can test guesses against.
 Against a 256-bit key these are not a practical break (~2^64 per target), and
