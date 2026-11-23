@@ -188,6 +188,13 @@ def build_manifest(artefact_path, source_path=None, *, transforms=None,
             # and the digest records the file bytes, not a version label.
             "commit": _git_commit(),
             "dependency_lock_digest": _dependency_lock_digest(),
+            # §7 WORKFLOW / ACTION IDENTITIES (review register). "Which
+            # workflow run produced this artefact?" was unanswerable from the
+            # signed record: a local build genuinely cannot know, but a CI
+            # build can, and GitHub Actions exports it in the environment.
+            # Recorded as None when not in CI -- a real answer, not a gap --
+            # so a reader can tell "built locally" from "field forgotten".
+            "ci": _ci_identity(),
         },
         "signed": False,
     }
@@ -236,6 +243,48 @@ def _cython_version():
         return str(getattr(Cython, "__version__", ""))
     except Exception:
         return ""
+
+
+#: GitHub Actions sets these for every step of a workflow run. Read as a group
+#: so the manifest records "which workflow run produced this artefact", which
+#: is the §7 field a local build cannot otherwise answer.
+_CI_IDENTITY_ENV = (
+    ("workflow", "GITHUB_WORKFLOW"),
+    ("run_id", "GITHUB_RUN_ID"),
+    ("run_attempt", "GITHUB_RUN_ATTEMPT"),
+    ("job", "GITHUB_JOB"),
+    ("repository", "GITHUB_REPOSITORY"),
+    ("ref", "GITHUB_REF"),
+    ("sha", "GITHUB_SHA"),
+    ("server_url", "GITHUB_SERVER_URL"),
+)
+
+
+def _ci_identity():
+    """The CI workflow/run identity, or None when not running under CI.
+
+    ``None`` is a REAL ANSWER -- "this was built outside a CI workflow" -- and
+    is deliberately distinguishable from an empty dict, which would mean "CI
+    ran but told us nothing". The distinction matters for the same reason the
+    pack record reports ``format_version: null`` rather than omitting the
+    field: an absent field and an absent fact are different claims.
+
+    Only the variables in ``_CI_IDENTITY_ENV`` are read; nothing is invoked
+    and no network call is made, so a locally built artefact records None
+    rather than guessing.
+    """
+    found = {}
+    for key, var in _CI_IDENTITY_ENV:
+        value = os.environ.get(var, "").strip()
+        if value:
+            found[key] = value
+    if not found:
+        return None
+    # GITHUB_SHA is the commit the RUN checked out; the manifest already
+    # records the commit it actually built from (build.commit). Both are kept
+    # because a mismatch between them is itself evidence -- it means the build
+    # ran from a different revision than CI checked out.
+    return found
 
 
 def sign_manifest(manifest, private_key=None):
