@@ -223,14 +223,21 @@ Listed so the review does not spend its budget rediscovering them.
    the direction that flatters the construction, so it is corrected here rather
    than quietly. `salt = SHA256(K_enc_i ‖ N_i)[:16]` is a truncated hash of the
    *encryption key*, differs per section, and is used in the structural digest.
-   The pack therefore publishes three independent 64-bit values derived from
-   key material:
+   The pack therefore publishes two independent 64-bit truncations plus a
+   128-bit identifier, all derived from key material:
 
    ```
    key_hint = SHA256(K)[:16]                            64 bits per pack
    salt_i   = SHA256(K_enc_i ‖ N_i)[:16]                64 bits per section
-   pack_id  = SHA256("nx-pack-id:" ‖ K ‖ pack_nonce)[:16]
+   pack_id  = SHA256("nx-pack-id:" ‖ K ‖ pack_nonce)[:16]   128 bits per pack
    ```
+
+   `pack_id` is **16 bytes = 128 bits** (`_pack_id` returns `digest()[:16]`;
+   `PACK_ID_BYTES = 16`), while `key_hint` and `salt` are 16 HEX CHARACTERS =
+   64 bits each. The `[:16]` above counts bytes on one line and hex chars on the
+   other two; that is how a 128-bit value came to be described as a third 64-bit
+   truncation (finding AI-CRYPTO-005). So the honest count is: **two 64-bit
+   truncations and one 128-bit identifier**, not three 64-bit values.
 
    Each is an offline oracle an attacker can test guesses against. Against a
    256-bit key, a 64-bit truncation is not a practical break (~2^64 per

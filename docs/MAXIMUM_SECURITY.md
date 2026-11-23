@@ -1093,6 +1093,63 @@ distinction sharper rather than softer.
 
 | Milestone | Definition here | Status |
 |---|---|---|
-| 1. Engineering closure | Latest committed HEAD passes the full derived-shard gate, with identity-bound evidence per shard | See the gate evidence section below |
-| 2. AI adversarial assessment | The scopes were worked, findings filed with reproductions, disproved hypotheses recorded | Four of six scopes worked; two named as unstarted |
+| 1. Engineering closure | Latest committed HEAD passes the full derived-shard gate, with identity-bound evidence per shard | **CLOSED** — see §Gate evidence below |
+| 2. AI adversarial assessment | The scopes were worked, findings filed with reproductions, disproved hypotheses recorded, confirmed findings carry regression tests | **PARTIAL** — four of six scopes worked; all seven findings now carry tests; two scopes named as unstarted |
 | 3. Release qualification | Milestones 1 and 2 plus the operator-side evidence that cannot be produced in-session | Not reached; the external items are enumerated and cannot be closed from here |
+
+## Gate evidence — commit `5e97ce6`
+
+The numbers reported for `a0ea66a` (30,286 passed / 9 skipped) belong to that
+commit and are **not** evidence for the parser and protocol fixes made after it.
+This block supersedes them.
+
+```
+run_id:            rc-gate-20261123T141221-2722340
+commit:            5e97ce60559a56ae3441fca6fa0c93123ec53724
+tree:              7da1cb8e6b71939575f10905b9fa4b22b5f5314c
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 459
+shards_with_failures: 0
+started:           2026-11-23T14:12:21+05:30
+finished:          2026-11-23T14:45:58+05:30
+```
+
+| shard | rc | dirty | commit re-read | tree re-read | passed | skipped |
+|---|---|---|---|---|---|---|
+| 1 | 0 | 0 | 5e97ce6… | 7da1cb8e… | 534 | 1 |
+| 2 | 0 | 0 | 5e97ce6… | 7da1cb8e… | 583 | 2 |
+| 3 | 0 | 0 | 5e97ce6… | 7da1cb8e… | 437 | 0 |
+| 4 | 0 | 0 | 5e97ce6… | 7da1cb8e… | 574 | 2 |
+| 5 | 0 | 0 | 5e97ce6… | 7da1cb8e… | 572 | 0 |
+| 6 | 0 | 0 | 5e97ce6… | 7da1cb8e… | 741 | 1 |
+| 7 | 0 | 0 | 5e97ce6… | 7da1cb8e… | 695 | 2 |
+| 8 | 0 | 0 | 5e97ce6… | 7da1cb8e… | 25144 | 0 |
+| 9 | 0 | 0 | 5e97ce6… | 7da1cb8e… | 569 | 1 |
+| 10 | 0 | 0 | 5e97ce6… | 7da1cb8e… | 600 | 0 |
+| **total** | | | | | **30449** | **9** |
+
+Aggregates recomputed from the ten shard logs, not copied from a summary line:
+**30,449 passed, 9 skipped, 0 failed, 30,458 collected.** Shard 6 carried one
+non-failing warning. Every shard re-read the same commit and tree at the END of
+its run and recorded `dirty=0`, which is what `identity_stable: true` asserts.
+
+**Coverage is derived, not asserted.** The gate enumerates `tests/**` itself and
+refuses to run if any collected suite file is unassigned. Verified independently
+for this run: the tree contains 459 suite files, the shard assignment contains
+459 entries, and the two sets are equal — zero orphans in either direction, zero
+duplicates.
+
+**The parser fixes are inside this run.** `tests/test_parser_fuzz.py` is assigned
+to shard 10, which reported `rc=0, 600 passed`. Its collected cases include
+`test_malformed_pack_field_is_rejected[state wrong]`, `[total negative]`,
+`[index negative]`, `[v negative]`, `[total huge]`, plus
+`test_malformed_manifest_json_is_refused` (the JSON `null` case). The generated
+facade check `tests/test_core_facade_surface.py` (shard 5) and
+`tests/test_emitted_sources_parse.py` (shard 7) both ran in green shards; the
+facade test compares the package surface name-for-name and object-for-object.
+
+**Two earlier runs were discarded, not published.** Both were stopped when
+in-flight documentation edits made the tree dirty mid-run (shards recorded
+`dirty=1` and `dirty=2`). A gate binds its result to a commit and a tree; a run
+whose tree changed underneath it is not evidence, however many shards passed.
