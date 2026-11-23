@@ -1041,3 +1041,58 @@ signing cannot be optional) remains buildable.
    travel only as environment variables inside the signing environment and
    are never written to artefacts, logs, test reports or build caches; the
    acceptance run verifies no artefact text contains key material.
+
+---
+
+## Assessment terminology — binding definitions
+
+These definitions are binding on every document in `docs/security/` and on this
+register. Where an older sentence conflicts with one of them, this section
+wins.
+
+**Multi-agent adversarial cryptographic assessment.** The pack construction,
+key schedule, nonce handling, authentication composition and downgrade
+behaviour were attacked by several agents working distinct scopes, each trying
+to produce a demonstrated break rather than an opinion. It is "adversarial"
+because the work is organised around attempts to disprove claims, and
+"multi-agent" because the scopes were separate. It is **not** a cryptographic
+certification, and it carries no reviewer's name.
+
+**AI-assisted reverse-engineering assessment.** The obfuscation claims were
+tested by attempting semantic recovery against produced artefacts. This
+substitutes for neither a human reverse engineer with a time budget nor a
+published attack methodology, because those are precisely what it was standing
+in for, and that is stated rather than glossed.
+
+**Multi-agent static-analysis finding validation.** Every finding in this
+register was reproduced by executing the reproduction it carries. A finding
+that did not survive its own disproof attempt was moved to the disproved list
+rather than published as a live weakness.
+
+**External security sign-off: Not performed; residual assurance limitation.**
+No external firm, consultant, or independent human reviewed this code. The
+residual limitation is not "the review was smaller"; it is that **the same
+session that wrote the code assessed it**, and no amount of reproduction
+discipline removes the shared blind spot that independence exists to remove.
+
+### Why the words changed
+
+The previous drafts used "independent" for work that was not independent: an
+internal review, a self-assessment, and later an AI-assisted pass. In each case
+the word did the work that the *reviewer's independence* should have done —
+a reader who skims sees "independently reviewed" and stops. The four
+definitions above describe what was actually done, and the sign-off line states
+the absence rather than implying it away.
+
+**Multiple AI agents can provide valuable adversarial analysis, but they do not
+constitute independent human security certification.** In this repository's
+case the agents were not even separate from the author, which makes the
+distinction sharper rather than softer.
+
+### What each milestone means now
+
+| Milestone | Definition here | Status |
+|---|---|---|
+| 1. Engineering closure | Latest committed HEAD passes the full derived-shard gate, with identity-bound evidence per shard | See the gate evidence section below |
+| 2. AI adversarial assessment | The scopes were worked, findings filed with reproductions, disproved hypotheses recorded | Four of six scopes worked; two named as unstarted |
+| 3. Release qualification | Milestones 1 and 2 plus the operator-side evidence that cannot be produced in-session | Not reached; the external items are enumerated and cannot be closed from here |
