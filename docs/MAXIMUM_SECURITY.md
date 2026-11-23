@@ -1153,3 +1153,55 @@ facade test compares the package surface name-for-name and object-for-object.
 in-flight documentation edits made the tree dirty mid-run (shards recorded
 `dirty=1` and `dirty=2`). A gate binds its result to a commit and a tree; a run
 whose tree changed underneath it is not evidence, however many shards passed.
+
+## Gate evidence — commit `0d1f208` (current HEAD)
+
+This is the authoritative block: it covers the regression tests added for the AI
+assessment findings, which the `5e97ce6` block above predates. The suite grew
+from 459 to **460** files because `tests/test_ai_findings_regressions.py` was
+added, and the gate picked it up with no shard-list edit — which is the derived
+allocation working.
+
+```
+run_id:            rc-gate-20261123T150144-2802059
+commit:            0d1f208607ceff47d187e296a26929e316105271
+tree:              5ac7b2b50aeba832a4ae74ce7593388624e8dd42
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 460
+shards_with_failures: 0
+started:           2026-11-23T15:01:44+05:30
+finished:          2026-11-23T15:35:54+05:30
+```
+
+| shard | rc | dirty | passed | skipped | xfailed |
+|---|---|---|---|---|---|
+| 1 | 0 | 0 | 602 | 0 | 0 |
+| 2 | 0 | 0 | 548 | 1 | 0 |
+| 3 | 0 | 0 | 555 | 2 | **6** |
+| 4 | 0 | 0 | 459 | 0 | 0 |
+| 5 | 0 | 0 | 562 | 2 | 0 |
+| 6 | 0 | 0 | 850 | 0 | 0 |
+| 7 | 0 | 0 | 477 | 1 | 0 |
+| 8 | 0 | 0 | 659 | 2 | 0 |
+| 9 | 0 | 0 | 25159 | 0 | 0 |
+| 10 | 0 | 0 | 579 | 1 | 0 |
+| **total** | | | **30450** | **9** | **6** |
+
+Aggregates recomputed from the ten shard logs: **30,450 passed, 9 skipped,
+6 xfailed, 0 failed, 30,465 collected.** Every shard re-read the same commit and
+tree at the end of its run and recorded `dirty=0`. Coverage verified by set
+equality: 460 suite files in the tree, 460 shard entries, zero duplicates, zero
+orphans.
+
+**The six xfails in shard 3 are the AI findings.** They are the open defects from
+`docs/security/REVIEW_FINDINGS_FILED.md`, each marked `xfail(strict=True)` with
+its finding id as the reason. They run on every gate, report as xfailed rather
+than silently absent, and XPASS into a FAILURE the moment the defect is fixed —
+so a fix cannot land without the marker being removed deliberately.
+
+**Shard allocation moved between the two gates, which is expected.** With one
+extra file the modulo distribution re-shuffled: `test_parser_fuzz.py` moved from
+shard 10 (in the `5e97ce6` run) to shard 1 (602 passed here). A hand-maintained
+shard list would have silently dropped the new file; the derived scheme cannot.
+
