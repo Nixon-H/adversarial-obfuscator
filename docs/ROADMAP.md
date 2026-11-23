@@ -202,7 +202,7 @@ Crown jewel functions execute inside a custom VM whose instruction set changes e
 - [x] IR mutation pipeline: `python -m irgen.mutation apply input.ir`
 
 ### Why
-Even if an attacker dumps the VM bytecode, they cannot decode it without the per-build permutation key. The same source produces structurally different bytecode every build.
+The same source produces structurally different bytecode every build. **Frozen-map decoding fails across the variants tested** — an earlier revision of this line said an attacker "cannot decode it without the per-build permutation key", which overstates what was measured: nothing here tests whether an attacker can *parse or adapt*, which is why `docs/LIMITATIONS.md` opens by stating that no construction here resists a root-privileged analyst. Corrected under finding AI-RE-001.
 
 ## Phase 10 — JIT Template Generation (Built, behind `--phase2`)
 ### Tasks

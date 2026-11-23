@@ -1130,6 +1130,196 @@ FINDING AI-BIN-002
   fixed-by:     nobody.
 ```
 
+## AI-RE-001 — an unqualified "cannot decode" contradicts the project's own limits
+
+```
+FINDING AI-RE-001
+  package:      reverse-engineering
+  reviewer:     delegated AI agent (RE scope); verified verbatim by maintainer
+  received:     2026-11-23
+  severity:     high (it is the only unqualified impossibility claim found)
+  confidence:   high (quoted verbatim, and contradicted by this repo's own text)
+  claim:        docs/ROADMAP.md:205 asserts: "Even if an attacker dumps the VM
+                bytecode, they cannot decode it without the per-build
+                permutation key."
+  evidence-for: NOTHING in the repository measures adaptation resistance. The
+                repo's own research-readiness audit
+                (docs/research/research-readiness-audit-2026-10-29.md:55) says
+                the VM experiment "does not test whether an attacker can parse
+                or adapt" and recommends narrowing the claim to "frozen-map
+                decoding fails across these variants".
+  contradiction: docs/LIMITATIONS.md:14-16 states the opposite as the governing
+                position: "No construction here resists a root-privileged
+                analyst who can observe the ...". Two documents, one repo, and
+                a reader can pick whichever is convenient.
+  impact:       "Cannot" is the strongest word available and it is unsupported.
+                An attacker who reads the bytecode and rebuilds a permutation
+                from observed behaviour is not doing anything exotic. Overstating
+                here is worse than understating, because a reader who believes
+                it may skip the mitigation that actually matters.
+  remediation:  Replace "cannot decode it without the per-build permutation key"
+                with the narrowly-scoped, measured statement: frozen-map
+                decoding fails across the variants tested. Reference the
+                research-readiness audit rather than contradicting it.
+  disproof:     Would be disproved by a measurement in the repo showing
+                adaptation resistance. There is none, and the audit that
+                examined this area says so explicitly.
+  fixed-by:     this pass — the sentence is corrected, see below.
+```
+
+## AI-RE-002 — a mitigation table promises more than the disclaimers allow
+
+```
+FINDING AI-RE-002
+  package:      reverse-engineering
+  reviewer:     delegated AI agent (RE scope); verified by maintainer
+  received:     2026-11-23
+  severity:     medium
+  confidence:   high
+  claim:        docs/SECURITY_FEATURES.md:25 lists the anti-debugging/
+                anti-instrumentation goal as "Hide the code from a root analyst".
+  contradiction: LIMITATIONS.md:14-16 says "No construction here resists a
+                root-privileged analyst", and THREAT_MODEL.md:65 marks
+                root/admin protection "None -- UNVERIFIED".
+  impact:       A table row is read as a capability summary. "Hide the code from
+                a root analyst" is not a goal the project can meet, and the
+                same project says so two files away. This is the framing problem
+                the terminology work exists to fix, in a table nobody revisited.
+  remediation:  State the goal as detection/disruption of a debugger or tracer,
+                which is what the code does, and add that root-level observation
+                is explicitly out of scope.
+  disproof:     Would be disproved if any construction were tested against a
+                root analyst. None is.
+  fixed-by:     this pass.
+```
+
+## AI-RE-003 — the protection score that drives pass selection is unvalidated
+
+```
+FINDING AI-RE-003
+  package:      reverse-engineering
+  reviewer:     delegated AI agent (RE scope); verified by maintainer
+  received:     2026-11-23
+  severity:     high (it is on the control path, not just a report)
+  confidence:   high
+  claim:        scripts/benchmark/ai_eval.py:385 compute_protection_score()
+                produces "a weighted overall protection score" (0.0 weak,
+                1.0 strong) from static proxies -- entropy, name recovery,
+                semantic leakage -- that were never validated against any
+                analyst's actual recovery success. That score is consumed by
+                obfuscator/adaptive_rewriter.py to SELECT PASSES.
+  technical-
+  explanation:  A composite of proxies is a reasonable diagnostic, and the
+                weights are documented. The defect is the direction of use: a
+                number that has never been checked against ground truth is
+                driving which transforms get applied. If the proxy is wrong in
+                a consistent direction, the adaptive layer optimises the wrong
+                objective and every subsequent measurement inherits the bias.
+  impact:       Silent, systematic: the tool gets "better" at a metric that may
+                not correspond to analyst cost, and no test would fail. This is
+                harder to notice than a broken feature because everything keeps
+                looking green.
+  remediation:  Either (a) validate the score against measured analyst/agent
+                recovery on a held-out set and record the correlation, or
+                (b) stop letting it drive pass selection and use it as a
+                reported diagnostic only. (b) is the honest minimum until (a)
+                exists.
+  disproof:     Would be disproved by a validation record correlating the score
+                with recovery success. None exists in the repo.
+  fixed-by:     nobody. This is a design decision, not a typo -- flagged rather
+                than changed unilaterally.
+```
+
+## AI-RE-004 — "analyst resistance" is one instrument's shortfall
+
+```
+FINDING AI-RE-004
+  package:      reverse-engineering
+  reviewer:     delegated AI agent (RE scope); verified by maintainer
+  received:     2026-11-23
+  severity:     medium
+  confidence:   high
+  claim:        obfuscator/bench_layers.py:12 defines
+                "resistance = 1 - recall  (how much the analyst FAILED to
+                recover)". The layer ranking therefore measures one LLM's recall
+                shortfall, not attacker cost.
+  technical-
+  explanation:  The code is honest about cell counts, and single-instrument
+                measurement is legitimate as far as it goes. The naming is what
+                overstates: "analyst resistance" reads as a property of the
+                artefact when it is a property of one model on one sample. A
+                stronger model reorders the layers without the artefacts
+                changing.
+  impact:       Layer rankings get cited as if they were general. They are not
+                transferable, and the docs do not say so at the naming site.
+  remediation:  Rename to what it is -- "model recall shortfall" -- and state at
+                the definition that it is instrument-specific and not a measure
+                of attacker cost.
+  disproof:     Would be disproved by a second independent instrument agreeing
+                on the ordering. None is recorded.
+  fixed-by:     nobody (rename is a docs/API decision).
+```
+
+## AI-RE-005 — the cost column attributes decompiler work nobody measured
+
+```
+FINDING AI-RE-005
+  package:      reverse-engineering
+  reviewer:     delegated AI agent (RE scope); verified by maintainer
+  received:     2026-11-23
+  severity:     low
+  confidence:   high
+  claim:        docs/TRANSFORMS.md:28 maps the CFG class to "CFG recovery;
+                decompilation" under a column describing the "typical attacker
+                work it costs". No measurement shows any CFG transform here
+                costs a decompiler that work.
+  impact:       Low: framing in a reference table, not a headline claim. Filed
+                for completeness because the column title asserts a cost that
+                was never measured, and a reader building a threat model off the
+                table would inherit it.
+  remediation:  Either cite the measurement or relabel the column as the
+                intended cost, distinct from a measured one.
+  disproof:     Would be disproved by a decompiler experiment per transform.
+                None in repo.
+  fixed-by:     nobody.
+```
+
+## Reverse-engineering scope: what IS properly evidenced
+
+Recorded because the negatives matter as much as the findings, and because a
+register that lists only problems misrepresents a repository that is unusually
+honest about its own limits:
+
+```
+EVIDENCED AI-RE-N1
+  docs/MAXIMUM_SECURITY.md:783-809 -- the bounded LLM-probe table states the
+  method, model, token counts and timeout handling, and concludes explicitly
+  that it does NOT support "resists reverse engineering". Correctly scoped.
+
+EVIDENCED AI-RE-N2
+  docs/RESULTS.md:44 records the full-tool agent RECOVERING the payload
+  (disconfirming confidentiality) alongside the 0/12 name-survival result;
+  RESULTS.md:334-337 records benchmark-defect retractions (memoryless attacker,
+  k-label confound). Publishing disconfirmation of your own defence is the
+  opposite of the failure mode this scope was looking for.
+
+EVIDENCED AI-RE-N3
+  docs/security/THREAT_BOUNDARY_LOADER.md:518-552 -- the text-segment encryption
+  result comes from a named Ghidra session on a named artefact, and the same
+  section discloses that .rodata strings survive. Scoped, with the caveat
+  adjacent to the claim.
+
+SCOPE NOTE
+  There is NO test in this repository that attempts semantic recovery of a
+  produced artefact. tests/test_post_build_attack.py checks identifier and name
+  exposure (static_probe), which is not decompilation; pydeobsbench/ contains
+  decompilation-adjacent probes that no test drives end to end. Every
+  decompilation result quoted in the docs came from a one-off manual session, not
+  from CI. That is a coverage gap, not a finding: it is why the claims above are
+  unmeasured, and it is the thing to build if these claims are to be made
+  honestly in future.
+```
+
 ---
 
 ## Scope coverage — what was worked, by whom
