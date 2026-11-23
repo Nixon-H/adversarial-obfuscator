@@ -5217,3 +5217,60 @@ packages keep their NOT PERFORMED banner, and no reviewer findings exist to
 file. What exists is: a verified first approach, a scoped ask, a disclosed
 weakness list, a hand-checkable vector, and a ready-to-send message. The
 remaining action is a purchase order and a name, and both belong to the owner.
+
+### 6s.15 Pass-26 gate (draft enquiry)
+
+```
+run_id:            rc-gate-20261123T113219-2455017
+commit:            5d9ac4c66dfb309c1d35445c3d5e4530c03c66fc
+tree:              626d7c2c3ef121ac34dc76d9a12034daf650b240
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 459
+shards_with_failures: 0
+passed 30,445 / skipped 9 / collected 30,454
+```
+
+All ten shards `rc=0`. Aggregate rose 30,443 → 30,445, the two tests added for
+the draft enquiry. Arithmetic: 30,445 + 9 = 30,454.
+
+TWO RUNS WERE DISCARDED, AND THE SECOND REASON IS THE USEFUL ONE
+
+1. A gate started on `f8d4b40` recorded `dirty=2` because the draft-enquiry
+   edits were in flight. That run is not evidence.
+
+2. The re-run then produced **thirteen shard lines for a ten-shard gate**. Cause:
+   `rm -rf` of the output directory did not stop the FIRST driver, which kept
+   writing into the recreated path — two run IDs interleaved in one summary
+   file. Detected by counting distinct run IDs (`sort -u` returned two) rather
+   than by trusting the totals.
+
+   That is the same failure I diagnosed in an earlier pass and it recurred
+   because I deleted the directory instead of killing the process first. The
+   fix is order: `pkill`, confirm zero runners, then clear and start once. The
+   authoritative run above was verified to carry exactly ONE run ID.
+
+THE DRAFT ENQUIRY
+
+The brief previously said "send the enquiry first, not the bundle" but contained
+no enquiry — a plan with no first step. Section 1.2 now carries a sendable draft
+asking two questions (is this in scope; which channel for the material) and
+nothing else.
+
+Measured: the draft slice is 1,213 characters and contains none of
+"mac-then-encrypt", "sha-256 counter", "pack_id" or any finding ID. The
+prohibition against pasting the bundle sits inside the draft section, where the
+sender will be reading.
+
+A test bug is recorded in the commit: my first leak check sliced from the first
+occurrence of "draft enquiry" — the prohibition sentence, not the heading — and
+swept in the eight questions. Second time in that pass a test failed on MY slice
+rather than the document.
+
+THE REVIEW ROW IS UNCHANGED
+
+A draft is not a submission. The P1 cryptographic review stays OPEN, no enquiry
+has been sent, and no reviewer findings exist to file. Submitting on the owner's
+behalf would begin a commercial relationship and disclose an unpatched
+construction (MIMOSA-INTAKE-002 is open) — both requiring their consent. The
+bundle, the route and the draft are prepared; the send is theirs.
