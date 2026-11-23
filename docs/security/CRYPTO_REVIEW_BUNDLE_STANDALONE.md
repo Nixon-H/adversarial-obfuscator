@@ -228,25 +228,94 @@ Listed so the review does not spend its budget rediscovering them.
   `section_split.py` and `pack_state.py` only. Licence derivation, HWID
   binding and the loader's memory protections are separate surfaces.
 
-## 11. How to check our measurements
+## 11. Worked test vector — check the construction by hand, no code needed
 
-Clone `https://github.com/Nixon-H/adversarial-obfuscator` at commit
-`71eff21081785eb4bf588e7dd8542d0e4c279d79`, then:
+This is the fastest way to satisfy yourself that §3–§5 describe what the
+builder actually does. Recompute it with a standard-library-only script; if
+every value below matches, the specification and the implementation agree.
+
+Inputs:
+
+```
+K           = 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
+plaintext   = 4142434445464748            ("ABCDEFGH", 8 bytes)
+nonce_seed  = 766563746f72                ("vector")
+```
+
+Pack-level outputs (v3, 2 sections):
+
+```
+pack_nonce  = 5549563aed1e0f84069b3d0dbe9d9cf7
+pack_id     = 5b1f3620a4cf5b1cc4979f2d94cf6e4e      (16 bytes)
+key_hint    = 630dcd2966c43366
+state       = eae758258ea4975adcb4a802d68b5170
+v = 3   count = 2   total = 8
+```
+
+Section 0 and 1, with every intermediate the reviewer needs to verify:
+
+```
+--- section 0 ---
+nonce       = f59dcefd82e7c385dae4264e1193c4af
+enc_key     = 0129e91768c48513f2ee2aa6fd7eab2daa17fafb5d135ec4c521140b17703cf0
+mac_key     = 0f354d91e5242ce78044b22e1b8d5ed013159299d287687386ec52cad9f45224
+ctx         = 00000003 00000000 00000008 f59dcefd…c4af 5b1f3620…6e4e   (44 bytes)
+salt        = c7401dba1e9fbcdf
+plaintext_0 = 41424344                    ("ABCD")
+tag         = 3ac5b01ffc3d691ad2a0635d76cc5f2d37ffacc043cb2d284f92d66dbeda9a23
+
+--- section 1 ---
+nonce       = bd433f1f970e6ef95f036f9d54e1bf98
+enc_key     = bd5b1a54554207be6052ad9791ca9ff8d85beb712eaa39fac118bd8d4a28653d
+mac_key     = 75ff1cb8917363f9bc57db1fddce735c84f359fc0b40ba6b69b2e5e300057c65
+ctx         = 00000003 00000001 00000008 bd433f1f…bf98 5b1f3620…6e4e   (44 bytes)
+salt        = 5e459fe597a2ad2a
+plaintext_1 = 45464748                    ("EFGH")
+tag         = b2b4a3ffa0e897f00cda84b5dd0b39fb7331b3ba1188b038017580e3a30335ee
+```
+
+Verification recipe — nothing beyond `hashlib` and `hmac`:
+
+```python
+pack_id = sha256(b"nx-pack-id:" + K + pack_nonce)[:16]
+basis   = K + i.to_bytes(4,"big") + nonce
+enc_key = sha256(b"nx-section-enc:" + basis)
+mac_key = sha256(b"nx-section-mac:" + basis)
+ctx     = v.to_bytes(4,"big") + i.to_bytes(4,"big") \
+          + total.to_bytes(4,"big") + nonce + pack_id
+tag     = hmac.new(mac_key, ctx + plaintext_i, sha256)
+salt    = sha256(enc_key + nonce)[:16]
+```
+
+**These values were reproduced in a clean interpreter importing nothing from
+this project** — only `hashlib` and `hmac` — before being published here.
+`scripts/fuzz/gen_crypto_test_vectors.py` regenerates them, and
+`tests/test_crypto_test_vectors.py` fails if the implementation drifts from
+them. If your recomputation disagrees with any line above, that is a finding:
+tell us which one.
+
+## 12. How to check the rest of our measurements
 
 ```sh
+git clone https://github.com/Nixon-H/adversarial-obfuscator
+cd adversarial-obfuscator
 export PYTHONPATH="$PWD"
 python3 -c 'import sys; from pytest import console_main; sys.exit(console_main())' \
     -q tests/test_section_split.py tests/test_pack_state.py \
        tests/test_reorder_pack.py tests/test_byte_tamper_sweep.py
 ```
 
-Expected **40 passed** (verified on that commit). Coverage-guided fuzzing of the
+Expected **40 passed** — re-verified on the v3 tree, which is the same count as
+under v2 because the v3 work added tests to *other* modules (the pack-identity
+and seed-reuse findings), not to this tamper-matrix set. If you get a different
+number, the suite moved and §4's table needs re-checking rather than the number
+being wrong. Coverage-guided fuzzing of the
 pack parser reached `cov: 61 / ft: 185` over 4,075,415 executions with zero
 unintended acceptances; `scripts/fuzz/nx_fuzz.py` reproduces it (45 s is enough
 to see coverage grow — and `cov: 1` means the harness is not instrumenting, not
 that the parser is clean).
 
-## 12. How to return findings
+## 13. How to return findings
 
 Privately, via
 <https://github.com/Nixon-H/adversarial-obfuscator/security/advisories/new>
