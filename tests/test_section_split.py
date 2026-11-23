@@ -479,12 +479,34 @@ def test_the_full_framing_tamper_matrix_is_rejected():
         "total tampered": bump_total,
         "nonce swapped between sections": lambda p: p["sections"][0].__setitem__(
             "nonce", p["sections"][1]["nonce"]),
+        # CIPHERTEXT TAMPER -- note the guard, and why it is not cosmetic.
+        # The first version read:
+        #     ("FF" if data[0] != "F" else "00") + data[2:]
+        # which compares the first HEX DIGIT to "F" and then overwrites BOTH
+        # hex digits. When the byte's first nibble was already 'f' (byte in
+        # 0xf0..0xff) it wrote "00"; otherwise it wrote "FF". If the byte was
+        # ALREADY 0xff, the mutation wrote back exactly what was there -- the
+        # "tamper" was a no-op, the pack verified, and the test failed claiming
+        # stream_join accepted a flipped ciphertext.
+        #
+        # Measured before the fix: 16 of 3000 runs ACCEPTED (~0.53%, i.e. 1 in
+        # 256 as expected for "the first byte happened to be 0xff"). It only
+        # ever surfaced in the release gate, because split_sealed draws a fresh
+        # os.urandom nonce per pack -- the test was nondeterministic in a way
+        # that looked like a security hole.
+        #
+        # The fix inverts a bit instead of assigning a constant, so the result
+        # is ALWAYS different from the input. `^ 0x01` on the first byte keeps
+        # the tamper minimal and guarantees a change.
         "ciphertext flipped": lambda p: p["sections"][2].__setitem__(
-            "data", ("FF" if p["sections"][2]["data"][0] != "F" else "00")
+            "data", "%02x" % (int(p["sections"][2]["data"][:2], 16) ^ 0x01)
             + p["sections"][2]["data"][2:]),
+        # Same class of bug: writing "0" or "1" as the first hex digit could
+        # reproduce the original digit and make the "tag flip" a no-op. Toggle
+        # the first byte's low bit instead.
         "tag flipped": lambda p: p["sections"][1].__setitem__(
-            "data", ("0" if p["sections"][1]["data"][0] != "0" else "1")
-            + p["sections"][1]["data"][1:]),
+            "data", "%02x" % (int(p["sections"][1]["data"][:2], 16) ^ 0x01)
+            + p["sections"][1]["data"][2:]),
         "indices swapped (order tamper)": swap_indices,
     }
     for name, mutate in cases.items():
