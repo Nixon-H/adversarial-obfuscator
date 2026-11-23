@@ -3542,22 +3542,35 @@ if __name__ in ("__main__", "__mp_main__"):
     # with False for any build that has a fallback, i.e. exactly the builds
     # where the silent path exists.
     #
-    # What this adds: if the native load failed AND nothing produced output,
-    # report it on stderr and exit non-zero. A sectioned artefact carries a
-    # complete Python payload pack, so a failed native blob is a fallback
-    # condition, not a silent success -- but the fallback either ran (and will
-    # have set the marker below) or it did not, and the caller must be able to
-    # tell. "Ran nothing" is never a successful run.
+    # What this adds: if the native load failed, there WAS something to run,
+    # and the fallback never ran either, then report it and exit non-zero.
+    #
+    # "There WAS something to run" is the discriminator, and getting it wrong
+    # is how the first version of this guard broke seven e2e tests. Those tests
+    # emit a loader with EMPTY blobs and no section pack on purpose -- a
+    # synthetic loader with nothing embedded is a legitimate no-op, not silent
+    # degradation. The defect this guard exists for is different: a real build
+    # whose native blob IS present and IS supposed to load, which fails at
+    # import. So the guard fires only when the artefact actually carried
+    # payload material:
+    #
+    #   _NX_HAD_PAYLOAD  -- set at emit time: a section pack or a native blob
+    #                       was baked in, so this artefact was meant to run
+    #                       something.
+    #
+    # Without that discriminator the guard turns every degenerate test loader
+    # into a fatal error, which is a false positive in the one place -- the
+    # release gate -- where a false positive costs the most.
     if (not __NX_NATIVE_ONLY_GUARD__) and _nx_native_verdict is None:
         try:
             _nx_m2 = __import__("sys")
-            _nx_native_path_done = bool(
-                globals().get("_NX_FALLBACK_RAN", False))
-            if not _nx_native_path_done:
+            _nx_fallback_done = bool(globals().get("_NX_FALLBACK_RAN", False))
+            _nx_had_payload = bool(globals().get("_NX_HAD_PAYLOAD", False))
+            if _nx_had_payload and not _nx_fallback_done:
                 _nx_m2.stderr.write(
-                    "[FATAL] artefact ran no payload: the native blob failed "
-                    "to load and the Python fallback did not run either "
-                    "(exit 79)\n")
+                    "[FATAL] artefact ran no payload: this build embedded "
+                    "payload material, but neither the native blob nor the "
+                    "Python fallback executed it (exit 79)\n")
                 _nx_m2.stderr.flush()
                 _nx_m2.exit(79)
         except SystemExit:
@@ -3792,6 +3805,20 @@ if __name__ in ("__main__", "__mp_main__"):
     # placeholders.  _exec_fallback reads both at call time.
     try:
         _phase4_suffix += "_NX_SECTION_PACK = %r\n" % (_section_pack_val,)
+        # _NX_HAD_PAYLOAD (finding AI-BUILD-001). True when this build actually
+        # embedded something that is supposed to execute: a section pack, or a
+        # native blob for some platform. The entrypoint's silent-degradation
+        # guard reads it so that a degenerate loader (empty blobs, empty pack,
+        # emitted for a wiring test) stays a legitimate no-op while a REAL
+        # artefact that failed to run anything becomes a fatal, named error.
+        #
+        # Emitted here rather than in the template because the value is only
+        # known at build time; a template-level default would be wrong for one
+        # of the two cases.
+        _nx_blobs_have_data = any(
+            bool(_v) for _v in (native_blobs or {}).values())
+        _phase4_suffix += "_NX_HAD_PAYLOAD = %r\n" % (
+            bool(_section_pack_val) or _nx_blobs_have_data,)
         _phase4_suffix += _section_snippet
         # Honeypayload (Tier 2 #5): a second, plausible payload sealed under a
         # key derived from the BUILD ID ONLY -- never from the licence.  It is
