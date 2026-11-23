@@ -1320,6 +1320,60 @@ SCOPE NOTE
   honestly in future.
 ```
 
+## AI-TEST-001 — a tamper test that sometimes tested nothing
+
+```
+FINDING AI-TEST-001
+  package:      parser (test integrity)
+  reviewer:     maintainer, found by a release-gate failure on 4a37962
+  received:     2026-11-23
+  severity:     medium (a security test that intermittently asserts nothing)
+  confidence:   high (measured 16/3000, then 1 in 256 explained)
+  claim:        test_the_full_framing_tamper_matrix_is_rejected mutates the
+                first byte of a ciphertext as
+                    ("FF" if data[0] != "F" else "00") + data[2:]
+                When the byte was ALREADY 0xff the mutation wrote back exactly
+                the original value, the "tampered" pack verified, and the test
+                failed claiming stream_join accepted a flipped ciphertext.
+  what actually happened:
+                NOT a crypto defect. The pack was never modified, so accepting
+                it was correct. The test had a 1-in-256 blind spot in which it
+                asserted nothing at all.
+  how it surfaced:
+                The gate on 4a37962 reported shard 9 rc=1 with
+                "1 failed, 25131 passed". The same file passed in isolation and
+                passed when the whole shard was re-run -- the signature of a
+                nondeterministic test, since split_sealed draws a fresh
+                os.urandom nonce per pack.
+  reproduction: 3000 seal/mutate/join cycles with the ORIGINAL mutation:
+                    {'ValueError': 2984, 'ACCEPTED': 16}
+                Capturing the accepted cases showed data[0:2] == 'ff' in every
+                one, and the mutation wrote 'FF' -- identical bytes.
+                'tag flipped' had the same class of bug: writing "0" or "1" as
+                the first hex digit can reproduce the original digit.
+  impact:       Two directions, and both matter:
+                  1. A tamper case silently stopped testing, so a real
+                     regression in that check could pass on the unlucky runs
+                     that the CI happened to sample.
+                  2. It FAILED about 0.4% of runs with an alarming message
+                     ("the tampered pack was ACCEPTED"), which is how a team
+                     learns to re-run gates until they are green -- destroying
+                     the value of the check entirely.
+  remediation:  FIXED. Both mutations now invert a bit of the first byte:
+                    "%02x" % (int(data[:2], 16) ^ 0x01)
+                which CANNOT reproduce the input. Verified: 5000 trials, 0
+                accepted, and an assertion inside the probe that the mutation
+                always changes the value. The test file was then run 8
+                consecutive times: 24 passed each time.
+  disproof:     Would be disproved if the mutation always altered the byte.
+                It did not, which is the finding.
+  fixed-by:     this pass.
+  note:         This is worth filing rather than quietly fixing because the
+                lesson generalises: any test that mutates a random artefact by
+                ASSIGNING A CONSTANT can accidentally assign the original value.
+                The fix pattern is to derive the new value from the old.
+```
+
 ---
 
 ## Scope coverage — what was worked, by whom
