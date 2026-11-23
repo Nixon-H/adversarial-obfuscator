@@ -77,17 +77,47 @@ def test_every_named_firm_has_a_verification_marker():
 
 
 def test_the_brief_does_not_invent_contact_details():
-    """No email address, no invented URL, no phone number."""
+    """No email address, no invented URL, no phone number.
+
+    URLs are allowed only for domains that were FETCHED AND READ while
+    preparing this brief: trailofbits.com (services and contact pages) and its
+    sendsafely subdomain, plus github.com for the repository. Anything else is
+    a name or a link added from memory.
+    """
     text = _text()
     assert not re.findall(r"[\w.+-]+@[\w-]+\.[\w.]+", text), (
         "the brief contains an email address; none has been verified and an "
         "invented one sends enquiries into a void")
-    # Only URLs that were actually fetched may appear.
-    urls = re.findall(r"https?://[^\s)>`]+", text)
-    for url in urls:
-        assert "trailofbits" in url or "github.com" in url, (
+    allowed = ("trailofbits", "github.com")
+    for url in re.findall(r"https?://[^\s)>`]+", text):
+        assert any(a in url for a in allowed), (
             "the brief cites %r, which was not among the pages fetched and "
             "read" % (url,))
+
+
+def test_the_intake_route_is_recorded_and_carries_the_one_rule():
+    """The brief must say HOW to approach, and warn against the wrong order.
+
+    Verified 2026-11-23: the vendor publishes a contact form and, for sensitive
+    material, SendSafely or PGP. No plain email address exists -- so the brief
+    must not imply one, and it must warn that the bundle should NOT be attached
+    to a first web form: that would disclose a live construction and an open
+    weakness before a confidential channel exists.
+    """
+    text = _text()
+    lowered = text.lower()
+    assert "intake route" in lowered, (
+        "the brief must record the verified intake route")
+    assert "contact form" in lowered
+    assert "sendsafely" in lowered or "pgp" in lowered, (
+        "the brief should name the secure channel for sensitive material")
+    assert "do not attach the bundle" in lowered, (
+        "the brief must warn against attaching the bundle to a first contact "
+        "form; that discloses before a confidential channel exists")
+    assert "no plain email" in lowered or "no email address is published" in \
+        lowered, (
+        "the brief must state that no plain email is published, so nobody "
+        "hunts for one")
 
 
 def test_the_brief_does_not_estimate_price():

@@ -32,6 +32,30 @@ the construction is bespoke: §1 of the bundle says so, and the request is
 that only audits standard-protocol implementations would not be the right fit,
 and their page says explicitly that this is not their only scope.
 
+### 1.1 Intake route (verified 2026-11-23)
+
+Their contact page was fetched and read. What it documents:
+
+* a **contact form** on `/contact/` ("Tell us about your hardest security
+  problems") — the ordinary route;
+* for **sensitive material**, they direct senders to **SendSafely**
+  (`https://trailofbits.sendsafely.com/...`) **or PGP**, with a public key at
+  `/documents/pubkey.txt`;
+* a mailing address, which is not the right channel for this.
+
+**No plain email address is published**, which is worth noting because it means
+the intake is a form rather than a mailto — and a form is the correct place for
+a first approach that will name an unpatched construction.
+
+**Do not attach the bundle to the first contact form.** The bundle describes a
+live construction and three known weaknesses, one still open. Send the
+*enquiry* first, and offer the material; let them tell you which channel they
+want it through. Sending an unsolicited weakness description over a web form is
+disclosing before there is a confidential channel to disclose into.
+
+That is the one operational rule in this brief, and it is the sort of thing a
+procurement process does not catch.
+
 ## 2. What to ask for
 
 Ask for a **cryptographic design assessment** of the construction in
