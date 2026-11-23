@@ -22,7 +22,7 @@ Companion documents:
 |---|---|---|
 | **Static code obfuscation** | Make source harder to read: names, literals, expression shape, encoding | Stop execution or prove equivalence |
 | **Control-flow / data-flow protection** | Make the CFG or data flow harder to reconstruct | Resist a determined dynamic analyst |
-| **Anti-debugging / anti-instrumentation** | Detect or disrupt a debugger, tracer, VM, or audit hook | Hide the code from a root analyst |
+| **Anti-debugging / anti-instrumentation** | Detect or disrupt a debugger, tracer, VM, or audit hook | Detect and disrupt a debugger, tracer or audit hook. **Root-level observation is explicitly out of scope** — `LIMITATIONS.md` states no construction here resists a root-privileged analyst (corrected under AI-RE-002) |
 | **Counter-REA / deception** | Waste an automated or human analyst's time with decoys and false leads | Provide a measured cost reduction — no study here |
 | **Runtime integrity / anti-tamper** | Detect modified code, sections, stdlib, or loader state | Encrypt the code or prevent reading |
 | **Cryptographic protection** | Keep payload/strings/sections confidential under a key | Protect against a client that must decrypt; keys are in the client |
