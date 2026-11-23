@@ -65,10 +65,55 @@ def test_a_fallback_build_reports_and_exits_nonzero_when_nothing_ran():
     # The native-only guard is substituted False for fallback builds; the new
     # one must NOT be tied to that substitution, or it inherits the same hole.
     idx = src.find("ran no payload")
-    prelude = src[max(0, idx - 1200):idx]
+    prelude = src[max(0, idx - 1600):idx]
     assert "not False" in prelude or "if (not " in prelude, (
         "the new guard appears to be gated on the native-only placeholder, "
         "which is False exactly for the builds that need it")
+
+
+def test_the_guard_requires_that_payload_was_embedded():
+    """The guard must discriminate 'nothing embedded' from 'nothing ran'.
+
+    The first version fired whenever the native verdict was None and the
+    fallback had not run, which broke seven e2e tests: those emit loaders with
+    EMPTY blobs and an empty pack on purpose, and a synthetic loader with
+    nothing embedded is a legitimate no-op.
+
+    The fix gates on `_NX_HAD_PAYLOAD`, emitted at build time from the actual
+    blobs and pack. Both halves are asserted here: the flag is emitted, and the
+    guard reads it.
+    """
+    src = _loader_source()
+    assert "_NX_HAD_PAYLOAD" in src, (
+        "the emitted loader never names _NX_HAD_PAYLOAD, so the guard cannot "
+        "distinguish a degenerate test loader from a real artefact that failed")
+    idx = src.find("ran no payload")
+    prelude = src[max(0, idx - 1600):idx]
+    assert "_NX_HAD_PAYLOAD" in prelude, (
+        "the 'nothing ran' exit does not consult _NX_HAD_PAYLOAD; it will "
+        "fire on a loader that legitimately has nothing to run")
+
+
+def test_the_emitter_marks_payload_presence_from_real_inputs():
+    """_NX_HAD_PAYLOAD must be True only when something was actually embedded."""
+    from obfuscator.core.pipeline import generate_hybrid_loader_script
+
+    # Nothing embedded: no blobs, and section_split off so no pack is built.
+    # The key stays a real key -- an empty key is rejected by key_emit, which
+    # is a different concern from what this test is about.
+    _key_hex = bytes(range(32)).hex()
+    empty_src, _, _ = generate_hybrid_loader_script(
+        {"linux": b"", "windows": b"", "darwin": b""}, b"", _key_hex,
+        native_only=False, section_split=False)
+    assert "_NX_HAD_PAYLOAD = False" in empty_src, (
+        "a loader with no blobs and no pack must record _NX_HAD_PAYLOAD False")
+
+    # A real blob present: the flag must be True.
+    filled_src, _, _ = generate_hybrid_loader_script(
+        {"linux": b"\x7fELF" + b"\x00" * 64}, b"", _key_hex,
+        native_only=False, section_split=False)
+    assert "_NX_HAD_PAYLOAD = True" in filled_src, (
+        "a loader carrying a native blob must record _NX_HAD_PAYLOAD True")
 
 
 def test_native_only_build_keeps_its_own_fatal_exit():
