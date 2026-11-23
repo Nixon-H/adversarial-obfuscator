@@ -120,6 +120,47 @@ def test_the_intake_route_is_recorded_and_carries_the_one_rule():
         "hunts for one")
 
 
+def test_the_draft_enquiry_exists_and_leaks_nothing():
+    """The draft must be sendable as-is, and must not describe the construction.
+
+    A first contact that names the product, counts the weaknesses, or hints at
+    the design has disclosed before a confidential channel exists. The draft's
+    only job is to ask whether they want the material and over which channel.
+    """
+    text = _text()
+    lowered = text.lower()
+    assert "draft enquiry" in lowered, (
+        "the brief must carry a sendable draft, or the owner still has to "
+        "compose the one message the brief exists to prepare")
+    # It must ask the two scoping questions.
+    assert "scope you would take on" in lowered or "scope you would" in lowered
+    assert "which channel" in lowered, (
+        "the draft must ask which channel to use")
+    # And it must repeat the prohibition inside the draft's own section.
+    assert "do not paste the bundle into this message" in lowered, (
+        "the prohibition must appear next to the draft, not only above it")
+
+    # Negative: the draft itself must not name the construction's internals.
+    # The slice must start at the DRAFT HEADING, not at the first occurrence of
+    # the words "draft enquiry" -- that first hit is the prohibition sentence
+    # above it, and slicing from there swept in the eight questions further
+    # down the document and failed on text that is nowhere near the draft.
+    marker = "### 1.2 draft enquiry"
+    assert marker in lowered, (
+        "the brief must keep a clearly headed draft section")
+    draft_start = lowered.index(marker)
+    # The draft ends at the next heading, so the check covers only the draft.
+    rest = lowered[draft_start:]
+    end = rest.find("**do not paste the bundle")
+    assert end > 0, "the draft must be followed by its own prohibition"
+    draft = rest[:end]
+    for leaked in ("mac-then-encrypt", "sha-256 counter", "pack_id",
+                   "mimosa-intake-00"):
+        assert leaked not in draft, (
+            "the draft enquiry names %r; a first contact must not describe "
+            "the construction before a confidential channel exists" % (leaked,))
+
+
 def test_the_brief_does_not_estimate_price():
     """Prices are commercial and unverified; an invented figure is a claim."""
     lowered = _text().lower()

@@ -56,6 +56,44 @@ disclosing before there is a confidential channel to disclose into.
 That is the one operational rule in this brief, and it is the sort of thing a
 procurement process does not catch.
 
+### 1.2 Draft enquiry — the message to send through the contact form
+
+This is deliberately short and deliberately carries **no** construction detail.
+Its only job is to find out whether they want the brief and over which channel.
+
+> **Subject:** Enquiry — review of a bespoke section-sealing construction
+>
+> Hello,
+>
+> I maintain a Python code-protection tool that ships a payload as N
+> individually sealed sections. The sealing construction is custom rather than a
+> standardised AEAD, and it is now in a release candidate I would like reviewed
+> independently before it goes further.
+>
+> I have a self-contained specification ready — the construction written out,
+> a worked test vector that can be checked with `hashlib`/`hmac` alone, the
+> weaknesses I already know about, and a numbered set of questions. It needs no
+> repository access. I would rather not send it through a web form, because it
+> describes a live construction and one still-open issue.
+>
+> Could you tell me:
+>
+> 1. whether this is a scope you would take on, and
+> 2. which channel you would like the material through — your SendSafely
+>    endpoint, or PGP?
+>
+> Happy to answer scoping questions first if that is easier.
+>
+> Thank you.
+
+**Do not paste the bundle into this message.** If they reply asking for detail,
+that reply is the confidential channel and the bundle goes there.
+
+Three things the draft deliberately omits: the product's name, the number of
+known weaknesses, and any hint of what the construction is. Those are not
+secrets in a legal sense, but a first contact does not need them, and a shorter
+first message is easier for a vendor to triage.
+
 ## 2. What to ask for
 
 Ask for a **cryptographic design assessment** of the construction in
