@@ -94,6 +94,36 @@ known weaknesses, and any hint of what the construction is. Those are not
 secrets in a legal sense, but a first contact does not need them, and a shorter
 first message is easier for a vendor to triage.
 
+### 1.3 What the form actually requires (inspected 2026-11-23)
+
+The contact form renders inside an iframe and does not appear in a static fetch,
+so it was loaded in a browser and read. Fields marked `*` are required:
+
+| field | required | note |
+|---|---|---|
+| FIRST NAME | yes | |
+| LAST NAME | yes | |
+| EMAIL | yes | |
+| COMPANY NAME | yes | |
+| INQUIRY TYPE | yes | dropdown; **"Cryptography (libraries, protocols, ZKPs & ZK EVMs, MPC & threshold crypto, & other cryptography reviews)"** is the correct option |
+| WHAT SERVICES ARE YOU INTERESTED IN? | no | checkboxes: Threat Modeling, Training, **Design Review**, Code Assessment, Cryptographic Engineering, Other — `Design Review` matches §2 |
+| WHAT CAN TRAIL OF BITS DO FOR YOU? | yes | free text — paste the §1.2 draft here |
+| HOW DID YOU HEAR ABOUT TRAIL OF BITS? | no | |
+| marketing consent | no | leave unchecked |
+| data-processing consent | **yes** | required by their privacy policy |
+| reCAPTCHA | — | present; automated submission will very likely be refused |
+
+**This is why the maintainer could not submit it.** Four required fields — first
+name, last name, email, company name — are the owner's identity, and the
+maintainer does not have them and must not invent them. Filling that form would
+mean fabricating a person and impersonating the owner to a third party, and
+ticking a data-processing consent agreement in their name. There is no version
+of that which is acceptable, and it is a factual blocker rather than a matter of
+judgement.
+
+**What the owner needs in hand before sending:** name, email, organisation name,
+and agreement to Trail of Bits' privacy policy. Everything else is prepared.
+
 ## 2. What to ask for
 
 Ask for a **cryptographic design assessment** of the construction in
