@@ -291,6 +291,62 @@ records the experiment and the fix.
 entry. `--randomization-seed` remains accepted by `scripts/build.py` and seeds
 structure randomisation, speculation, and the CPU-port phase.
 
+### 6.2 Why the packed loader is not byte-reproducible — a decision, not a gap
+
+The row above says the packed loader is "No" under deterministic. That is
+correct, and it is a **deliberate design decision** rather than an unfinished
+feature. This subsection records the reasoning, because the alternative —
+making builds byte-identical by removing the runtime randomness — was
+considered and rejected, and a future contributor should not "fix" it without
+reading why.
+
+**The trade.** Byte-identical builds would give release engineering an easy
+integrity story: build twice, compare hashes, publish the hash. Removing the
+randomness costs:
+
+* **Per-build key uniqueness.** `BLOB_KEY`, the string-encryption key, the
+  section keys and the per-section nonces all come from `secrets` /
+  `os.urandom`. A pinned build would ship the *same* key material in every copy
+  of a given payload. One recovered key would then open every customer's copy of
+  that build — the exact opposite of what the per-customer key chain exists to
+  achieve. This is the decisive argument: reproducibility and per-build key
+  diversity are in direct conflict, and key diversity is the security property.
+* **Nonce uniqueness within the pack scheme.** `split_sealed` draws a fresh
+  per-section nonce and a per-pack nonce. Pinning them would reintroduce
+  keystream reuse across builds of the same payload (see MIMOSA-INTAKE-002,
+  which records that the deterministic `nonce_seed` path is an API hazard the
+  shipped path avoids precisely because it does not pin these).
+* **Any future analyst-cost measurement.** Several protections randomise
+  structure per build. Freezing that makes every build of a payload identical,
+  which is a gift to a reverse engineer: solve it once and the solve applies to
+  every copy.
+
+**What is offered instead.** The guarantee is *deterministic transform plus
+measured functional equivalence*, not byte-identical artefacts:
+
+| Property | How it is established |
+|---|---|
+| Same input program behaves the same | The suite builds a payload, runs the artefact and asserts its observable output; `test_pipeline_loader_e2e.py` and the `security-artifact.yml` real-artefact jobs do this in fresh processes |
+| Structure is reproducible when wanted | `--seed` makes the source emitter byte-identical (§6.1, measured); `--pin-structure` pins structure without pinning key material |
+| Released artefacts are attributable | The signed build manifest records the payload hash, the tool identity and the full provenance tuple; the manifest signature is the integrity claim, not a rebuild hash |
+| Two builds differ only where they must | Key material, nonces and timestamps differ; everything the manifest covers is recorded, so a difference is explainable rather than mysterious |
+
+**What this costs in assurance, stated plainly.** A reviewer cannot verify a
+release by rebuilding it and comparing bytes. They verify by checking the
+manifest against the artefact, which proves *what was built* and *who signed
+it*, but not *that the source reproduces it*. Anyone who needs the rebuild
+property has to accept the key-reuse cost above, and this repository has decided
+that cost is worse than the benefit. If a future release process needs
+byte-identical artefacts — for a reproducible-build attestation, say — the
+correct approach is a **separate deterministic profile that also rotates keys
+out of band**, not deleting `os.urandom` from the default path.
+
+**Do not do this to make a hash match.** Removing the runtime randomness so two
+builds hash the same would trade a real, load-bearing security property (unique
+key material per build) for a convenience property. The tests that would fail
+are the ones asserting per-section key independence and nonce uniqueness — they
+are load-bearing, not incidental.
+
 ---
 
 ## 7. CI
