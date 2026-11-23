@@ -1241,4 +1241,58 @@ cd <repo> && git status --porcelain --untracked-files=all | wc -l   # must be 0
 zsh /home/nixon/nx-suite/release_gate.sh --clean
 ```
 
+## Gate evidence — commit `d9fc9bc` (HEAD at time of writing)
+
+This run closes the gap the previous section described: the gate now binds HEAD
+itself, not a parent commit. It is the authoritative block.
+
+```
+run_id:            rc-gate-20261123T154507-2871901
+commit:            d9fc9bcd7eb75988a137eb99834beeaf16fcc916
+tree:              0d51ec4067802e94d82d3e459e251cda6d24b7c0
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 460
+shards_with_failures: 0
+started:           2026-11-23T15:45:07+05:30
+finished:          2026-11-23T16:25:13+05:30
+```
+
+| shard | rc | dirty | passed | skipped | xfailed |
+|---|---|---|---|---|---|
+| 1 | 0 | 0 | 602 | 0 | 0 |
+| 2 | 0 | 0 | 548 | 1 | 0 |
+| 3 | 0 | 0 | 555 | 2 | **6** |
+| 4 | 0 | 0 | 459 | 0 | 0 |
+| 5 | 0 | 0 | 562 | 2 | 0 |
+| 6 | 0 | 0 | 850 | 0 | 0 |
+| 7 | 0 | 0 | 477 | 1 | 0 |
+| 8 | 0 | 0 | 659 | 2 | 0 |
+| 9 | 0 | 0 | 25159 | 0 | 0 |
+| 10 | 0 | 0 | 579 | 1 | 0 |
+| **total** | | | **30450** | **9** | **6** |
+
+Aggregates recomputed from the ten shard logs: **30,450 passed, 9 skipped,
+6 xfailed, 0 failed, 30,465 collected.** Every shard re-read the same commit and
+tree at the end of its run and recorded `dirty=0`, which is what
+`identity_stable: true` asserts. Coverage verified by set equality with consistent
+collation: 460 suite files in the tree, 460 shard entries, **0** in the tree but
+not the gate, **0** in the gate but not the tree, **0** duplicates.
+
+The 6 xfails are the open AI-assessment findings, in shard 3. They execute, they
+report, and they fail loudly on a fix.
+
+### The three gates in this document, and what each is good for
+
+| Block | Commit | What it proves |
+|---|---|---|
+| `5e97ce6` | `5e97ce6` | The parser/protocol fixes passed before the AI regression tests existed |
+| `0d1f208` | `0d1f208` | The regression tests were picked up by derived allocation and the suite went 459 → 460 |
+| **`d9fc9bc`** | **`d9fc9bc`** | **HEAD passes with everything above included** — use this one |
+
+Earlier blocks are kept rather than deleted because each records a state the
+next one was built on. A reader who needs the current claim should use the
+`d9fc9bc` block; the others are history, and the document says which is which
+instead of presenting the newest as if it were the only one ever taken.
+
 
