@@ -219,3 +219,43 @@ is the row being marked closed because the maintainer wrote more documents about
 it. Three findings were self-found and are filed with `reviewed-by: NOBODY` —
 that is honest bookkeeping, and it is explicitly not the review the register
 asked for.
+
+### 1.4 Submission attempt — 2026-11-23
+
+The §1.2 enquiry was entered into the live contact form on 2026-11-23 with the
+owner's identity, supplied by the owner in-session:
+
+| field | value |
+|---|---|
+| FIRST NAME | Nixon |
+| LAST NAME | Binner |
+| EMAIL | the address the repository's own commits are authored with |
+| COMPANY NAME | `Independent security research (personal)` — the owner's instruction was to describe this as personal research rather than a company |
+| INQUIRY TYPE | Cryptography |
+| services | Design Review |
+| description | the §1.2 draft, verbatim (859 chars) |
+| data-processing consent | ticked |
+
+**Result: NOT SUBMITTED.** The form's reCAPTCHA Enterprise widget issued no
+token. Polled for 12 s; `g-recaptcha-response` stayed empty across both the
+visible response textarea and the hidden input. A real Playwright click on the
+submit control was used (a JS `.click()` produces an untrusted event that
+reCAPTCHA ignores), and the form reported no validation errors — it simply did
+not proceed.
+
+**This was not worked around.** The site key is a rendered v2-style widget, not
+an `execute`-mode one: calling `grecaptcha.enterprise.execute(sitekey)` from the
+page returned `Invalid site key or not loaded in api.js`, and the form frame has
+no `grecaptcha` object of its own. Forging a token or substituting a key would
+mean defeating the vendor's bot control, which is their security boundary and
+not something to route around to close a register row.
+
+Everything else is verified and still in place: the fields hold their values,
+the consent box stays ticked, and the browser tab is left open at
+<https://trailofbits.com/contact/>. **A human completing the reCAPTCHA on that
+open tab can submit the prepared enquiry with one click.**
+
+If the challenge will not complete even for a human in that browser profile,
+the alternative channels are the ones the vendor publishes for sensitive
+material: SendSafely (`https://trailofbits.sendsafely.com/u/chris.dahlheimer`)
+or PGP (`/documents/pubkey.txt`). Both bypass the web form entirely.
