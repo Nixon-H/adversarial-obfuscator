@@ -396,8 +396,52 @@ def chain_owner_of(
     import json as _json
     import urllib.request as _request
 
-    if not rpc_url.startswith("https://"):
-        raise ValueError("licence chain RPC must use HTTPS")
+    # RPC TRANSPORT POLICY (2026-11-24, benchmark requirement).
+    #
+    # Production MUST be https: a plaintext RPC endpoint lets a network
+    # attacker rewrite the eth_call result, which would make the on-chain
+    # ownership check worthless.
+    #
+    # Development/simulation MUST be able to use a local node, and a local
+    # node speaks plain HTTP (Anvil on http://127.0.0.1:8545). The previous
+    # rule was `startswith("https://")`, so a local chain could NEVER be
+    # exercised -- the whole on-chain licence path was untestable without
+    # spending real gas, and therefore went unbenchmarked.
+    #
+    # The rule below admits plain HTTP ONLY for a loopback literal. Loopback
+    # is not network-reachable, so the plaintext-interception argument does
+    # not apply to it; anything else still has to be https. `localhost` is
+    # deliberately NOT accepted as a hostname: it resolves through the
+    # resolver and can be pointed elsewhere, whereas 127.0.0.0/8 and ::1 are
+    # checked as literals.
+    def _transport_ok(url):
+        if url.startswith("https://"):
+            return True
+        if not url.startswith("http://"):
+            return False
+        try:
+            from urllib.parse import urlsplit
+            host = (urlsplit(url).hostname or "").strip().lower()
+        except ValueError:
+            return False
+        if host in ("127.0.0.1", "::1"):
+            return True
+        # 127.0.0.0/8 -- parse the octets and require a valid dotted quad, so
+        # "127.evil.com" and "127.0.0.1.example.com" fail the quad check
+        # rather than passing a string-prefix test.
+        parts = host.split(".")
+        if len(parts) == 4 and parts[0] == "127":
+            try:
+                if all(0 <= int(p) <= 255 for p in parts):
+                    return True
+            except ValueError:
+                return False
+        return False
+
+    if not _transport_ok(rpc_url):
+        raise ValueError(
+            "licence chain RPC must use HTTPS (plain HTTP is accepted only "
+            "for a loopback literal, for local chain simulation)")
     if not contract_address.startswith("0x") or len(contract_address) != 42:
         raise ValueError("licence chain contract must be a 20-byte address")
 
