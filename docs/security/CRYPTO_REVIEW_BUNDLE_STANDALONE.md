@@ -1,4 +1,4 @@
-# Section pack v2 — standalone review bundle
+# Section pack v3 — standalone review bundle
 
 **What this is.** A self-contained description of the construction in
 `obfuscator/section_split.py`, written so a cryptographer can review it
@@ -164,7 +164,28 @@ Listed so the review does not spend its budget rediscovering them.
    impossible.
 5. **Section length is implicit**, bound only via `T` and the final join check.
    Should `|part|` be in `ctx_i`?
-6. **`salt` is unkeyed and unverified**, used only in the structural digest.
+6. **`salt` is KEYED, and the pack publishes three 64-bit truncations.**
+   (Corrected 2026-11-23, finding MIMOSA-INTAKE-003.) An earlier revision of
+   this section called `salt` "unkeyed" — that was wrong, and it was wrong in
+   the direction that flatters the construction, so it is corrected here rather
+   than quietly. `salt = SHA256(K_enc_i ‖ N_i)[:16]` is a truncated hash of the
+   *encryption key*, differs per section, and is used in the structural digest.
+   The pack therefore publishes three independent 64-bit values derived from
+   key material:
+
+   ```
+   key_hint = SHA256(K)[:16]                            64 bits per pack
+   salt_i   = SHA256(K_enc_i ‖ N_i)[:16]                64 bits per section
+   pack_id  = SHA256("nx-pack-id:" ‖ K ‖ pack_nonce)[:16]
+   ```
+
+   Each is an offline oracle an attacker can test guesses against. Against a
+   256-bit key, a 64-bit truncation is not a practical break (~2^64 per
+   target), and we believe they are harmless — but **that is exactly the kind
+   of judgement we should not be making about our own construction.** The
+   question for you: are these acceptable, and should any of them be removed,
+   narrowed, or replaced with an HMAC keyed differently from the encryption
+   path?
 7. **The v1 legacy path remains** (single key for both roles, no metadata
    binding), kept so older artefacts stay loadable.
 8. **v2 packs still carry the splice weakness.** The v3 fix protects v3 packs

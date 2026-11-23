@@ -209,3 +209,80 @@ It is filed anyway, for two reasons:
    hazard that is currently unreachable but that a reviewer should judge rather
    than accept on the maintainer's say-so. That is exactly what the register's
    §6 means by "your own sampling is not independent verification".
+
+---
+
+## MIMOSA-INTAKE-003
+
+```
+FINDING MIMOSA-INTAKE-003
+  package:      crypto
+  reviewer:     maintainer (self-reported; NOT an independent review)
+  received:     2026-11-23
+  severity:     medium
+  claim:        The review bundle's section 8 item 6 describes `salt` as
+                "unkeyed and unverified". It is neither: salt is
+                SHA256(K_enc_i || nonce)[:16], a truncated hash of the
+                ENCRYPTION KEY, and it is checked indirectly (see below).
+                A reviewer relying on the document would reach the wrong
+                conclusion about three published 64-bit truncations.
+  evidence:     Recomputing from the shipped builder:
+
+                  nonce = bytes.fromhex(sec["nonce"])
+                  skey, _ = _section_keys_v2(K, sec["i"], nonce)
+                  sha256(skey + nonce).hexdigest()[:16] == sec["salt"]
+
+                holds for every section in every pack tested. The `salt`
+                field is therefore KEYED, and differs per section because
+                the key differs per section.
+
+                What the pack publishes, then, is THREE independent 64-bit
+                truncations derived from key material:
+
+                  key_hint = SHA256(K)[:16]                      (64 bits)
+                  salt_i   = SHA256(K_enc_i || N_i)[:16]         (64 bits/section)
+                  pack_id  = SHA256("nx-pack-id:"||K||pack_nonce)[:16]
+
+                None is a practical break of a 256-bit key (~2^64 per
+                target), and key_hint was already filed as bundle section 8
+                item 3. The finding is that the document UNDERSTATES the
+                set: it calls one of the three "unkeyed" and does not
+                enumerate them together. A reviewer asked "are there offline
+                oracles against the session key?" is told about one and
+                implicitly told the other is not one.
+  reproducible: yes (the four lines above, against any built pack)
+  affects:      docs/security/CRYPTO_REVIEW_BUNDLE_STANDALONE.md section 8
+                item 6; docs/security/CRYPTO_REVIEW_PACKAGE.md section 3.6;
+                obfuscator/section_split.py salt emission (line ~259)
+  maintainer-response:
+                accept
+  resolution:   DOCUMENTATION FIX APPLIED (this pass): both documents now
+                describe salt as keyed and list the three truncations
+                together as one question for the reviewer. No code change:
+                whether the published truncations are acceptable is a design
+                question for the independent review, not something to change
+                ahead of it.
+  reviewed-by:  NOBODY. This is a maintainer finding about maintainer
+                documentation. It is filed rather than silently corrected
+                because the register's whole purpose is to record what was
+                claimed and what was measured -- and the claim here was wrong
+                in the direction that flatters the construction.
+```
+
+## Why a documentation error is filed as `medium`
+
+Because of the direction it is wrong in. The bundle's §8 is the maintainers'
+own list of weaknesses, offered to a reviewer as an honest starting point. An
+entry that says "unkeyed, not a security boundary" about a value that is in fact
+a keyed truncation tells the reviewer *not* to look at something they should.
+
+The three truncations may well be harmless — 64 bits each against a 256-bit key
+is not a break, and the same argument was already made for `key_hint`. But that
+is an assessment for the reviewer, and they can only make it if the document
+describes the values correctly.
+
+This finding was produced by auditing the document against the code rather than
+by reading either alone. That is a technique the register should note: two of
+the three findings so far came from making a document and an implementation
+disagree, which is exactly what an independent reviewer does and exactly what
+no amount of re-reading one artefact finds.

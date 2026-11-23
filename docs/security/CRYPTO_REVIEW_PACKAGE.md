@@ -152,10 +152,18 @@ and state whether they want a counter instead.
 ### 3.6 Structural state digest (second, non-cryptographic check)
 
 `state = SHA256(STATE_SCHEMA ‖ count4 ‖ total8 ‖ Σ(i4 ‖ salt))[:32]`, where
-`salt = SHA256(K_enc_i ‖ N_i)[:16]`. This is unkeyed and is not a
-security boundary — it detects accidental inconsistency and forces an
-attacker to make their edit self-consistent. It is checked BEFORE the MACs.
-A reviewer should treat it as a debugging aid, not as authentication.
+`salt = SHA256(K_enc_i ‖ N_i)[:16]`.
+
+The DIGEST is unkeyed — anyone can recompute it — so it is not a security
+boundary: it detects accidental inconsistency and forces an attacker to make an
+edit self-consistent. It is checked BEFORE the MACs. Treat it as a debugging
+aid, not as authentication.
+
+**`salt` itself is NOT unkeyed** (corrected 2026-11-23, finding
+MIMOSA-INTAKE-003). It is a truncated hash of the per-section encryption key,
+so the pack publishes a 64-bit function of key material for every section. See
+§5.6 — an earlier revision of this line said "unkeyed", which was wrong in the
+direction that flatters the construction.
 
 ## 4. Properties this construction claims, and how each is tested
 
@@ -216,10 +224,28 @@ hex string. The tag covers `part` but not `len(part)` explicitly — length is
 bound indirectly via `total` and the final join check. A reviewer should
 decide whether that is sufficient or whether the length belongs in `ctx_i`.
 
-**5.6 `salt` is unkeyed and unverified.** It is used only in the state
-digest. An attacker can recompute the state digest to match any salt edit.
-This is by design (the digest is not a security boundary) but should be
-confirmed as understood rather than accidental.
+**5.6 `salt` is KEYED, and three 64-bit truncations are published.**
+(corrected 2026-11-23, finding MIMOSA-INTAKE-003 — the previous revision said
+"salt is unkeyed and unverified", which contradicted §3.6's own formula two
+hundred lines earlier.)
+
+`salt = SHA256(K_enc_i ‖ N_i)[:16]` is a truncated hash of the per-section
+ENCRYPTION KEY, and it differs per section. The pack therefore publishes:
+
+```
+key_hint = SHA256(K)[:16]                                64 bits per pack
+salt_i   = SHA256(K_enc_i ‖ N_i)[:16]                    64 bits per section
+pack_id  = SHA256("nx-pack-id:" ‖ K ‖ pack_nonce)[:16]   64 bits per pack
+```
+
+Each is an offline oracle an attacker holding a pack can test guesses against.
+Against a 256-bit key these are not a practical break (~2^64 per target), and
+the outcome is probably fine — but **deciding that is the reviewer's job, not
+ours.** An attacker can also recompute the state digest to match any salt edit,
+because the digest is unkeyed; that part stands.
+
+Question for the reviewer: are these truncations acceptable, and should any be
+removed, narrowed, or rekeyed away from the encryption path?
 
 **5.7 The v1 legacy path remains.** Packs with `v` absent or 1 use a single
 key for both roles and a MAC over plaintext only, with no metadata binding.
