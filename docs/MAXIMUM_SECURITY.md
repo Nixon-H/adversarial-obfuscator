@@ -1205,3 +1205,40 @@ extra file the modulo distribution re-shuffled: `test_parser_fuzz.py` moved from
 shard 10 (in the `5e97ce6` run) to shard 1 (602 passed here). A hand-maintained
 shard list would have silently dropped the new file; the derived scheme cannot.
 
+### Scope of this evidence: which tree it binds, and which it does not
+
+The gate binds **commit `0d1f208`, tree `5ac7b2b5`**. The evidence was recorded
+into this document, which produced commit `3253cce` — so HEAD is now one commit
+past the gated tree. That difference is stated rather than glossed, because "HEAD
+passes" and "the gated tree passes" are different claims and only the second is
+proven.
+
+What closes the gap, measured rather than assumed:
+
+* `git diff --name-only 0d1f208..3253cce` lists exactly one file,
+  `docs/MAXIMUM_SECURITY.md`. No `.py`, `.toml`, `.cfg` or `.sh` file changed, so
+  no executable behaviour differs between the gated tree and HEAD.
+* One test reads this document: `tests/test_manifest_native_blob.py` asserts
+  `NIXON_BUILD_MANIFEST_PUBKEY` appears in it. Verified present (1 occurrence)
+  and that test passes on HEAD (14 passed).
+* The doc-consistency and review-package tests also pass on HEAD
+  (`test_research_docs_consistency.py`, `test_ai_findings_regressions.py`,
+  `test_crypto_review_package.py`, `test_crypto_bundle_standalone.py`:
+  40 passed, 6 xfailed).
+
+That is sufficient to say the documentation-only commit did not invalidate the
+gate. It is **not** a substitute for a gate run on `3253cce`, and if HEAD moves
+again with a code change, a fresh run is required — the pattern that produced two
+discarded runs earlier in this work was exactly an edit landing after the gate
+started.
+
+**Reproduce this block:**
+
+```
+pkill -f release_gate.sh            # confirm zero runners first
+rm -rf /home/nixon/nx-suite/gate
+cd <repo> && git status --porcelain --untracked-files=all | wc -l   # must be 0
+zsh /home/nixon/nx-suite/release_gate.sh --clean
+```
+
+
