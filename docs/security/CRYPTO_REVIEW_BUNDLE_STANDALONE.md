@@ -105,6 +105,59 @@ Every substituted section's MAC verified. The fix binds a per-pack identity.
 our own finding, which is precisely the independence gap this review exists to
 close. §8 item 8 covers what it does *not* fix.
 
+### 4.2 Encoding of the context — is it canonical?
+
+The context is a bare concatenation with no delimiters, so whether it is an
+*injective* encoding is a real question: if two different tuples
+`(v, i, T, N, pack_id)` could produce the same bytes, two distinct sections
+would share a MAC input.
+
+**It is injective, and the reason is entirely fixed-width fields:**
+
+| field | width | note |
+|---|---|---|
+| `v` | 4 | always the FIRST field |
+| `i` | 4 | |
+| `T` | 4 | |
+| `N_i` | 16 | fixed by §3.5 |
+| `pack_id` | 16 | v3 only; absent (not empty) in v2 |
+
+v2 context = 28 bytes, v3 = 44. Since every field has a fixed width and the
+version comes first, the parse is unambiguous for any given version, and the
+version itself differs between the two lengths — so a 44-byte v3 context can
+never be reinterpreted as a 28-byte v2 one.
+
+**Three things we are NOT claiming, which a reviewer should check:**
+
+1. **The construction has no length prefixes.** It is a bare concatenation
+   `ctx_i ‖ plaintext_i`, and `plaintext_i` is variable-length — measured:
+   a 10-byte payload over 4 sections gives chunks of 3, 3, 3, 1 bytes. It works
+   because `ctx_i` is fixed-width, so the boundary between context and plaintext
+   is always exactly byte 44 (v3) or 28 (v2). Two consequences a reviewer should
+   confirm:
+   - within a section there is no ambiguity: the split point is determined by
+     the version alone;
+   - across sections there is none either, because `ctx_i` differs in the index
+     field, so `ctx_0 ‖ P0` cannot equal `ctx_1 ‖ P1` for any plaintexts.
+   We verified both. What we have NOT done is prove that adding a length prefix
+   would be unnecessary under refactoring — if `ctx_i` ever becomes
+   variable-width, the encoding stops being injective and the tag stops being
+   meaningful.
+2. **Bounds are enforced in Python, not in the encoding.** `u32be(i)` and
+   `u32be(T)` require `0 <= value < 2^32`; the join refuses out-of-range values
+   before constructing the context. If that check were removed, `int.to_bytes`
+   would raise rather than silently wrap — but a future refactor to a
+   fixed-width C integer would wrap instead.
+3. **`pack_id` is appended, not substituted for a length.** A v2 pack has no
+   `pack_id` at all rather than a zero-length one, which is why the two
+   versions have different context lengths rather than a common prefix. §8 item
+   8 covers why v2 was kept.
+
+We do not have a proof that this composition is sound — §8 item 1 says so. What
+we can state is the narrower fact relevant here: **the encoding is injective
+given fixed-width fields, and the version is bound first.** Please confirm or
+refute that reading.
+
 ## 5. Seal
 
 ```

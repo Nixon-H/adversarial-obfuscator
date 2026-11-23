@@ -146,3 +146,71 @@ def test_the_bundle_names_the_regeneration_script():
     assert "gen_crypto_test_vectors.py" in text
     assert "test_crypto_test_vectors.py" in text, (
         "§11 must name the test that fails if the implementation drifts")
+
+
+# ── §4.2: the context encoding is injective ───────────────────────────
+#
+# The bundle now asserts that `ctx_i ‖ plaintext_i` is unambiguous because
+# every context field is fixed-width. That is a claim about the ENCODING, and
+# it is what makes a length-prefix-free concatenation safe. Pin it.
+
+def test_the_context_is_injective_across_indices():
+    """ctx_i ‖ P_i cannot collide with ctx_j ‖ P_j for i != j.
+
+    If contexts differed only in a field a caller could control, two sections
+    could share a MAC input. The index field guarantees they do not.
+    """
+    from obfuscator.section_split import _mac_context_v2, _pack_id
+
+    pack = split_sealed(PLAINTEXT, sections=2, key=K, nonce_seed=NONCE_SEED)
+    pid = _pack_id(K, bytes.fromhex(pack["pack_nonce"]))
+    nonce = bytes.fromhex(SECTIONS[0]["nonce"])
+
+    ctxs = [_mac_context_v2(i, len(PLAINTEXT), nonce, pid, version=3)
+            for i in range(4)]
+    assert len(set(ctxs)) == 4, (
+        "two section indices produced the same context, so two sections "
+        "could share a MAC input")
+    # The concatenation with plaintext is unambiguous because the context
+    # length is fixed: the boundary is always byte 44 for v3.
+    assert all(len(c) == 44 for c in ctxs)
+
+
+def test_the_context_fields_are_all_fixed_width():
+    """The injectivity argument rests entirely on fixed widths."""
+    from obfuscator.section_split import (PACK_ID_BYTES, _mac_context_v2)
+
+    v2 = _mac_context_v2(0, 8, b"\x00" * 16, version=2)
+    v3 = _mac_context_v2(0, 8, b"\x00" * 16, b"\x00" * PACK_ID_BYTES)
+    assert len(v2) == 28, "v2 context must be 4+4+4+16"
+    assert len(v3) == 44, "v3 context must be 4+4+4+16+16"
+    # The version is the FIRST field, so the two are distinguishable without
+    # knowing which length to expect.
+    assert v2[:4] == (2).to_bytes(4, "big")
+    assert v3[:4] == (3).to_bytes(4, "big")
+
+
+def test_plaintext_chunks_really_are_variable_length():
+    """The premise of the §4.2 discussion: chunks are not fixed-width.
+
+    If this ever became false the §4.2 wording would overstate the risk, and
+    it says so explicitly -- so the claim is measured rather than assumed.
+    """
+    pack = split_sealed(b"x" * 10, sections=4, key=K, nonce_seed=b"t")
+    lengths = [len(bytes.fromhex(s["data"])) - 32 for s in pack["sections"]]
+    assert len(set(lengths)) > 1, (
+        "chunks are uniform for this input; §4.2's 'variable-length' premise "
+        "is not demonstrated by this case")
+    assert sum(lengths) == 10
+
+
+def test_the_bundle_documents_the_encoding_question():
+    """§4.2 must be present and must not overclaim soundness."""
+    with open(BUNDLE, encoding="utf-8") as fh:
+        text = fh.read()
+    assert "4.2" in text and "injective" in text.lower(), (
+        "§4.2 must discuss whether the context encoding is injective")
+    assert "length-prefix" in text.lower() or "fixed-width" in text.lower()
+    assert "do not have a proof" in text.lower() or \
+        "not claiming" in text.lower(), (
+        "§4.2 must not present injectivity as a soundness proof")
