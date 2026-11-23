@@ -4995,3 +4995,49 @@ hand-checkable vector. The one thing it does not have is a recipient: there is
 no mail transport on this host (exim4 inactive, unconfigured) and no reviewer
 address in the repository or the owner's public profile. No tool can supply
 either. That is the whole remaining gap on this row.
+
+### 6s.11 Pass-22 gate (canonical-encoding section)
+
+```
+run_id:            rc-gate-20261123T070406-2030332
+commit:            dfed471696a5f357412b34876385770a80bf12f1
+tree:              543256d6633bd3b043ed7cc3ac1868b86749bb37
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 456
+shards_with_failures: 0
+passed 30,413 / skipped 9 / collected 30,422
+```
+
+All ten shards `rc=0`. Aggregate rose 30,409 → 30,413, exactly the four
+encoding-injectivity tests added to `test_crypto_test_vectors.py`.
+Arithmetic: 30,413 + 9 = 30,422.
+
+THE COVERAGE AUDIT THAT PROMPTED IT
+
+The register's §2 lists eight areas a reviewer is asked to examine. Auditing the
+bundle against that list — by reading the bundle, not by memory — found seven
+covered and ONE absent: "canonical encoding of authenticated metadata". The
+context was specified as a bare concatenation with no discussion of whether the
+encoding is injective, so a reviewer could not tell whether two different
+`(v, i, total, nonce, pack_id)` tuples could collide into the same 44 bytes.
+
+§4.2 now answers it, and the answer is narrow: the encoding IS injective,
+because every field is fixed-width with the version first, so v2 is 28 bytes and
+v3 is 44 and the two cannot be confused. Three things are explicitly NOT
+claimed: no length prefixes exist (measured chunk lengths for a 10-byte payload
+over 4 sections are 3,3,3,1), bounds are enforced in Python rather than in the
+encoding, and `pack_id` is appended rather than substituted for a length. The
+section closes by stating we do NOT have a proof the composition is sound, and
+asks the reviewer only to confirm or refute the injectivity reading.
+
+That is the same discipline as the three filed findings: state what was measured,
+state what was not, and do not let the strong-sounding half stand alone.
+
+STATUS OF THE REVIEW ROW, UNCHANGED
+
+All eight areas are now covered. The bundle is self-contained, has a cover
+brief, and carries a hand-checkable test vector reproducible without importing
+this project. It has no recipient: no mail transport on this host, no reviewer
+address in the repository or the owner's public profile. No tool can supply
+either, and fabricating reviewer output would not be evidence.
