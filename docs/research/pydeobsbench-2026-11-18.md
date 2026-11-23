@@ -4944,3 +4944,54 @@ The packages are deliverable and one needs no repository access at all. What
 does not exist is a recipient. That is not a gap more engineering can close,
 and continuing to produce passes that restate it would be motion rather than
 work.
+
+### 6s.10 Pass-21 gate (test vector and cover brief)
+
+```
+run_id:            rc-gate-20261123T061926-1958706
+commit:            9ca3679708a29b4f8a719c8d37d0d1ad5a64b5f6
+tree:              d3838afa993594f64b5486883b7ff591c7d2939f
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 456
+shards_with_failures: 0
+passed 30,409 / skipped 9 / collected 30,418
+```
+
+All ten shards `rc=0`. Aggregate rose 30,404 → 30,409, exactly the five tests in
+`test_crypto_test_vectors.py`, assigned to shard 5 (`rc=0`, re-read from
+`gate/shards/`). Arithmetic: 30,409 + 9 = 30,418.
+
+THREE STALE CLAIMS FIXED IN THE BUNDLE, all found by checking it against the
+tree rather than by reading it:
+
+1. §11 cited commit `71eff21` — the PRE-v3 revision. A reviewer cloning that
+   would receive a v2 construction while the document described v3, and would
+   report mismatches that are not defects. The hash is removed entirely; a
+   hand-copied hash goes stale and a fabricated one is worse.
+2. It promised "40 passed" and I then wrote "46" assuming the count grew with
+   the v3 work. Ran it: still 40. My assumption was wrong; the v3 tests live in
+   other modules. Corrected to the measured value.
+3. Heading numbering collided (two sections numbered 12). Renumbered.
+
+The generator script also hit the PYTHONPATH trap that has now broken FOUR
+reproduction commands in this project. Fixed the same way as the others — the
+repo root computed from `__file__`, not required as an export.
+
+THE TEST VECTOR IS THE SUBSTANTIVE ADDITION
+
+§11 publishes every intermediate for one pack, and the recipe needs only
+`hashlib` and `hmac`. The vector was reproduced in a clean interpreter
+importing nothing from this project BEFORE publication, so a reviewer can check
+in minutes that the implementation matches the specification without running
+our code or trusting our suite. Pinned in both directions by
+`tests/test_crypto_test_vectors.py`: the formulas recompute the published tags,
+the builder emits those values, and the document still carries them.
+
+WHAT REMAINS, STATED WITHOUT EMBELLISHMENT
+
+The bundle is 13 KB, self-contained, and now has a matching cover brief and a
+hand-checkable vector. The one thing it does not have is a recipient: there is
+no mail transport on this host (exim4 inactive, unconfigured) and no reviewer
+address in the repository or the owner's public profile. No tool can supply
+either. That is the whole remaining gap on this row.
