@@ -1376,6 +1376,141 @@ FINDING AI-TEST-001
 
 ---
 
+# Fourth round — found by building a real artefact for the AI reverse-engineering benchmark
+
+The benchmark needed a maximum-security build to attack. Building one surfaced a
+defect that unit tests could not: **the artefact was produced, shipped, exited 0,
+and ran nothing.**
+
+## AI-BUILD-001 — a native build silently executes no payload at all
+
+```
+FINDING AI-BUILD-001
+  package:      binary security / build integrity
+  reviewer:     maintainer, found while constructing the RE benchmark
+  received:     2025-11-24
+  severity:     high (a shipped artefact that does nothing and reports success)
+  confidence:   high (reproduced end to end; root cause identified)
+  claim:        A default `pipeline build` of a payload that looks functions up
+                through `globals()` produces an artefact whose native module
+                raises KeyError during init. The loader catches nothing useful,
+                returns None, and the entrypoint exits 0 having run nothing.
+                A caller (systemd, CI, a supervisor, a benchmark) cannot
+                distinguish this from success.
+  attacker-capability:
+                None needed -- this is a build defect. Its security relevance is
+                that a failed load is indistinguishable from a clean run, which
+                is exactly the silent-degradation class this project has fixed
+                before in other paths.
+  technical-
+  explanation:  Three mechanisms compose into the failure:
+
+                1. `build_local_cython` rewrites the main guard so Cython
+                   compiles the body eagerly:
+                       for _guard in ('if __name__ == "__main__":', ...):
+                           source_content = source_content.replace(_guard, "if True:")
+                   The comment explains why: a guard that never fires inside an
+                   extension module meant "a native build ran the module body
+                   only". Making it `if True:` moves `main()` into module init.
+
+                2. The payload's `main()` resolves functions by NAME:
+                       fn = globals()[name]
+                   The obfuscator renames identifiers. Measured on the produced
+                   blob: NONE of the original names survive --
+                       fnv1a32/djb2/crc8_atm/luhn_check/levenshtein all absent.
+                   So the lookup raises KeyError.
+
+                3. The loader's retry loop catches only ImportError:
+                       for _nx_mod_name in (...):
+                           try: ... exec_module(module); _nx_ok = True; break
+                           except ImportError: continue
+                   A KeyError escapes to the outer `except Exception`, which
+                   returns None. The entrypoint then exits 0. Nothing prints.
+  reproduction:  Build any payload whose `__main__` block resolves names from
+                `globals()`, then run the artefact:
+                    $ python3 artefact.py ; echo "EXIT=$?"
+                    EXIT=0                       # no output at all
+                Loading the extracted blob directly shows the real error:
+                    KeyError: 'fnv1a32'
+                    File "payload.py", line 515, in init payload
+                Confirmed the payload itself is fine: the section pack verifies
+                (key_hint e03962ebd17a497d matches) and joins to 15873 bytes,
+                and the embedded blob export list contains both
+                `nx_apply_protections` and `PyInit_payload`.
+  impact:       Any payload that dispatches through globals(), getattr on the
+                module, or a name-keyed registry silently fails to run in a
+                native build -- and the failure is invisible. This is worse than
+                a crash: a crash is diagnosable, exit-0-with-no-output is not.
+  remediation:  Three changes, in order of importance:
+                1. The loader must distinguish "nothing ran" from "ran fine".
+                   It already returns True on success and None otherwise, and
+                   the entrypoint check is `if __FALSE__ and verdict is None`
+                   for fallback builds -- so for a build WITH a fallback the
+                   None is not treated as failure at all. A native module that
+                   raises during init must be reported on stderr and exit
+                   non-zero, or fall back to the section pack (which is present
+                   and verifies).
+                2. `except ImportError` around exec_module should not exclude
+                   the payload's own exceptions. Distinguish "wrong module name
+                   in the blob" from "the module ran and raised".
+                3. `build_local_cython` should refuse (or warn loudly) when the
+                   source contains name-based module lookups that renaming will
+                   break, since the `if True:` rewrite promotes them to import
+                   time.
+  disproof:     Would be disproved if the artefact printed its output or exited
+                non-zero. It does neither.
+  fixed-by:     FIXED this pass, at the entrypoint. Two changes to the emitted
+                loader (obfuscator/core/pipeline.py):
+
+                  1. `_exec_fallback()` now sets `_NX_FALLBACK_RAN = True` at the
+                     TOP, before every early return, so "the fallback executed
+                     the payload" is distinguishable from "nothing ran".
+                  2. The entrypoint gains: if the native verdict is None AND
+                     `_NX_FALLBACK_RAN` is unset, write
+                     "[FATAL] artefact ran no payload: the native blob failed
+                     to load and the Python fallback did not run either"
+                     to stderr and exit 79.
+
+                Deliberately NOT gated on `__NX_NATIVE_ONLY_GUARD__`, because
+                that placeholder is substituted False for every build that HAS a
+                fallback -- i.e. exactly the builds where the silent path
+                existed.
+
+                What this does and does not fix, stated precisely: the artefact
+                still fails to run the payload when the native module raises
+                during init (the retry loop still catches only ImportError and
+                the payload's own exception still escapes). What changed is that
+                the failure is now OBSERVABLE. Silent degradation is the defect
+                that made this dangerous; a non-zero exit with a named reason is
+                a diagnosable build failure.
+
+  regression-test:
+                tests/test_silent_exit_finding.py -- 4 tests on the emitted
+                source: the flag exists and is set before the early returns, the
+                "nothing ran" guard is present and not tied to the native-only
+                placeholder, and the native-only exit(78) survives.
+                NEGATIVE CONTROLS RUN: with the fix stashed, 2 of the 4 FAIL
+                (the two that assert the fix); with it applied, 4 pass. A test
+                that cannot fail on its own defect would be worse than none.
+
+  verified-end-to-end:
+                Rebuilt the exact failing payload (a `globals()` dispatch) with
+                the fix in place:
+                  BEFORE: printed nothing, EXIT=0
+                  AFTER:  "[FATAL] artefact ran no payload: ... (exit 79)"
+                          EXIT=79
+                A normal build (the benchmark payload) still prints its 19
+                vectors and exits 0, so the guard does not fire on a healthy
+                artefact.
+
+  note:         The benchmark payload was changed to avoid `globals()` so the
+                benchmark could proceed; that works around the symptom and did
+                NOT fix the defect. The entrypoint fix above is the actual
+                change.
+```
+
+---
+
 ## Scope coverage — what was worked, by whom
 
 Six scopes were requested. Coverage at the end of the third round:

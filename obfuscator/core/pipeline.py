@@ -3026,6 +3026,17 @@ def _exec_fallback():
     # it in the function that actually runs the payload means every execution
     # path marks the same three checkpoints in the same order.
     _nx_cfi_mark('enter')
+    # OBSERVABLE COMPLETION (finding AI-BUILD-001). The entrypoint must be able
+    # to distinguish "the fallback ran the payload" from "nothing ran at all".
+    # Set at the TOP, before any path that could return early: the flag means
+    # "this function was entered", and a caller that sees the native verdict as
+    # None plus this flag set knows the None meant "deliberately handed off",
+    # not "everything failed". Without it the two cases were indistinguishable
+    # and an artefact that ran nothing exited 0.
+    try:
+        globals()["_NX_FALLBACK_RAN"] = True
+    except Exception:
+        pass
     try:
         if "DISABLED" in str(FALLBACK_BLOB): sys.exit(1)
         if "PLACEHOLDER" in str(FALLBACK_BLOB):
@@ -3513,6 +3524,42 @@ if __name__ in ("__main__", "__mp_main__"):
                 "be loaded and no Python fallback exists (exit 78)\n")
             _nx_m.stderr.flush()
             _nx_m.exit(78)
+        except SystemExit:
+            raise
+        except Exception:
+            pass
+    # SILENT-DEGRADATION GATE (finding AI-BUILD-001, 2025-11-24).
+    #
+    # Measured: a default build of a payload that dispatches through
+    # globals() produced an artefact that EXITED 0 HAVING RUN NOTHING. The
+    # native module raised KeyError during init (the renamer had removed the
+    # names the payload looked up), the retry loop caught only ImportError,
+    # the outer handler returned None, and this entrypoint treated None on a
+    # fallback build as "the fallback was the intended outcome" -- so nothing
+    # printed and the exit status said success.
+    #
+    # The preceding native-only guard does not help here: it is substituted
+    # with False for any build that has a fallback, i.e. exactly the builds
+    # where the silent path exists.
+    #
+    # What this adds: if the native load failed AND nothing produced output,
+    # report it on stderr and exit non-zero. A sectioned artefact carries a
+    # complete Python payload pack, so a failed native blob is a fallback
+    # condition, not a silent success -- but the fallback either ran (and will
+    # have set the marker below) or it did not, and the caller must be able to
+    # tell. "Ran nothing" is never a successful run.
+    if (not __NX_NATIVE_ONLY_GUARD__) and _nx_native_verdict is None:
+        try:
+            _nx_m2 = __import__("sys")
+            _nx_native_path_done = bool(
+                globals().get("_NX_FALLBACK_RAN", False))
+            if not _nx_native_path_done:
+                _nx_m2.stderr.write(
+                    "[FATAL] artefact ran no payload: the native blob failed "
+                    "to load and the Python fallback did not run either "
+                    "(exit 79)\n")
+                _nx_m2.stderr.flush()
+                _nx_m2.exit(79)
         except SystemExit:
             raise
         except Exception:
