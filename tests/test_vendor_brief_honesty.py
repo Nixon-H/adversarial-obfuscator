@@ -210,3 +210,31 @@ def test_the_brief_says_a_negative_answer_is_acceptable():
     assert "unmeasured" in lowered or "not as absence" in lowered, (
         "the brief should state that the register treats silence as "
         "unmeasured rather than as proof of absence")
+
+
+def test_the_form_requirements_are_recorded():
+    """The brief must say what the form requires, so the send is a checklist.
+
+    Inspected in a browser 2026-11-23: the form renders inside an iframe and is
+    invisible to a static fetch. Four fields are REQUIRED and are the owner's
+    identity -- first name, last name, email, company name -- which is exactly
+    why a maintainer cannot submit it. That must be recorded as a FACT rather
+    than left as an unexplained refusal.
+    """
+    text = _text()
+    lowered = text.lower()
+    assert "what the form actually requires" in lowered, (
+        "the brief must record the inspected form requirements")
+    for field in ("first name", "last name", "email", "company name"):
+        assert field in lowered, (
+            "the brief must name the required field %r" % (field,))
+    assert "design review" in lowered, (
+        "the brief should name the checkbox that matches the ask")
+    assert "cryptography (libraries" in lowered, (
+        "the brief should quote the inquiry-type option verbatim, so the "
+        "sender picks the right one rather than paraphrasing")
+    assert "cannot submit" in lowered or "could not submit" in lowered, (
+        "the brief must state plainly why the maintainer could not submit: "
+        "the required fields are the owner's identity")
+    assert "invent" in lowered, (
+        "the brief must say that inventing those details is not acceptable")
