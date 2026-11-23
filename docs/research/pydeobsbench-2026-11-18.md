@@ -5162,3 +5162,58 @@ pipeline path.
 WHAT REMAINS is unchanged: six external register rows requiring a person, a
 purchase, hardware, or an administrator decision. No further engineering can
 move them.
+
+### 6s.14 Pass-25 gate (vendor engagement brief)
+
+```
+run_id:            rc-gate-20261123T102043-2333967
+commit:            21884ff424f62350ac67890c6a1091a556481ee5
+tree:              736e380a00c0bd4f27decbcfe5b5ffbed5b6aff2
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 459
+shards_with_failures: 0
+passed 30,443 / skipped 9 / collected 30,452
+```
+
+All ten shards `rc=0`. Aggregate rose 30,434 → 30,443, exactly the nine tests in
+`test_vendor_brief_honesty.py`, assigned to shard 2 (`rc=0`).
+Arithmetic: 30,443 + 9 = 30,452.
+
+WHAT THE PASS DID, AND WHY IT IS NOT AN ENGAGEMENT
+
+The maintainer cannot name or contact a cryptographer. What was possible was to
+establish which firms actually offer this work and what the ask should be, so
+the owner's decision is a shortlist and a scoped brief rather than a research
+task.
+
+Vendor pages were FETCHED AND READ rather than recalled. One firm (Trail of Bits)
+verified: cryptography practice with PhD cryptographers, explicitly covering
+novel and non-standard designs, including formal proofs or counterexamples for
+novel protocols. Two other URLs returned 404 and a DNS failure; those firms are
+NOT named in the brief, because naming a company in a security document from
+memory is the same failure as the invented commit hash caught two passes ago and
+the invented email address refused throughout. The brief states the shortlist
+has one item because of verification, not lack of searching -- a weaker
+deliverable than three verified options, and it says so.
+
+`tests/test_vendor_brief_honesty.py` (9 tests) enforces that discipline: the
+brief must say it is not engaged; every named firm must carry a verification
+marker; no email address, invented URL or currency figure may appear; the ask
+must be a design assessment rather than a pentest; the known findings must be
+disclosed by ID before the engagement; and the register's treatment of silence
+as unmeasured must be preserved.
+
+Two of those tests failed on first run and both were maintainer errors, not
+document errors: the brief did not cite the finding IDs (fixed in the document,
+since a reviewer needs them) and an assertion looked for "not contacted" when
+the sentence reads "No vendor has been contacted" (fixed in the test, because
+the document was right).
+
+THE REVIEW ROW REMAINS OPEN
+
+A brief is not an engagement. The P1 cryptographic review stays OPEN, the
+packages keep their NOT PERFORMED banner, and no reviewer findings exist to
+file. What exists is: a verified first approach, a scoped ask, a disclosed
+weakness list, a hand-checkable vector, and a ready-to-send message. The
+remaining action is a purchase order and a name, and both belong to the owner.
