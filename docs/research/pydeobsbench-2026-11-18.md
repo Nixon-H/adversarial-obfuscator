@@ -5041,3 +5041,64 @@ brief, and carries a hand-checkable test vector reproducible without importing
 this project. It has no recipient: no mail transport on this host, no reviewer
 address in the repository or the owner's public profile. No tool can supply
 either, and fabricating reviewer output would not be evidence.
+
+### 6s.12 Pass-23 gate (pack format version in the signed manifest)
+
+```
+run_id:            rc-gate-20261123T084450-2181497
+commit:            d6b1b31f4c1cde852203ae5e4493fc5c8390e6e8
+tree:              2dd2bca06b093f12aefe425cb01db6f2f949e96d
+dirty_files:       0
+identity_stable:   true
+shard_files_total: 457
+shards_with_failures: 0
+passed 30,427 / skipped 9 / collected 30,436
+```
+
+All ten shards `rc=0`. Aggregate rose 30,413 → 30,427, exactly the fourteen
+tests in `test_manifest_pack_version.py`, assigned to shard 4 (`rc=0`).
+Arithmetic: 30,427 + 9 = 30,436.
+
+§7 PROVENANCE, MEASURED FIELD BY FIELD
+
+The verifier noted §7 was only partially evidenced. Rather than accept or
+dispute that, all nine fields were measured against a built manifest:
+
+  compiler/linker identity      PRESENT  toolchain.gcc/.ld
+  toolchain versions            PRESENT  toolchain.python/.cython
+  build flags / configuration   PRESENT  transforms[]
+  workflow / action identities  ABSENT   (see below)
+  target OS / architecture      PRESENT  toolchain.platform/.machine
+  dependency-lock digest        PRESENT  build.dependency_lock_digest
+  final artifact digest         PRESENT  artefact.sha256
+  signing-key identifier        PRESENT  signed_key_fingerprint, but ONLY on
+                                         a signed manifest -- my first probe
+                                         read an unsigned one and wrongly
+                                         reported it absent
+  pack format version           WAS ABSENT, now recorded as extra.pack
+
+Workflow/action identity is deliberately NOT closed. It is a CI concept -- which
+workflow run produced this artefact -- that a local build cannot know, and a
+placeholder would be worse than the gap. Recorded as open rather than papered
+over.
+
+THREE ATTEMPTS TO ADD ONE FIELD, AND THE TWO FAILURES ARE THE FINDING
+
+1. `globals().get("_section_armed")` — that name is a LOCAL of
+   `generate_hybrid_loader_script`; from `main` it is always absent, so the
+   field read False for EVERY build.
+2. `getattr(args, "no_section_split", False)` — argparse stores the flag as
+   `section_split` with `action='store_false'` (parser line 7399), so the
+   lookup always fell back to its default and reported requested=True even
+   when the operator passed `--no-section-split`.
+
+Both looked right on review. Only BUILDING and reading the output told me
+otherwise — the same lesson as the three filed findings, and the reason the
+pass took two full builds to verify:
+
+  --section-count 4   -> {"requested": true,  "format_version": 3}
+  --no-section-split  -> {"requested": false, "format_version": null}
+
+The version is imported as `SECTION_PACK_VERSION` rather than written as a
+literal; a hardcoded 3 is the exact staleness defect this project has hit three
+times in its own documentation.
