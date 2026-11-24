@@ -307,4 +307,44 @@ def build_stub_decoder(decoder_name, key_hex, kek_env=None):
         else:
             raise ValueError("stub template key line not found")
         stub = "\n".join(lines)
+        # LOAD-TIME KEK GATE (finding AI-STRING-001, 2026-11-24).
+        #
+        # The prologue above runs INSIDE the decoder function, so a missing
+        # shard only surfaces when something actually decodes a sealed string.
+        # Measured on the maximum-security benchmark artefact: the agent read
+        # the payload's code-object constants and bytecode WITHOUT ever calling
+        # the decoder, so the seal layer never executed and its absence was
+        # never noticed. The agent's own summary: "the string-seal env-var
+        # requirement was NOT load-bearing -- this look-up happens in a
+        # try/except that degrades only if a caller actually invokes the
+        # decoder."
+        #
+        # The docstring for this feature claimed the stub "fails closed without
+        # it". It does not: it fails closed only on first use. That is the gap
+        # between a control and a check, and the fix is to assert at import:
+        # a shipped artefact built with a shard must refuse to load without it,
+        # regardless of whether any sealed string is ever decoded.
+        #
+        # Emitted as a module-level statement AFTER the decoder definition so
+        # it runs on import and cannot be skipped by not calling the decoder.
+        stub += (
+            "\n\n"
+            "# LOAD-TIME shard requirement: this artefact was built with a\n"
+            "# string-seal shard, so it must not import without one.\n"
+            "def _nx_assert_kek_present():\n"
+            "    import os as _nx_ako\n"
+            "    _v = _nx_ako.environ.get(%r)\n"
+            "    if not _v:\n"
+            "        raise ValueError(\n"
+            "            'string KEK unavailable: this artefact requires the '\n"
+            "            'string-seal shard in the environment variable named '\n"
+            "            'by the build; refusing to load without it')\n"
+            "    try:\n"
+            "        _b = bytes.fromhex(_v.strip())\n"
+            "    except ValueError:\n"
+            "        raise ValueError('string KEK is not valid hex')\n"
+            "    if len(_b) < 16:\n"
+            "        raise ValueError('string KEK is shorter than 16 bytes')\n"
+            "\n"
+            "_nx_assert_kek_present()\n" % (kek_env,))
     return stub
