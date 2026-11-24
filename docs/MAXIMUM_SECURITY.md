@@ -478,6 +478,20 @@ it is absent from `--package` here.
 
 #### ABSOLUTE maximum — every namespace, every gate
 
+> **Operator note — the access field is `expire=`, not `expiry=`.** A typo here
+> used to fail the build with no console output at all (the message went to
+> `build.log` only). It now prints `[FATAL ERROR] --access: unknown sub-option
+> ...` and exits 1, so a mistyped gate cannot be silently ignored — but the
+> simplest defence is to know the spelling. Full list: `hwid`, `hwid-lock`,
+> `lock-hwid`, `trial`, `expire`, `bind-mac`, `one-shot`, `kod`, `hostguard`,
+> `driver-check`, `name-gate`, `rename-internal`, `allow-countries`,
+> `block-countries`, `allow-regions`, `block-regions`, `webhook`, `net-url`,
+> `vm-threshold`.
+>
+> **Operator note — `--lowering` is not optional here.** Leaving it out still
+> builds, but the command below is the one that was verified end to end
+> (rc=0, artefact runs 19/19 with its shard, fails closed without it).
+
 ```bash
 NIXON_LOG_REDIRECT=0 PYTHONPATH=$PWD NX_SEAL_SHARD=$NX_SEAL_SHARD \
 python3 -m obfuscator.core.pipeline build payload.py \
