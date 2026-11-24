@@ -1,5 +1,19 @@
 archive/artifacts/invariant_engine_report.json filter=lfs diff=lfs merge=lfs -text
 
+# Generated stego fixtures over GitHub's 100 MB per-file limit. They are OUTPUTS
+# of the stego build (562 / 170 / 162 / 159 MB of padding), and GitHub rejects
+# any single file above 100 MB, so the unpushed history could not be pushed at
+# all. Tracked through LFS for the same reason as the report above.
+#
+# Verified before choosing LFS: no test and no script reads these four by name
+# (grepped tests/ and scripts/), so they are benchmark inputs rather than a
+# build or gate dependency. Nothing in the gate or CI fetches them.
+# All four are NEW in the unpushed range -- they exist nowhere on origin -- so
+# converting them rewrites only commits that have never been published.
+tests/fixtures/portable/constructs_source_Nixon-Enc_Debug_stego.py filter=lfs diff=lfs merge=lfs -text
+tests/fixtures/portable/constructs_source_Nixon-Enc_Debug_Packed_Stego.py filter=lfs diff=lfs merge=lfs -text
+tests/fixtures/portable/constructs_source_Nixon-Enc_Silent_stego.py filter=lfs diff=lfs merge=lfs -text
+tests/fixtures/portable/constructs_source_Nixon-Enc_Silent_Packed_Stego.py filter=lfs diff=lfs merge=lfs -text
 # Generated artefacts carry an integrity hash over their own bytes. Git must not
 # rewrite their line endings: a checkout with CRLF changed every byte offset and
 # the self-check refused to run (found by the Windows CI leg, exit 137).
