@@ -1582,7 +1582,45 @@ FINDING AI-BUILD-002
                 was invisible.
   disproof:     Would be disproved if `--access bogus=1` printed the
                 "unknown sub-option" message or exited nonzero. It does neither.
-  fixed-by:     nobody yet.
+  fixed-by:     BOTH HALVES CLOSED.
+
+                (a) VISIBILITY — FIXED in ed7f1e7. main() now catches the spec
+                parser's SystemExit and routes non-trivial messages through
+                UI.fatal, which writes to the saved console fd. Measured:
+                `--access bogus=1` now prints
+                  [FATAL ERROR] --access: unknown sub-option 'bogus'; expected
+                  one of: ..., expire, ...
+                and exits 1. Regression test: tests/test_access_spec_visibility.py
+                (3 tests, negative-controlled).
+
+                (b) BUILDABILITY — NOT A PRODUCT DEFECT. The documented ABSOLUTE
+                command builds and runs; my earlier failures were MY OWN command
+                errors, and this is worth recording precisely because the first
+                write-up asserted the profile was unbuildable:
+
+                  1. I omitted `--lowering ...` from the documented command.
+                     With it present the build completes: rc=0, 2 artefacts.
+                  2. I used `--access expiry=` when the field is `expire=`.
+                     That was the misspelling that harm (2) above is about.
+
+                Verified end to end at maximum profile:
+                  rc=0, artefacts written, and the artefact RUNS:
+                    19/19 vectors pass
+                  with its seal shard, and fails closed with exit 79 without it.
+
+                So the status is: the profile was always buildable; the operator
+                guidance was the weak point, and (a) now makes a mistyped flag
+                say so instead of failing silently.
+  correction:   The original row claimed "the documented ABSOLUTE maximum
+                command cannot produce an artefact on this host". That was
+                wrong, and it was wrong in the direction that makes the product
+                look worse rather than better. Corrected here rather than
+                quietly deleted: a register that only ever corrects itself in
+                one direction is not a register.
+  regression-test:
+                tests/test_access_spec_visibility.py covers the visibility half.
+                The buildability half needs a full build and is therefore
+                recorded as a measured result rather than a gate test.
 ```
 
 ## AI-STRING-001 — the string-seal shard was required on first use, not at load
