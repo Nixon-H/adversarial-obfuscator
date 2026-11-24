@@ -1040,8 +1040,56 @@ FINDING AI-SC-003
                 lock (generated with --generate-hashes) rather than installing
                 them by name.
   disproof:     Would be disproved if those jobs used the lock. They do not.
-  fixed-by:     nobody. Operator task: regenerating the lock and proving every
-                job still installs is not something to do blind in a review pass.
+  fixed-by:     FIXED this pass, and the remediation went further than the row
+                asked because measurement found more than the audit had:
+
+                * requirements.lock regenerated with
+                  `uv pip compile --generate-hashes --universal`:
+                  25 packages / 548 SHA-256 lines (was 23 / 544).
+                * TWO packages were missing from the lock entirely --
+                  `wheel` (installed BY NAME in three workflows, so it could
+                  never be hash-locked) and `pycparser` (a cffi transitive the
+                  old lock omitted). Both are now pinned with hashes.
+                * setuptools moved from `>=68.0.0` to `==80.9.0`: a floating
+                  floor cannot carry a hash.
+                * requirements-dev.lock created (2 packages, 71 hashes) and the
+                  three jobs that installed requirements-dev.txt unhashed now
+                  install from it.
+                * every build install is now `--require-hashes -r <lock>`:
+                  release.yml, ci.yml (both sites), security-artifact.yml,
+                  shadow-build.yml, build.yml, cross-platform.yml.
+                * two redundant unpinned `pip install pytest` lines removed --
+                  the lock already carries pytest==9.0.3 with hashes.
+                * pip-audit version-pinned to 2.10.1. Full hashing is NOT
+                  applied to it, and the reason is recorded in the workflow: it
+                  is a verification tool that never enters the deliverable and
+                  whose dependency tree changes too often to lock usefully.
+                  Version-pinning makes a change visible in review, which is the
+                  property that matters for an auditor. Stating the exception
+                  rather than silently leaving it is the point.
+
+  verified:     a fresh venv installed the new lock under --require-hashes: all
+                23 packages hash-verified, Cython 3.0.12 / setuptools 80.9.0 /
+                wheel 0.45.1 / cryptography 50.0.0 import at their pinned
+                versions. A REAL build then ran inside that locked-only
+                environment and the artefact executed:
+                    19/19 vectors pass, EXIT=0
+                so the lock covers the actual Cython build path, not merely
+                resolution.
+
+  regression-test:
+                tests/test_dependency_locking.py -- 5 tests: every workflow
+                install is hash-locked or on a documented exception list, the
+                main lock pins setuptools/wheel/cython, the lock carries >=4
+                hashes per package, the dev lock exists and pins ruff, and
+                setuptools is exactly pinned in the source list.
+                NEGATIVE CONTROLS: with the six workflows and both requirement
+                lists reverted, 3 of 5 FAIL; with the fix, all 5 pass.
+  note:         The first test run FAILED and found two more real gaps
+                (`pip install pytest` unpinned in build.yml and
+                cross-platform.yml) that hand-editing had missed. Recording it
+                because a policy test that never fails has not been shown to
+                test anything.
 ```
 
 ## AI-BIN-001 — the read-only-after-load sealing API has no production caller
