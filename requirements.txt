@@ -11,14 +11,26 @@ numpy==2.2.4             # Optional — HAS_NUMPY check; used if present for num
 
 # ─── Build (C extension compilation) ─────────────────────────────────────────
 Cython==3.0.12           # C extension compilation (GitHubBuildFarm → .pyd/.so/.dylib)
-setuptools==80.9.0       # build backend required by the Cython/setup.py path
+setuptools==84.2.1       # build backend required by the Cython/setup.py path
                          # (kernel_gen.cythonize_kernel, scripts/phases/phase_pytoc.py)
                          # PINNED, was `>=68.0.0`: a floating floor cannot be
                          # hash-locked, and the artefact-producing jobs install
                          # this package. Finding AI-SC-003.
-wheel==0.45.1            # bdist_wheel for the Cython path. Was installed by name
+                         # BUMPED from 80.9.0 (2026-11-24) for two Dependabot
+                         # advisories that my own pin surfaced: GHSA medium
+                         # (MANIFEST.in exclusion bypass via Unicode
+                         # normalisation collision on APFS/HFS+, patched 83.0.0)
+                         # and GHSA low (Windows path escape via
+                         # namespace_packages.txt during legacy wheel install,
+                         # patched 84.1.0). Dependabot only saw these BECAUSE
+                         # the package entered the lock -- an unpinned
+                         # `pip install setuptools` is invisible to it.
+wheel==0.48.0            # bdist_wheel for the Cython path. Was installed by name
                          # and unpinned in four workflows, so a substituted wheel
                          # would not have been detected. Finding AI-SC-003.
+                         # BUMPED from 0.45.1 (2026-11-24) for GHSA HIGH:
+                         # arbitrary file-permission modification via path
+                         # traversal in `wheel unpack`, patched 0.46.2.
 
 # ─── Crypto (primary: cryptography → AES-CTR; fallback: pycryptodome; else XOR) ──
 cryptography==50.0.0     # pipeline.py _check_aes_ctr tries cryptography first
