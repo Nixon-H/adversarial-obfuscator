@@ -1113,6 +1113,172 @@ required answer format. Counting those as zeros would have produced a mean of
 0.56% and a false story about impenetrable protection. The reliability ceiling is
 itself a finding about the benchmark, not about the artefact.
 
+---
+
+## Complete flag and environment inventory (verified 2026-11-24)
+
+This section closes the gap the audit named: earlier revisions of this document
+described the maximum profiles without listing everything the live parser and
+runtime actually accept. It was produced by diffing the **live repository** —
+`build --help`, `obfuscate --help`, `build-farm --help`, `auth --help`, and a
+grep of every `NIXON_*` read in `obfuscator/` and `scripts/` — not by copying an
+older inventory.
+
+Two counts, both measured:
+
+| Surface | Count | Reachable from CLI |
+|---|---|---|
+| CLI flags in source | 43 | 43 — zero dead parser entries |
+| `NIXON_*` variables read in code | 85 | n/a (environment) |
+
+Of the 85 variables, 70 were absent from this document before this revision.
+
+### A. Build flags the earlier text omitted
+
+Five apply to `build` and therefore to the ABSOLUTE profiles:
+
+| Flag | Effect | Why it matters here |
+|---|---|---|
+| `--bind` | Bind files inside the payload | Adds artefacts the payload requires; changes the load path |
+| `--private-key` | Deployment key | Key material for the deployment path |
+| `--no-split-bootstrap` | Ships the bootstrap key as one string instead of the default Shamir (n=3,k=2) split | **WEAKENS protection.** Documented here so it is not used by accident |
+| `--in-place` | Writes `dist/` beside the source instead of staging | Affects where the deliverable lands, not what it contains |
+| `--cf-account` | Cloudflare account id override | Cloud path only |
+
+Seven more belong to the `obfuscate` subcommand and are reached from `build`
+through `--opt-level` (which resolves all 17 canonical transforms at level 5) or
+through `--transforms`:
+
+`--cfg-flatten`, `--opaque-predicates`, `--bogus-exceptions`, `--mba-subs`,
+`--fragment-strings`, `--unicode-ids`, `--rename-internal`.
+
+Listing them here prevents a reader concluding that `build` cannot apply them.
+It can — the ladder does. `--rename-internal` is the one exception worth
+knowing: it is also reachable from `build` via
+`--access rename-internal`, because it changes public API surface and is
+therefore an access-policy decision rather than a pure transform.
+
+Three belong to `build-farm` / `auth` and play no part in a local build:
+`--payload`, `--platform`, `--token-file`.
+
+### B. `NIXON_*` variables, grouped by whether an operator should set them
+
+Not all 70 belong in a "you may configure this" list — that framing would be
+actively misleading for the internal ones. Grouped by role:
+
+#### B.1 Release-policy gates (operator-facing, fail the build or load)
+
+| Variable | Enforcement point | Effect when `=1` |
+|---|---|---|
+| `NIXON_REQUIRE_PROVENANCE` | `build_manifest._manifest_trusted_key`, loader | The out-of-band pin is the SINGLE trust authority; a missing pin is a refusal; an explicit key differing from the pin is a refusal |
+| `NIXON_REQUIRE_PACK_V2` | `section_split`, all three emitted loader templates | Refuses section packs older than v2 |
+| `NIXON_REQUIRE_DEP_LOCK` | `pipeline.py` (~4853) | Dependency-lock drift becomes FATAL rather than reported |
+| `NIXON_REQUIRE_CFG` | `native_harden.py` (~982) | Requires the Windows CFG load-config/function table, as a hard gate |
+| `NIXON_REQUIRE_FARM_ATTEST` | `pipeline.py` (~5293) | Requires build-farm attestation for farm-produced blobs |
+
+These five are the ones that change whether a build SUCCEEDS. All were verified
+as real code paths (`raise` / fatal), not merely recorded.
+
+#### B.2 Key material and trust anchors (operator-facing)
+
+| Variable | Role |
+|---|---|
+| `NIXON_BUILD_MANIFEST_PUBKEY` | Out-of-band manifest trust anchor (hex Ed25519 public key) |
+| `NIXON_PROVENANCE_PUBKEY` | Out-of-band loader-provenance anchor |
+| `NIXON_ARTIFACT_ED25519_KEY` | Artefact signing key (private, build-time only) |
+| `NIXON_ARTIFACT_ED25519_KEYS` | Key set for `scripts/artifact_sign.py`; the multi-key form of the line above |
+| `NIXON_ARTIFACT_KEY_HEX` | Signing key, hex form. Precedence in `utils.py`: explicit hex > this variable > stored config |
+| `NIXON_ARTIFACT_ED25519_PUBKEY` | Corresponding public key |
+| `NIXON_ARTIFACT_TTL` | Sidecar TTL in seconds (default 30 days; `0` means no expiry) |
+| `NIXON_LICENCE_PRIVATE_KEY` | Licence issuer key |
+| `NIXON_CHAIN_SECRET` | On-chain licence read secret |
+| `NIXON_SIGN_KEY` | Signing input for the signed-artefact path |
+| `NIXON_REMOTE_SECRET` | Remote-unlock shared secret |
+| `NIXON_PROOF_HMAC_KEY` | HMAC key for the proof channel |
+
+Per the repository's standing rule, all of these travel only as environment
+variables inside the signing environment and are never written into artefacts,
+logs, or test reports.
+
+#### B.3 Runtime behaviour of a shipped artefact
+
+| Variable | Effect |
+|---|---|
+| `NIXON_PATH_MARKER` | Names a file the section-stream walker appends to, so the decrypt path is observable from outside |
+| `NIXON_MEM_REPORT` | Prints the native enforcement bitmask (what the kernel accepted) |
+| `NIXON_LADDER_DEBUG` | Prints the kill-ladder reason to stderr |
+| `NIXON_TRACEBACKS` | Controls traceback suppression |
+| `NIXON_DUMP_RAW` | Debug aid: writes the decrypted payload to a 0600 temp file. **Never ship with this** |
+| `NIXON_VERIFY_SKIP_VERSION_CHECK` | Version gate bypass — requires an additional CI/ALLOW var |
+| `NIXON_ALLOW_SKIP`, `NIXON_CI` | Together form the CI bypass; NATIVE-ONLY builds deliberately get no bypass |
+| `NIXON_SNAPSHOT_OFF`, `NIXON_STDLIB_AUDIT_OFF`, `NIXON_AUDITHOOK_PLANT_OFF` | Disable the corresponding integrity gate. **Weaken protection** |
+| `NIXON_REMOTE_URL`, `NIXON_REMOTE_UNLOCK_ENROLL`, `NIXON_REMOTE_UNLOCK_TRANSPORT` | Remote-unlock endpoint and enrolment |
+| `NIXON_LICENSES` | Licence search path |
+| `NIXON_DRIVER_CHECK`, `NIXON_KOD` | Runtime gate toggles |
+
+#### B.4 Build behaviour
+
+| Variable | Effect |
+|---|---|
+| `NIXON_SEED` | Deterministic build seed (see REPRODUCIBILITY.md §6.2 on why the default is random) |
+| `NIXON_REPRODUCIBLE` | Reproducible-build mode |
+| `NIXON_ASCII_IDS` | Restrict identifiers to ASCII (required for the Cython path) |
+| `NIXON_NATIVE_CC` | C compiler selection for native blobs |
+| `NIXON_BUILD_ID` | Build identity |
+| `NIXON_KEY_SALT`, `NIXON_OBF_KEY` | Key-derivation inputs |
+| `NIXON_FARM_ID` | Farm identity |
+| `NIXON_LAST_TRANSFORMS` | Records the transform set applied |
+| `NIXON_PORT_ENTANGLE_SEED` | CPU-port entanglement seed |
+| `NIXON_KERNEL_FAST_DEBUG` | Kernel-fast diagnostics |
+| `NIXON_AUDIT_TIMING` | Audit-hook timing diagnostics |
+
+#### B.5 Internal / emitted-loader housekeeping — do NOT set these
+
+Grouped and named so a reader can recognise them and leave them alone:
+
+`NIXON_DICT`, `NIXON_HEADER`, `NIXON_PAYLOAD_LEN`, `NIXON_PROTECTED`,
+`NIXON_DLL_ORIGINAL_LEN`, `NIXON_DLL_COMPRESSED_LEN`, `NIXON_RUST_BINARY`,
+`NIXON_RUST_ORIGINAL_LEN`, `NIXON_RUST_COMPRESSED_LEN`, `NIXON_PYTHON_DLL`,
+`NIXON_MSVC_LOAD_CONFIG`, `NIXON_UPX_SHA256`, `NIXON_TEE_TYPE`,
+`NIXON_WORD_ARRAY`, `NIXON_NUM_BOUND_FRAGMENTS`, `NIXON_CRYPTO_BOUND_DATA`,
+`NIXON_CRYPTO_BOUND_DATA_LEN`, `NIXON_PROOF_BEGIN__`, `NIXON_PROOF_END__`,
+`NIXON_PROOF__`.
+
+These are strings the **emitted loader looks for inside a PE/Mach-O**, or
+markers written into the artefact. Documenting them as operator options would
+invite someone to set a value the loader then fails to find.
+
+#### B.6 Benchmark and analysis instrumentation
+
+`NIXON_AI_TOOL_COST`, `NIXON_ANALYST_COST`, `NIXON_TIMING_BENCHMARK_PAYLOAD_2024`,
+`NIXON_TOR_PROXY`, `NIXON_ALLOW_DEP_DRIFT`, `NIXON_AUTHENTICODE_CERT`,
+`NIXON_AUTHENTICODE_KEY`, `NIXON_AUTHENTICODE_PASS`.
+
+The Authenticode three are consumed by the Windows signing path and are external
+identity material — see §11 of the audit on what cannot be produced locally.
+
+### C. Two corrections to earlier claims in this document
+
+**`--access expire=`, not `expiry=`.** Verified against the live parser:
+`_ACCESS_SPEC_FIELDS` contains `expire` and does not contain `expiry`. A
+mistyped key previously failed the build with the message written only to
+`build.log`; it now prints `[FATAL ERROR] --access: unknown sub-option ...` and
+exits 1. Both the correct spelling and the full field list are in §5.3.
+
+**`--opt-level 5` is not required to get the full transform set.**
+`build` applies all 17 canonical transforms by default. Measured: a default
+build and an `--opt-level 5` build both report `Protection: Applied 27
+mutations`. The ladder exists to *reduce* protection for lower levels, not to
+raise it above the default.
+
+### D. What this inventory does not establish
+
+A flag appearing in this table means the parser accepts it and the code reads
+it. It does **not** mean the protection is effective — the benchmark controls in
+the preceding section showed that the semantic layer is worth what its runtime
+secret is worth, regardless of how many transforms are enabled. Treat this as a
+map of the configuration surface, not as evidence of resistance.
+
 ## Assessment terminology — binding definitions
 
 These definitions are binding on every document in `docs/security/` and on this
