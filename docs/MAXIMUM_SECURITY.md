@@ -1058,6 +1058,61 @@ signing cannot be optional) remains buildable.
 
 ---
 
+## What the AI benchmark actually established (2026-11-24)
+
+Three payload series were built and attacked. The numbers below are measured, and
+they constrain what this document may claim.
+
+| Series | Payload | Recovery |
+|---|---|---|
+| A | Standard algorithms (FNV-1a, CRC-8, Luhn, …) | **100%** every variant, 1–40 tool calls |
+| B | Arbitrary tables, seed **embedded** in the artefact | 65%, 10% |
+| C | Arbitrary tables derived from a **runtime secret** | **0%, 0%, 0%, 5%** (4 completed samples) |
+
+Two controls decide how those C numbers must be read:
+
+**Control 1 — shard leaked (secret + source): 100% recovery in 4 tool calls.**
+The agent re-derived every table in one pass and said so: *"the shard plus leaked
+source is fully sufficient … protection measures key custody, not obfuscation
+strength."*
+
+**Control 2 — secrets held, source withheld: the artefact self-validates.** With
+`NX_TABLE_SHARD` and `NX_SEAL_SHARD` set, the payload's own `main()` **prints its
+table-derived outputs**. A reconstruction derived from the shard alone reproduces
+all five exactly. The obfuscation — control-flow flattening, unicode renaming,
+virtualisation, string sealing — contributed **no measurable cost** to an analyst
+who holds the keys, because they never needed to read the code at all.
+
+### The one defensible claim
+
+> This artefact's semantic layer is bound to a runtime secret. Without that
+> secret, AI recovery was 0–5% across four completed measurement attempts.
+
+Everything stronger is contradicted by the controls. In particular:
+
+* ~~"The maximum profile resists AI semantic recovery"~~ — false; 100% when the
+  secret leaks, and 100% via self-validation without reading the code.
+* ~~"AI cannot recover the payload"~~ — false for the same reasons.
+* ~~"The obfuscation raises analyst cost"~~ — **unmeasured**; the only control
+  that could show it (secrets held, no self-validating output) produced no
+  measurable cost.
+
+### Why this is structural, not a bug to fix
+
+A payload must run on the operator's machine, so the operator holds its keys.
+Anything that runs can be observed, and anything observed can be reconstructed —
+this artefact even confirms reconstructions for you. That is the shape of
+client-side obfuscation, and the honest response is to describe the boundary
+rather than to claim a property the design cannot have.
+
+### Measurement limitation, stated
+
+Twelve agent attempts were made across the C-series; **four produced usable
+measurements.** The rest returned no output, stopped mid-thought, or ignored the
+required answer format. Counting those as zeros would have produced a mean of
+0.56% and a false story about impenetrable protection. The reliability ceiling is
+itself a finding about the benchmark, not about the artefact.
+
 ## Assessment terminology — binding definitions
 
 These definitions are binding on every document in `docs/security/` and on this
