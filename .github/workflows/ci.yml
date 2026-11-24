@@ -87,7 +87,7 @@ jobs:
         # runs the test.
         run: |
           pip install --require-hashes -r requirements.lock
-          pip install -r requirements-dev.txt
+          pip install --require-hashes -r requirements-dev.lock
       - name: Build native artefacts
         # BEFORE the tests.  Nineteen tests need a compiled artefact
         # (the C shared libraries, the Rust relay) and SKIP themselves
@@ -165,7 +165,10 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install build dependencies
-        run: pip install cython==3.0.12 setuptools wheel && sudo apt-get update && sudo apt-get install -y upx
+        # HASH-PINNED (finding AI-SC-003). Was `pip install cython==3.0.12
+        # setuptools wheel`: setuptools and wheel unpinned, no hashes, in the
+        # acceptance-matrix job.
+        run: pip install --require-hashes -r requirements.lock && sudo apt-get update && sudo apt-get install -y upx
       - name: Build and run the acceptance matrix
         run: |
           python3 - <<'PY'
@@ -335,7 +338,18 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install pip-audit
-        run: pip install pip-audit
+        # VERSION-PINNED (finding AI-SC-003 remainder). `pip install pip-audit`
+        # was unpinned, so the auditor itself could change between runs and a
+        # silent version bump would alter what the gate reports.
+        #
+        # Full --require-hashes is NOT applied here and the reason is stated
+        # rather than glossed: pip-audit's own dependency tree is large and
+        # changes frequently, and it is a verification TOOL rather than a build
+        # input -- it never runs inside the artefact and contributes no code to
+        # the deliverable. Pinning the version makes a change visible in review,
+        # which is the property that matters for an auditor. The build
+        # dependencies themselves ARE hash-locked above.
+        run: pip install pip-audit==2.10.1
       - name: Audit the direct pins (hard gate)
         run: pip-audit -r requirements.txt --desc
       - name: Audit the hash-pinned lock (hard gate)
