@@ -1263,6 +1263,86 @@ FINDING AI-BIN-002
                 changing the code to emit a marker it should not.
 ```
 
+## AI-BIN-004 — native enforcement's result bitmask is reported, never enforced
+
+```
+FINDING AI-BIN-004
+  package:      binary security
+  reviewer:     maintainer, found by decompiling the real artefact with Ghidra
+  received:     2026-11-24
+  severity:     medium (claim-vs-measurement; the DOCS say "verified", the code
+                only reports)
+  confidence:   high (decompiled call graph + exhaustive grep for enforcement)
+  claim:        `nx_apply_protections()` returns a bitmask describing which
+                anti-dump syscalls the kernel ACCEPTED, and the loader stores it
+                in `_NX_NATIVE_ENF` -- but nothing anywhere refuses to run when
+                a bit is clear. A hardened container, a seccomp filter or a
+                restrictive `kernel.yama` setting that blocks `prctl` therefore
+                leaves the artefact running with NO anti-dump protection and no
+                indication to the user.
+  attacker-capability:
+                Not needed to TRIGGER it -- the failure happens on ordinary
+                hardened hosts. The attacker benefit is that a deployment
+                believed to be protected is not.
+  technical-
+  explanation:  Ghidra decompilation of the shipped blob, `nx_apply_protections`
+                at 0x0014cbf0 (66 instructions):
+
+                    iVar1 = prctl(4,0,0,0,0);          /* PR_SET_DUMPABLE=0 */
+                    iVar2 = setrlimit(RLIMIT_CORE, &{0});
+                    sigaction(0xd, ...); sigaction(6, ...);
+                    return (iVar1 == 0) + 2;           /* bitmask */
+
+                The value is stored by the loader:
+
+                    globals()["_NX_NATIVE_ENF"] = int(_nx_enf.nx_apply_protections() or 0)
+
+                and consumed ONLY by `memguard._nx_mem_harden()`, which reports:
+
+                    _nx_result["dumpable"]   = "native(mask=%d)" % (_nx_mask,)
+                    _nx_result["core_limit"] = "native(mask=%d)" % (_nx_mask,)
+
+                Two observations, both measured:
+                  1. Both keys are labelled with the SAME raw mask, so the
+                     diagnostic does not say WHICH syscall succeeded -- it cannot
+                     tell a reader whether dumpability or the core limit failed.
+                  2. A grep for any branch that raises, exits or refuses on the
+                     mask returns ZERO hits across the tree. The only references
+                     are the assignment, the report, and one test asserting the
+                     name exists.
+  reproduction: grep -rn '_NX_NATIVE_ENF' --include=*.py . \
+                  | grep -vE 'globals\(\)\[|get\("_NX_NATIVE_ENF"'
+                -> only the assignment, the two report lines, and a test.
+                Ghidra evidence: ghidra/nx_apply_protections.evidence.json
+                (address, 66 instructions, called_symbols including prctl
+                and setrlimit, and the decompiled body).
+  impact:       `docs/MAXIMUM_SECURITY.md` describes the anti-dump layer as
+                applied before payload init. It IS applied -- the call happens.
+                What is unverified is whether it SUCCEEDED, and the artefact
+                proceeds identically either way. A customer on a hardened host
+                gets an artefact whose process is still dumpable with core dumps
+                enabled, and the only visible sign is a diagnostic they must opt
+                into via NIXON_MEM_REPORT.
+  remediation:  Two changes, either of which closes the gap:
+                  (a) decode the mask into named outcomes so the diagnostic says
+                      "dumpable=ok core_limit=FAILED", and
+                  (b) decide an explicit policy: refuse to run when the
+                      anti-dump syscalls fail (fail closed), or document that
+                      enforcement is best-effort and log a warning by default
+                      rather than only under an opt-in env var.
+                (a) is required either way; (b) is the product decision.
+  disproof:     Would be disproved by any code path that acts on the mask beyond
+                reporting. Exhaustive grep finds none.
+  fixed-by:     nobody. This is a policy decision (best-effort vs fail-closed),
+                not an unambiguous defect -- filed rather than changed
+                unilaterally, because making it fail-closed would break every
+                artefact on a host where prctl is blocked.
+  regression-test:
+                none yet, and the reason is the same one: the correct behaviour
+                depends on (b). A test asserting "artefact refuses when prctl
+                fails" would encode a policy the owner has not chosen.
+```
+
 ## AI-RE-001 — an unqualified "cannot decode" contradicts the project's own limits
 
 ```
