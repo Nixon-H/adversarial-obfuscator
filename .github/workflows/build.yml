@@ -37,8 +37,10 @@ jobs:
           # landing.  requirements.txt states the wanted versions; the
           # lock states the exact artefacts allowed.
           pip install --require-hashes -r requirements.lock
-          pip install -r requirements-dev.txt
-          pip install pytest
+          pip install --require-hashes -r requirements-dev.lock
+          # `pip install pytest` used to sit here, unpinned. The lock above
+          # already carries pytest==9.0.3 with its hashes, so the extra line
+          # added nothing except an unverified artefact. Removed (AI-SC-003).
       - name: Lint Python
         # The gate must be reproducible: requirements-dev.txt pins ruff
         # exactly, so a rule change upstream cannot turn a clean tree

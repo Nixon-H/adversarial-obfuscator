@@ -71,7 +71,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        # HASH-PINNED (finding AI-SC-003). This used requirements.txt, a version
+        # list with no hashes. requirements.lock is the reviewed set of exact
+        # artefacts. This job produces REAL artefacts, so it is a supply-chain
+        # target rather than a pure test runner.
+        run: pip install --require-hashes -r requirements.lock
 
       - name: Build tiny payload artifact (fast flags)
         env:
@@ -129,7 +133,13 @@ jobs:
 
       - name: pip-audit clean (hard gate)
         run: |
-          pip install pip-audit
+          # VERSION-PINNED (finding AI-SC-003). Was `pip install pip-audit`
+          # unpinned, so the auditor could change between runs and silently
+          # alter what this gate reports. Full --require-hashes is not applied
+          # to the auditor: it is a verification tool, never a build input, and
+          # its dependency tree changes too often to lock usefully. The BUILD
+          # dependencies are hash-locked above.
+          pip install pip-audit==2.10.1
           pip-audit -r requirements.txt --desc
 
       - name: Upload artifact + probe evidence

@@ -52,7 +52,12 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install build dependencies
-        run: pip install cython==3.0.12 setuptools wheel && sudo apt-get update && sudo apt-get install -y upx
+        # HASH-PINNED (finding AI-SC-003). This used to be
+        # `pip install cython==3.0.12 setuptools wheel`, which pinned neither
+        # setuptools nor wheel and verified no hashes at all -- in the job that
+        # BUILDS AND SIGNS the release. requirements.lock carries all three
+        # (plus pycparser, which the old lock omitted) with 548 SHA-256 lines.
+        run: pip install --require-hashes -r requirements.lock && sudo apt-get update && sudo apt-get install -y upx
       - name: Build, sign and run the acceptance matrix
         run: |
           python3 - <<'PY'
