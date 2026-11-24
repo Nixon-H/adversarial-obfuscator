@@ -911,7 +911,24 @@ def _safe_compile_worker(src, dest, swizzle_key, enc_map, morph_seed):
         final_data = header + morphed_data
         with open(cfile, "wb") as f:
             f.write(final_data[:16] + swizzle_bytecode(final_data[16:], swizzle_key))
-    except Exception:
+    except Exception as _sw_exc:
+        # AI-BUILD-002 (2026-11-24): this was `except Exception: sys.exit(1)`.
+        # A bare swallow that discarded the error and exited 1 with NO message.
+        # Measured while building the maximum-security benchmark artefact: the
+        # build died right after the dependency banner with exit 1 and empty
+        # stderr, so there was nothing to diagnose from. Three separate flags
+        # (--access expiry=, --licence env-only, --licence bootstrap-encrypted)
+        # each produced that same silent exit, and the only way to tell them
+        # apart was to bisect the command line.
+        #
+        # A build failure must name itself. The exception and the file being
+        # compiled are the two facts that make it actionable, and neither is a
+        # secret: the payload path is already printed in the build banner.
+        import sys as _sw_sys
+        _sw_sys.stderr.write(
+            "[FATAL] bytecode swizzle failed: %s: %s (file: %s)\n"
+            % (type(_sw_exc).__name__, _sw_exc, cfile))
+        _sw_sys.stderr.flush()
         sys.exit(1)
 def process_file_safe(args):
     src, build_dir, swizzle_key_list, out_name, root_source, enc_map, ast_opts = args

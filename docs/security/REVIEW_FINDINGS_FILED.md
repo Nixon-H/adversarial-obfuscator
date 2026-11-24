@@ -1509,6 +1509,163 @@ FINDING AI-BUILD-001
                 change.
 ```
 
+## AI-BUILD-002 — the maximum-security build dies silently on a valid access spec
+
+```
+FINDING AI-BUILD-002
+  package:      build integrity
+  reviewer:     maintainer, found while building the benchmark artefact
+  received:     2026-11-24
+  severity:     high (the documented maximum command cannot be built)
+  confidence:   medium-high (reproduced; exact swallow point not yet located)
+  claim:        The ABSOLUTE maximum command as documented in
+                docs/MAXIMUM_SECURITY.md cannot produce an artefact on this
+                host. The build prints the SYSTEM CHECK banner, then exits 1
+                with completely empty stderr and no artefact.
+  attacker-capability:
+                None needed. The consequence is that the strongest documented
+                profile is unbuildable, so nobody can ship or benchmark it.
+  reproduction:  cd <scratch>
+                python3 -m obfuscator.core.pipeline build payload.py --in-place \
+                    --access expire=2027-12-31
+                -> SYSTEM CHECK banner, then rc=1, stderr 0 bytes, no dist/
+
+                Bisected by flag:
+                    --access bogus=1        -> rc=0, no error, no artefact
+                    --access expiry=...     -> rc=1  (WRONG KEY: the field is
+                                             'expire', not 'expiry')
+                    --access expire=...     -> proceeds past the banner
+                    --licence env-only      -> rc=1
+                    --licence bootstrap-encrypted -> rc=1
+                    (no extra flags)        -> rc=0, artefact built
+
+                The decisive observation is `--access bogus=1` exiting 0. The
+                parser is supposed to raise:
+                    SystemExit("--access: unknown sub-option 'bogus'; expected
+                                one of: allow-countries, ..., expire, ...")
+                Verified in isolation that `_parse_unified_spec(['bogus=1'],
+                ...)` DOES raise with exactly that message. But invoked through
+                the CLI, the process exits 0 and prints nothing.
+  what is established:
+                * The parser raises correctly in isolation.
+                * `apply_unified_specs(args)` is called unguarded from main().
+                * An outer handler (or argparse) discards the SystemExit, so a
+                  misspelled access sub-option is SILENTLY IGNORED and the build
+                  proceeds without the gate the operator asked for.
+                That last property is the security-relevant one: an operator who
+                writes `--access expire-2027-12-31` (hyphen instead of equals)
+                or `--access expiry=` gets an artefact with no expiry gate and
+                no warning.
+  not yet established:
+                The exact frame that swallows it. Traced with sys.settrace
+                (no lines recorded), patched both os._exit sites (neither
+                fired), enabled NIXON_LADDER_DEBUG (no nx-kill line), captured
+                faulthandler (nothing), and split stdout/stderr (stderr is
+                genuinely empty). The process terminates in a way that runs no
+                Python and emits nothing, which is consistent with an argparse
+                error path or an atexit-suppressing os._exit inside a library.
+                Recording this as medium-high confidence for that reason.
+  impact:       Two distinct harms:
+                1. The documented ABSOLUTE maximum profile cannot be built, so
+                   the benchmark for "absolute maximum" cannot run at all.
+                2. A misspelled `--access` sub-option is silently ignored. An
+                   operator can believe an expiry/hwid/geofence gate is armed
+                   when it is not, and the build reports success.
+                Harm 2 is the security-relevant one and is independent of
+                harm 1.
+  remediation:  Find and remove the swallow. Every `SystemExit` raised for an
+                invalid operator request must reach the terminal with its
+                message, and a nonzero exit. Add a CLI-level test that invokes
+                the build with an unknown `--access` key and asserts BOTH a
+                nonzero exit AND the message on stderr -- the current test suite
+                tests `_parse_unified_spec` directly, which is why the swallow
+                was invisible.
+  disproof:     Would be disproved if `--access bogus=1` printed the
+                "unknown sub-option" message or exited nonzero. It does neither.
+  fixed-by:     nobody yet.
+```
+
+## AI-STRING-001 — the string-seal shard was required on first use, not at load
+
+```
+FINDING AI-STRING-001
+  package:      crypto (string sealing)
+  reviewer:     found by the A6 reverse-engineering benchmark agent, verified here
+  received:     2026-11-24
+  severity:     medium-high (a documented control that does not gate loading)
+  confidence:   high (agent's report + maintainer reproduction both directions)
+  claim:        A build using string-key-env=<VAR> binds the string seals to a
+                shard held in that environment variable. The advertised
+                property is that the artefact cannot be used without it. In
+                fact the shard is checked INSIDE the decoder function, so an
+                artefact with no shard present still imports, still runs its
+                payload, and never notices the shard is missing unless
+                something decodes a sealed string.
+  attacker-capability:
+                None beyond reading the file. This is a control that does not
+                gate the thing it claims to gate.
+  evidence, from the agent:
+                "the string-seal env-var requirement was NOT load-bearing --
+                 this look-up happens in a try/except that degrades only if a
+                 caller actually invokes the decoder"
+
+                The agent recovered the entire payload from the maximum-security
+                artefact (with the shard absent from its environment) by reading
+                code-object constants and bytecode directly. It never called the
+                decoder, so the check never ran.
+  technical-
+  explanation:  obfuscator/chacha20.py build_stub_decoder() inserts a prologue
+                INSIDE the emitted decoder:
+
+                    def _nx_dec(...):
+                        import os as _nx_os
+                        try:
+                            _nx_sh = _nx_os.environ[%r]
+                            ...
+                        except Exception:
+                            raise ValueError('string KEK unavailable')
+
+                Nothing at module level checks it. string_crypto's docstring
+                and the transform's comment both said "the stub fails closed
+                without it" -- true in the narrow sense of "fails when used",
+                which is not the property an operator reads it as.
+  impact:       A leaked or copied artefact without its shard is still a fully
+                functional artefact. The shard requirement changes what a
+                RUNTIME attacker can decode, but it does not prevent the
+                artefact from being loaded, run, or statically analysed --
+                which is what the maximum profile is supposed to make hard.
+  remediation:  FIXED this pass. build_stub_decoder now appends a module-level
+                assertion after the decoder definition:
+
+                    def _nx_assert_kek_present():
+                        ... refuse if absent / non-hex / <16 bytes
+                    _nx_assert_kek_present()
+
+                Emitted only when kek_env is not None, so shard-free builds are
+                unaffected.
+  disproof:     Would be disproved if the emitted stub refused to import without
+                the shard. It did not.
+  fixed-by:     this pass.
+  regression-test:
+                tests/test_string_kek_load_gate.py -- 6 tests on the emitted
+                source: the gate exists, is called at MODULE level (column 0,
+                not inside the decoder), names the failure, validates hex and
+                length, and is absent when kek_env is None.
+                NEGATIVE CONTROLS RUN: with obfuscator/chacha20.py reverted,
+                3 of the 6 FAIL; with the fix applied, 6 pass.
+  verified-behaviourally:
+                importing the emitted stub in a clean interpreter with no shard:
+                    -> ValueError: string KEK unavailable: this artefact
+                       requires the string-seal shard ...
+                importing it with a valid 32-byte shard:
+                    -> loads OK
+                Both directions observed before writing the source-level tests.
+                The tests do not reproduce this themselves because a
+                subprocess-with-controlled-environment in a test file is refused
+                by the local write-time scanner; that limitation is stated in
+                the test module's docstring rather than worked around.
+```
+
 ---
 
 ## Scope coverage — what was worked, by whom
