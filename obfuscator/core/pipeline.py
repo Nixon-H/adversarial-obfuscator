@@ -7675,7 +7675,26 @@ def main():
         if args.command == 'build':
             # Unified --web3 / --licence sub-options land on the same
             # destinations the legacy flags write, before anything reads them.
-            apply_unified_specs(args)
+            #
+            # OPERATOR-INPUT ERRORS MUST BE VISIBLE (finding AI-BUILD-002,
+            # 2026-11-24). enable_log_redirect() dup2()s fd 2 onto build.log,
+            # so a bare `raise SystemExit("--access: unknown sub-option ...")`
+            # reaches the FILE and never the terminal. Measured: a build with
+            # `--access bogus=1` exited 1 with completely empty console output,
+            # and the message was only findable by opening build.log. An
+            # operator who mistypes a gate name got no artifact and no reason.
+            #
+            # UI.fatal writes through the saved console fd, so it is visible
+            # with the redirect active. Catching here (rather than changing the
+            # parser's contract) keeps _parse_unified_spec raising like every
+            # other validator while making the CLI honour that raise.
+            try:
+                apply_unified_specs(args)
+            except SystemExit as _spec_exit:
+                _spec_msg = str(_spec_exit)
+                if _spec_msg and _spec_msg != "1":
+                    UI.fatal(_spec_msg)
+                raise
             # --fast ships the reduced posture. That is a legitimate choice, but it
             # must never be a silent one: the flag is one word from the hardened
             # default and the difference is every detection this project has.
