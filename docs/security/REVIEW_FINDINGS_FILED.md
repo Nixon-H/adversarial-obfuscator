@@ -1081,7 +1081,39 @@ FINDING AI-BIN-001
                 honest minimum is to state in the docs that the API is available
                 but not used by default.
   disproof:     Would be disproved by any non-test call site. Grep finds none.
-  fixed-by:     nobody.
+  fixed-by:     WIRED this pass. The loader's join branch -- the one place the
+                whole cleartext payload is contiguous before exec -- now
+                mprotects the joined buffer PROT_READ:
+
+                    import ctypes as _nx_ro_ct
+                    _nx_ro_libc = _nx_ro_ct.CDLL(None, use_errno=True)
+                    ... page-align, then:
+                    _nx_ro_libc.mprotect(addr, len, 1)   # PROT_READ
+
+                Design choices, each deliberate:
+                  * BEST-EFFORT: any failure (no libc, hardened kernel, odd
+                    platform) falls through and the payload still runs. Hardening
+                    must never break a legitimate artefact.
+                  * OBSERVABLE: `_NX_PAYLOAD_RO` records whether it took effect,
+                    so a diagnostic can tell "not applied" from "applied" instead
+                    of guessing. A control whose state is unrecorded is how this
+                    finding arose in the first place.
+                  * PROT_READ only -- never PROT_EXEC, never PROT_WRITE. The
+                    test asserts the third argument is exactly 1.
+  verified:     a real build was produced and run after the change:
+                    19/19 vectors pass, EXIT=0
+                so the protection does not break execution.
+  regression-test:
+                tests/test_payload_ro_wired.py -- 4 tests: the emitted loader
+                attempts mprotect, the block is exception-guarded with a False
+                branch, the call passes PROT_READ (1) and mentions neither
+                PROT_EXEC nor PROT_WRITE, and pipeline.py contains a call site.
+                NEGATIVE CONTROLS: with pipeline.py reverted, all 4 FAIL; with
+                the fix, all 4 pass.
+  residual:     The moving-decryption walker (`_nx_section_stream`) does not need
+                this, because it never accumulates the whole plaintext -- that is
+                the stronger property and it stays on by default. This fix covers
+                the join fallback, which previously had no protection at all.
 ```
 
 ## AI-BIN-002 — the native self-check is fail-open on unstamped anchors

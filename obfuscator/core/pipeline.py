@@ -3108,6 +3108,48 @@ def _exec_fallback():
                         pass
                     raise ValueError("section join failed")
                 compressed = bytearray(_joined)
+                # RO-AFTER-LOAD, WIRED (finding AI-BIN-001, 2026-11-24).
+                #
+                # section_split.py documented and tested a read-only-after-load
+                # capability (protect_after_load / seal_joined /
+                # stream_join_sealed) that re-mprotects the joined plaintext
+                # PROT_READ, and NOTHING in the shipped loader called it. Grep
+                # across obfuscator/ found zero production callers: the
+                # mitigation was implemented, described as present, and
+                # unreachable. A documented control nobody invokes is worse than
+                # an undocumented gap, because it stops the next person looking.
+                #
+                # This is the one place the whole cleartext payload is
+                # contiguous in memory before exec, so it is the right place and
+                # the only one that matters. Best-effort by contract: if mprotect
+                # is unavailable (no libc, hardened kernel, odd platform) the
+                # load proceeds exactly as before -- hardening must never break
+                # a legitimate artefact.
+                try:
+                    import ctypes as _nx_ro_ct
+                    _nx_ro_libc = _nx_ro_ct.CDLL(None, use_errno=True)
+                    if _nx_ro_libc.mprotect is None:
+                        raise AttributeError("no mprotect")
+                    _nx_ro_addr = id(compressed) + 32
+                    _nx_ro_pagesize = 4096
+                    try:
+                        _nx_ro_pagesize = _nx_ro_libc.getpagesize()
+                    except Exception:
+                        pass
+                    _nx_ro_start = _nx_ro_addr - (_nx_ro_addr % _nx_ro_pagesize)
+                    _nx_ro_len = (len(compressed) + (_nx_ro_addr % _nx_ro_pagesize)
+                                  + _nx_ro_pagesize - 1)
+                    _nx_ro_len -= _nx_ro_len % _nx_ro_pagesize
+                    if _nx_ro_len > 0 and _nx_ro_libc.mprotect(
+                            _nx_ro_ct.c_void_p(_nx_ro_start),
+                            _nx_ro_ct.c_size_t(_nx_ro_len), 1) != 0:
+                        raise OSError("mprotect refused")
+                    globals()["_NX_PAYLOAD_RO"] = True
+                except Exception:
+                    # Never fatal: the payload still runs. The flag records
+                    # whether the mitigation actually took effect, so a
+                    # diagnostic can tell "not applied" from "applied".
+                    globals()["_NX_PAYLOAD_RO"] = False
         else:
             encrypted = bytearray(base64.b85decode(FALLBACK_BLOB))
             compressed = bytearray(_xor_decrypt(bytes(encrypted), _NX_EFF_KEY))
