@@ -1159,7 +1159,60 @@ FINDING AI-BIN-002
                 fail-open case.
   disproof:     Would be disproved if zeroing the anchor caused a failure. It
                 causes a skip.
-  fixed-by:     nobody.
+  fixed-by:     FIXED this pass. The root cause was that ONE predicate did both
+                jobs -- gating the check AND gating its own failure report:
+
+                    if globals().get("_NX_SELF_CK") not in (None, "", "0"*64):
+                        _nx_self_check()
+                    ...
+                    except Exception:
+                        if globals().get("_NX_SELF_CK") not in (None, "", "0"*64):
+                            _nx_self_fail(...)
+
+                So zeroing the anchor silenced both. The attacker who can edit
+                the anchor is exactly the attacker this check exists to catch.
+
+                The fix introduces a discriminator that is a fact about the
+                BUILD, not a value an attacker can edit. The stamping branch now
+                also emits:
+
+                    _NX_SELF_STAMPED = True
+
+                and both self-check sites (exec path and native path) apply:
+
+                    if _nx_stamped_build and not _nx_anchor_ok:
+                        _nx_self_fail("self-check anchor was removed or zeroed")
+                    if _nx_anchor_ok:
+                        _nx_self_check()
+
+                The stamped+zeroed case -- an artefact that WAS stamped whose
+                anchor has been removed -- now fails closed instead of skipping.
+
+                Why the marker is not derived from the anchor: three tests
+                assert it is a literal on the emitted line, because a marker
+                computed from `_NX_SELF_CK` would be cleared by the same edit
+                and re-open the hole.
+
+                Why no existing test broke: a generator-emitted loader driven
+                directly by tests or embedders never passes through the stamping
+                branch, so it has no marker and keeps its legitimate no-op
+                behaviour. That distinction is what makes the fix safe.
+  verified:     a real stamped build was produced and run after the change:
+                    19/19 vectors pass, EXIT=0
+                and 63 tests across the self-check / integrity / loader suites
+                pass with no regression.
+  regression-test:
+                tests/test_selfcheck_anchor_gate.py -- 6 tests: the marker is
+                emitted for a stamped build, is NOT derived from the anchor, the
+                fail-closed diagnostic appears on BOTH paths, the branch consults
+                the marker, an unstamped loader stays a no-op, and the emitted
+                loader still compiles.
+                NEGATIVE CONTROLS: with pipeline.py reverted, 5 of the 6 FAIL;
+                with the fix, all 6 pass.
+  note:         One test initially failed for a test-side reason: it built the
+                loader without `self_check=True`, so the stamping branch never
+                ran and the marker was absent. Corrected in the test, not by
+                changing the code to emit a marker it should not.
 ```
 
 ## AI-RE-001 — an unqualified "cannot decode" contradicts the project's own limits

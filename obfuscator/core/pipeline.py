@@ -3254,12 +3254,22 @@ def _exec_fallback():
         # It re-verifies against the same _NX_SELF_CK/_NX_SELF_HM values, so
         # it fails closed on any edit made after the first check passed.
         try:
-            # Same stamped-anchor guard as the native path: a generator-emitted
-            # loader used directly (tests, embedders) carries all-zero anchors,
-            # and verifying there fails on a value that was never set. A
-            # shipped artefact always stamps, so the §1 anti-patch property is
-            # unaffected -- the bypass tests build for real and assert it.
-            if globals().get("_NX_SELF_CK") not in (None, "", "0" * 64):
+            # STAMPED-ARTEFACT GATE (finding AI-BIN-002). Two independent facts
+            # decide whether to verify:
+            #   * _NX_SELF_STAMPED -- emitted at build time when this artefact
+            #     was stamped. Cannot be forged by editing an anchor.
+            #   * the anchor's value -- kept, because a generator-emitted loader
+            #     driven directly by a test carries all-zero anchors and must
+            #     stay a no-op.
+            # The dangerous case is STAMPED + zeroed anchor: that is an
+            # attacker who removed the value. It now FAILS CLOSED, where
+            # previously the same predicate skipped the check and its report.
+            _nx_stamped_build = bool(globals().get("_NX_SELF_STAMPED"))
+            _nx_anchor_ok = (globals().get("_NX_SELF_CK")
+                             not in (None, "", "0" * 64))
+            if _nx_stamped_build and not _nx_anchor_ok:
+                _nx_self_fail("self-check anchor was removed or zeroed")
+            if _nx_anchor_ok:
                 _nx_self_check()
         except SystemExit:
             raise
@@ -3476,14 +3486,17 @@ def _load_native():
             # stopped.
             try:
                 _nx_late = globals().get("_nx_self_check")
-                # Only verify when the anchors are actually STAMPED. A loader
-                # emitted by the generator and used directly (tests, embedders)
-                # carries all-zero anchors; running the check there would fail
-                # on a value that was never set. A shipped artefact always
-                # stamps, so the §1 anti-patch property is unaffected -- and
-                # that is asserted by the bypass tests, which build for real.
-                _nx_stamped = (globals().get("_NX_SELF_CK") not in (None, "", "0" * 64))
-                if _nx_late is not None and _nx_stamped:
+                # STAMPED-ARTEFACT GATE (finding AI-BIN-002) -- same rule as the
+                # exec path. A stamped build whose anchor has been zeroed is an
+                # attacker who removed it, so it fails closed instead of
+                # silently skipping both the check and its report.
+                _nx_stamped_build = bool(globals().get("_NX_SELF_STAMPED"))
+                _nx_anchor_ok = (globals().get("_NX_SELF_CK")
+                                 not in (None, "", "0" * 64))
+                if _nx_stamped_build and not _nx_anchor_ok:
+                    _nx_self_fail("self-check anchor was removed or zeroed "
+                                  "(native path)")
+                if _nx_late is not None and _nx_anchor_ok:
                     _nx_late()
             except SystemExit:
                 raise
@@ -4072,6 +4085,25 @@ def _nx_self_check():
             '_NX_SELF_CK = "%s"\n_NX_SELF_HM = "%s"\n'
             '_NX_SELF_TOK = "{licence_token_hash}"\n'
             '_NX_SELF_HK = "%s"\n'
+            # SHIPPED-ARTEFACT MARKER (finding AI-BIN-002, 2026-11-24).
+            #
+            # The late self-checks were gated on the ANCHOR'S VALUE
+            # (`_NX_SELF_CK not in (None, "", "0"*64)`), and the SAME predicate
+            # gated the failure report. So zeroing _NX_SELF_CK skipped the
+            # check AND the report: an attacker who can edit the anchor is
+            # exactly the attacker the check exists to catch, and the check
+            # said nothing.
+            #
+            # The discriminator must be a fact about the BUILD, not a value an
+            # attacker can edit. This line is emitted only when the generator
+            # actually stamps a self-check, so it is set by construction and
+            # cannot be produced by zeroing anything. A stamped artefact whose
+            # anchor has been zeroed now FAILS CLOSED instead of skipping.
+            #
+            # A generator-emitted loader used directly by tests or embedders
+            # never passes through this branch, so it keeps its legitimate
+            # no-op behaviour and no test had to change.
+            '_NX_SELF_STAMPED = True\n'
             # §1 control-flow integrity: the expected chain slot is written
             # HERE (zeroed) and stamped with the real value by
             # _stamp_hybrid_selfcheck, exactly like _NX_SELF_CK/_NX_SELF_HM --
