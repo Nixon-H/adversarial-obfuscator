@@ -1263,84 +1263,93 @@ FINDING AI-BIN-002
                 changing the code to emit a marker it should not.
 ```
 
-## AI-BIN-004 — native enforcement's result bitmask is reported, never enforced
+## AI-BIN-004 — native-only builds report `mask=0` (no enforcement) and run anyway
 
 ```
 FINDING AI-BIN-004
   package:      binary security
-  reviewer:     maintainer, found by decompiling the real artefact with Ghidra
+  reviewer:     maintainer; Ghidra decompilation + strace + a real build
   received:     2026-11-24
-  severity:     medium (claim-vs-measurement; the DOCS say "verified", the code
-                only reports)
-  confidence:   high (decompiled call graph + exhaustive grep for enforcement)
-  claim:        `nx_apply_protections()` returns a bitmask describing which
-                anti-dump syscalls the kernel ACCEPTED, and the loader stores it
-                in `_NX_NATIVE_ENF` -- but nothing anywhere refuses to run when
-                a bit is clear. A hardened container, a seccomp filter or a
-                restrictive `kernel.yama` setting that blocks `prctl` therefore
-                leaves the artefact running with NO anti-dump protection and no
-                indication to the user.
+  severity:     medium-high for the `absolute-native-only` VARIANT only
+  confidence:   high (measured: the artefact reports mask=0 and completes)
+  claim:        In a `--package native-only` build the loader reads the native
+                enforcement bitmask and REPORTS it, but never acts on it. When
+                the bitmask is 0 -- meaning none of the documented protections
+                applied -- the artefact still runs its payload to completion.
   attacker-capability:
-                Not needed to TRIGGER it -- the failure happens on ordinary
-                hardened hosts. The attacker benefit is that a deployment
-                believed to be protected is not.
+                None needed to hit it. It fires on ordinary hosts where the
+                native blob's prctl/setrlimit calls do not succeed.
   technical-
-  explanation:  Ghidra decompilation of the shipped blob, `nx_apply_protections`
-                at 0x0014cbf0 (66 instructions):
+  explanation:  `memguard.emit_snippet(native_enforced=...)` selects between two
+                emitters, and `pipeline.py:2213` passes `bool(native_only)`:
 
-                    iVar1 = prctl(4,0,0,0,0);          /* PR_SET_DUMPABLE=0 */
-                    iVar2 = setrlimit(RLIMIT_CORE, &{0});
-                    sigaction(0xd, ...); sigaction(6, ...);
-                    return (iVar1 == 0) + 2;           /* bitmask */
+                  * native_enforced=False -> the rlimit_only emitter, which
+                    DECODES: `dumpable = "ok"` or `"failed(errno=N)"`, and
+                    actually sets RLIMIT_CORE to 0 then re-reads to verify.
+                  * native_enforced=True  -> the report-only emitter, which
+                    records `"native(mask=%d)"` for BOTH keys and never
+                    branches on the value.
 
-                The value is stored by the loader:
+                The reason for the second emitter is stated in its docstring and
+                is legitimate: a model reconstructed the Python syscall form
+                verbatim from artefact text, so native-only builds stop naming
+                syscalls and rely on the blob's own enforcement instead.
 
-                    globals()["_NX_NATIVE_ENF"] = int(_nx_enf.nx_apply_protections() or 0)
+                What is missing is the ENFORCEMENT on the result. The documented
+                semantics are "1 = dumpable off, 2 = core limit zero,
+                4 = deny-attach" -- so `mask=0` means none applied.
+  reproduction:  build and run the native-only variant, then read the report:
 
-                and consumed ONLY by `memguard._nx_mem_harden()`, which reports:
+                    python3 -m obfuscator.core.pipeline build payload.py \
+                        --in-place --package native-only --section-count 8
+                    NX_SEAL_SHARD=… NX_TABLE_SHARD=… \
+                        NIXON_MEM_REPORT=/tmp/memrep.txt \
+                        python3 dist/payload_protected.py
 
-                    _nx_result["dumpable"]   = "native(mask=%d)" % (_nx_mask,)
-                    _nx_result["core_limit"] = "native(mask=%d)" % (_nx_mask,)
+                Measured output:
 
-                Two observations, both measured:
-                  1. Both keys are labelled with the SAME raw mask, so the
-                     diagnostic does not say WHICH syscall succeeded -- it cannot
-                     tell a reader whether dumpability or the core limit failed.
-                  2. A grep for any branch that raises, exits or refuses on the
-                     mask returns ZERO hits across the tree. The only references
-                     are the assignment, the report, and one test asserting the
-                     name exists.
-  reproduction: grep -rn '_NX_NATIVE_ENF' --include=*.py . \
-                  | grep -vE 'globals\(\)\[|get\("_NX_NATIVE_ENF"'
-                -> only the assignment, the two report lines, and a test.
-                Ghidra evidence: ghidra/nx_apply_protections.evidence.json
-                (address, 66 instructions, called_symbols including prctl
-                and setrlimit, and the decompiled body).
-  impact:       `docs/MAXIMUM_SECURITY.md` describes the anti-dump layer as
-                applied before payload init. It IS applied -- the call happens.
-                What is unverified is whether it SUCCEEDED, and the artefact
-                proceeds identically either way. A customer on a hardened host
-                gets an artefact whose process is still dumpable with core dumps
-                enabled, and the only visible sign is a diagnostic they must opt
-                into via NIXON_MEM_REPORT.
-  remediation:  Two changes, either of which closes the gap:
-                  (a) decode the mask into named outcomes so the diagnostic says
-                      "dumpable=ok core_limit=FAILED", and
-                  (b) decide an explicit policy: refuse to run when the
-                      anti-dump syscalls fail (fail closed), or document that
-                      enforcement is best-effort and log a warning by default
-                      rather than only under an opt-in env var.
-                (a) is required either way; (b) is the product decision.
-  disproof:     Would be disproved by any code path that acts on the mask beyond
-                reporting. Exhaustive grep finds none.
-  fixed-by:     nobody. This is a policy decision (best-effort vs fail-closed),
-                not an unambiguous defect -- filed rather than changed
-                unilaterally, because making it fail-closed would break every
-                artefact on a host where prctl is blocked.
+                    nx_fold      : 1271344609
+                    nx_gate      : 2
+                    nx_tag       : a1ec9d8fbd33c76d
+                    nx_derive    : c7388f5f226e730e6f1315d6ed35ba43
+                    rc=0
+                    mem_harden core_limit=native(mask=0) core_policy=native_enforcement dumpable=native(mask=0)
+
+                **mask=0** on both keys, and the payload ran to completion.
+
+                For contrast, the non-native-only ABSOLUTE artefact uses the
+                DECODING emitter and reports:
+                    mem_harden core_limit=0 core_policy=rlimit_only dumpable=ok
+  impact:       On the `absolute-native-only` variant -- the profile whose whole
+                selling point is "the blob is the only payload path, fail-closed"
+                -- a host where the blob's syscalls fail yields an artefact with
+                NO anti-dump protection that runs the full payload and exits 0.
+                The bitmask is reported only when NIXON_MEM_REPORT is set, so by
+                default even the diagnostic is absent.
+  correction:   An earlier revision of this row described the raw-mask reporting
+                as if it applied to every build, and claimed the diagnostic
+                "labels both keys with the same mask" as evidence of a defect.
+                Dynamic testing showed the DEFAULT path decodes correctly
+                (`dumpable=ok`, `core_limit=0`). The row is narrowed to the
+                native-only variant, where the measurement actually supports it.
+                Recorded rather than quietly rewritten: the original claim was
+                wrong about scope.
+  remediation:  In the report-only emitter, decode the mask instead of printing
+                it raw, and apply a policy: either refuse to run when the mask
+                shows a failed protection, or log a warning by DEFAULT rather
+                than only under NIXON_MEM_REPORT. Decoding is required either
+                way; the fail-closed-vs-warn choice is the product decision.
+  disproof:     Would be disproved if a native-only artefact refused to run, or
+                warned by default, when its mask was 0. It does neither.
+                NOTE on strength of evidence: this is confirmed by a real build
+                and a real run, but NOT by forcing the syscalls to fail -- mask=0
+                occurred naturally on this host. Forcing failure with a seccomp
+                filter is the stronger experiment and has not been run.
+  fixed-by:     nobody. Policy decision (fail-closed vs warn), not an
+                unambiguous defect.
   regression-test:
-                none yet, and the reason is the same one: the correct behaviour
-                depends on (b). A test asserting "artefact refuses when prctl
-                fails" would encode a policy the owner has not chosen.
+                none yet, for the same reason: the correct behaviour depends on
+                which policy the owner chooses.
 ```
 
 ## AI-RE-001 — an unqualified "cannot decode" contradicts the project's own limits
