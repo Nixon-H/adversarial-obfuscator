@@ -1,0 +1,15 @@
+{
+  "results": [
+    {
+      "platform": "linux",
+      "path": "/home/nixon/absmax-scratch/rebuild-final-review-v7/extracted/absolute-native-only/cipher/linux.so",
+      "size": 669648,
+      "sha256": "016601725cb492ed5209eb83c8c397ec9f6a59999f2d0790e760412d775d1ac2",
+      "magic_hex": "7f454c4602010100",
+      "valid_elf": true
+    }
+  ],
+  "licence_key_material_used": true,
+  "secret_values_logged": false,
+  "operator_shards_used": true
+}

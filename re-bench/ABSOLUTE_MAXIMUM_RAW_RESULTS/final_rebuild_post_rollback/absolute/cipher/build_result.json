@@ -1,0 +1,29 @@
+{
+  "variant": "absolute",
+  "target": "cipher",
+  "returncode": 0,
+  "elapsed_seconds": 49.879310010990594,
+  "artifact_source_path": "/home/nixon/absmax-scratch/rebuild-final-review-v7/builds/absolute/cipher/dist-staging/cipher-1795679114/cipher_protected.py",
+  "artifact_copy": "/home/nixon/absmax-scratch/rebuild-final-review-v7/raw/builds/absolute/cipher/artifact.py",
+  "artifact_sha256": "5e4a44e5bfa999252b3d739cae33a6cf3de5bffcf782194bb06ae73f15f6389f",
+  "artifact_size": 1736530,
+  "host_fingerprint_sha256": "ad18bae9e72fad3ea4674eda7fc1eb86cc8c26669da7e7ab1288ee2b1fd87005",
+  "static_hwid_sha256": "28f48faf9b03945a242741012a0674dc8b509fb3d6e60ad5e3c5c37812214ae2",
+  "expire_date": "2027-01-10",
+  "licence": {
+    "sha256": "43a8591f1d759fdec085526f139875920050210b56f7ed138f596860d4a6f430",
+    "key_version": 1,
+    "chain": {
+      "contract": "0x51a240271AB8AB9f9a21C82d9a85396b704E164d",
+      "token_id": "1",
+      "rpc": "http://127.0.0.1:8545",
+      "chain_id": "131277322940537"
+    },
+    "owner_sha256": "fbd7e871893b421ba1595fade8d71bd31eec4ab5cb7f146d325b25da23cfdcca"
+  },
+  "public_keys": {
+    "licence_verify_pub_sha256": "67fc3bcbf8328f1067670cb9f524e74444ba04aea3ffe53613a11b9604dc70fc"
+  },
+  "build_stdout_sha256": "6072231b94b771fb069f13e92f64ba51e57f45bb852bd7f8560a085ae24520c2",
+  "build_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
