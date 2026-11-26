@@ -494,7 +494,8 @@ def test_resume_watchdog_multilane_uses_authorized_models_and_avoids_success_bat
     assert 'LANES=[HY4_MODEL,TOKEN_FREE_MODEL,TOKEN_PAID_MODEL]' in source
     assert 'probe_model(lane)' in source
     assert 'if current_lane:' in source
-    assert "any(x.get('provider_error_type') for x in last)" in source
+    assert "provider_error=any('free-limit'" in source
+    assert "if rec.get('returncode')!=0 or provider_error:" in source
     assert "'available':p.returncode==0 and not quota" in source
     assert "'available':p.returncode==0 and not quota and ok_text" not in source
     assert 'probe_needed' not in source
