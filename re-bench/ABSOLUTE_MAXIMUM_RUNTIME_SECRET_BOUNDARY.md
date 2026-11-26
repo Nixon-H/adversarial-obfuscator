@@ -1,6 +1,6 @@
 # ABSOLUTE MAXIMUM customer-controlled runtime-secret boundary
 
-Date: 2026-11-26  
+Date: 2026-11-26
 Scope: authoritative artifact pair and the current continuation source. This document explains what is and is not protected when the attacker controls the customer machine.
 
 ## Measured boundary
