@@ -933,6 +933,10 @@ FARM_DRIVER_DATA = (
     # file with --require-hashes; uploading it is part of the supply-chain
     # control rather than a convenience copy.
     ("requirements-farm.lock", "requirements-farm.lock"),
+    # Exact-byte attestation across OS runners. Without this file a Windows
+    # checkout can convert payload.py to CRLF, so the runner honestly attests
+    # different bytes from the controller upload and the build must fail.
+    (".gitattributes", "scripts/farm.gitattributes"),
     ("pe_load_config.c", "native/pe_load_config.c"),
     # CET ISOLATION PROBE (review register, P1: "enable and verify CET
     # compatibility on the actual Windows farm artifact"). The farm .pyd
@@ -1102,10 +1106,30 @@ class GitHubBuildFarm:
     def create_disposable_repo(self):
         print(f"\n [*] [Cloud] Ensuring private repo exists: {self.repo_name}...")
         import requests
+        repo_url=f"{self.base_url}/repos/{self.username}/{self.repo_name}"
+        # Do not POST a creation request when the reusable private farm repo
+        # already exists. Repository creation is aggressively secondary-rate-
+        # limited by GitHub; repeated builds otherwise fail before reaching an
+        # otherwise usable repo.
+        try:
+            existing=requests.get(repo_url,headers=self.headers,proxies=self.proxies,verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
+            if getattr(existing,'status_code',None)==200:
+                return True
+        except Exception:
+            pass
         data={"name":self.repo_name,"private":True,"auto_init":True}
         r=requests.post(f"{self.base_url}/user/repos",headers=self.headers,json=data,proxies=self.proxies,verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
-        if r.status_code==201 or r.status_code==422:                           
+        if r.status_code==201:
             return True
+        if r.status_code==422:
+            # 422 is evidence only of a validation failure, not necessarily of
+            # existence. Confirm the exact repository before treating it as usable.
+            try:
+                confirm=requests.get(repo_url,headers=self.headers,proxies=self.proxies,verify=True, timeout=_GITHUB_REQUEST_TIMEOUT)
+                if getattr(confirm,'status_code',None)==200:
+                    return True
+            except Exception:
+                pass
         print(f" [!] Repo creation failed: {r.text}")
         return False
     def delete_repo(self):
@@ -2011,7 +2035,7 @@ try:
         # mingw build would fail every Windows build forever. check() records
         # that flag as `unavailable` instead, naming the gap rather than
         # hiding it.
-        _hard_verdict = _nh.check(_rep, _sys.platform, _toolchain)
+        _hard_verdict = _nh.check(_rep, sys.platform, _toolchain)
         # HARD GATE ON THE CFG FUNCTION TABLE (2026-11-21). The verdict was
         # recorded and then ignored, which is how three farm runs shipped a
         # .pyd with CF_INSTRUMENTED and NO function table while every log line
@@ -2161,13 +2185,31 @@ jobs:
         shell: bash
         run: |
           find . -maxdepth 1 -name "payload*" -type f ! -name "*.py" ! -name "setup_remote.py" ! -name "*.c" -print0 | xargs -0 -I {{}} mv {{}} payload${{{{ matrix.suffix }}}}
+      - name: Bind Attestation To Standard Artifact
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib, json, os
+          std = "payload${{{{ matrix.suffix }}}}"
+          src = "runner-attestation.json"
+          out = "runner-attestation-" + std + ".json"
+          digest = hashlib.sha256(open(std, "rb").read()).hexdigest()
+          doc = json.load(open(src, encoding="utf-8"))
+          artifacts = dict()
+          artifacts[std] = digest
+          doc["artifacts"] = artifacts
+          fh = open(out, "w", encoding="utf-8")
+          json.dump(doc, fh, indent=2, sort_keys=True)
+          fh.close()
+          os.remove(src)
+          PY
       - name: Upload Artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pinned immutable; original actions/upload-artifact@v4
         with:
           name: blob-payload${{{{ matrix.suffix }}}}
           path: |
             payload${{{{ matrix.suffix }}}}
-            runner-attestation.json
+            runner-attestation-payload${{{{ matrix.suffix }}}}.json
           retention-days: 1
 """
         self._nx_last_yaml = workflow_yaml
@@ -2339,14 +2381,29 @@ jobs:
             if not _verify_download_zip(zip_path, name, _sign_key):
                 raise ValueError(
                     "artifact verification refused for %r" % (name,))
-            _extract_zip_confined(zip_path, output_dir)
-            os.remove(zip_path)
             clean_name=name.replace("blob-","")
-            if "android.so" in clean_name: clean_name = "android.so" 
+            if "android.so" in clean_name: clean_name = "android.so"
             final_path=os.path.join(output_dir,clean_name)
-            for root,dirs,files in os.walk(output_dir):
-                for f in files:
-                    if clean_name in f and os.path.join(root,f)!=final_path:shutil.move(os.path.join(root,f),final_path)
+            attestation_path=os.path.join(
+                output_dir,"runner-attestation-%s.json" % clean_name)
+            # Extract each matrix artifact in isolation. Every job uploads a
+            # file literally named runner-attestation.json; extracting all
+            # zips directly into output_dir used to overwrite all but one
+            # attestation, so the controller verified whichever platform
+            # happened to be extracted last and rejected the renamed blobs
+            # from the others.
+            with tempfile.TemporaryDirectory(
+                    prefix=".%s-" % name, dir=output_dir) as _extract_dir:
+                _extract_zip_confined(zip_path, _extract_dir)
+                for root,dirs,files in os.walk(_extract_dir):
+                    for f in files:
+                        src=os.path.join(root,f)
+                        if f in ("runner-attestation.json",
+                                 "runner-attestation-%s.json" % clean_name):
+                            shutil.move(src, attestation_path)
+                        elif clean_name in f and src != final_path:
+                            shutil.move(src, final_path)
+            os.remove(zip_path)
             print(f"    [+] Acquired: {clean_name}")
     def nuke(self):
         import requests

@@ -281,7 +281,8 @@ def test_scorer_rejects_attempts_over_twenty_tool_calls(tmp_path):
 
 def test_benchmark_prompt_states_hard_twenty_tool_validity_limit():
     source = _read_tool_text('ai_bench.py')
-    assert 'Hard validity timebox: use at most 20 tool invocations' in source
+    assert 'Hard validity timebox: never exceed 9 tool invocations in this turn' in source
+    assert 'write answer.json no later than tool invocation 8' in source
     assert 'more than 20 tool invocations is structurally invalid' in source
 
 
@@ -820,11 +821,12 @@ def test_kern_proxy_redacts_json_escaped_runtime_licence():
 
 def test_benchmark_agent_is_step_limited_and_recorded():
     source = _read_tool_text('ai_bench.py')
-    assert 'BENCHMARK_AGENT_STEPS=18' in source
+    assert 'BENCHMARK_AGENT_STEPS=10' in source
     assert "'steps':BENCHMARK_AGENT_STEPS" in source
     assert "'--agent',BENCHMARK_AGENT" in source
     assert 'benchmark_agent_prompt_sha256' in source
-    assert 'Never exceed 15 tool invocations' in source
+    assert 'Never exceed 9 tool invocations in this turn' in source
+    assert 'By tool invocation 8, create answer.json' in source
 
 
 def test_final_text_json_materialization_preserves_model_content(tmp_path):
@@ -837,3 +839,112 @@ def test_final_text_json_materialization_preserves_model_content(tmp_path):
     out = bench.materialize_final_answer_json(tmp_path, {'text': 'not json'})
     assert out['materialized'] is False
     assert not (tmp_path / 'answer.json').exists()
+
+
+def test_benchmark_profile_matrix_includes_local_cloud_packed_and_absolute():
+    builder = _load('benchmark_profile_builder', ROOT / 're-bench/tools/build_absolute.py')
+    expected = {'maximum-local', 'maximum-packed', 'maximum-cloud', 'absolute', 'absolute-cloud', 'absolute-native-only'}
+    assert expected <= set(builder.PROFILE_CONFIG)
+    assert builder.PROFILE_CONFIG['maximum-local']['skip_cloud'] is True
+    assert builder.PROFILE_CONFIG['maximum-packed']['skip_cloud'] is True
+    assert builder.PROFILE_CONFIG['maximum-cloud']['skip_cloud'] is False
+    assert builder.PROFILE_CONFIG['absolute-cloud']['skip_cloud'] is False
+    assert 'platform=github' in builder.PROFILE_CONFIG['maximum-cloud']['pkg']
+    assert 'platform=github' in builder.PROFILE_CONFIG['absolute-cloud']['pkg']
+
+
+def test_source_assisted_workspace_receives_original_source(tmp_path, monkeypatch):
+    bench = _load('ai_bench_source_assisted_workspace', ROOT / 're-bench/tools/ai_bench.py')
+    monkeypatch.setattr(bench, 'LIVE_WORKSPACE_ROOT', tmp_path / 'live')
+    assert 'source-assisted-runtime-secrets' in bench.SCENARIOS
+    assert 'source-assisted-secrets-withheld' in bench.SCENARIOS
+    assert 'source-assisted-static' in bench.SCENARIOS
+    ws, desc = bench.prep_workspace('absolute-native-only', 'source-assisted-static', 'kern/inkling-2-mini', 77)
+    assert 'original_source.py' in desc or (ws / 'original_source.py').exists()
+    assert (ws / 'original_source.py').exists()
+    assert (ws / 'original_source.py').read_bytes() == (ROOT / 're-bench/builds/absolute-native-only/cipher/cipher.py').read_bytes()
+
+
+def test_two_turn_finalisation_command_uses_continue_only_when_answer_missing():
+    bench = _load('ai_bench_two_turn_command', ROOT / 're-bench/tools/ai_bench.py')
+    cmd = bench.opencode_shell_command('absolute', 'runtime-secrets-withheld', 3, 'kern/inkling-2-mini', 'analysis prompt')
+    assert '--continue' in cmd
+    assert 'if [ ! -s answer.json ]; then' in cmd
+    assert 'analysis prompt' in cmd
+    assert 'mandatory finalisation turn' in cmd
+
+
+def test_resume_watchdog_matrix_covers_profiles_and_source_assisted_scenarios():
+    source = _read_tool_text('resume_absmax_benchmark_when_quota.py')
+    assert "BENCHMARK_VARIANTS=['maximum-local','maximum-packed','maximum-cloud','absolute','absolute-cloud','absolute-native-only']" in source
+    for scenario in ('source-assisted-static', 'source-assisted-runtime-secrets', 'source-assisted-secrets-withheld'):
+        assert scenario in source
+    assert 'missing_variants.append(variant)' in source
+    assert "'active_variants':variants" in source
+
+
+def test_workspace_secret_root_can_be_overridden(tmp_path, monkeypatch):
+    bench = _load('ai_bench_secret_root_override', ROOT / 're-bench/tools/ai_bench.py')
+    monkeypatch.setattr(bench, 'LIVE_WORKSPACE_ROOT', tmp_path / 'live')
+    alt = tmp_path / 'alt-secrets' / 'absolute-native-only' / 'cipher'
+    alt.mkdir(parents=True)
+    for name, data in [('runtime.licence', '{"x":1}'), ('nx_seal_shard.hex', 'aa'), ('provenance.public.hex', 'bb')]:
+        (alt / name).write_text(data)
+    monkeypatch.setattr(bench, 'SECRETS_ROOT', tmp_path / 'alt-secrets')
+    ws, _desc = bench.prep_workspace('absolute-native-only', 'legitimate-runtime-secrets', 'kern/inkling-2-mini', 91)
+    assert (ws / 'runtime.licence').read_text() == '{"x":1}'
+    assert (ws / 'nx_seal_shard.hex').read_text() == 'aa'
+    assert (ws / 'provenance.public.hex').read_text() == 'bb'
+
+
+def test_secret_mentions_in_source_assisted_answer_are_not_exact_recovery(tmp_path):
+    bench = _load('ai_bench_secret_exactness', ROOT / 're-bench/tools/ai_bench.py')
+    (tmp_path / 'answer.json').write_text(json.dumps({
+        'recovered_secret': None,
+        'algorithm': 'input original_source.py literally contains cipher-master-K_77',
+        'key_derivation': 'cipher-master-K_77 appears in supplied source',
+    }))
+    result = bench.validate_workspace(tmp_path)
+    assert result['secret_recovered'] is False
+    assert result['secret_exact_in_recovered_secret'] is False
+    assert result['secret_mentioned_incidentally'] is True
+
+
+def test_exact_recovered_secret_field_counts_as_exact_recovery(tmp_path):
+    bench = _load('ai_bench_secret_exactness2', ROOT / 're-bench/tools/ai_bench.py')
+    (tmp_path / 'answer.json').write_text(json.dumps({'recovered_secret': 'cipher-master-K_77'}))
+    result = bench.validate_workspace(tmp_path)
+    assert result['secret_recovered'] is True
+    assert result['secret_exact_in_recovered_secret'] is True
+    assert result['secret_mentioned_incidentally'] is False
+
+
+def test_scorer_does_not_cross_contaminate_evidence_roots():
+    source = _read_tool_text('score_ai_benchmark.py')
+    assert 'workspace_is_preserved' in source
+    assert 'if not workspace_is_preserved and copied.exists()' in source
+    assert 'crossing evidence-root' in source
+
+
+def test_scorer_exact_secret_boundary_is_field_specific():
+    source = _read_tool_text('score_ai_benchmark.py')
+    assert "answer_obj.get('recovered_secret') == benchmark_payload_secret" in source
+    assert 'secret_mentioned_incidentally' in source
+    assert 'harness_secret_recovered_field' in source
+
+
+def test_profile_matrix_id_is_configurable():
+    source = _read_tool_text('run_profile_matrix.py')
+    assert "ABSMAX_PROFILE_MATRIX_ID" in source
+    assert "'_profile_matrix_'+PROFILE_MATRIX_ID" in source
+    assert "'/home/nixon/absmax-scratch/profile-matrix-'+PROFILE_MATRIX_ID+'-status.json'" in source
+
+
+def test_cloud_build_integrity_regressions():
+    builder = _read_tool_text('build_absolute.py')
+    validator = _read_tool_text('validate_cloud_profile_build.py')
+    assert 'acquire_build_root_lock' in builder
+    assert 'fcntl.LOCK_EX|fcntl.LOCK_NB' in builder
+    assert 'artifact_matches_build_manifest' in validator
+    assert 'nxs1-container' in validator
+    assert 'positive_ok' in validator and 'negative_fail_closed' in validator

@@ -941,6 +941,17 @@ def check(object_report, platform_name, toolchain=None):
     """
     canonical = canonical_platform(platform_name)
     want = expected_for(platform_name, toolchain)
+    object_type_unavailable = []
+    if (canonical == "darwin" and object_report.get("kind") == "macho"
+            and object_report.get("filetype") in (6, 8)):
+        # MH_DYLIB/MH_BUNDLE are library images, not executables. MH_PIE and
+        # MH_NO_HEAP_EXECUTION are executable-image flags; requiring them
+        # from a Python extension bundle makes a correct macOS runner fail
+        # without adding any enforcement. Stack execution remains forbidden.
+        for _field in ("pie", "no_heap_exec"):
+            if _field in want:
+                want.pop(_field, None)
+                object_type_unavailable.append(_field)
     missing = [field for field, value in want.items()
                if value is True and not object_report.get(field)]
     wrong = [field for field, value in want.items()

@@ -222,7 +222,9 @@ def test_generated_farm_yaml_uploads_runner_attestation():
     body = yaml_text[start:start + 1000]
     assert "path: |" in body
     assert "payload${{ matrix.suffix }}" in body
-    assert "runner-attestation.json" in body
+    assert "runner-attestation-payload${{ matrix.suffix }}.json" in body
+    assert "Bind Attestation To Standard Artifact" in yaml_text
+    assert "artifacts[std] = digest" in yaml_text
 
 
 def test_the_embedded_driver_records_both_seeds():
@@ -257,10 +259,11 @@ def test_controller_binds_attestation_to_the_exact_uploaded_source():
     pipe = open(os.path.join(ROOT, "obfuscator", "core", "pipeline.py"),
                 encoding="utf-8").read()
     start = pipe.find("FARM-RUNNER INTEGRITY")
-    end = pipe.find("_ra_res = _ra_verify", start)
+    end = pipe.find("_ra_problems = []", start)
     assert start >= 0 and end > start
     block = pipe[start:end]
-    assert 'open(_farm_src, "rb").read()' in block
+    assert '_ra_expect = _farm_upload_sha' in block
+    assert 'open(_farm_src, "rb").read()' not in block
     assert 'open(source, "rb").read()' not in block
 
 
@@ -289,3 +292,36 @@ def test_farm_attestation_verification_errors_are_fail_closed():
     assert "could not be " in block
     assert "unverified farm output is refused" in block
     assert block.count("raise SystemExit") >= 2
+
+
+def test_uploaded_payload_digest_is_captured_before_temp_file_cleanup():
+    """The cleanup finally-block must not make verification hash a deleted file."""
+    pipe = open(os.path.join(ROOT, "obfuscator", "core", "pipeline.py"),
+                encoding="utf-8").read()
+    hash_pos = pipe.find('_farm_upload_sha = hashlib.sha256')
+    upload_pos = pipe.find('_farm.upload_file(_farm_src, "payload.py")')
+    cleanup_pos = pipe.find('if _farm_tmp and os.path.exists(_farm_tmp):')
+    assert 0 <= hash_pos < upload_pos < cleanup_pos
+    verify_pos = pipe.find('_ra_expect = _farm_upload_sha')
+    assert verify_pos > cleanup_pos
+
+
+def test_generated_driver_hardening_uses_imported_sys_module():
+    """The farm driver imports sys, not _sys; a wrong reference made every
+    hardening verdict an exception string rather than evidence."""
+    from obfuscator.core.utils import render_farm_driver
+
+    driver = render_farm_driver("payload.py")
+    assert "_nh.check(_rep, sys.platform, _toolchain)" in driver
+    assert "_nh.check(_rep, _sys.platform, _toolchain)" not in driver
+
+
+def test_controller_requires_matching_per_artifact_attestation():
+    """Renamed farm artifacts must be bound to their own runner records;
+    otherwise three matrix attestation files overwrite one another and the
+    controller cannot know which runner produced which object."""
+    pipe = open(os.path.join(ROOT, "obfuscator", "core", "pipeline.py"),
+                encoding="utf-8").read()
+    assert '_ra_docs.get(' in pipe
+    assert '"runner-attestation-" + _ra_name + ".json"' in pipe
+    assert 'require_hardening=True' in pipe

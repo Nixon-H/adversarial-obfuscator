@@ -5598,6 +5598,14 @@ def build_project(args):
                         "single-OS. Either provide a token, or pass "
                         "--skip-cloud to build locally on purpose.")
                 else:
+                    # The farm repository is a single mutable resource. Concurrent
+                    # local builds otherwise overwrite payload.py/workflow state while
+                    # matrix jobs are still reading it; measured 2026-11-26 as a
+                    # Windows-runner payload-hash mismatch. Serialize the farm-critical
+                    # section with an OS-held lock so a crashed builder cannot leave it
+                    # locked forever.
+                    _farm_repo_lock = _acquire_farm_repo_lock()
+                    _farm = None
                     try:
                         _farm = _make_farm(args, _gh_token)
                         if _farm.create_disposable_repo():
@@ -5645,6 +5653,14 @@ def build_project(args):
                                 UI.warn("farm: AST pre-pass failed (%s); "
                                         "uploading raw source" % _fa_exc)
                                 _farm_src = source
+                            # Bind runner attestation to the exact uploaded bytes
+                            # before the temporary AST-parity file can be cleaned
+                            # up.  Deleting .nx_farm_payload.py in the finally block
+                            # and only hashing _farm_src during verification turns
+                            # every successful AST-parity farm build into a false
+                            # verification error.
+                            _farm_upload_sha = hashlib.sha256(
+                                open(_farm_src, "rb").read()).hexdigest()
                             try:
                                 if not _farm.upload_file(_farm_src, "payload.py"):
                                     raise RuntimeError("payload upload failed")
@@ -5704,25 +5720,24 @@ def build_project(args):
                                         _sha256_file as _ra_sha,
                                     )
                                     _ra_dir = _blob_dir
-                                    _ra_doc = None
+                                    _ra_docs = {}
                                     for _ra_name in os.listdir(_ra_dir):
-                                        if _ra_name == "runner-attestation.json":
+                                        if (_ra_name.startswith("runner-attestation-")
+                                                and _ra_name.endswith(".json")):
                                             try:
                                                 with open(os.path.join(
                                                         _ra_dir, _ra_name),
                                                         encoding="utf-8") as _rf:
-                                                    _ra_doc = json.load(_rf)
+                                                    _ra_docs[_ra_name] = json.load(_rf)
                                             except Exception:
-                                                _ra_doc = None
-                                            break
+                                                _ra_docs[_ra_name] = None
                                     # Compare against the exact bytes uploaded
                                     # to the farm. When the AST pre-pass wrote
                                     # .nx_farm_payload.py, hashing the original
                                     # source instead would falsely reject a
                                     # correct attestation and fail to bind the
                                     # bytes the runner actually received.
-                                    _ra_expect = hashlib.sha256(
-                                        open(_farm_src, "rb").read()).hexdigest()
+                                    _ra_expect = _farm_upload_sha
                                     _ra_dl = []
                                     for _ra_name in os.listdir(_ra_dir):
                                         if _ra_name.endswith(
@@ -5730,21 +5745,31 @@ def build_project(args):
                                             _ra_dl.append((_ra_name, _ra_sha(
                                                 os.path.join(_ra_dir,
                                                              _ra_name))))
-                                    _ra_res = _ra_verify(
-                                        _ra_doc, _ra_expect, _ra_dl,
-                                        require_artifacts=bool(_ra_dl),
-                                        # §3: the platform header check must
-                                        # PASS, not merely be present. A
-                                        # runner on Windows brought back an
-                                        # object with no ASLR and said so --
-                                        # that is a failure, and the earlier
-                                        # behaviour (record and continue) used
-                                        # the evidence as a log line rather
-                                        # than a gate.
-                                        require_hardening=True)
+                                    _ra_problems = []
+                                    for _ra_name, _ra_hash in _ra_dl:
+                                        _ra_doc = _ra_docs.get(
+                                            "runner-attestation-" + _ra_name + ".json")
+                                        _ra_one = _ra_verify(
+                                            _ra_doc, _ra_expect, [(_ra_name, _ra_hash)],
+                                            require_artifacts=True,
+                                            # §3: the platform header check must
+                                            # PASS, not merely be present. A
+                                            # runner on Windows brought back an
+                                            # object with no ASLR and said so --
+                                            # that is a failure, and the earlier
+                                            # behaviour (record and continue) used
+                                            # the evidence as a log line rather
+                                            # than a gate.
+                                            require_hardening=True)
+                                        _ra_problems.extend(
+                                            _ra_name + ": " + _ra_problem
+                                            for _ra_problem in _ra_one["problems"])
+                                    _ra_res = {"ok": not _ra_problems,
+                                               "problems": _ra_problems}
                                     if _ra_res["ok"]:
                                         UI.item("Farm attestation",
-                                                _ra_summary(_ra_doc), "VERIFIED")
+                                                "%d per-artifact runner record(s)" % len(_ra_docs),
+                                                "VERIFIED")
                                     else:
                                         UI.warn(
                                             "farm attestation FAILED: %s"
@@ -5770,14 +5795,20 @@ def build_project(args):
                                         UI.item("Native blob", _os_name,
                                                 "EMBEDDED (farm)")
                             else:
-                                UI.warn("Cython farm run returned no id: "
-                                        "other OSes fall back to bytecode")
+                                raise SystemExit(
+                                    "platform=github requested but the Cython farm "
+                                    "run returned no id; refusing to ship a "
+                                    "single-OS artefact as a cloud build")
                         else:
-                            UI.warn("Cython farm repo unavailable: other OSes "
-                                    "fall back to bytecode")
+                            raise SystemExit(
+                                "platform=github requested but the Cython farm "
+                                "repository was unavailable; refusing to ship a "
+                                "single-OS artefact as a cloud build")
                     except Exception as _farm_exc:
-                        UI.warn(f"Cython farm build failed: {_farm_exc} "
-                                "(other OSes fall back to bytecode)")
+                        raise SystemExit(
+                            "platform=github requested but the Cython farm "
+                            f"build failed: {_farm_exc}; refusing to ship a "
+                            "single-OS artefact as a cloud build") from _farm_exc
                     finally:
                         # --public / "Flash Mode": --public has advertised
                         # "Nukes repo after build" since it was added, and was
@@ -5787,13 +5818,14 @@ def build_project(args):
                         # failed, because a failed run leaves the source up
                         # too.  --skip-cloud already implies no farm, so this
                         # only fires when a repo was actually created.
-                        if getattr(args, 'public', False):
+                        if getattr(args, 'public', False) and _farm is not None:
                             try:
                                 _farm.delete_repo()
                             except Exception as _del_exc:
                                 UI.warn("repo cleanup failed: %s (the build "
                                         "repo still holds the payload "
                                         "source)" % (_del_exc,))
+                        _release_farm_repo_lock(_farm_repo_lock)
         with UI.Task("Hybrid Loader", "Compiling Universal Fallback...") as t:
             # NOTE: 'ast_options' is assigned later in this function, so it
             # is never in locals() here — the literal below is the live
@@ -7657,6 +7689,60 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 log = logging.getLogger(__name__)
 
 from obfuscator.version import VERSION, version_string  # noqa: F401
+
+def _farm_repo_lock_path():
+    """Return the local lock path used to serialize the singleton farm repo."""
+    base = os.path.expanduser("~/.cache/nixon-build-farm")
+    try:
+        os.makedirs(base, mode=0o700, exist_ok=True)
+        os.chmod(base, 0o700)
+    except Exception:
+        base = tempfile.gettempdir()
+    return os.path.join(base, "nixon-build-farm-native.lock")
+
+
+def _acquire_farm_repo_lock():
+    """Acquire the host-local singleton-farm lock and return its open handle.
+
+    The lock is deliberately OS-held rather than a sentinel file: if the builder
+    crashes or is killed, the kernel releases it. This does not pretend to stop
+    two different machines sharing one GitHub account; it prevents the measured
+    local race where two pipeline processes overwrite the same disposable repo.
+    """
+    path = _farm_repo_lock_path()
+    fh = open(path, "a+b")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        fh.seek(0)
+        fh.truncate()
+        fh.write((str(os.getpid()) + "\n").encode())
+        fh.flush()
+        return fh
+    except Exception:
+        fh.close()
+        raise
+
+
+def _release_farm_repo_lock(fh):
+    if fh is None:
+        return
+    try:
+        fh.seek(0)
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    finally:
+        fh.close()
+
 
 def _make_farm(args, gh_token):
     """Build the cloud-compile farm named by --platform.

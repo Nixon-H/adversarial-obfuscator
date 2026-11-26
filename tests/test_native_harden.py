@@ -1270,3 +1270,25 @@ def test_the_macho_probe_source_is_committed_and_reproducible():
     for token in ("arm64-apple-macos", "x86_64-apple-macos"):
         assert token in build, (
             "the Mach-O build script no longer targets %r" % token)
+
+
+def test_macho_bundle_does_not_fail_on_executable_only_flags():
+    """PIE/no-heap-exec are executable-image bits, not extension-bundle bits."""
+    blob = _macho(0)
+    header = bytearray(blob)
+    struct.pack_into("<I", header, 12, 8)  # MH_BUNDLE
+    report = nh.verify_macho_bytes(bytes(header))
+    result = nh.check(report, "darwin", "clang")
+    assert result["missing"] == []
+    assert "pie" in result["unavailable"]
+    assert "no_heap_exec" in result["unavailable"]
+
+
+def test_farm_uploads_gitattributes_to_pin_payload_line_endings():
+    """Windows checkout CRLF conversion must not change attested payload bytes."""
+    from obfuscator.core import utils as nutils
+    entries = dict(nutils.FARM_DRIVER_DATA)
+    assert entries.get(".gitattributes") == "scripts/farm.gitattributes"
+    text = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts", "farm.gitattributes"),
+                encoding="utf-8").read()
+    assert "payload.py text eol=lf" in text

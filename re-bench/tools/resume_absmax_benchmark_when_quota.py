@@ -46,7 +46,9 @@ ALL_SCENARIOS=[
  'binary-only-external','static-analysis-only','ghidra-static','ghidra-dynamic',
  'unprivileged-local','privileged-debugger','native-module-extraction','loader-initialization-order',
  'pack-layout-sections','crypto-construction','provenance-signatures','host-runtime-gates',
- 'chain-licence-path','semantics-hidden-vectors','legitimate-runtime-secrets','runtime-secrets-withheld']
+ 'chain-licence-path','semantics-hidden-vectors','legitimate-runtime-secrets','runtime-secrets-withheld',
+ 'source-assisted-static','source-assisted-runtime-secrets','source-assisted-secrets-withheld']
+BENCHMARK_VARIANTS=['maximum-local','maximum-packed','maximum-cloud','absolute','absolute-cloud','absolute-native-only']
 # User-directed priority: essential zero-valid groups first, then remaining groups.
 PRIORITY=[
  'legitimate-runtime-secrets','runtime-secrets-withheld','crypto-construction','chain-licence-path',
@@ -422,7 +424,17 @@ def worker(args):
         os.environ['ABSMAX_OPENCODE_STATE_ROOT']=args.opencode_state_root
     sys.path.insert(0,str(Path(__file__).resolve().parent))
     import ai_bench
-    variants=args.variants.split(',')
+    requested_variants=args.variants.split(',')
+    variants=[];missing_variants=[]
+    for variant in requested_variants:
+        try:
+            artifact=ai_bench.artifact_for(variant)
+            if artifact.exists():
+                variants.append(variant)
+            else:
+                missing_variants.append(variant)
+        except Exception:
+            missing_variants.append(variant)
     scenarios=args.scenarios.split(',')
     groups=scan_groups(ai_bench.OUT,variants,scenarios,args.target_valid)
     complete=all(g['needed']==0 for g in groups.values())
@@ -446,6 +458,7 @@ def worker(args):
       'deficient':{'/'.join(k):g for k,g in groups.items() if g['needed']},
       'last_batch':batch,'scan_only':bool(args.scan_only),'updated':time.time(),
       'results_root':str(ai_bench.OUT.relative_to(ROOT)),
+      'requested_variants':requested_variants,'active_variants':variants,'missing_variants':missing_variants,
     }
     # JSON cannot serialize sets; they are only internal above.
     for g in status['deficient'].values():g['used_attempts']=sorted(g['used_attempts'])
@@ -463,7 +476,7 @@ def load_status(path):
 def run_worker(mode,scan_only=False,model=MODEL):
     post_status,prefix_status=status_paths(model)
     if mode=='post':
-        cmd=[sys.executable,str(Path(__file__).resolve()),'--worker','--status-file',str(post_status),'--variants','absolute-native-only,absolute','--scenarios',','.join(ALL_SCENARIOS),'--batch-size','1','--target-valid','5']
+        cmd=[sys.executable,str(Path(__file__).resolve()),'--worker','--status-file',str(post_status),'--variants',','.join(BENCHMARK_VARIANTS),'--scenarios',','.join(ALL_SCENARIOS),'--batch-size','2','--target-valid','5']
     else:
         cmd=[sys.executable,str(Path(__file__).resolve()),'--worker','--status-file',str(prefix_status),'--variants','absolute-native-only,absolute','--scenarios',','.join(PREFIX_SCENARIOS),'--batch-size','1','--target-valid','5','--suffix','_prefix_xor_comparison','--artifact-subdir','pre_fix','--live-workspace-root','/home/nixon/absmax-ai-workspaces-prefix-xor-comparison','--opencode-state-root','/home/nixon/absmax-opencode-state-prefix-xor-comparison']
     if scan_only:cmd.append('--scan-only')

@@ -14,9 +14,13 @@ Three defects in the cloud-build path, all recorded in
 These tests drive the real methods with a stubbed ``requests`` module,
 so no network is touched.
 """
+import hashlib
+import io
+import json
 import os
 import sys
 import types
+import zipfile
 import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -29,10 +33,11 @@ from obfuscator.core import utils as nutils  # noqa: E402
 class _Response:
     """A minimal stand-in for a requests.Response."""
 
-    def __init__(self, status_code=200, headers=None, payload=None):
+    def __init__(self, status_code=200, headers=None, payload=None, content=b""):
         self.status_code = status_code
         self.headers = headers or {}
         self._payload = payload if payload is not None else {}
+        self.content = content
 
     text = ""
 
@@ -203,6 +208,56 @@ def test_download_artifacts_retries_once_on_429(monkeypatch, tmp_path):
     assert seen["n"] == 2, "the rate-limited request was not retried"
 
 
+def test_download_artifacts_preserves_each_matrix_runner_attestation(monkeypatch, tmp_path):
+    """Matrix zips must not overwrite one another's runner-attestation.json."""
+
+    def _zip_bytes(blob_name, blob_bytes, attestation):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr(blob_name, blob_bytes)
+            zf.writestr("runner-attestation-" + blob_name + ".json", json.dumps(attestation))
+        return buf.getvalue()
+
+    blobs = {
+        "blob-payload.so": (b"linux-blob", {"payload_sha256": "a" * 64, "runner": {"os": "Linux"}}),
+        "blob-payload.pyd": (b"windows-blob", {"payload_sha256": "a" * 64, "runner": {"os": "Windows"}}),
+    }
+    artifacts = [
+        {"name": name, "archive_download_url": "https://example.invalid/" + name}
+        for name in blobs
+    ]
+    downloads = {
+        "https://example.invalid/" + name: _zip_bytes(
+            name.replace("blob-", ""), data[0], data[1])
+        for name, data in blobs.items()
+    }
+    calls = {"n": 0}
+
+    def _fake_get(url, *args, **kwargs):
+        calls["n"] += 1
+        if url in downloads:
+            return _Response(200, content=downloads[url])
+        return _Response(200, payload={"artifacts": artifacts})
+
+    fake_requests = types.ModuleType("requests")
+    fake_requests.get = _fake_get
+    monkeypatch.setitem(sys.modules, "requests", fake_requests)
+    monkeypatch.setattr(nutils.time, "sleep", lambda *_a: None)
+
+    farm = nutils.GitHubBuildFarm("token")
+    farm.username = "u"
+    farm.repo_name = "r"
+    farm.download_artifacts(1, str(tmp_path))
+
+    assert (tmp_path / "payload.so").read_bytes() == b"linux-blob"
+    assert (tmp_path / "payload.pyd").read_bytes() == b"windows-blob"
+    linux_att = json.loads((tmp_path / "runner-attestation-payload.so.json").read_text())
+    win_att = json.loads((tmp_path / "runner-attestation-payload.pyd.json").read_text())
+    assert linux_att["runner"]["os"] == "Linux"
+    assert win_att["runner"]["os"] == "Windows"
+    assert not (tmp_path / "runner-attestation.json").exists()
+
+
 def test_upload_file_waits_out_a_rate_limit(monkeypatch, tmp_path):
     """A 429 on upload must back off using Retry-After, not a fixed sleep."""
     slept = []
@@ -229,3 +284,52 @@ def test_upload_file_waits_out_a_rate_limit(monkeypatch, tmp_path):
     assert farm.upload_file(str(src), "payload.py") is True
     # The rate-limited attempt must have waited for the server's answer.
     assert any(s >= 0 for s in slept)
+
+
+def test_create_disposable_repo_does_not_post_when_repo_exists(monkeypatch):
+    """Reused farm repos must not burn GitHub content-creation rate limit."""
+    calls = {"get": 0, "post": 0}
+
+    def _get(url, *args, **kwargs):
+        calls["get"] += 1
+        if url.endswith("/user"):
+            return _Response(200, payload={"login": "u"})
+        return _Response(200, payload={"name": "r"})
+
+    def _post(*args, **kwargs):
+        calls["post"] += 1
+        return _Response(403, payload={"message": "secondary rate limit"})
+
+    fake_requests = types.ModuleType("requests")
+    fake_requests.get = _get
+    fake_requests.post = _post
+    monkeypatch.setitem(sys.modules, "requests", fake_requests)
+    farm = nutils.GitHubBuildFarm("token")
+    farm.username = "u"
+    farm.repo_name = "r"
+    assert farm.create_disposable_repo() is True
+    assert calls["post"] == 0
+
+
+def test_create_disposable_repo_uses_get_before_post(monkeypatch):
+    calls = []
+    def _fake_get(url, *args, **kwargs):
+        calls.append(("GET", url)); return _Response(200, payload={"name": "r"})
+    def _fake_post(url, *args, **kwargs):
+        calls.append(("POST", url)); return _Response(201)
+    fake_requests = types.ModuleType("requests"); fake_requests.get = _fake_get; fake_requests.post = _fake_post
+    monkeypatch.setitem(sys.modules, "requests", fake_requests)
+    farm = nutils.GitHubBuildFarm.__new__(nutils.GitHubBuildFarm)
+    farm.base_url = "https://api.github.com"; farm.headers = {}; farm.proxies = None; farm.username = "u"; farm.repo_name = "r"
+    assert farm.create_disposable_repo() is True
+    assert [m for m, _ in calls] == ["GET"]
+
+
+def test_create_disposable_repo_does_not_treat_arbitrary_422_as_success(monkeypatch):
+    def _fake_get(url, *args, **kwargs): return _Response(404)
+    def _fake_post(url, *args, **kwargs): return _Response(422)
+    fake_requests = types.ModuleType("requests"); fake_requests.get = _fake_get; fake_requests.post = _fake_post
+    monkeypatch.setitem(sys.modules, "requests", fake_requests)
+    farm = nutils.GitHubBuildFarm.__new__(nutils.GitHubBuildFarm)
+    farm.base_url = "https://api.github.com"; farm.headers = {}; farm.proxies = None; farm.username = "u"; farm.repo_name = "r"
+    assert farm.create_disposable_repo() is False
