@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Finite first-pass protection-profile benchmark matrix.
 
-This runner is deliberately sequential because the Kern endpoint enforces a low
-per-IP request rate. It writes a separate suffixed evidence root so harness-version
-smoke/invalid records are not overwritten or mixed into the profile comparison.
+This runner is deliberately capped at two concurrent attempts to protect provider quota and cache locality. It writes a
+separate suffixed evidence root so harness-version smoke/invalid records are not
+overwritten or mixed into the profile comparison.
 """
-import argparse, json, os, sys, time
+import argparse, json, os, subprocess, sys, time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 PROFILE_MATRIX_ID=os.environ.get('ABSMAX_PROFILE_MATRIX_ID','v10')
@@ -17,12 +18,7 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import ai_bench
 
-CORE_SCENARIOS=[
- 'legitimate-runtime-secrets',
- 'runtime-secrets-withheld',
- 'source-assisted-runtime-secrets',
- 'source-assisted-secrets-withheld',
-]
+CORE_SCENARIOS=list(ai_bench.SCENARIOS)
 LOCAL_VARIANTS=['maximum-packed','maximum-local','absolute','absolute-native-only']
 CLOUD_VARIANTS=['maximum-cloud','absolute-cloud']
 ALL_VARIANTS=LOCAL_VARIANTS+CLOUD_VARIANTS
@@ -36,11 +32,16 @@ def result_path(variant,scenario,model,attempt):
 
 def main():
     ap=argparse.ArgumentParser()
-    ap.add_argument('--model',default='kern/inkling-2-mini')
+    ap.add_argument('--model',default='opencode-go/deepseek-v4.1-flash')
+    ap.add_argument('--matrix-id',default=PROFILE_MATRIX_ID,help='visible matrix identifier; must match ABSMAX_PROFILE_MATRIX_ID when both are supplied')
     ap.add_argument('--variants',default=','.join(ALL_VARIANTS))
     ap.add_argument('--scenarios',default=','.join(CORE_SCENARIOS))
     ap.add_argument('--attempts',type=int,default=1)
+    ap.add_argument('--parallel',type=int,default=2,help='concurrent attempts; clamped to 2 to protect provider quota and cache locality')
     args=ap.parse_args()
+    args.parallel=max(1,min(2,args.parallel))
+    if args.matrix_id!=PROFILE_MATRIX_ID:
+        raise SystemExit('matrix id mismatch: pass ABSMAX_PROFILE_MATRIX_ID or matching --matrix-id')
     variants=args.variants.split(',')
     scenarios=args.scenarios.split(',')
     jobs=[]
@@ -60,28 +61,40 @@ def main():
     STATUS.parent.mkdir(parents=True,exist_ok=True)
     state={'started':time.time(),'model':args.model,'jobs_planned':len(jobs),'completed':0,'missing_variants':missing,'complete':False,'results':[]}
     STATUS.write_text(json.dumps(state,indent=2))
-    for job in jobs:
+    def execute_job(job):
         variant,scenario,model,attempt=job
         rp=result_path(variant,scenario,model,attempt)
         if rp.exists():
             try:
                 r=json.loads(rp.read_text())
-                rec={'job':job,'skipped_existing':True,'returncode':r.get('returncode'),'answer_json_exists':(r.get('validation') or {}).get('answer_json_exists')}
+                return {'job':job,'skipped_existing':True,'returncode':r.get('returncode'),'answer_json_exists':(r.get('validation') or {}).get('answer_json_exists')}
             except Exception:
-                rec={'job':job,'skipped_existing':True}
-        else:
+                return {'job':job,'skipped_existing':True}
+        try:
+            r=ai_bench.one(job)
+            return {'job':job,'returncode':r.get('returncode'),'timeout':r.get('timeout'),'tool_event_count':r.get('tool_event_count'),'answer_json_exists':(r.get('validation') or {}).get('answer_json_exists'),'answer_json_valid':(r.get('validation') or {}).get('answer_json_valid'),'secret_recovered':(r.get('validation') or {}).get('secret_recovered'),'solution_py_exists':(r.get('validation') or {}).get('solution_py_exists')}
+        except Exception as e:
+            return {'job':job,'executor_error':type(e).__name__,'error':str(e)[:200]}
+
+    with ThreadPoolExecutor(max_workers=args.parallel) as pool:
+        futures={pool.submit(execute_job,job):job for job in jobs}
+        for fut in as_completed(futures):
             try:
-                r=ai_bench.one(job)
-                rec={'job':job,'returncode':r.get('returncode'),'timeout':r.get('timeout'),'tool_event_count':r.get('tool_event_count'),'answer_json_exists':(r.get('validation') or {}).get('answer_json_exists'),'answer_json_valid':(r.get('validation') or {}).get('answer_json_valid'),'secret_recovered':(r.get('validation') or {}).get('secret_recovered'),'solution_py_exists':(r.get('validation') or {}).get('solution_py_exists')}
+                rec=fut.result()
             except Exception as e:
-                rec={'job':job,'executor_error':type(e).__name__,'error':str(e)[:200]}
-        state['results'].append(rec)
-        state['completed']=len(state['results'])
-        state['updated']=time.time()
-        STATUS.write_text(json.dumps(state,indent=2))
+                rec={'job':futures[fut],'executor_error':type(e).__name__,'error':str(e)[:200]}
+            state['results'].append(rec)
+            state['completed']=len(state['results'])
+            state['updated']=time.time()
+            state['parallel']=args.parallel
+            STATUS.write_text(json.dumps(state,indent=2))
     state['complete']=True
     state['finished']=time.time()
     STATUS.write_text(json.dumps(state,indent=2))
+    try:
+        subprocess.run([sys.executable,str(Path(__file__).with_name('analyze_benchmark_precision.py'))],cwd=str(ROOT),env=dict(os.environ),timeout=120,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
     print(json.dumps({'complete':True,'jobs':len(jobs),'missing_variants':missing,'status':str(STATUS)},indent=2))
     return 0
 

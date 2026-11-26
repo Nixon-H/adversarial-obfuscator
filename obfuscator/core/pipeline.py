@@ -5714,7 +5714,6 @@ def build_project(args):
                                 try:
                                     from obfuscator.runner_attest import (
                                         verify as _ra_verify,
-                                        summary as _ra_summary,
                                     )
                                     from obfuscator.build_manifest import (
                                         _sha256_file as _ra_sha,
@@ -5810,22 +5809,22 @@ def build_project(args):
                             f"build failed: {_farm_exc}; refusing to ship a "
                             "single-OS artefact as a cloud build") from _farm_exc
                     finally:
-                        # --public / "Flash Mode": --public has advertised
-                        # "Nukes repo after build" since it was added, and was
-                        # parsed and never read, so every cloud build left a
-                        # repo holding the payload source.  Delete it once the
-                        # blobs are downloaded -- always, even if the run
-                        # failed, because a failed run leaves the source up
-                        # too.  --skip-cloud already implies no farm, so this
-                        # only fires when a repo was actually created.
-                        if getattr(args, 'public', False) and _farm is not None:
-                            try:
-                                _farm.delete_repo()
-                            except Exception as _del_exc:
-                                UI.warn("repo cleanup failed: %s (the build "
-                                        "repo still holds the payload "
-                                        "source)" % (_del_exc,))
-                        _release_farm_repo_lock(_farm_repo_lock)
+                        # The disposable farm repo contains the uploaded
+                        # payload source. Delete it by default once artifacts
+                        # have been downloaded or the build has failed;
+                        # retention is now an explicit debugging opt-in.
+                        _cleanup_error = _farm_repo_cleanup_error(_farm, args)
+                        try:
+                            if _cleanup_error:
+                                _cleanup_msg = (
+                                    "farm repo cleanup failed: %s; the repository "
+                                    "may still hold the uploaded payload source"
+                                    % (_cleanup_error,))
+                                if sys.exc_info()[0] is None:
+                                    raise SystemExit(_cleanup_msg)
+                                UI.warn(_cleanup_msg)
+                        finally:
+                            _release_farm_repo_lock(_farm_repo_lock)
         with UI.Task("Hybrid Loader", "Compiling Universal Fallback...") as t:
             # NOTE: 'ast_options' is assigned later in this function, so it
             # is never in locals() here — the literal below is the live
@@ -7690,6 +7689,24 @@ log = logging.getLogger(__name__)
 
 from obfuscator.version import VERSION, version_string  # noqa: F401
 
+def _farm_repo_cleanup_error(farm, args):
+    """Delete the disposable farm repo unless explicitly retained.
+
+    The repo contains the uploaded payload source, so keeping it by default
+    contradicts the cloud-build confidentiality boundary. Returns None on
+    success or an operator-visible error string. --keep-farm-repo is the
+    explicit debugging escape hatch.
+    """
+    if farm is None or getattr(args, 'keep_farm_repo', False):
+        return None
+    try:
+        if farm.delete_repo():
+            return None
+        return 'delete_repo returned false'
+    except Exception as exc:
+        return str(exc)
+
+
 def _farm_repo_lock_path():
     """Return the local lock path used to serialize the singleton farm repo."""
     base = os.path.expanduser("~/.cache/nixon-build-farm")
@@ -8217,7 +8234,8 @@ def build_parser():
                             'stego — add it explicitly for cloud builds')
     build.add_argument('--skip-cloud', action='store_true', help='Skip the cloud build farm: build the artifact locally even if --package compile/cloud would send it to the farm')
     build.add_argument('--resume', help='Resume waiting for a specific GitHub Run ID (skip upload)')
-    build.add_argument('--public', action='store_true', help='Public Repo Mode (Flash Mode) - Nukes repo after build')
+    build.add_argument('--public', action='store_true', help='Legacy flash-mode alias; farm repos are deleted by default after use')
+    build.add_argument('--keep-farm-repo', action='store_true', help='Retain the disposable farm repository for debugging (not recommended: it contains the uploaded payload source)')
     build.add_argument('--no-split-bootstrap', dest='split_bootstrap',
                        action='store_false', default=True,
                        help='Ship the bootstrap key as one string instead of '

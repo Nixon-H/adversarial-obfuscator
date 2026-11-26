@@ -12,7 +12,6 @@ RUNNER=ROOT/'re-bench/tools/run_profile_matrix.py'
 ARCHIVER=ROOT/'re-bench/tools/archive_invalid_matrix_results.py'
 LOCAL_VARIANTS='maximum-packed,maximum-local,absolute,absolute-native-only'
 CLOUD_VARIANTS='maximum-cloud,absolute-cloud'
-SCENARIOS='legitimate-runtime-secrets,runtime-secrets-withheld,source-assisted-runtime-secrets,source-assisted-secrets-withheld'
 
 def probe():
     try:
@@ -47,7 +46,7 @@ def start_matrix(matrix_id,variants,cloud=False):
         env['ABSMAX_SECRETS_ROOT']='/home/nixon/absmax-scratch/cloud-final4-secrets'
     out=open('/home/nixon/absmax-scratch/profile-matrix-'+matrix_id+'-retry.out','ab')
     err=open('/home/nixon/absmax-scratch/profile-matrix-'+matrix_id+'-retry.err','ab')
-    subprocess.Popen([sys.executable,str(RUNNER),'--variants',variants,'--scenarios',SCENARIOS,'--attempts','1'],cwd=str(ROOT),env=env,stdout=out,stderr=err,start_new_session=True)
+    subprocess.Popen([sys.executable,str(RUNNER),'--variants',variants,'--attempts','1'],cwd=str(ROOT),env=env,stdout=out,stderr=err,start_new_session=True)
 
 def main():
     import fcntl
