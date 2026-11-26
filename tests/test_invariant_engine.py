@@ -151,11 +151,36 @@ class TestSecurityInvariantEngine:
         assert isinstance(result, InvariantResult)
         assert result.invariant_name == "no_hardcoded_metrics"
 
-    def test_check_no_silent_fallback(self):
-        e = SecurityInvariantEngine()
+    def test_check_no_silent_fallback(self, tmp_path):
+        (tmp_path / "silent.py").write_text(
+            "def f():\n"
+            "    try:\n"
+            "        return 1\n"
+            "    except Exception:\n"
+            "        pass\n",
+            encoding="utf-8",
+        )
+        e = SecurityInvariantEngine(root_dir=str(tmp_path))
         result = e._check_no_silent_fallback()
         assert isinstance(result, InvariantResult)
         assert result.invariant_name == "no_silent_fallback"
+        assert result.passed is False
+        assert len(result.violations) == 1
+        assert result.violations[0].file_path == "silent.py"
+
+    def test_check_no_silent_fallback_reported_handler_passes(self, tmp_path):
+        (tmp_path / "reported.py").write_text(
+            "def f():\n"
+            "    try:\n"
+            "        return 1\n"
+            "    except Exception as exc:\n"
+            "        print(exc)\n",
+            encoding="utf-8",
+        )
+        e = SecurityInvariantEngine(root_dir=str(tmp_path))
+        result = e._check_no_silent_fallback()
+        assert result.passed is True
+        assert result.violations == []
 
     def test_invariant_file_walk_excludes_generated_evidence_trees(self, tmp_path):
         (tmp_path / "re-bench").mkdir()

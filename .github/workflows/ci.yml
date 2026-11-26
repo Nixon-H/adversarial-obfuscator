@@ -168,7 +168,7 @@ jobs:
         # HASH-PINNED (finding AI-SC-003). Was `pip install cython==3.0.12
         # setuptools wheel`: setuptools and wheel unpinned, no hashes, in the
         # acceptance-matrix job.
-        run: pip install --require-hashes -r requirements.lock && sudo apt-get update && sudo apt-get install -y upx
+        run: pip install --require-hashes -r requirements.lock
       - name: Build and run the acceptance matrix
         run: |
           python3 - <<'PY'
@@ -410,7 +410,6 @@ jobs:
           python-version: "3.11"
       - name: Compare the pinned ruff with the latest release
         run: |
-          pip install -q ruff
           pinned=$(grep '^ruff==' requirements-dev.txt | cut -d= -f3)
           latest=$(pip index versions ruff 2>/dev/null | head -1 | awk '{print $3}')
           echo "pinned: $pinned"
