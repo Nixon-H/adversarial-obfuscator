@@ -1,0 +1,51 @@
+# ABSOLUTE MAXIMUM continuation status matrix
+
+Date: 2026-11-26. Classifications are based on inspected source, test output, artifacts, benchmark records, and subagent audits. “Verified” means locally executed evidence exists at the referenced path; it does not mean externally reproducible CI evidence.
+
+## Workstream matrix
+
+| Item | Status | Evidence | Exact outstanding action / verification criterion |
+|---|---|---|---|
+| Reconstruct prior state | COMPLETED AND VERIFIED | Prior audit, benchmark, manifest, raw results, watchdog logs inspected; continuation state in `re-bench/CONTINUATION_PROGRESS_20261126.md` | Keep matrix updated through final report |
+| GitHub Actions third-party pinning | COMPLETED AND VERIFIED | `re-bench/GITHUB_ACTION_PIN_INVENTORY.json`; 107/107 active external refs SHA-pinned, 0 mutable; YAML parse 17/17; pin tests 6 passed | Optional normalization of mixed action versions; no mutable-ref blocker |
+| Generated build-farm action pinning/attestation upload | COMPLETED AND VERIFIED | `obfuscator/core/utils.py`; `tests/test_runner_attest.py`: 21 passed in `test_outputs/pytest-runner-attest-continuation.log` | Live farm rerun still external/not performed |
+| Historical xfailed tests | COMPLETED AND VERIFIED in working tree | `tests/test_ai_findings_regressions.py` + `tests/test_ledger_race_deterministic.py`: 8 passed in `test_outputs/xfix-regression-continuation.log`; current tree has zero xfail markers | Full suite must confirm no regression; committed HEAD still predates fix because no continuation commit exists |
+| Local real EVM contract execution | COMPLETED AND VERIFIED for local in-process EVM | `tests/test_chain_real_evm.py`: 5 passed in 58.57s in `test_outputs/chain_real_evm_full_artifact_continuation.log`; compiles Solidity, deploys/mints/transfers on py-evm, executes real emitted artifact | Not public-chain evidence; production chain behavior remains external |
+| EVM dependency reproducibility | IMPLEMENTED AND LOCALLY VERIFIED | `requirements-evm.txt`, hash-generated `requirements-evm.lock`, `tests/test_evm_dependency_lock.py`: 2 passed | Add optional CI lane if desired; dependencies are beta/pre-release upstream |
+| Runtime expiry and strict chain parsing in emitted loaders | IMPLEMENTED AND VERIFIED | `tests/test_licence_binding.py`/`test_chain_transport_policy.py` combined chain lane: 47 passed plus one initially incorrect lock test, then lock test fixed and passed; real EVM 5 passed | Include in full-suite verification |
+| Emitted chain helper completeness | FIXED AND VERIFIED | Real EVM initially exposed missing `_hex_address` NameError; pipeline fixed; 5 real EVM tests passed | Include in full-suite verification |
+| Runtime-secret customer-machine boundary | DOCUMENTED LIMITATION | `re-bench/ABSOLUTE_MAXIMUM_RUNTIME_SECRET_BOUNDARY.md`; AM-001 direct-import evidence `native_final_lowering/direct_import_boundary.json` | Architectural fix requires server-side execution/remote key release/native handshake; cannot be honestly closed locally |
+| AI-RE-003 unvalidated benchmark score control | FIXED AND VERIFIED | `scripts/benchmark/score_control.py`; control gate wired into adaptive paths; `test_outputs/benchmark_control_gate.log`: 17 passed | Objective validation corpus still does not exist; score remains diagnostic until validation evidence exists |
+| Build fatal-error visibility in `scripts/build.py` | FIXED AND LOCALLY VERIFIED | `scripts/common.py` error counting; `scripts/build.py` nonzero exit after phase errors; `test_outputs/build_error_visibility.log`: 7 passed | Full build behavior should be exercised in CI; optional phase semantics may need explicit classification |
+| Release dependency drift enforcement | IMPLEMENTED BUT NOT CI-EXECUTED | `.github/workflows/release.yml` now sets `NIXON_REQUIRE_DEP_LOCK=1` | Requires live CI run |
+| Manifest exact-value acceptance checks | IMPLEMENTED BUT NOT CI-EXECUTED | CI/release workflows now compare exact lock digest, CI workflow/run/sha identity, and dependency-lock `ok` | Requires live CI run |
+| CI manifest trust-anchor mismatch | FIXED STATICALLY | `ci.yml` now sets `NIXON_BUILD_MANIFEST_PUBKEY` before `verify_manifest` | Requires live CI run |
+| Circular provenance-pin acceptance | FIXED STATICALLY | CI/release compare artifact-embedded pin with independently generated publisher key | Requires live CI run |
+| Release manifest sidecar distribution | IMPLEMENTED BUT NOT CI-EXECUTED | release upload includes `accepted_artefact.py.build-manifest.json` | Requires live CI run; publish job should also verify sidecar |
+| Debug artifact manifest coverage | IMPLEMENTED BUT NOT VERIFIED | pipeline now includes `_protected_dbg.py` in manifest generation loop | Needs focused build test |
+| Rollback protection | PARTIALLY COMPLETED | `obfuscator/rollback.py` and tests exist; no production emitted-artifact wiring found | Decide product scope and implement real monotonic-level source plus artifact/runtime wiring, or explicitly declare library-only |
+| Replay-ledger revocation high-water integration | PARTIALLY COMPLETED | API pass-through fixed and tests pass; no production caller supplies persisted `previous_revocation_issued_at` | Implement persisted caller integration or document as caller responsibility |
+| Cross-platform Linux x86-64 artifact | COMPLETED AND VERIFIED for authoritative local pair | hashes/runtime probes in `ABSOLUTE_MAXIMUM_BUILD_MANIFEST.json` and `final_verification_summary.json` | Later source changes require separately identified rebuild before new claims |
+| Windows x86-64 native payload | PARTIALLY COMPLETED | farm evidence exists per prior audit, but externally produced and not locally reproducible | Live rerun with corrected runner-attestation upload and Windows validation |
+| macOS universal native payload | PARTIALLY COMPLETED / low trust | farm evidence exists; no local signing/notarisation validation | macOS runner + Developer ID + notarisation validation |
+| Linux ARM64 / Windows ARM64 | NOT STARTED / unsupported | prior cross-platform audit found unsupported/unmeasured | Add runners/build support before claiming |
+| Windows Authenticode mechanism | IMPLEMENTED BUT EXTERNALLY TRUST-BLOCKED | `obfuscator/authenticode.py`, verifier, tests; docs describe real mechanism | Requires trusted certificate, timestamping, Windows `signtool verify /pa` |
+| macOS signing/notarisation | BLOCKED BY EXTERNAL DEPENDENCY | parser implemented/tested; no Developer ID, macOS runner, notarisation account | Administrator must perform documented `codesign`/notarytool/`spctl` validation |
+| CET/shadow-stack enforcement | PARTIALLY COMPLETED | CET compatibility probing exists; runtime shadow-stack enforcement not proven | Requires Windows runner policy query and OS enforcement evidence |
+| Release signing identity | PARTIALLY COMPLETED | ephemeral CI/release keys validate mechanism only | Persistent operator-controlled publisher identity and independent pin distribution required |
+| SLSA/in-toto/Sigstore provenance | NOT STARTED | no standards-based provenance found | Optional enhancement; custom Ed25519/manifest provenance exists |
+| Dependency locking | MOSTLY COMPLETED | hashed `requirements.lock`, dev lock, pip-audit lock, new EVM lock | pip bootstrap and ruff exceptions remain; Makefile does not cover all locks |
+| Full test suite after continuation edits | IN PROGRESS / NOT VERIFIED | partition run launched; `vm-ir-llvm` 774 passed, other partitions running at time of writing | Must complete and aggregate exact counts |
+| Benchmark completion | BLOCKED BY EXTERNAL DEPENDENCY | watchdog PID 2393295 active; TokenHarbor paid lane HTTP 402; `:free` reset 2 Dec 2026 15:07 UTC; Hy4 cooldown active | Requires provider quota/reset or explicit billing intervention; no unauthorized substitution |
+| Benchmark scoring methodology | PARTIALLY COMPLETED | strict invalid-evidence separation, artifact identity, tool-call limit, evidence-boundary corrections; AI-RE-003 product control fixed | Golden scorer corpus and quantitative validation not complete; no unvalidated score may gate release |
+| Credential/evidence hygiene | PARTIALLY COMPLETED / needs rerun | prior scans report zero credential hits after redaction; edits and new files since then require rerun | Run redaction + secret scan before final report/commit |
+| Commit/final preservation | NOT STARTED | no continuation commit exists; worktree extremely dirty with pre-existing/external edits | Review scoped diffs, avoid unrelated/pre-existing changes, commit only verified authorized hunks or document why impossible |
+
+## Explicitly not completable in this environment
+
+1. Provider-completion of the benchmark without TokenHarbor/Hy4 quota restoration or reset.
+2. Public-chain production behaviour; only local EVM execution is valid evidence here.
+3. Windows/macOS public trust, signing, notarisation, and platform enforcement without external certificates/accounts/runners.
+4. Real cryptographic confidentiality of client-side computation against the customer-controlled machine.
+5. Live GitHub Actions validation of workflow changes without pushing or otherwise running CI, which is not authorised.
+6. A clean single-generation full-suite result while the tree continues to be edited; the best available completion criterion is a post-final-edit bounded partition run.
