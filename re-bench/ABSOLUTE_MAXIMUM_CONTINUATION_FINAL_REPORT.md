@@ -1,5 +1,15 @@
 # ABSOLUTE MAXIMUM continuation final report
 
+
+> **2026-11-27 status supersession:** this is historical pre-DeepSeek continuation
+> evidence. Statements that the benchmark remains provider-blocked or incomplete
+> are superseded for the operator-authorised replacement lane:
+> `opencode-go/deepseek-v4.1-flash` completed 114/114 structurally valid
+> diagnostic cells across 6 variants × 19 scenarios, one attempt per cell. That
+> completion is diagnostic-only, not statistical acceptance or a release gate.
+> Current authority: `re-bench/ABSOLUTE_MAXIMUM_FINAL_CLOSEOUT_20261127.md` and
+> `re-bench/ABSOLUTE_MAXIMUM_DEEPSEEK_FINAL_REPORT_20261126.md`.
+
 Date: 2026-11-26. This report covers the continuation work only. It does not overwrite the prior audit and it does not claim externally blocked work is complete.
 
 ## Executive outcome

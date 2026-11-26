@@ -2,6 +2,16 @@
 
 Date: 2026-11-26. Classifications are based on inspected source, test output, artifacts, benchmark records, and subagent audits. “Verified” means locally executed evidence exists at the referenced path; it does not mean externally reproducible CI evidence.
 
+> **Authoritative correction — 2026-11-27.** This matrix is historical
+> pre-DeepSeek continuation status. Rows below that say the external benchmark is
+> incomplete, quote the 30,799-pass suite, or describe commit state as of the
+> rollback pass are superseded. Current authority is
+> `ABSOLUTE_MAXIMUM_FINAL_CLOSEOUT_20261127.md`,
+> `ABSOLUTE_MAXIMUM_DEEPSEEK_FINAL_REPORT_20261126.md`, and
+> `ABSOLUTE_MAXIMUM_RAW_RESULTS/final_partition_test_aggregate_20261127.json`.
+> The DeepSeek lane later completed 114/114 valid diagnostic cells; statistical
+> acceptance remains diagnostic-only, not a release gate.
+
 ## Workstream matrix
 
 | Item | Status | Evidence | Exact outstanding action / verification criterion |

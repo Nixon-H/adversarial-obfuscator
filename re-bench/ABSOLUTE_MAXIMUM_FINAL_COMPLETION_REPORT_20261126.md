@@ -1,5 +1,17 @@
 # ABSOLUTE MAXIMUM final completion report
 
+> **Authoritative correction — 2026-11-27.** This is historical pre-DeepSeek
+> completion evidence, not current release status. Its source-state, artifact,
+> benchmark, full-suite, and commit claims are superseded by
+> `ABSOLUTE_MAXIMUM_FINAL_CLOSEOUT_20261127.md`,
+> `ABSOLUTE_MAXIMUM_DEEPSEEK_FINAL_REPORT_20261126.md`, and
+> `ABSOLUTE_MAXIMUM_RAW_RESULTS/final_partition_test_aggregate_20261127.json`.
+> In particular, the DeepSeek diagnostic benchmark later completed 114/114 valid
+> cells, AM-001 was formally accepted as an architectural boundary, and the
+> current corrected partitioned-suite aggregate differs from the historical
+> 30,799-pass total below because the test tree and documentation inventory
+> subsequently changed.
+
 Date: 2026-11-26. This report supersedes the earlier continuation-only status rows for the final rollback/rebuild verification. It is evidence-bound: paths are local evidence, not claims of external CI, public-chain, provider benchmark, Windows, or macOS completion.
 
 ## Final result
