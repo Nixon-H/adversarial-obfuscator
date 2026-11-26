@@ -1,0 +1,62 @@
+{
+  "artifact": "/home/nixon/absmax-scratch/rebuild-final-review-v7/raw/builds/absolute-native-only/cipher/artifact.py",
+  "cases": {
+    "valid_runtime_secrets": {
+      "returncode": 0,
+      "stdout": "SEALED 8771940273853809a401795ec7699cdc\n",
+      "stderr": "",
+      "elapsed_seconds": 0.4568,
+      "timeout": false
+    },
+    "missing_licence": {
+      "returncode": 78,
+      "stdout": "",
+      "stderr": "licence token required: set NIXON_LICENCE or place licence.json beside the artefact\nlicence token required: set NIXON_LICENCE or place licence.json beside the artefact\n[FATAL] native-only artefact: the embedded blobs could not be loaded and no Python fallback exists (exit 78)\n",
+      "elapsed_seconds": 0.1975,
+      "timeout": false
+    },
+    "missing_seal_shard": {
+      "returncode": 78,
+      "stdout": "",
+      "stderr": "[FATAL] native-only artefact: the embedded blobs could not be loaded and no Python fallback exists (exit 78)\n",
+      "elapsed_seconds": 0.232,
+      "timeout": false
+    },
+    "wrong_seal_shard": {
+      "returncode": 78,
+      "stdout": "",
+      "stderr": "[FATAL] native-only artefact: the embedded blobs could not be loaded and no Python fallback exists (exit 78)\n",
+      "elapsed_seconds": 0.2297,
+      "timeout": false
+    },
+    "missing_all_runtime_secrets": {
+      "returncode": 78,
+      "stdout": "",
+      "stderr": "licence token required: set NIXON_LICENCE or place licence.json beside the artefact\nlicence token required: set NIXON_LICENCE or place licence.json beside the artefact\n[FATAL] native-only artefact: the embedded blobs could not be loaded and no Python fallback exists (exit 78)\n",
+      "elapsed_seconds": 0.2012,
+      "timeout": false
+    },
+    "tampered_one_byte": {
+      "returncode": 137,
+      "stdout": "",
+      "stderr": "Self-check error: merkle expected=f0fb02727d278af6 got=00235c00c4c7332e lines=3297\n",
+      "elapsed_seconds": 0.0429,
+      "timeout": false
+    },
+    "forged_licence_payload": {
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "licence token does not match the pinned token\n",
+      "elapsed_seconds": 0.0616,
+      "timeout": false
+    },
+    "wrong_licence_token": {
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "licence token does not match the pinned token\n",
+      "elapsed_seconds": 0.0607,
+      "timeout": false
+    }
+  },
+  "secret_values_logged": false
+}

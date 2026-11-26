@@ -1,0 +1,105 @@
+{
+  "complete": true,
+  "missing": [],
+  "all_returncode_zero": true,
+  "rows": [
+    {
+      "name": "vm-ir-llvm",
+      "returncode": 0,
+      "counts": {
+        "passed": 779
+      },
+      "duration_seconds": 101.86,
+      "log": "/home/nixon/absmax-scratch/final-partitions-remaining/vm-ir-llvm.log",
+      "source_results": "/home/nixon/absmax-scratch/final-partitions-remaining/results.json"
+    },
+    {
+      "name": "crypto-container",
+      "returncode": 0,
+      "counts": {
+        "passed": 405,
+        "skipped": 1
+      },
+      "duration_seconds": 30.036,
+      "log": "/home/nixon/absmax-scratch/final-partitions-remaining/crypto-container.log",
+      "source_results": "/home/nixon/absmax-scratch/final-partitions-remaining/results.json"
+    },
+    {
+      "name": "security-licensing",
+      "returncode": 0,
+      "counts": {
+        "passed": 843
+      },
+      "duration_seconds": 692.267,
+      "log": "/home/nixon/absmax-scratch/final-partitions-postfix/security-licensing.log",
+      "source_results": "/home/nixon/absmax-scratch/final-partitions-postfix/results.json"
+    },
+    {
+      "name": "build-native-loader",
+      "returncode": 0,
+      "counts": {
+        "passed": 560,
+        "skipped": 4
+      },
+      "duration_seconds": 337.461,
+      "log": "/home/nixon/absmax-scratch/final-partitions-postfix/build-native-loader.log",
+      "source_results": "/home/nixon/absmax-scratch/final-partitions-postfix/results.json"
+    },
+    {
+      "name": "distributed-network",
+      "returncode": 0,
+      "counts": {
+        "passed": 161
+      },
+      "duration_seconds": 5.527,
+      "log": "/home/nixon/absmax-scratch/final-partitions-remaining/distributed-network.log",
+      "source_results": "/home/nixon/absmax-scratch/final-partitions-remaining/results.json"
+    },
+    {
+      "name": "unit-static-1",
+      "returncode": 0,
+      "counts": {
+        "passed": 483
+      },
+      "duration_seconds": 160.241,
+      "log": "/home/nixon/absmax-scratch/final-partitions-postfix/unit-static-1.log",
+      "source_results": "/home/nixon/absmax-scratch/final-partitions-postfix/results.json"
+    },
+    {
+      "name": "unit-static-2",
+      "returncode": 0,
+      "counts": {
+        "passed": 25638,
+        "skipped": 1
+      },
+      "duration_seconds": 391.322,
+      "log": "/home/nixon/absmax-scratch/final-review/full-partitions-v3/unit-static-2.log",
+      "source_results": "/home/nixon/absmax-scratch/final-review/full-partitions-v3/results.json"
+    },
+    {
+      "name": "unit-static-3",
+      "returncode": 0,
+      "counts": {
+        "passed": 951,
+        "skipped": 3
+      },
+      "duration_seconds": 49.216,
+      "log": "/home/nixon/absmax-scratch/final-review/full-partitions-v3/unit-static-3.log",
+      "source_results": "/home/nixon/absmax-scratch/final-review/full-partitions-v3/results.json"
+    },
+    {
+      "name": "unit-static-4",
+      "returncode": 0,
+      "counts": {
+        "passed": 979
+      },
+      "duration_seconds": 95.159,
+      "log": "/home/nixon/absmax-scratch/final-partitions-remaining/unit-static-4.log",
+      "source_results": "/home/nixon/absmax-scratch/final-partitions-remaining/results.json"
+    }
+  ],
+  "totals": {
+    "passed": 30799,
+    "skipped": 9
+  }
+}

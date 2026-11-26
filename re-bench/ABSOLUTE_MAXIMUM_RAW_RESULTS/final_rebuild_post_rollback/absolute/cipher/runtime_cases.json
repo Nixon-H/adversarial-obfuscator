@@ -1,0 +1,62 @@
+{
+  "artifact": "/home/nixon/absmax-scratch/rebuild-final-review-v7/raw/builds/absolute/cipher/artifact.py",
+  "cases": {
+    "valid_runtime_secrets": {
+      "returncode": 0,
+      "stdout": "SEALED 8771940273853809a401795ec7699cdc\n",
+      "stderr": "",
+      "elapsed_seconds": 0.7818,
+      "timeout": false
+    },
+    "missing_licence": {
+      "returncode": 137,
+      "stdout": "",
+      "stderr": "licence token required: set NIXON_LICENCE or place licence.json beside the artefact\nlicence token required: set NIXON_LICENCE or place licence.json beside the artefact\n",
+      "elapsed_seconds": 0.2487,
+      "timeout": false
+    },
+    "missing_seal_shard": {
+      "returncode": 137,
+      "stdout": "",
+      "stderr": "",
+      "elapsed_seconds": 0.2769,
+      "timeout": false
+    },
+    "wrong_seal_shard": {
+      "returncode": 137,
+      "stdout": "",
+      "stderr": "",
+      "elapsed_seconds": 0.2808,
+      "timeout": false
+    },
+    "missing_all_runtime_secrets": {
+      "returncode": 137,
+      "stdout": "",
+      "stderr": "licence token required: set NIXON_LICENCE or place licence.json beside the artefact\nlicence token required: set NIXON_LICENCE or place licence.json beside the artefact\n",
+      "elapsed_seconds": 0.2495,
+      "timeout": false
+    },
+    "tampered_one_byte": {
+      "returncode": 137,
+      "stdout": "",
+      "stderr": "Self-check error: merkle expected=6e191de90b394466 got=844a44cdf5c9f1a8 lines=3822\n",
+      "elapsed_seconds": 0.0495,
+      "timeout": false
+    },
+    "forged_licence_payload": {
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "licence token does not match the pinned token\n",
+      "elapsed_seconds": 0.0714,
+      "timeout": false
+    },
+    "wrong_licence_token": {
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "licence token does not match the pinned token\n",
+      "elapsed_seconds": 0.0728,
+      "timeout": false
+    }
+  },
+  "secret_values_logged": false
+}
