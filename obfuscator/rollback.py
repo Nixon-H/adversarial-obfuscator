@@ -69,6 +69,18 @@ def _mac(key: bytes, level: int, artefact_name: str) -> str:
     return hmac.new(bytes(key), body, hashlib.sha256).hexdigest()
 
 
+def derive_mark_key(root_key):
+    """Derive the emitted loader's rollback-mark key from its runtime key.
+
+    The rollback gate must not embed the payload key as a contiguous literal.
+    Deriving a domain-separated mark key from the already reconstructed runtime
+    key keeps the raw payload key split/masked while avoiding key reuse across
+    the payload-decryption and mark-authentication domains.
+    """
+    return hashlib.sha256(
+        b"nx-rollback/v1/key:" + bytes(root_key)).digest()
+
+
 def read_mark(path, key=None, artefact_name=None):
     """Return the recorded level, or 0 when absent/unreadable/corrupt.
 
@@ -128,24 +140,19 @@ def write_mark(path, key, level, artefact_name):
         return False
 
 
-def emit_rollback_snippet(level, key_hex):
+def emit_rollback_snippet(level):
     """Return self-contained loader code for runtime rollback enforcement.
 
     The snippet deliberately duplicates the small mark format rather than
     importing this module because emitted artefacts must run without the
-    repository on ``sys.path``. ``None``/invalid input is a build-time error:
-    an armed rollback gate must never degrade to a silent no-op.
+    repository on ``sys.path``. It does not embed the payload key: the gate
+    derives a domain-separated mark key at runtime from the loader's already
+    reconstructed ``_NX_EFF_KEY``/``BLOB_KEY``. Invalid input is a build-time
+    error because an armed rollback gate must never degrade to a silent no-op.
     """
     if not isinstance(level, int) or level < 0:
         raise ValueError("rollback level must be a non-negative int")
-    try:
-        key = bytes.fromhex(str(key_hex))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("rollback key must be hex") from exc
-    if not key:
-        raise ValueError("rollback key must not be empty")
     return """_NX_ROLLBACK_LEVEL = %d
-_NX_ROLLBACK_KEY_HEX = %r
 
 
 def _nx_rollback_gate():
@@ -161,7 +168,11 @@ def _nx_rollback_gate():
         _nx_rb_base = _nx_rb_os.path.dirname(_nx_rb_art)
         _nx_rb_name = _nx_rb_os.path.basename(_nx_rb_art)
         _nx_rb_path = _nx_rb_os.path.join(_nx_rb_base, '.nx-rollback-mark')
-        _nx_rb_key = bytes.fromhex(_NX_ROLLBACK_KEY_HEX)
+        _nx_rb_root = globals().get('_NX_EFF_KEY') or globals().get('BLOB_KEY')
+        if not _nx_rb_root:
+            return 'mark-unwritable'
+        _nx_rb_key = _nx_rb_hashlib.sha256(
+            b'nx-rollback/v1/key:' + bytes(_nx_rb_root)).digest()
 
         def _nx_rb_mac(_level):
             _body = ('nx-rollback/v1:%%d:%%s' %% (int(_level), _nx_rb_name)).encode()
@@ -205,8 +216,7 @@ def _nx_rollback_gate():
         return 'ok'
     except Exception:
         return 'mark-unwritable'
-""" % (level, str(key_hex))
-
+""" % (level,)
 
 def check_rollback(artefact_path, level, key, override_path=None):
     """Raise RuntimeError on a downgrade; otherwise raise the mark.

@@ -102,10 +102,11 @@ def test_emitted_rollback_snippet_enforces_the_high_water_mark(tmp_path):
     artefact = tmp_path / "payload_protected.py"
     artefact.write_text("print('x')\n", encoding="utf-8")
     key_hex = (b"k" * 32).hex()
+    root_key = bytes.fromhex(key_hex)
 
     def loaded(level):
-        snippet = rb.emit_rollback_snippet(level, key_hex)
-        ns = {"__file__": str(artefact)}
+        snippet = rb.emit_rollback_snippet(level)
+        ns = {"__file__": str(artefact), "BLOB_KEY": root_key}
         exec(compile(snippet, str(artefact), "exec"), ns)
         return ns
 
@@ -118,14 +119,29 @@ def test_emitted_rollback_snippet_enforces_the_high_water_mark(tmp_path):
 
     upgrade = loaded(6)
     assert upgrade["_nx_rollback_gate"]() == "ok"
-    assert rb.read_mark(str(tmp_path / rb.MARK_NAME), key=bytes.fromhex(key_hex),
+    assert rb.read_mark(str(tmp_path / rb.MARK_NAME),
+                        key=rb.derive_mark_key(root_key),
                         artefact_name=artefact.name) == 6
 
 
 def test_emitted_rollback_snippet_rejects_invalid_build_inputs(tmp_path):
-    for level, key in ((-1, "00" * 32), ("5", "00" * 32), (5, ""), (5, "not-hex")):
+    for level in (-1, "5"):
         with pytest.raises(ValueError):
-            rb.emit_rollback_snippet(level, key)
+            rb.emit_rollback_snippet(level)
+
+
+def test_generated_loader_does_not_embed_the_payload_key_for_rollback(tmp_path):
+    from obfuscator.core.pipeline import generate_hybrid_loader_script
+
+    key_hex = "11" * 32
+    src, _blobs, _fallback = generate_hybrid_loader_script(
+        {}, b"print('RB_PAYLOAD_OK')", key_hex,
+        build_id="rollback-test", protection_level=20,
+        self_check=False)
+    assert "_NX_ROLLBACK_KEY_HEX" not in src
+    assert key_hex not in src
+    assert "nx-rollback/v1/key:" in src
+
 
 
 def test_pipeline_wires_one_protection_level_into_loader_and_manifest():
@@ -135,6 +151,7 @@ def test_pipeline_wires_one_protection_level_into_loader_and_manifest():
     assert "protection_level=getattr(args, \"_protection_level\", None)" in source
     assert source.index("protection_level=_rb_level") < source.index(
         "protection_level=getattr(args, \"_protection_level\", None)")
+    assert "int(time.time_ns())" in source
 
 
 def test_generated_loader_enforces_rollback_before_payload(tmp_path):
@@ -162,3 +179,28 @@ def test_generated_loader_enforces_rollback_before_payload(tmp_path):
     downgrade = write_and_run(10)
     assert downgrade.returncode == 137
     assert "rollback-refused" in downgrade.stderr
+    assert "RB_PAYLOAD_OK" not in downgrade.stdout
+
+
+def test_generated_loader_refuses_to_run_when_the_mark_is_unwritable(tmp_path):
+    import subprocess
+    import sys
+    from obfuscator.core.pipeline import generate_hybrid_loader_script
+
+    artefact = tmp_path / "payload_protected.py"
+    src, _blobs, _fallback = generate_hybrid_loader_script(
+        {}, b"print('RB_PAYLOAD_OK')", "11" * 32,
+        build_id="rollback-test", protection_level=20,
+        self_check=False)
+    artefact.write_text(src, encoding="utf-8")
+    tmp_path.chmod(0o500)
+    try:
+        result = subprocess.run(
+            [sys.executable, str(artefact)], capture_output=True, text=True,
+            timeout=30, env=dict(os.environ, NIXON_LOG_REDIRECT="0",
+                                 NIXON_LADDER_DEBUG="1"))
+    finally:
+        tmp_path.chmod(0o700)
+    assert result.returncode == 137
+    assert "rollback-mark-unwritable" in result.stderr
+    assert "RB_PAYLOAD_OK" not in result.stdout
