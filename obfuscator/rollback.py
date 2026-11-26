@@ -128,6 +128,86 @@ def write_mark(path, key, level, artefact_name):
         return False
 
 
+def emit_rollback_snippet(level, key_hex):
+    """Return self-contained loader code for runtime rollback enforcement.
+
+    The snippet deliberately duplicates the small mark format rather than
+    importing this module because emitted artefacts must run without the
+    repository on ``sys.path``. ``None``/invalid input is a build-time error:
+    an armed rollback gate must never degrade to a silent no-op.
+    """
+    if not isinstance(level, int) or level < 0:
+        raise ValueError("rollback level must be a non-negative int")
+    try:
+        key = bytes.fromhex(str(key_hex))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("rollback key must be hex") from exc
+    if not key:
+        raise ValueError("rollback key must not be empty")
+    return """_NX_ROLLBACK_LEVEL = %d
+_NX_ROLLBACK_KEY_HEX = %r
+
+
+def _nx_rollback_gate():
+    import hashlib as _nx_rb_hashlib
+    import hmac as _nx_rb_hmac
+    import json as _nx_rb_json
+    import os as _nx_rb_os
+    import sys as _nx_rb_sys
+    import tempfile as _nx_rb_tempfile
+    try:
+        _nx_rb_art = _nx_rb_os.path.realpath(_nx_rb_os.path.abspath(
+            globals().get('__file__') or (_nx_rb_sys.argv[0] if _nx_rb_sys.argv else '')))
+        _nx_rb_base = _nx_rb_os.path.dirname(_nx_rb_art)
+        _nx_rb_name = _nx_rb_os.path.basename(_nx_rb_art)
+        _nx_rb_path = _nx_rb_os.path.join(_nx_rb_base, '.nx-rollback-mark')
+        _nx_rb_key = bytes.fromhex(_NX_ROLLBACK_KEY_HEX)
+
+        def _nx_rb_mac(_level):
+            _body = ('nx-rollback/v1:%%d:%%s' %% (int(_level), _nx_rb_name)).encode()
+            return _nx_rb_hmac.new(_nx_rb_key, _body, _nx_rb_hashlib.sha256).hexdigest()
+
+        _nx_rb_seen = 0
+        _nx_rb_exists = _nx_rb_os.path.exists(_nx_rb_path)
+        if _nx_rb_exists:
+            try:
+                with open(_nx_rb_path, encoding='utf-8') as _nx_rb_fh:
+                    _nx_rb_data = _nx_rb_json.load(_nx_rb_fh)
+                if _nx_rb_data.get('schema') == 'nx-rollback/v1':
+                    _nx_rb_candidate = int(_nx_rb_data.get('level', 0))
+                    if _nx_rb_hmac.compare_digest(
+                            str(_nx_rb_data.get('mac', '')),
+                            _nx_rb_mac(_nx_rb_candidate)):
+                        _nx_rb_seen = _nx_rb_candidate
+            except Exception:
+                _nx_rb_seen = 0
+        if _NX_ROLLBACK_LEVEL < _nx_rb_seen:
+            return 'refused'
+        if _NX_ROLLBACK_LEVEL > _nx_rb_seen or not _nx_rb_exists:
+            _nx_rb_tmp = None
+            try:
+                _nx_rb_fd, _nx_rb_tmp = _nx_rb_tempfile.mkstemp(
+                    dir=_nx_rb_base, prefix='.nx-rb-')
+                with _nx_rb_os.fdopen(_nx_rb_fd, 'w', encoding='utf-8') as _nx_rb_fh:
+                    _nx_rb_json.dump({
+                        'schema': 'nx-rollback/v1',
+                        'level': int(_NX_ROLLBACK_LEVEL),
+                        'mac': _nx_rb_mac(_NX_ROLLBACK_LEVEL),
+                    }, _nx_rb_fh, sort_keys=True)
+                _nx_rb_os.replace(_nx_rb_tmp, _nx_rb_path)
+            except Exception:
+                try:
+                    if _nx_rb_tmp:
+                        _nx_rb_os.unlink(_nx_rb_tmp)
+                except Exception:
+                    pass
+                return 'mark-unwritable'
+        return 'ok'
+    except Exception:
+        return 'mark-unwritable'
+""" % (level, str(key_hex))
+
+
 def check_rollback(artefact_path, level, key, override_path=None):
     """Raise RuntimeError on a downgrade; otherwise raise the mark.
 

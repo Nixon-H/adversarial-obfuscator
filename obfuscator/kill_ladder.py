@@ -57,6 +57,8 @@ REASON_CODES = frozenset([
     "trial-expired",
     "trial-tampered",
     "trial-rollback",
+    "rollback-refused",
+    "rollback-mark-unwritable",
     "watermark-tampered",
     "watermark-missing",
     "integrity-snapshot",
