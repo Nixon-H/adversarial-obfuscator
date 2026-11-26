@@ -51,6 +51,7 @@ class CorpusEntry:
 
 # Directories to skip during codebase scanning.
 _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", ".tox", ".pytest_cache", ".eggs", "eggs", "dist", "relay", ".agents", ".claude"}
+_MAX_SOURCE_SCAN_BYTES = 1_000_000
 
 class AttackCorpus:
     """
@@ -99,11 +100,11 @@ class AttackCorpus:
         """
         root = root or _ROOT
         categories = [
-            ("bypass", r"bypass|evade|circumvent", "Bypass"),
-            ("deobfuscation", r"deobfuscat|unpack|decompress", "Deobfuscation"),
-            ("proof_failure", r"proof.*fail|soundness.*violat", "Proof Failure"),
-            ("replay", r"replay|capture.*attack", "Replay Attack"),
-            ("symbolic_failure", r"symbolic.*fail|z3.*fail", "Symbolic Failure"),
+            ("bypass", re.compile(r"bypass|evade|circumvent"), "Bypass"),
+            ("deobfuscation", re.compile(r"deobfuscat|unpack|decompress"), "Deobfuscation"),
+            ("proof_failure", re.compile(r"proof.*fail|soundness.*violat"), "Proof Failure"),
+            ("replay", re.compile(r"replay|capture.*attack"), "Replay Attack"),
+            ("symbolic_failure", re.compile(r"symbolic.*fail|z3.*fail"), "Symbolic Failure"),
         ]
 
         for root_dir, dirs, files in os.walk(root):
@@ -114,32 +115,35 @@ class AttackCorpus:
                 fpath = os.path.join(root_dir, fname)
                 matched_cats = set()
                 try:
+                    if os.path.getsize(fpath) > _MAX_SOURCE_SCAN_BYTES:
+                        continue
                     with open(fpath, "r", errors="ignore") as f:
-                        lines = f.readlines()
+                        for i, line in enumerate(f, 1):
+                            line_lower = line.lower()
+                            for cat_key, pattern, cat_label in categories:
+                                if cat_label in matched_cats:
+                                    continue
+                                if pattern.search(line_lower):
+                                    matched_cats.add(cat_label)
+                                    self._entry_counter += 1
+                                    attack_id = f"AC-{self._entry_counter:04d}"
+                                    rel = os.path.relpath(fpath, root)
+                                    entry = CorpusEntry(
+                                        attack_id=attack_id,
+                                        category=cat_label,
+                                        description=f"Found '{cat_key}' pattern in {rel}",
+                                        severity=self._infer_severity(cat_key, line),
+                                        file_path=rel,
+                                        line_number=i,
+                                        reproduction_steps=[
+                                            f"Review {rel}:{i}",
+                                        ],
+                                    )
+                                    self.entries.append(entry)
+                            if len(matched_cats) == len(categories):
+                                break
                 except (OSError, UnicodeDecodeError):
                     continue
-                for i, line in enumerate(lines, 1):
-                    line_lower = line.lower()
-                    for cat_key, pattern, cat_label in categories:
-                        if cat_label in matched_cats:
-                            continue
-                        if re.search(pattern, line_lower):
-                            matched_cats.add(cat_label)
-                            self._entry_counter += 1
-                            attack_id = f"AC-{self._entry_counter:04d}"
-                            rel = os.path.relpath(fpath, root)
-                            entry = CorpusEntry(
-                                attack_id=attack_id,
-                                category=cat_label,
-                                description=f"Found '{cat_key}' pattern in {rel}",
-                                severity=self._infer_severity(cat_key, line),
-                                file_path=rel,
-                                line_number=i,
-                                reproduction_steps=[
-                                    f"Review {rel}:{i}",
-                                ],
-                            )
-                            self.entries.append(entry)
 
     def scan_test_files(self, root: str = "") -> None:
         """
@@ -160,11 +164,11 @@ class AttackCorpus:
         if not os.path.isdir(test_root):
             return
         attack_patterns = [
-            ("adversarial", r"adversarial", "Adversarial Test"),
-            ("attack", r"attack", "Attack Test"),
-            ("bypass", r"bypass|evade", "Bypass Test"),
-            ("soundness", r"soundness|proof.*attack", "Soundness Test"),
-            ("replay", r"replay", "Replay Test"),
+            ("adversarial", re.compile(r"adversarial", re.IGNORECASE), "Adversarial Test"),
+            ("attack", re.compile(r"attack", re.IGNORECASE), "Attack Test"),
+            ("bypass", re.compile(r"bypass|evade", re.IGNORECASE), "Bypass Test"),
+            ("soundness", re.compile(r"soundness|proof.*attack", re.IGNORECASE), "Soundness Test"),
+            ("replay", re.compile(r"replay", re.IGNORECASE), "Replay Test"),
         ]
         for root_dir, dirs, files in os.walk(test_root):
             dirs[:] = [d for d in dirs if not self._should_skip(d)]
@@ -172,31 +176,35 @@ class AttackCorpus:
                 if not fname.endswith(".py"):
                     continue
                 fpath = os.path.join(root_dir, fname)
+                matched = set()
                 try:
+                    if os.path.getsize(fpath) > _MAX_SOURCE_SCAN_BYTES:
+                        continue
                     with open(fpath, "r", errors="ignore") as f:
-                        content = f.read()
+                        for line in f:
+                            for cat_key, pattern, cat_label in attack_patterns:
+                                if cat_label in matched:
+                                    continue
+                                if pattern.search(line):
+                                    matched.add(cat_label)
+                                    self._entry_counter += 1
+                                    attack_id = f"AC-{self._entry_counter:04d}"
+                                    rel = os.path.relpath(fpath, root)
+                                    entry = CorpusEntry(
+                                        attack_id=attack_id,
+                                        category=cat_label,
+                                        description=f"Attack-related test in {rel}",
+                                        severity="medium",
+                                        file_path=rel,
+                                        reproduction_steps=[
+                                            f"Run tests in {rel}",
+                                        ],
+                                    )
+                                    self.entries.append(entry)
+                            if len(matched) == len(attack_patterns):
+                                break
                 except OSError:
                     continue
-                matched = set()
-                for cat_key, pattern, cat_label in attack_patterns:
-                    if cat_label in matched:
-                        continue
-                    if re.search(pattern, content, re.IGNORECASE):
-                        matched.add(cat_label)
-                        self._entry_counter += 1
-                        attack_id = f"AC-{self._entry_counter:04d}"
-                        rel = os.path.relpath(fpath, root)
-                        entry = CorpusEntry(
-                            attack_id=attack_id,
-                            category=cat_label,
-                            description=f"Attack-related test in {rel}",
-                            severity="medium",
-                            file_path=rel,
-                            reproduction_steps=[
-                                f"Run tests in {rel}",
-                            ],
-                        )
-                        self.entries.append(entry)
 
     def scan_attack_report(self, report_path: str = "") -> None:
         """

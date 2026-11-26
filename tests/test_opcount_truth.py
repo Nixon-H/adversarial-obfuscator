@@ -127,7 +127,7 @@ def test_no_bare_141_claim_in_code():
     # CFI constants are random integers, so the digits "141" appear by
     # coincidence (e.g. 314182922) — not as an op-count claim.
     bad = []
-    skip_dirs = {"archive", "build", ".git", ".opencode", ".mypy_cache",
+    skip_dirs = {"archive", "build", "ci-artifacts", ".git", ".opencode", ".mypy_cache",
                  ".pytest_cache", "__pycache__", "h0h5-results",
                  # Committed generated artefacts (the portable fixture): their
                  # MORPH_MAP and seed constants are random, so "141" appears by
@@ -137,6 +137,10 @@ def test_no_bare_141_claim_in_code():
                  # Vendored third-party code for the external corpus: its
                  # constants are not this project's claims. recipes.py's
                  # Miller-Rabin base 4759123141 contains the digits by accident.
+                 # re-bench/ is generated adversarial-benchmark evidence: embedded
+                 # artefact literals can contain these digits by coincidence and
+                 # are not implementation claims.
+                 "re-bench",
                  }
     skip_files = {"test_opcount_truth.py", "test_multi_func.py",
                   "test_lowering_parity_141.py",
@@ -159,6 +163,17 @@ def test_no_bare_141_claim_in_code():
                    for part in ("external", "bulk", "pkg")):
                 continue
             p = os.path.join(root, fn)
+            # audit/ holds dated audit notes: line numbers such as jit.rs:141
+            # are locations, not op-count claims about the current source.
+            if os.sep + "audit" + os.sep in p:
+                continue
+            # docs/research/ai-layer-bench-*/[a-z]*.py files are generated
+            # per-arm benchmark artefacts (the same classification .gitignore
+            # uses), not live implementation claims.  Match them explicitly:
+            # a VCS-less Docker context cannot use `git check-ignore`.
+            _rel = os.path.relpath(p, REPO_ROOT).replace(os.sep, "/")
+            if re.match(r"docs/research/ai-layer-bench-[^/]+/[a-z][^/]*\.py$", _rel):
+                continue
             # Git-ignored files are build leftovers, not source: a failed
             # build used to leave its staging file in the repository root,
             # and the check is about the SOURCE, not about whatever a

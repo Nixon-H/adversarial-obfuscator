@@ -22,6 +22,7 @@ Dependencies:
     - None (standard library only: struct)
 """
 
+import functools
 import struct
 
 # Header layout (20 bytes): text_base_delta (8), original_entry (8),
@@ -477,8 +478,169 @@ def make_stub_xor_decrypt(text_size: int, original_entry: int,
                       key_path=key_path)
 
 
+STUB_HEADER_SIZE_AEAD = 64
+STUB_MAGIC = b"NXAEAD1\0"
+STUB_VERSION = 1
+_AEAD_HEADER = struct.Struct("<8sIIIIqqIqIII")
+
+
+def make_aead_header(text_size: int, original_entry: int, nonce: bytes,
+                     text_base_delta: int, rodata_size: int = 0,
+                     rodata_base_delta: int = 0, block_index: int = 0) -> bytes:
+    """Canonical 64-byte authenticated header for the compiled ELF stub."""
+    if len(nonce) != 12:
+        raise ValueError("AEAD nonce must be 12 bytes")
+    return _AEAD_HEADER.pack(
+        STUB_MAGIC, STUB_VERSION, STUB_HEADER_SIZE_AEAD, text_size, 0,
+        text_base_delta, original_entry, rodata_size, rodata_base_delta,
+        block_index, 0, 0,
+    )
+
+
+def _c_array(data: bytes) -> str:
+    return ",".join(str(value) for value in data)
+
+
+@functools.lru_cache(maxsize=128)
+def _compile_aead_template(text_size: int, path_len: int,
+                           rodata_size: int) -> tuple[bytes, int]:
+    """Compile one invariant stub layout and return its header offset.
+
+    Header/nonce/tag/path bytes are data only. Compiling a canonical layout
+    once per structural shape avoids invoking GCC for every encrypted block.
+    """
+    import os
+    from pathlib import Path
+    import subprocess
+    import tempfile
+
+    if text_size <= 0 or path_len <= 1 or rodata_size < 0:
+        raise ValueError("invalid AEAD stub layout")
+    nonce = b"\0" * 12
+    tag = b"\0" * 16
+    path = b"A" * (path_len - 1) + b"\0"
+    header = make_aead_header(
+        text_size, 0, nonce, -(text_size + 6), rodata_size, 0, 0,
+    )
+    template = Path(__file__).with_name("stub_aead_template.c").read_text()
+    source = template.replace("@HEADER@", _c_array(header))
+    source = source.replace("@NONCE@", _c_array(nonce))
+    source = source.replace("@TAG@", _c_array(tag))
+    source = source.replace("@PATHLEN@", str(path_len))
+    source = source.replace("@KEYPATH@", _c_array(path))
+    scratch = Path(tempfile.mkdtemp(prefix="nix-aead-", dir=os.environ.get("TMPDIR")))
+    try:
+        c_path = scratch / "stub.c"
+        elf_path = scratch / "stub.elf"
+        bin_path = scratch / "stub.bin"
+        script_path = scratch / "stub.ld"
+        c_path.write_text(source, encoding="ascii")
+        script_path.write_text(
+            "ENTRY(stub_main)\n"
+            "SECTIONS {\n"
+            "  . = 0; .text.stub_main : { *(.text.stub_main) }\n"
+            "  .text : { *(.text*) }\n"
+            "  .rodata : { *(.rodata.aead.0) *(.rodata.aead.1) "
+            "*(.rodata.aead.2) *(.rodata.aead.3) *(.rodata*) }\n"
+            "  /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) "
+            "*(.got*) *(.plt*) *(.dynamic) *(.dyn*) }\n"
+            "}\n",
+            encoding="ascii",
+        )
+        subprocess.run([
+            "gcc", "-Os", "-fPIE", "-pie", "-nostdlib", "-static",
+            "-fno-stack-protector", "-fno-builtin", "-Wl,--build-id=none",
+            "-Wl,-z,noseparate-code", "-Wl,-T", str(script_path),
+            "-o", str(elf_path), str(c_path),
+        ], check=True, capture_output=True, timeout=60)
+        subprocess.run([
+            "objcopy", "-O", "binary", "--only-section=.text.stub_main",
+            "--only-section=.text", "--only-section=.rodata",
+            str(elf_path), str(bin_path),
+        ], check=True, capture_output=True, timeout=30)
+        blob = bin_path.read_bytes()
+        rodata_path = scratch / "rodata.bin"
+        subprocess.run([
+            "objcopy", "--dump-section", f".rodata={rodata_path}", str(elf_path),
+        ], check=True, capture_output=True, timeout=30)
+        if not blob or not rodata_path.exists():
+            raise RuntimeError("compiled AEAD stub is empty")
+        rodata = rodata_path.read_bytes()
+        header_in_rodata = rodata.find(header)
+        metadata = header + nonce + tag + path
+        if header_in_rodata < 0 or rodata[
+                header_in_rodata:header_in_rodata + len(metadata)] != metadata:
+            raise RuntimeError("compiled AEAD stub metadata layout is not contiguous")
+        header_offset = len(blob) - len(rodata) + header_in_rodata
+        return blob, header_offset
+    finally:
+        import shutil
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _compile_aead_stub(header: bytes, nonce: bytes, tag: bytes,
+                       key_path: str) -> bytes:
+    """Patch an invariant compiled stub with authenticated artifact metadata."""
+    import os
+
+    if len(header) != 64 or len(nonce) != 12 or len(tag) != 16:
+        raise ValueError("invalid AEAD stub metadata lengths")
+    fields = _AEAD_HEADER.unpack(header)
+    if fields[0] != STUB_MAGIC or fields[1] != STUB_VERSION \
+            or fields[2] != STUB_HEADER_SIZE_AEAD:
+        raise ValueError("invalid AEAD stub header")
+    path_bytes = os.fsencode(key_path) + b"\0"
+    if not path_bytes or b"\0" in path_bytes[:-1]:
+        raise ValueError("key path must be a non-empty NUL-free path")
+    template, offset = _compile_aead_template(
+        fields[3], len(path_bytes), fields[7],
+    )
+    built = bytearray(template)
+    built[offset:offset + 64] = header
+    built[offset + 64:offset + 76] = nonce
+    built[offset + 76:offset + 92] = tag
+    built[offset + 92:offset + 92 + len(path_bytes)] = path_bytes
+    return bytes(built)
+
+
+def make_stub_aead(text_size: int, original_entry: int, key_path: str,
+                   nonce: bytes, tag: bytes, text_base_delta: int,
+                   rodata_size: int = 0, rodata_base_delta: int = 0,
+                   block_index: int = 0) -> bytes:
+    """Build a standalone authenticated ELF stub with no embedded key."""
+    if text_size <= 0 or original_entry < 0 or rodata_size < 0:
+        raise ValueError("invalid AEAD stub sizes")
+    header = make_aead_header(
+        text_size, original_entry, nonce, text_base_delta,
+        rodata_size, rodata_base_delta, block_index,
+    )
+    return _compile_aead_stub(header, nonce, tag, key_path)
+
+
+def aead_header_offset(built: bytes, key_path_len: int) -> int:
+    """Offset of the canonical header in a compiled AEAD stub."""
+    del key_path_len
+    start = 0
+    while True:
+        offset = built.find(STUB_MAGIC, start)
+        if offset < 0:
+            raise ValueError("compiled AEAD stub has no canonical header")
+        if offset + STUB_HEADER_SIZE_AEAD <= len(built):
+            fields = _AEAD_HEADER.unpack_from(built, offset)
+            if fields[1] == STUB_VERSION and fields[2] == STUB_HEADER_SIZE_AEAD:
+                return offset
+        start = offset + 1
+
+
 def stub_size(text_size: int, key_path_len: int = 0,
-              rodata_size: int = 0) -> int:
+              rodata_size: int = 0, aead: bool = False) -> int:
+    if aead:
+        if not key_path_len:
+            raise ValueError("AEAD stub requires a sidecar key path")
+        template, _ = _compile_aead_template(
+            max(text_size, 1), key_path_len, rodata_size,
+        )
+        return len(template)
     if key_path_len and rodata_size:
         return (STUB_CODE_SIZE_KEYED_RO + STUB_HEADER_SIZE_KEYED_RO
                 + text_size + rodata_size + key_path_len)

@@ -12,7 +12,6 @@ high-water mark kept beside the artefact, MAC'd with the build key.
 Deleting it, or running in a clean directory, lets the old build run again.
 Real anti-rollback needs the issuer or a server to refuse old builds.
 """
-import json
 import os
 import sys
 

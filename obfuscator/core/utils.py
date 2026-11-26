@@ -352,6 +352,59 @@ def fast_xor_bytes(data, key):
     k_len = len(key)
     return bytes([b ^ key[i % k_len] for i, b in enumerate(data)])
 
+
+STREAM_XOR_MAGIC = b"NXS1"
+STREAM_XOR_NONCE_BYTES = 16
+
+
+def stream_xor_bytes(data, key, nonce):
+    """XOR ``data`` with a SHA-256 counter-mode keystream.
+
+    This is a stdlib-only stream construction for artifact packing. Unlike a
+    repeating-key XOR, a known plaintext prefix reveals only the keystream for
+    this nonce and does not expose a reusable key. The nonce is not secret.
+    """
+    key = bytes(key)
+    nonce = bytes(nonce)
+    out = bytearray()
+    counter = 0
+    while len(out) < len(data):
+        block = hashlib.sha256(
+            key + nonce + counter.to_bytes(8, "big")).digest()
+        out.extend(block)
+        counter += 1
+    return bytes(c ^ k for c, k in zip(data, out[:len(data)]))
+
+
+def stream_xor_envelope(data, key, *, context=b""):
+    """Seal bytes as magic||nonce||stream ciphertext, deterministically.
+
+    The nonce is derived from the key, plaintext digest, and caller-supplied
+    context. This keeps fixed-build-id output deterministic while ensuring
+    different plaintexts or roles do not share a keystream. The construction
+    is packing protection, not a replacement for authenticated encryption.
+    """
+    data = bytes(data)
+    key = bytes(key)
+    context = bytes(context)
+    digest = hashlib.sha256(data).digest()
+    nonce = hashlib.sha256(
+        b"nx-stream-nonce:" + key + context + digest).digest()[:STREAM_XOR_NONCE_BYTES]
+    return STREAM_XOR_MAGIC + nonce + stream_xor_bytes(data, key, nonce)
+
+
+def stream_xor_open(data, key):
+    """Open a stream envelope; raise ValueError for malformed input."""
+    data = bytes(data)
+    if not data.startswith(STREAM_XOR_MAGIC):
+        raise ValueError("not an NXS1 stream envelope")
+    nonce_start = len(STREAM_XOR_MAGIC)
+    nonce_end = nonce_start + STREAM_XOR_NONCE_BYTES
+    if len(data) < nonce_end:
+        raise ValueError("truncated NXS1 stream envelope")
+    nonce = data[nonce_start:nonce_end]
+    return stream_xor_bytes(data[nonce_end:], key, nonce)
+
 # MEASURED C-LEGAL UNICODE POOL (2026-11-20). These identifiers are
 # compiled into generated C (the Cython blob), and C99/C11 restrict which
 # non-ASCII characters may appear in identifiers regardless of what
@@ -592,24 +645,35 @@ class ConfigManager:
     def __init__(self):self.config=self._load()
     def _load(self):
         if not os.path.exists(self.CONFIG_FILE):return {}
+        # Never swallow a read/parse failure: the next save() would write {}
+        # over the file and silently destroy the user's stored tokens.
         try:
             with open(self.CONFIG_FILE,"r", encoding='utf-8')as f:return json.load(f)
-        except Exception:return {}
+        except (OSError, ValueError) as exc:
+            raise SystemExit(
+                f"cannot read config {self.CONFIG_FILE}: {exc}; refusing to "
+                "start with an empty config (a later save would overwrite it)"
+            ) from exc
     def save(self):
-        # Owner-only. This file holds GitHub and Cloudflare tokens, and the wizard
-        # tells the user they are "stored securely" -- 0644, the default, is not
-        # that. Written then chmod'd so the window where it is world-readable does
-        # not exist.
-        _fd = os.open(self.CONFIG_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        # Owner-only from creation, atomically replaced only after a complete
+        # fsync. os.replace replaces a symlink itself rather than following it,
+        # so a hostile CONFIG_FILE path cannot redirect secret writes elsewhere.
+        directory = os.path.dirname(os.path.abspath(self.CONFIG_FILE))
+        os.makedirs(directory, exist_ok=True)
+        fd, temp_path = tempfile.mkstemp(
+            prefix=".nixon-config-", suffix=".tmp", dir=directory)
         try:
-            with os.fdopen(_fd, "w", encoding="utf-8") as f:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(self.config, f, indent=4)
-        except Exception:
-            raise
-        try:
-            os.chmod(self.CONFIG_FILE, 0o600)   # in case the file already existed
-        except OSError:
-            pass
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, self.CONFIG_FILE)
+        finally:
+            try:
+                os.unlink(temp_path)
+            except FileNotFoundError:
+                pass
         print(f" [+] Configuration saved to {self.CONFIG_FILE}")
     def get(self,key,default=None):return self.config.get(key,default)
     def set(self,key,value):self.config[key]=value
@@ -865,6 +929,10 @@ FARM_DRIVER_MODULES = ("c_transform", "native_harden", "authenticode")
 #: `inert: ['cfg']`. Uploading it is therefore not optional for a Windows
 #: runner that wants CFG.
 FARM_DRIVER_DATA = (
+    # Hash-locked build tools. The generated workflow installs through this
+    # file with --require-hashes; uploading it is part of the supply-chain
+    # control rather than a convenience copy.
+    ("requirements-farm.lock", "requirements-farm.lock"),
     ("pe_load_config.c", "native/pe_load_config.c"),
     # CET ISOLATION PROBE (review register, P1: "enable and verify CET
     # compatibility on the actual Windows farm artifact"). The farm .pyd
@@ -913,6 +981,34 @@ def missing_farm_dependencies():
             if not os.path.exists(path)]
 
 
+
+
+def _render_farm_template(farm, payload_filename):
+    """Render farm workflow text without performing the GitHub upload.
+
+    ``create_workflow`` normally writes the rendered YAML into the farm repo.
+    The inspection helpers need the bytes, not the side effect; patching the
+    requests verbs here keeps renderer tests hermetic and avoids turning every
+    static inspection into a network-dependent test.
+    """
+    import requests
+    from unittest.mock import patch
+
+    class _Resp:
+        status_code = 404
+        text = "render-only"
+        def json(self):
+            return {}
+
+    class _PutResp(_Resp):
+        status_code = 201
+
+    try:
+        with patch.object(requests, "get", return_value=_Resp()),                 patch.object(requests, "put", return_value=_PutResp()):
+            farm.create_workflow(payload_filename)
+    except Exception:
+        pass
+
 def render_farm_driver(payload_filename="payload.py"):
     """Return the driver text the farm workflow embeds, for inspection.
 
@@ -931,12 +1027,7 @@ def render_farm_driver(payload_filename="payload.py"):
     farm.base_url = "https://api.github.com"
     farm.repo_name = "inspect"
     farm.username = "inspect"
-    # create_workflow uploads as a side effect; the renderer only needs the
-    # text, so swallow the network failure and read what it produced.
-    try:
-        farm.create_workflow(payload_filename)
-    except Exception:
-        pass
+    _render_farm_template(farm, payload_filename)
     return getattr(farm, "_nx_last_driver", "")
 
 
@@ -955,10 +1046,7 @@ def render_farm_yaml(payload_filename="payload.py"):
     farm.base_url = "https://api.github.com"
     farm.repo_name = "inspect"
     farm.username = "inspect"
-    try:
-        farm.create_workflow(payload_filename)
-    except Exception:
-        pass
+    _render_farm_template(farm, payload_filename)
     return getattr(farm, "_nx_last_yaml", "") or ""
 
 
@@ -2017,20 +2105,20 @@ jobs:
         include:
           - os: windows-latest
             suffix: .pyd
-            prep_cmd: choco install upx && pip install cython==3.0.12 setuptools wheel
+            prep_cmd: pip install --require-hashes -r requirements-farm.lock
             build_cmd: python setup_remote.py
           - os: ubuntu-22.04
             suffix: .so
-            prep_cmd: sudo apt-get update && sudo apt-get install -y upx && pip install cython==3.0.12 setuptools
+            prep_cmd: pip install --require-hashes -r requirements-farm.lock
             build_cmd: python setup_remote.py
           - os: macos-latest
             suffix: .dylib
-            prep_cmd: brew install upx && pip install cython==3.0.12 setuptools
+            prep_cmd: pip install --require-hashes -r requirements-farm.lock
             build_cmd: python setup_remote.py
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26  # pinned immutable; original actions/checkout@v3
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c  # pinned immutable; original actions/setup-python@v4
         with:
           python-version: '3.11'
       - name: Create Setup Script
@@ -2074,10 +2162,12 @@ jobs:
         run: |
           find . -maxdepth 1 -name "payload*" -type f ! -name "*.py" ! -name "setup_remote.py" ! -name "*.c" -print0 | xargs -0 -I {{}} mv {{}} payload${{{{ matrix.suffix }}}}
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pinned immutable; original actions/upload-artifact@v4
         with:
           name: blob-payload${{{{ matrix.suffix }}}}
-          path: payload${{{{ matrix.suffix }}}}
+          path: |
+            payload${{{{ matrix.suffix }}}}
+            runner-attestation.json
           retention-days: 1
 """
         self._nx_last_yaml = workflow_yaml

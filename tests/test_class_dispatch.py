@@ -126,7 +126,7 @@ class TestClassSpecializer:
             for blk in v.blocks:
                 for instr in blk.instructions:
                     v2_instrs.append(getattr(instr, 'opcode', ''))
-        assert v1_instrs != v2_instrs or True  # At minimum, nop positions differ
+        assert v1_instrs != v2_instrs  # variants must actually differ
 
     def test_variants_have_nops(self):
         fn = make_test_function()

@@ -60,14 +60,14 @@ which enables 14.
 | `call_indirection` | CFG | Calls routed through tables | A shared table name once let one assignment silently replace another |
 | `reflection` | REP | Reflective call paths | — |
 | `dataflow` | DATA | Value splitting / affine encoding | Storage virtualisation once deleted a cell a nested `nonlocal` needed |
-| `watermark` | INT | IR watermark + refuse-to-run gate | Needs IR; conflicts with `--skip-irgen` |
+| `watermark` | INT | IR watermark + refuse-to-run gate | Needs IR; conflicts with `--skip irgen` |
 | `variant_pool` | REP | Cloned crown-jewel functions | Increases binary size |
 | `fragmentation` | REP | Semantic fragmentation | — |
 | `provenance` | LEX | Provenance removal | — |
 
 Level 0 enables none of the 17. It is **not** a byte-identical copy through
 the CLI: always-on passes (symbol rename, integrity checksums, string sealing,
-adversarial injection) still run. `--skip-obfuscate` is the byte-identical
+adversarial injection) still run. `--skip obfuscate` is the byte-identical
 path (verified: 2,635 bytes in, 2,635 bytes out, `diff` clean). The ladder is
 the only way to enable a transform; individual transforms are disabled with
 `--no-cfg-flatten`, `--no-opaque-predicates`, `--no-bogus-exceptions`,
@@ -241,8 +241,8 @@ discovering it in the implementation:
 | `--lock-hwid` | Registers a licence and seeds the polymorphic-map/VM RNG. It does **not** "seed the build deterministically" as its help says. |
 | `--pin-structure` | Pins structure, not key material; two builds differed (1,882,254 / 1,882,385 bytes). |
 | `--cfg-mutation`, `--class-dispatch`, `--ssa-mutation`, `--state-isa`, `--per-exec-recompile`, `--self-healing` | **Metadata-only.** The phase writes a JSON config; the runtime modules were archived and no component reads it. |
-| `--watermark` + `--skip-irgen` (build.py) | Logs a conflict and writes an IR watermark, but the watermark string is **not** in the emitted AST artefact (`grep` count 0). |
-| `--opt-level 0` | Disables the 17 ladder transforms, **not** the always-on passes. Not a copy; use `--skip-obfuscate`. |
+| `--watermark` + `--skip irgen` (build.py) | Logs a conflict and writes an IR watermark, but the watermark string is **not** in the emitted AST artefact (`grep` count 0). |
+| `--opt-level 0` | Disables the 17 ladder transforms, **not** the always-on passes. Not a copy; use `--skip obfuscate`. |
 | `--fast` + `--strict-detections` | Share one dest; the last flag on the command line wins. |
 | `--hwid-lock` without `--hwid` | Silently disabled (`hwid_lock = flag and bool(hwid)`). |
 | `--licence-token` + `--customer-salt` | The token's `key_material` overrides the salt. |

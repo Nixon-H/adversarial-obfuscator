@@ -109,6 +109,7 @@ def test_fallback_runs_end_to_end_with_split_bootstrap_and_salt():
                         licence_bound=True, section_split=True,
                         section_count=4)
     ns = _exec(src)
+    ns["_nx_cfi_mark"]("enter")
     ns["_exec_fallback"]()
     assert ns.get("FB_RAN") == 123
 
@@ -117,6 +118,7 @@ def test_fallback_runs_end_to_end_without_section_split():
     src, _, _ = _loader(split_bootstrap=True, customer_salt=_SALT,
                         licence_bound=True, section_split=False)
     ns = _exec(src)
+    ns["_nx_cfi_mark"]("enter")
     ns["_exec_fallback"]()
     assert ns.get("FB_RAN") == 123
 

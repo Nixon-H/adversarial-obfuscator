@@ -1,10 +1,10 @@
 name: Flags x all Python versions (manual + release)
 
-# Every one of the 274 ladder flags, isolated, on every supported interpreter.
+# Every catalogue flag (30 today), isolated, on every supported interpreter.
 # Coverage tier A2: a transform that depends on the interpreter (ast.unparse
 # differences, changed AST node shapes) shows up here and nowhere else.
 #
-# 14 shards x 20 flags x 5 Pythons = 70 jobs.
+# 3 shards x 10 flags x 5 Pythons = 15 jobs.
 # Runs manually while stabilising, and automatically on every published release.
 
 on:
@@ -23,25 +23,25 @@ jobs:
       fail-fast: false
       matrix:
         python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        shard: [0, 1, 2]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # pinned immutable; original actions/checkout@v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
       - name: Install builder dependencies
         run: pip install --require-hashes -r requirements.lock
-      - name: Build and run 20 flags on this interpreter
+      - name: Build and run 10 flags on this interpreter
         env:
           NX_PAYLOAD: ${{ github.workspace }}/tests/fixtures/portable/constructs_source.py
           NX_OPT_LEVEL: "3"
           NX_BUILD_TIMEOUT: "1800"
           PYTHONHASHSEED: "0"
           NX_BUILD_SEED: "12345"
-        run: python scripts/ci/isolate_flags.py --start $(( ${{ matrix.shard }} * 20 )) --count 20
+        run: python scripts/ci/isolate_flags.py --start $(( ${{ matrix.shard }} * 10 )) --count 10
       - name: Keep the failing artefact
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pinned immutable; original actions/upload-artifact@v4
         with:
           name: failing-py${{ matrix.python }}-shard-${{ matrix.shard }}
           path: |

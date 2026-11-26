@@ -25,10 +25,24 @@ report success is not a benchmark.
 """
 from __future__ import annotations
 
+import ast
 import itertools
-import random
+import re
 import statistics
 import time
+
+#: Hard budgets for artefact-derived expressions passed to the symbolic probes.
+#: Inputs beyond either limit are reported as untranslatable before any solver
+#: or evaluator is invoked, so a hostile artefact cannot turn a probe into a
+#: CPU/memory sink.
+# The shipped five-round MBA fixture has 826 AST nodes. Keep a hard ceiling
+# with headroom for that measured emitter output rather than rejecting the
+# project's own adversarial benchmark as hostile input.
+MAX_EXPRESSION_NODES = 1024
+MAX_EXPRESSION_LENGTH = 20_000
+MAX_EXPRESSION_DEPTH = 64
+_INT64_MIN = -(1 << 63)
+_INT64_MAX = (1 << 63) - 1
 
 #: The bar the review sets. A transform that an automated solver dispatches in
 #: under this budget is not a security mechanism, whatever it costs in bytes.
@@ -245,11 +259,26 @@ def probe_mba(expressions, expected_value, simplifier=None):
     sympy-backed simplifier in `scripts/adversarial_transforms.py`.
     """
     rows = []
+    has_slots = False
     for expression in expressions:
+        if len(expression) > MAX_EXPRESSION_LENGTH:
+            rows.append({"expression_length": len(expression),
+                         "measured": False,
+                         "reason": "expression length budget exceeded"})
+            continue
+        has_slots = has_slots or "__nx_mba_" in expression
         if simplifier is None:
             rows.append({"expression_length": len(expression),
                          "measured": False,
                          "reason": "no simplifier supplied"})
+            continue
+        try:
+            _check_expression_budget(expression)
+        except (ValueError, SyntaxError) as exc:
+            # A hostile/generated expression cannot make the simplifier burn
+            # unbounded time; report the budget failure without invoking it.
+            rows.append({"expression_length": len(expression),
+                         "measured": False, "reason": str(exc)})
             continue
         recovered, seconds = simplifier(expression)
         rows.append({
@@ -270,7 +299,6 @@ def probe_mba(expressions, expected_value, simplifier=None):
     # this flag a "constant recovered" verdict is ambiguous: it could mean the
     # transform is weak, or it could mean the probe measured the slot-free form
     # by mistake. That ambiguity produced a wrong verdict once.
-    has_slots = any("__nx_mba_" in expression for expression in expressions)
     return {
         "probe": "mba",
         "applicable": True,
@@ -316,6 +344,82 @@ def count_main_branches(disassembly):
     return sum(1 for line in body.splitlines() if pattern.search(line))
 
 
+_INTEGER_BINOPS = {
+    ast.Add: lambda a, b: a + b,
+    ast.Sub: lambda a, b: a - b,
+    ast.Mult: lambda a, b: a * b,
+    ast.BitXor: lambda a, b: a ^ b,
+    ast.BitAnd: lambda a, b: a & b,
+    ast.BitOr: lambda a, b: a | b,
+    ast.FloorDiv: lambda a, b: a // b,
+}
+_INTEGER_UNARY = {ast.USub: lambda a: -a, ast.UAdd: lambda a: a}
+
+
+def _integer_literal_value(node, text):
+    """Return a signed integer literal's value, or None for a non-literal."""
+    sign = 1
+    while isinstance(node, ast.UnaryOp) and type(node.op) in _INTEGER_UNARY:
+        if isinstance(node.op, ast.USub):
+            sign = -sign
+        node = node.operand
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        spelling = ast.get_source_segment(text, node)
+        if spelling and "_" in spelling:
+            raise ValueError("underscore numeral spellings are not supported")
+        return sign * node.value
+    return None
+
+
+def _check_expression_budget(text):
+    """Validate and bound artefact-derived MBA arithmetic before simplification."""
+    if len(text) > MAX_EXPRESSION_LENGTH:
+        raise ValueError("expression length budget exceeded")
+    tree = ast.parse(text, mode="eval")
+    if sum(1 for _ in ast.walk(tree)) > MAX_EXPRESSION_NODES:
+        raise ValueError("expression node count budget exceeded")
+
+    def _depth(node):
+        return 1 + max((_depth(child) for child in ast.iter_child_nodes(node)),
+                       default=0)
+
+    if _depth(tree) > MAX_EXPRESSION_DEPTH:
+        raise ValueError("expression depth budget exceeded")
+
+    def _validate(node):
+        literal = _integer_literal_value(node, text)
+        if literal is not None:
+            if not (_INT64_MIN <= literal <= _INT64_MAX):
+                raise ValueError("integer width budget exceeded")
+            return
+        if isinstance(node, ast.Expression):
+            _validate(node.body)
+            return
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, bool):
+                raise ValueError("bool constants are not supported")
+            raise ValueError("disallowed node Constant")
+        if isinstance(node, ast.Name):
+            if re.fullmatch(r"__nx_mba_[0-9]+", node.id) is None:
+                raise ValueError("disallowed name %r" % node.id)
+            return
+        if isinstance(node, ast.BinOp):
+            if type(node.op) not in _INTEGER_BINOPS:
+                raise ValueError("disallowed node %s" % type(node.op).__name__)
+            _validate(node.left)
+            _validate(node.right)
+            return
+        if isinstance(node, ast.UnaryOp):
+            if type(node.op) not in _INTEGER_UNARY:
+                raise ValueError("disallowed node %s" % type(node.op).__name__)
+            _validate(node.operand)
+            return
+        raise ValueError("disallowed node %s" % type(node).__name__)
+
+    _validate(tree)
+    return tree
+
+
 def evaluate_integer_expression(expression):
     """Evaluate an MBA expression of CONSTANTS, without ``eval``.
 
@@ -330,32 +434,31 @@ def evaluate_integer_expression(expression):
     expression that ever gained a name or a call fails loudly instead of being
     silently evaluated.
     """
-    import ast
+    if isinstance(expression, str) and len(expression) > MAX_EXPRESSION_LENGTH:
+        raise ValueError("expression length budget exceeded")
+    text = str(expression)
+    tree = _check_expression_budget(text)
 
-    _BINOPS = {
-        ast.Add: lambda a, b: a + b,
-        ast.Sub: lambda a, b: a - b,
-        ast.Mult: lambda a, b: a * b,
-        ast.BitXor: lambda a, b: a ^ b,
-        ast.BitAnd: lambda a, b: a & b,
-        ast.BitOr: lambda a, b: a | b,
-        ast.FloorDiv: lambda a, b: a // b,
-    }
-    _UNARY = {ast.USub: lambda a: -a, ast.UAdd: lambda a: a}
+    def _bounded(value):
+        if not (_INT64_MIN <= value <= _INT64_MAX):
+            raise ValueError("integer width budget exceeded")
+        return value
 
     def _walk(node):
+        literal = _integer_literal_value(node, text)
+        if literal is not None:
+            return _bounded(literal)
         if isinstance(node, ast.Expression):
             return _walk(node.body)
-        if isinstance(node, ast.Constant) and isinstance(node.value, int):
-            return node.value
-        if isinstance(node, ast.BinOp) and type(node.op) in _BINOPS:
-            return _BINOPS[type(node.op)](_walk(node.left), _walk(node.right))
-        if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY:
-            return _UNARY[type(node.op)](_walk(node.operand))
+        if isinstance(node, ast.BinOp) and type(node.op) in _INTEGER_BINOPS:
+            return _bounded(_INTEGER_BINOPS[type(node.op)](
+                _walk(node.left), _walk(node.right)))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in _INTEGER_UNARY:
+            return _bounded(_INTEGER_UNARY[type(node.op)](_walk(node.operand)))
         raise ValueError("disallowed node %s in %r"
-                         % (type(node).__name__, expression[:60]))
+                         % (type(node).__name__, text[:60]))
 
-    return _walk(ast.parse(str(expression), mode="eval"))
+    return _walk(tree)
 
 
 def probe_opaque_predicate(compiler, expressions, build_dir=None):

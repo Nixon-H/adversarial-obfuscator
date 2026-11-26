@@ -115,7 +115,11 @@ def test_every_extraction_in_the_farm_is_confined():
                     ".venv", "venv", "target", "dist"}
     bare = []
     for dirpath, dirnames, filenames in os.walk(ROOT):
-        dirnames[:] = [d for d in dirnames if d not in skipped_dirs]
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in skipped_dirs
+            and not os.path.exists(os.path.join(dirpath, d, "pyvenv.cfg"))
+        ]
         for filename in filenames:
             if not filename.endswith(".py"):
                 continue

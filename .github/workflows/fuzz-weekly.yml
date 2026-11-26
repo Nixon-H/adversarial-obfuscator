@@ -21,7 +21,7 @@ jobs:
   fuzz:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # pinned immutable; original actions/checkout@v4
       - name: Install nightly (libFuzzer needs -Zbuild-std datasets)
         run: rustup toolchain install nightly --component rust-src
       - name: Long fuzz config_parse
@@ -34,7 +34,7 @@ jobs:
         working-directory: relay/fuzz
       - name: Upload crashers
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pinned immutable; original actions/upload-artifact@v4
         with:
           name: fuzz-crashers-weekly
           path: relay/fuzz/artifacts/

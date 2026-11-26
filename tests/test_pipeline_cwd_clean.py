@@ -11,6 +11,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 PAYLOAD = '''\
@@ -33,6 +35,7 @@ def _run_pipeline(source, cwd, extra=()):
         cwd=cwd, env=env, capture_output=True, text=True, timeout=1800)
 
 
+@pytest.mark.nixon_timeout(240)
 def test_pipeline_writes_next_to_the_source_not_the_cwd(tmp_path):
     src_dir = tmp_path / "src"
     run_dir = tmp_path / "run"

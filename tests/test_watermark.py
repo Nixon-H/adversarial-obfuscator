@@ -400,3 +400,118 @@ class TestCLI:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_bch_roundtrip_and_error_correction_regression():
+    """Regression: the generator multiplied duplicate cyclotomic cosets and
+    the BM update scaled by inv(d) instead of d/b with branch swap -- so
+    encode/decode failed even at ZERO errors and never corrected errors."""
+    import random as _random
+    from irgen.watermark import BCHCode
+    code = BCHCode(255, 20)
+    rng = _random.Random(1234)
+    for _ in range(10):
+        data = bytes(rng.randrange(256) for _ in range(14))
+        enc = code.encode(data)
+        assert code.decode(enc, len(data) * 8)[:len(data)] == data
+        bits = bytearray(enc)
+        for pos in rng.sample(range(255), 20):
+            bits[pos // 8] ^= 1 << (7 - pos % 8)
+        assert code.decode(bytes(bits), len(data) * 8)[:len(data)] == data
+
+
+def test_generate_watermark_uses_consistent_bch_capacity(monkeypatch):
+    import hashlib
+    import irgen.watermark as wm
+
+    monkeypatch.setattr(wm, "_PHASE2_ENABLED", True)
+    expected = hashlib.blake2b(b"customer" + b"build", digest_size=32).digest()[:14]
+    encoded, meta = wm.generate_watermark(b"customer", b"build")
+    assert len(encoded) == 32
+    assert meta["bits"] == [(byte >> bit) & 1 for byte in expected for bit in range(7, -1, -1)]
+    assert meta["bit_count"] == 255
+    assert wm.BCHCode(255, 20).decode(encoded, 112) == expected
+
+    raw, raw_meta = wm.generate_watermark(b"customer", b"build", error_correct=False)
+    assert raw == expected
+    assert raw_meta["bits"] == meta["bits"]
+    assert raw_meta["bit_count"] == 112
+
+
+def test_bch_encode_rejects_capacity_overflow():
+    import irgen.watermark as wm
+
+    with pytest.raises(ValueError, match="capacity"):
+        wm.BCHCode(255, 20).encode(b"x" * 15)
+
+
+def test_bch_decode_rejects_uncorrectable_errors():
+    import irgen.watermark as wm
+
+    code = wm.BCHCode(255, 20)
+    encoded = bytearray(code.encode(b"x" * 14))
+    for bit in range(21):
+        encoded[bit // 8] ^= 1 << (7 - bit % 8)
+    with pytest.raises(ValueError, match="uncorrectable"):
+        code.decode(bytes(encoded), 112)
+
+
+def test_watermark_is_one_seed_bound_sequence(monkeypatch):
+    import irgen.watermark as wm
+    from irgen.compile import IrBlock, IrType
+
+    monkeypatch.setattr(wm, "_PHASE2_ENABLED", True)
+    module = IrModule("m")
+    for name in ("first", "second"):
+        func = IrFunction(name, IrType.i32())
+        block = IrBlock("entry")
+        block.set_terminator("ret", operands=[IrType.i32(), 0])
+        func.blocks.append(block)
+        module.functions.append(func)
+
+    payload = b"\xab\xcd"
+    wm.embed_watermark(module, payload, {"build_seed": b"seed"})
+    markers = [
+        block for func in module.functions for block in func.blocks
+        if block.label.startswith("_wm_") and block.terminator is not None
+        and block.terminator.opcode == "br"
+    ]
+    assert len(markers) == 16
+    assert wm.detect_watermark(module, b"seed") == payload
+    assert wm.detect_watermark(module, b"other-seed") is None
+
+
+def test_watermark_detection_rejects_unbound_markers(monkeypatch):
+    import random
+    import irgen.watermark as wm
+    from irgen.compile import IrBlock, IrFunction, IrModule, IrType
+
+    monkeypatch.setattr(wm, "_PHASE2_ENABLED", True)
+    module = IrModule("m")
+    func = IrFunction("f", IrType.i32())
+    entry = IrBlock("entry")
+    entry.set_terminator("ret", operands=[IrType.i32(), 0])
+    func.blocks.append(entry)
+    module.functions.append(func)
+    for index in range(16):
+        wm._make_watermark_block(func, f"forged_{index}", index % 2, random.Random(index))
+    assert wm.detect_watermark(module, b"seed") is None
+
+
+def test_bch_watermark_detection_returns_payload(monkeypatch):
+    import hashlib
+    import irgen.watermark as wm
+    from irgen.compile import IrBlock, IrFunction, IrModule, IrType
+
+    monkeypatch.setattr(wm, "_PHASE2_ENABLED", True)
+    module = IrModule("m")
+    func = IrFunction("f", IrType.i32())
+    entry = IrBlock("entry")
+    entry.set_terminator("ret", operands=[IrType.i32(), 0])
+    func.blocks.append(entry)
+    module.functions.append(func)
+    encoded, meta = wm.generate_watermark(b"customer", b"build")
+    meta["build_seed"] = b"build"
+    wm.embed_watermark(module, encoded, meta)
+    expected = hashlib.blake2b(b"customer" + b"build", digest_size=32).digest()[:14]
+    assert wm.detect_watermark(module, b"build") == expected

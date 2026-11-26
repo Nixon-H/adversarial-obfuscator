@@ -91,6 +91,9 @@ def test_loader_with_watermark_has_gate(tmp_path):
     ns = {"__name__": "wm_on_loader"}
     exec(compile(src, "<wm_on_loader>", "exec"), ns)
     assert ns.get("_NX_WATERMARK_GATE") == "ok"
+    # The fallback is an internal branch of _load_native; reproduce that
+    # dispatch order explicitly instead of jumping straight into payload use.
+    ns["_nx_cfi_mark"]("enter")
     ns["_exec_fallback"]()
     assert ns.get("WM_E2E") == 42
 

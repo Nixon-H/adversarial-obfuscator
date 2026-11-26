@@ -48,16 +48,25 @@ def _build(tmp_path):
     return artifact, proc.stdout
 
 
-def test_the_c_core_is_built_next_to_the_artifact(tmp_path):
+@pytest.fixture(scope="module")
+def built_artifact(tmp_path_factory):
+    """Build the expensive artifact once for both wiring assertions."""
+    work = tmp_path_factory.mktemp("c_core_wiring")
+    return _build(str(work))
+
+
+@pytest.mark.nixon_timeout(1000)
+def test_the_c_core_is_built_next_to_the_artifact(built_artifact):
     """The loader looks beside its own file, so the library goes there."""
-    artifact, _out = _build(tmp_path)
+    artifact, _out = built_artifact
     core = os.path.join(os.path.dirname(artifact), "nixon_core.so")
     assert os.path.exists(core), (
         "the C core was not built next to the artifact, so the loader "
         "cannot load it: %s" % core)
 
 
-def test_the_build_reports_the_loader_symbols_it_is_missing(tmp_path):
+@pytest.mark.nixon_timeout(1000)
+def test_the_build_reports_the_loader_symbols_it_is_missing(built_artifact):
     """An unimplemented backend must not be reported as working.
 
     When the C core lacks the loader's symbols, the build has to say
@@ -65,7 +74,7 @@ def test_the_build_reports_the_loader_symbols_it_is_missing(tmp_path):
     """
     from obfuscator.core.c_core_build import missing_loader_symbols
 
-    artifact, out = _build(tmp_path)
+    artifact, out = built_artifact
     core = os.path.join(os.path.dirname(artifact), "nixon_core.so")
     missing = missing_loader_symbols(core)
     if missing:

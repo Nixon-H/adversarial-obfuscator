@@ -9,10 +9,25 @@ it survives automated simplification").
 """
 from __future__ import annotations
 
+import ast
 import os
 import re
 import subprocess
 import sys
+
+from .transform_solvers import (
+    MAX_EXPRESSION_DEPTH,
+    MAX_EXPRESSION_LENGTH,
+    MAX_EXPRESSION_NODES,
+    _check_expression_budget,
+    _integer_literal_value,
+)
+
+#: Per-solver ceilings. z3.unknown is reported as a timeout, never as proof of
+#: constancy. timeout is milliseconds; max_memory is MiB, matching Z3's options.
+Z3_SOLVER_TIMEOUT_MS = 5000
+Z3_SOLVER_RLIMIT = 1_000_000
+Z3_SOLVER_MAX_MEMORY = 512
 
 
 def probe_runtime_output(artefact_path, timeout=180):
@@ -95,6 +110,87 @@ def probe_memory_maps(artefact_path, timeout=180):
     return {"probe": "memory_maps", "max_maps": maps_seen, "rwx_mappings": rwx}
 
 
+def _z3_from_ast(text, syms, z3):
+    """Translate a C-style arithmetic predicate to a Z3 expression by AST
+    walk. Returns None for anything outside the allowed grammar (names must
+    be known operands; no calls, attributes, subscripts, or ** )."""
+    try:
+        if len(text) > MAX_EXPRESSION_LENGTH:
+            return None
+        tree = ast.parse(text, mode="eval")
+        if sum(1 for _ in ast.walk(tree)) > MAX_EXPRESSION_NODES:
+            return None
+    except SyntaxError:
+        return None
+    _BIN = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b,
+            ast.Mult: lambda a, b: a * b, ast.BitAnd: lambda a, b: a & b,
+            ast.BitOr: lambda a, b: a | b, ast.BitXor: lambda a, b: a ^ b,
+            ast.LShift: lambda a, b: a << b, ast.RShift: lambda a, b: a >> b}
+    _CMP = {ast.Eq: lambda a, b: a == b, ast.NotEq: lambda a, b: a != b,
+            ast.Lt: lambda a, b: a < b, ast.LtE: lambda a, b: a <= b,
+            ast.Gt: lambda a, b: a > b, ast.GtE: lambda a, b: a >= b}
+
+    def walk(node, depth=0):
+        if depth > MAX_EXPRESSION_DEPTH:
+            raise ValueError("expression too deep")
+        literal = _integer_literal_value(node, text)
+        if literal is not None:
+            # The operands are signed 32-bit bit-vectors. Silently truncating a
+            # wider literal would answer a different question than the
+            # artefact's C arithmetic, so refuse it instead.
+            if not (-(1 << 31) <= literal <= (1 << 31) - 1):
+                return None
+            return z3.BitVecVal(literal, 32)
+        if isinstance(node, ast.Expression):
+            return walk(node.body, depth + 1)
+        if isinstance(node, ast.Constant):
+            return None
+        if isinstance(node, ast.Name):
+            return syms.get(node.id)
+        if isinstance(node, ast.BinOp) and type(node.op) in _BIN:
+            l, r = walk(node.left, depth + 1), walk(node.right, depth + 1)
+            if l is None or r is None:
+                return None
+            return _BIN[type(node.op)](l, r)
+        if isinstance(node, ast.UnaryOp):
+            v = walk(node.operand, depth + 1)
+            if v is None:
+                return None
+            if isinstance(node.op, ast.Not):
+                return z3.Not(v)
+            if isinstance(node.op, ast.USub):
+                return -v
+            if isinstance(node.op, ast.Invert):
+                return ~v
+            return None
+        if isinstance(node, ast.BoolOp):
+            vals = [walk(v, depth + 1) for v in node.values]
+            if any(v is None for v in vals):
+                return None
+            # C's && / || take integer operands; coerce bit-vectors to bool.
+            vals = [v if z3.is_bool(v) else (v != 0) for v in vals]
+            if isinstance(node.op, ast.And):
+                return z3.And(*vals)
+            return z3.Or(*vals)
+        if isinstance(node, ast.Compare):
+            l = walk(node.left, depth + 1)
+            if l is None or len(node.ops) != 1 or type(node.ops[0]) not in _CMP:
+                return None
+            r = walk(node.comparators[0], depth + 1)
+            if r is None:
+                return None
+            return _CMP[type(node.ops[0])](l, r)
+        return None
+
+    try:
+        return walk(tree)
+    except (ValueError, RecursionError):
+        return None
+    except Exception:
+        # z3 sort/type errors on unexpected shapes: not translatable, not a crash
+        return None
+
+
 def probe_z3_opaque(predicate_c_expr):
     """Can an SMT solver decide an opaque predicate without modelling it?
 
@@ -110,13 +206,21 @@ def probe_z3_opaque(predicate_c_expr):
         return {"probe": "z3_opaque", "available": False}
 
     expr = predicate_c_expr
+    if len(expr) > MAX_EXPRESSION_LENGTH:
+        return {"probe": "z3_opaque", "available": True,
+                "translatable": False,
+                "reason": "expression length budget exceeded"}
     names = sorted(set(re.findall(r"__nx_opa_\d+", expr)))
     if not names:
         return {"probe": "z3_opaque", "available": True,
                 "translatable": False, "reason": "no opaque operands"}
     # Only handle the integer-arithmetic subset; anything else is reported as
-    # not translatable rather than silently "passed".
-    if not re.fullmatch(r"[\w\s()&|^+*\-\d=!]+", expr):
+    # not translatable rather than silently "passed". The old charset omitted
+    # < > / ~, so every real comparison predicate was rejected before the
+    # translator ever saw it. '%' stays out: Z3's signed modulo differs from C
+    # and its zero-divisor behavior is not the artefact's C behavior. The AST
+    # walk below is the real gate; this is just a cheap pre-filter.
+    if not re.fullmatch(r"[\w\s()&|^+*\-/~<>=!,]+", expr):
         return {"probe": "z3_opaque", "available": True,
                 "translatable": False, "reason": "non-arithmetic construct"}
     try:
@@ -125,7 +229,7 @@ def probe_z3_opaque(predicate_c_expr):
         # Int raises "unsupported operand type(s) for &: 'ArithRef' and 'int'"
         # and would also answer a different question.
         syms = {n: z3.BitVec(n, 32) for n in names}
-        py = expr.replace("&&", " and ")
+        py = expr.replace("&&", " and ").replace("||", " or ")
         depth = 0
         for ch in py:
             depth += (ch == "(") - (ch == ")")
@@ -133,16 +237,37 @@ def probe_z3_opaque(predicate_c_expr):
             return {"probe": "z3_opaque", "available": True,
                     "translatable": False,
                     "reason": "unbalanced parentheses in the emitted form"}
-        node = eval(py, {"__builtins__": {}}, dict(syms))  # noqa: S307
+        # Build the Z3 expression by walking the AST -- never eval(). The
+        # predicate text comes from an artefact (trust boundary); eval() here
+        # was a code-execution sink, and a charset regex still let `9**9**9`
+        # through as a CPU/memory DoS.
+        node = _z3_from_ast(py, syms, z3)
+        if node is None:
+            return {"probe": "z3_opaque", "available": True,
+                    "translatable": False,
+                    "reason": "expression outside the supported arithmetic subset"}
         if not z3.is_bool(node):
             return {"probe": "z3_opaque", "available": True,
                     "translatable": False, "reason": "not a boolean predicate"}
         s = z3.Solver()
+        s.set(timeout=Z3_SOLVER_TIMEOUT_MS,
+              rlimit=Z3_SOLVER_RLIMIT,
+              max_memory=Z3_SOLVER_MAX_MEMORY)
         s.add(z3.Not(node))
-        forced_true = s.check() == z3.unsat
+        check_true = s.check()
         s2 = z3.Solver()
+        s2.set(timeout=Z3_SOLVER_TIMEOUT_MS,
+               rlimit=Z3_SOLVER_RLIMIT,
+               max_memory=Z3_SOLVER_MAX_MEMORY)
         s2.add(node)
-        forced_false = s2.check() == z3.unsat
+        check_false = s2.check()
+        if check_true == z3.unknown or check_false == z3.unknown:
+            # An undecided query proves nothing. Treating unknown as "not
+            # forced true" previously reported it as a measured result.
+            return {"probe": "z3_opaque", "available": True,
+                    "translatable": False, "timed_out": True}
+        forced_true = check_true == z3.unsat
+        forced_false = check_false == z3.unsat
         return {
             "probe": "z3_opaque", "available": True, "translatable": True,
             "forced_true": forced_true, "forced_false": forced_false,
@@ -167,6 +292,16 @@ def probe_z3_mba(expression, slot_values=None):
         return {"probe": "z3_mba", "available": False}
 
     expr = expression
+    if len(expr) > MAX_EXPRESSION_LENGTH:
+        return {"probe": "z3_mba", "available": True,
+                "simplified": None, "is_literal": False,
+                "reason": "expression length budget exceeded"}
+    try:
+        _check_expression_budget(expr)
+    except (ValueError, SyntaxError) as exc:
+        return {"probe": "z3_mba", "available": True,
+                "simplified": None, "is_literal": False,
+                "reason": str(exc) or "expression outside the supported grammar"}
     slots = sorted(set(re.findall(r"__nx_mba_\d+", expr)))
     try:
         py = expr
@@ -177,8 +312,19 @@ def probe_z3_mba(expression, slot_values=None):
                         "reason": "references runtime slots; needs their values"}
             for n in slots:
                 py = py.replace(n, str(slot_values.get(n, 0)))
-        # the emitted arithmetic is C-style; python accepts & | ^ and parens
-        val = eval(py, {"__builtins__": {}})  # noqa: S307
+        # the emitted arithmetic is C-style; python accepts & | ^ and parens.
+        # Evaluate WITHOUT eval(): the expression text is artefact-derived
+        # (trust boundary). The AST-walk evaluator rejects any name/call.
+        from .transform_solvers import evaluate_integer_expression
+        try:
+            val = evaluate_integer_expression(py)
+        except ValueError as exc:
+            # Preserve the specific budget failure (length, node count or
+            # integer width) instead of collapsing it to a generic message.
+            reason = str(exc) or "expression outside the constant-arithmetic grammar"
+            return {"probe": "z3_mba", "available": True,
+                    "simplified": None, "is_literal": False,
+                    "reason": reason}
         return {"probe": "z3_mba", "available": True,
                 "simplified": str(val), "is_literal": True,
                 "slots_present": bool(slots),

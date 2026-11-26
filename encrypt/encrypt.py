@@ -5,10 +5,10 @@ two modes: bulk (single stub, safe for linked executables) and per-block
 (individual stubs, for relocatable objects). Embeds decryption metadata
 in a `.shadorenc` ELF section.
 
-Confidentiality note: the keystream embedded in the stub is XOR-masked with
-a 32-byte runtime key written to a 0600 sidecar (`<output>.key`).  The stub
-reads that file at startup and exits(1) if it is missing, so the artifact
-alone does not decrypt.  The sidecar must be distributed with the artifact.
+Confidentiality note: bulk and per-block modes use ChaCha20-Poly1305 with a
+random per-artifact/per-block nonce and a 32-byte runtime key stored only in a
+0600 sidecar (`<output>.key`). No key or keystream is embedded. The sidecar
+must be distributed separately and the stub fails closed if it is missing.
 
 Public API:
     - encrypt_binary(input_path, output_path, seed, block_size, ...) -> dict
@@ -23,6 +23,7 @@ import struct
 import hashlib
 
 from . import aes
+from . import chacha20poly1305 as aead
 from . import elf as elfmod
 from . import stub as stubmod
 
@@ -39,10 +40,11 @@ def encrypt_binary(input_path: str, output_path: str,
     """
     Encrypt blocks in the compiled binary.
 
-    In bulk mode (default), the entire .text section is split into blocks,
-    each block encrypted with AES-256-CTR (per-block key derived from seed + index),
-    and a single decryptor stub is appended to .text.
-    The ELF entry point is redirected to the stub.
+    In bulk mode (default), .text and optional .rodata are encrypted as one
+    ChaCha20-Poly1305 message with a random nonce and a standalone decryptor
+    stub appended in a new load segment. The ELF entry point is redirected to
+    the stub. ``seed`` remains a reproducibility/build identifier, not crypto
+    key material.
 
     Args:
         input_path: Path to the compiled ELF binary.
@@ -84,21 +86,8 @@ def encrypt_binary(input_path: str, output_path: str,
     blocks = _split_blocks(text_data, block_size)
     num_blocks = len(blocks)
 
-    encrypted_blocks = []
-    all_keystream = b''
-    for i, blk in enumerate(blocks):
-        blk_key = aes.derive_block_key(seed, i, len(blk))
-        nonce = hashlib.sha256(blk_key).digest()[:8]
-        keystream = aes.aes256_ctr_keystream(blk_key, nonce, len(blk))
-        encrypted = bytes(p ^ k for p, k in zip(blk, keystream))
-        encrypted_blocks.append(encrypted)
-        all_keystream += keystream
-
-    encrypted_text = b''.join(encrypted_blocks)
-
-    # Runtime key source: the embedded keystream is XOR-masked with a key
-    # that lives in a sidecar file, not in the binary.  Without the file the
-    # stub exits(1); ciphertext XOR the embedded bytes is not the plaintext.
+    # Runtime key source: a 32-byte sidecar key. The artifact carries only a
+    # random 96-bit nonce, ciphertext, tag, and canonical authenticated header.
     runtime_key_path = os.path.abspath(output_path) + ".key"
     env_key = os.environ.get("NIXON_ENC_RUNTIME_KEY", "").strip()
     if env_key:
@@ -110,41 +99,49 @@ def encrypt_binary(input_path: str, output_path: str,
             raise ValueError("NIXON_ENC_RUNTIME_KEY must be 32 bytes")
     else:
         runtime_key = os.urandom(32)
-    masked_keystream = bytes(
-        k ^ runtime_key[i % 32] for i, k in enumerate(all_keystream))
 
     # ---- optional .rodata encryption -------------------------------------
-    # .rodata holds the string literals a native binary would otherwise leak
-    # in cleartext.  It is encrypted in place (same length, so every vaddr
-    # and relocation stays valid) and the stub decrypts it before the
-    # original entry runs.
     rodata_plan = _plan_rodata_encryption(elf, seed, encrypt_rodata,
                                           runtime_key=runtime_key)
+    # The AEAD path below seals this plaintext together with .text; it never
+    # embeds a keystream, so there is no masked-keystream/key-reuse surface.
+    rodata_plain = rodata_plan['plaintext'] if rodata_plan['size'] else b""
 
     # The stub lives in its own executable PT_LOAD segment appended at EOF.
-    # Keeping it out of .text means no existing vaddr moves, so DT_FINI,
-    # DT_INIT_ARRAY and relocations stay valid.
     key_path_len = len(runtime_key_path.encode("utf-8")) + 1
     stub_len = stubmod.stub_size(text_size, key_path_len=key_path_len,
-                                 rodata_size=rodata_plan['size'])
-    plan = elf.plan_load_segment(stub_len)
-    stub_vaddr = plan['vaddr'] + plan['table_size']
-    stub = stubmod.make_stub_with_keystream(
-        text_size=text_size,
-        original_entry=entry_offset_in_text,
-        keystream=masked_keystream,
+                                 rodata_size=rodata_plan['size'], aead=True)
+    load_plan = elf.plan_load_segment(stub_len)
+    stub_vaddr = load_plan['vaddr'] + load_plan['table_size']
+    nonce = os.urandom(12)
+    header = stubmod.make_aead_header(
+        text_size, entry_offset_in_text, nonce,
         text_base_delta=text_addr - (stub_vaddr + 6),
-        key_path=runtime_key_path,
         rodata_size=rodata_plan['size'],
         rodata_base_delta=(rodata_plan['addr'] - (stub_vaddr + 6)
                            if rodata_plan['size'] else 0),
-        rodata_keystream=rodata_plan['masked_keystream'],
+        block_index=0,
+    )
+    ciphertext, tag = aead.seal(runtime_key, nonce, text_data + rodata_plain, header)
+    encrypted_text = ciphertext[:text_size]
+    encrypted_rodata = ciphertext[text_size:]
+    stub = stubmod.make_stub_aead(
+        text_size=text_size,
+        original_entry=entry_offset_in_text,
+        key_path=runtime_key_path,
+        nonce=nonce,
+        tag=tag,
+        text_base_delta=text_addr - (stub_vaddr + 6),
+        rodata_size=rodata_plan['size'],
+        rodata_base_delta=(rodata_plan['addr'] - (stub_vaddr + 6)
+                           if rodata_plan['size'] else 0),
+        block_index=0,
     )
 
     elf.replace_text(encrypted_text, add_stub_size=0)
     if rodata_plan['size']:
-        elf.replace_rodata_span(rodata_plan['addr'], rodata_plan['ciphertext'])
-    new_entry = elf.add_load_segment(stub, plan)
+        elf.replace_rodata_span(rodata_plan['addr'], encrypted_rodata)
+    new_entry = elf.add_load_segment(stub, load_plan)
     elf.set_entry_point(new_entry)
 
     _write_key_file(runtime_key_path, runtime_key)
@@ -173,7 +170,7 @@ def encrypt_binary(input_path: str, output_path: str,
         'stub_size': len(stub),
         'enable_microjit': enable_microjit,
         'key_file': runtime_key_path,
-        'confidentiality': 'runtime key file; keystream masked in the stub',
+        'confidentiality': 'ChaCha20-Poly1305 with separate 0600 runtime key file',
         'rodata_size': rodata_plan['size'],
         'rodata_encrypted': bool(rodata_plan['size']),
     }
@@ -191,9 +188,13 @@ _RODATA_DOMAIN = b"nixon-rodata-v1"
 def _rodata_keystream(seed: bytes, size: int) -> bytes:
     """Derive a keystream for .rodata, domain-separated from .text.
 
-    Reusing the .text keystream would let an attacker who recovers one
-    region's plaintext XOR the other region's ciphertext against it, so the
-    derivation is keyed with a distinct domain tag.
+    Retained for the legacy keyed-stub API (``make_stub_with_keystream``),
+    which embeds an XOR-masked keystream.  The shipped AEAD path does **not**
+    use this: it seals .rodata plaintext as part of the authenticated
+    ChaCha20-Poly1305 stream, so the runtime key is used exactly once, as the
+    AEAD key.  Masking a keystream with that same key (as the legacy stub
+    does) would let anyone who knows a stretch of .rodata plaintext recover
+    the key and decrypt .text as well.
     """
     out = bytearray()
     counter = 0
@@ -212,7 +213,7 @@ def _plan_rodata_encryption(elf, seed: bytes, enabled: bool,
     """Decide whether .rodata can be encrypted, and prepare the ciphertext.
 
     Returns a dict with ``size`` (0 when nothing will be encrypted),
-    ``addr``, ``ciphertext``, ``masked_keystream`` and ``skipped_reason``.
+    ``addr``, ``plaintext`` and ``skipped_reason``.
 
     Every ``.rodata*`` section is covered, not just the bare ``.rodata``:
     toolchains split string literals across ``.rodata.str1.1``,
@@ -226,8 +227,7 @@ def _plan_rodata_encryption(elf, seed: bytes, enabled: bool,
     original entry runs, and if it shared a page with .text that would strip
     execute permission from live code.
     """
-    plan = {'size': 0, 'addr': 0, 'ciphertext': b'',
-            'masked_keystream': b'', 'skipped_reason': ''}
+    plan = {'size': 0, 'addr': 0, 'plaintext': b'', 'skipped_reason': ''}
     if not enabled:
         plan['skipped_reason'] = 'disabled'
         return plan
@@ -284,27 +284,34 @@ def _plan_rodata_encryption(elf, seed: bytes, enabled: bool,
         return plan
     data = elf.data[file_off:file_off + span_size]
 
-    ks = _rodata_keystream(seed, span_size)
-    # The stub XORs the embedded keystream with the runtime key before use,
-    # so what ships must be the masked form -- exactly as for .text.
+    # Precondition for the AEAD seal that consumes this plan: a 32-byte key
+    # must already exist.  Without one the caller cannot authenticate the
+    # artifact, so refusing to plan .rodata keeps the failure closed.
     if len(runtime_key) != 32:
         plan['skipped_reason'] = 'runtime key unavailable'
         return plan
-    masked = bytes(k ^ runtime_key[i % 32] for i, k in enumerate(ks))
     plan.update({
         'size': span_size,
         'addr': span_start,
-        'ciphertext': bytes(p ^ k for p, k in zip(data, ks)),
-        'masked_keystream': masked,
+        'plaintext': bytes(data),
     })
     return plan
 
 
 def _write_key_file(path: str, key: bytes) -> None:
-    """Write the 32-byte runtime key with 0600 permissions."""
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    """Create a private key file without following or replacing any path."""
+    if len(key) != 32:
+        raise ValueError("Runtime key must be 32 bytes")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
     try:
-        os.write(fd, key)
+        os.fchmod(fd, 0o600)
+        view = memoryview(key)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                raise OSError("Short write while creating runtime key file")
+            view = view[written:]
         os.fsync(fd)
     finally:
         os.close(fd)
@@ -400,22 +407,23 @@ def encrypt_binary_per_block(input_path: str, output_path: str,
 
     final_text_parts = []
     for i, blk in enumerate(blocks):
-        blk_key = aes.derive_block_key(seed, i, len(blk))
-        nonce = hashlib.sha256(blk_key).digest()[:8]
-        keystream = aes.aes256_ctr_keystream(blk_key, nonce, len(blk))
-        encrypted = bytes(p ^ k for p, k in zip(blk, keystream))
-        masked = bytes(k ^ runtime_key[j % 32]
-                       for j, k in enumerate(keystream))
-
-        stub_len = stubmod.stub_size(len(encrypted),
-                                     key_path_len=key_path_len)
-        stub = stubmod.make_stub_with_keystream(
-            text_size=len(encrypted),
-            original_entry=0,
-            keystream=masked,
+        stub_len = stubmod.stub_size(len(blk), key_path_len=key_path_len, aead=True)
+        nonce = os.urandom(12)
+        header = stubmod.make_aead_header(
+            len(blk), 0, nonce,
             # The stub precedes its block: block base = stub_base + stub_len.
             text_base_delta=stub_len - 6,
+            block_index=i,
+        )
+        encrypted, tag = aead.seal(runtime_key, nonce, blk, header)
+        stub = stubmod.make_stub_aead(
+            text_size=len(blk),
+            original_entry=0,
             key_path=runtime_key_path,
+            nonce=nonce,
+            tag=tag,
+            text_base_delta=stub_len - 6,
+            block_index=i,
         )
         final_text_parts.append(stub)
         final_text_parts.append(encrypted)
@@ -445,7 +453,7 @@ def encrypt_binary_per_block(input_path: str, output_path: str,
         'text_size': len(text_data),
         'stub_total': len(new_text) - len(text_data),
         'key_file': runtime_key_path,
-        'confidentiality': 'runtime key file; keystream masked in the stub',
+        'confidentiality': 'ChaCha20-Poly1305 with separate 0600 runtime key file',
     }
     if degradation_config:
         result['degradation'] = degradation_config

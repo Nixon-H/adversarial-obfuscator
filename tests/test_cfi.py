@@ -99,3 +99,47 @@ def test_mark_call_matches_the_expected_sequence():
         assert call.startswith("_nx_cfi_mark("), call
         assert tag in call, "%r does not name its tag" % call
     assert CFI_SCHEMA in emit_snippet()
+
+
+def test_build_stamper_rekeys_the_generator_cfi_chain():
+    """Regression: production stamping must replace the zero-key chain.
+
+    The generator fills _NX_CFI_SEQ with a self-consistent chain derived from
+    the zeroed self-check key so direct callers can execute it. The production
+    stamper later replaces _NX_SELF_HK with the real build secret. If it only
+    replaces an all-zero CFI slot, the generator-filled value survives and every
+    stamped artefact dies with ``control-flow: chain mismatch``.
+    """
+    import re
+
+    from obfuscator.core import pipeline
+
+    src, _, _ = pipeline.generate_hybrid_loader_script(
+        {"windows": "", "linux": "", "darwin": "", "android": ""},
+        b"", "11" * 32, build_id="cfi-stamp-regression", self_check=True)
+    real_hk = "cd" * 32
+    stamped = pipeline._stamp_hybrid_selfcheck(src, real_hk)
+
+    hk = re.search(r'_NX_SELF_HK = "([0-9a-f]{64})"', stamped)
+    cfi = re.search(r'_NX_CFI_SEQ = "([0-9a-f]{64})"', stamped)
+    assert hk and hk.group(1) == real_hk
+    assert cfi and cfi.group(1) == expected_chain(real_hk)
+    assert cfi.group(1) != expected_chain("00" * 32)
+
+
+def test_loader_template_marks_common_enter_and_native_use():
+    """Native and fallback execution must traverse the same three checkpoints."""
+    from obfuscator.core import pipeline
+
+    src, _, _ = pipeline.generate_hybrid_loader_script(
+        {"windows": "", "linux": "", "darwin": "", "android": ""},
+        b"", "11" * 32, build_id="cfi-template-paths")
+
+    load_native = src[src.index("def _load_native():"):]
+    fallback = src[src.index("def _exec_fallback():"):src.index("def _load_native():")]
+    assert "_nx_cfi_mark('enter')" in load_native
+    assert "_nx_cfi_mark('enter')" not in fallback
+    native_exec = load_native.index("spec.loader.exec_module(module)")
+    native_use = load_native.rindex("_nx_cfi_mark('use')", 0, native_exec)
+    native_verify = load_native.rindex("_nx_cfi_verify()", 0, native_exec)
+    assert native_use < native_verify < native_exec

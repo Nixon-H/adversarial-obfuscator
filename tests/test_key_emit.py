@@ -8,10 +8,13 @@ import os
 import re
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from obfuscator.core.pipeline import generate_hybrid_loader_script
 from obfuscator.key_emit import (
+    apply_operator_key_mask,
     combine_shares,
     derive_effective_key,
     emit_key_loader,
@@ -22,6 +25,14 @@ from obfuscator.key_emit import (
 
 _KEY = bytes(range(32))
 _SEED = b"test-seed-01"
+
+
+@pytest.fixture(autouse=True)
+def _clear_operator_shards(monkeypatch):
+    """Operator shards are runtime inputs, not ambient test state."""
+    monkeypatch.delenv("NX_SEAL_SHARD", raising=False)
+    monkeypatch.delenv("NX_TABLE_SHARD", raising=False)
+
 
 
 def test_split_roundtrip():
@@ -81,6 +92,21 @@ def test_emitted_loader_applies_the_customer_salt():
     assert ns["BLOB_KEY"] == eff
     # A different customer must not reproduce it.
     assert ns["BLOB_KEY"] != derive_effective_key(_KEY, "bid-cust", "acme-43")
+
+
+def test_emit_key_loader_applies_operator_shards(monkeypatch):
+    """The standalone helper mirrors the emitted loader's operator mask."""
+    monkeypatch.setenv("NX_SEAL_SHARD", "17" * 32)
+    monkeypatch.setenv("NX_TABLE_SHARD", "42" * 32)
+    eff = apply_operator_key_mask(
+        derive_effective_key(_KEY, "bid-op"), "17" * 32, "42" * 32)
+    r0, r1 = split_key(_KEY, split_seed_for_build("bid-op"))
+    snippet = emit_key_loader(r0, r1, "bid-op")
+    assert "17" * 32 not in snippet and "42" * 32 not in snippet
+    ns = {"__name__": "key_emit_operator", "base64": base64}
+    ns["_nx_wipe"] = lambda obj: None
+    exec(compile(snippet, "<key_loader_operator>", "exec"), ns)
+    assert ns["BLOB_KEY"] == eff
 
 
 def test_no_hex_literal_of_key_in_loader():

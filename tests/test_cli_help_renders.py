@@ -79,7 +79,7 @@ def test_no_help_string_contains_a_bare_percent():
         dirs[:] = [d for d in dirs
                    if d not in (".git", "__pycache__", "build", "archive",
                                 ".opencode", ".pytest_cache", ".mypy_cache",
-                                "node_modules")]
+                                "node_modules", "re-bench")]
         for fn in files:
             if not fn.endswith(".py"):
                 continue

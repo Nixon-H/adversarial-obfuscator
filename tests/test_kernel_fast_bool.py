@@ -25,7 +25,7 @@ def test_no_bare_c_int_return():
                 raise AssertionError(f"{op}: bare C-int return: {s!r}")
 
 
-def test_runtime_bool_parity():
+def test_runtime_bool_parity(tmp_path):
     try:
         from tests.test_kernel_fast import _build_fast, _load, _token
     except ImportError:
@@ -33,7 +33,7 @@ def test_runtime_bool_parity():
         pytest.skip("test helper unavailable")
         return
     import pytest as _pt
-    so, msg, mod, omap = _build_fast(b"fast-bool-seed")
+    so, msg, mod, omap = _build_fast(b"fast-bool-seed", tmp_path / "fast-bool")
     if so is None:
         _pt.skip("toolchain missing: %s" % msg)
     m = _load(mod, so)

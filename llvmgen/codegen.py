@@ -25,9 +25,10 @@ def main():
     parser.add_argument("--module-name", default="nixon_module",
                         help="LLVM module name (default: nixon_module)")
     parser.add_argument("--integrity", action="store_true", default=True,
-                        help="Inject .text integrity check (default: True)")
+                        help="Inject a startup CRC32 check of the embedded IR-text "
+                             "blob (not a .text check; default: True)")
     parser.add_argument("--no-integrity", action="store_false", dest="integrity",
-                        help="Skip .text integrity check injection")
+                        help="Skip embedded-IR-text integrity check injection")
     parser.add_argument("--emit-llvm", action="store_true",
                         help="Emit LLVM IR to stdout instead of assembling")
     parser.add_argument("--keep-ll", action="store_true",

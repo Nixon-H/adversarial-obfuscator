@@ -28,6 +28,42 @@ REASON_TRAPS = ROOT / "obfuscator" / "reasoning_traps.py"
 PROOF_THRESHOLD = 80  # score >= 80 = PROOF
 CONSECUTIVE_TARGET = 3
 MAX_ROUNDS = 50
+MAX_BENCH_FAILURES = 5  # abort after this many consecutive benchmark failures
+CONFIG_PATH = ROOT / "config" / "default.json"
+
+
+def _load_loop_config() -> dict:
+    """Load optional adversarial_loop overrides, failing closed on bad types.
+
+    The section lives under ``shadow_compiler.adversarial_loop`` in
+    ``config/default.json`` -- the same place ``phase09_adversarial.py`` and
+    the schema validator read it.  A top-level ``adversarial_loop`` is still
+    accepted for older standalone configs, but the nested section wins.
+    """
+    try:
+        raw = json.loads(CONFIG_PATH.read_text())
+        section = raw.get("shadow_compiler", {}).get(
+            "adversarial_loop", raw.get("adversarial_loop", {}))
+    except (OSError, json.JSONDecodeError, AttributeError) as exc:
+        raise RuntimeError(f"cannot load adversarial loop config {CONFIG_PATH}: {exc}") from exc
+    if not isinstance(section, dict):
+        raise RuntimeError("adversarial_loop config must be an object")
+    defaults = {
+        "proof_threshold": PROOF_THRESHOLD,
+        "consecutive_target": CONSECUTIVE_TARGET,
+        "max_rounds": MAX_ROUNDS,
+        "max_bench_failures": MAX_BENCH_FAILURES,
+    }
+    out = {}
+    for key, default in defaults.items():
+        value = section.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise RuntimeError(f"adversarial_loop.{key} must be a positive integer")
+        out[key] = value
+    if out["proof_threshold"] > 100:
+        raise RuntimeError("adversarial_loop.proof_threshold must be 0..100")
+    return out
+
 
 # ─── Knob state ──────────────────────────────────────────────────────────────
 
@@ -179,6 +215,8 @@ def is_genuine_deobfuscation(result: dict, original: str) -> bool:
 # ─── File Modifications ──────────────────────────────────────────────────────
 
 def _replace_in_file(filepath: Path, old: str, new: str) -> int:
+    if old == new:
+        return 0
     content = filepath.read_text()
     if old not in content:
         logger.warning("  Pattern not found in %s", filepath.name)
@@ -193,29 +231,42 @@ def _replace_in_file(filepath: Path, old: str, new: str) -> int:
 BACKUP_DIR = ROOT / ".originals"
 SOURCE_FILES = [TRANSFORMS, DATAFLOW, DECOY_APIS, ATTN_POISON, REASON_TRAPS]
 
-def _reset_source_files():
-    """Reset obfuscator source files to clean state from backup."""
+
+def _ensure_source_backups() -> None:
+    """Create immutable pre-mutation backups, failing closed on I/O errors."""
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     for fp in SOURCE_FILES:
         backup = BACKUP_DIR / fp.name
         if backup.exists():
-            shutil.copy2(str(backup), str(fp))
+            continue
+        shutil.copy2(str(fp), str(backup))
+        backup.chmod(0o444)
+
+
+def _reset_source_files():
+    """Reset obfuscator source files to clean state from verified backups."""
+    missing = [fp.name for fp in SOURCE_FILES
+               if not (BACKUP_DIR / fp.name).is_file()]
+    if missing:
+        raise RuntimeError("cannot roll back; missing source backups: %s" %
+                           ", ".join(missing))
+    for fp in SOURCE_FILES:
+        backup = BACKUP_DIR / fp.name
+        shutil.copyfile(str(backup), str(fp))
     logger.info("Reset obfuscator source files to clean state")
 
 
 def apply_improvements(knobs: KnobState) -> int:
     """Apply current knob state to obfuscator source files. Returns count of changes."""
+    _ensure_source_backups()
     _reset_source_files()
     changes = 0
 
-    # 1. MBA chain call-site depth in visit_BinOp (transforms.py)
-    lo = max(1, knobs.mba_depth // 2)
-    hi = knobs.mba_depth
-    changes += _replace_in_file(TRANSFORMS,
-        "depth=random.randint(2, 5)",
-        f"depth=random.randint({lo}, {hi})")
-    changes += _replace_in_file(TRANSFORMS,
-        "depth=random.randint(2, 4)",
-        f"depth=random.randint({lo}, {min(hi, lo+2)})")
+    # 1. MBA chain call-site depth in visit_BinOp (transforms.py).
+    #    NOTE: the old `depth=random.randint(2, 5)` / `(2, 4)` call sites were
+    #    refactored out of transforms.py; there is no longer a depth= knob
+    #    site there, so these replacements are intentionally dropped (a
+    #    silent no-op here is exactly what _replace_in_file's warning is for).
 
     # 2. MBA K ranges in transforms.py
     changes += _replace_in_file(TRANSFORMS,
@@ -255,36 +306,33 @@ def apply_improvements(knobs: KnobState) -> int:
         "_rnd.randint(2, min(9999, 99999))",
         f"_rnd.randint(2, min(9999, {knobs.mba_dataflow_K_max//100}))")
 
-    # 5. Opaque predicate probability (current backup values: 0.60, 0.75)
+    # 5. Opaque predicate probability (current values in transforms.py: both
+    #    sites use 0.60). Replace the LONGER pattern first: the short one is a
+    #    substring of the long line and would corrupt it.
     o1 = 0.60
-    o2 = 0.75
     if knobs.predicate_prob != o1:
+        changes += _replace_in_file(TRANSFORMS,
+            f"if len(node.body) > 2 and random.random() < {o1:.2f}:",
+            f"if len(node.body) > 2 and random.random() < {knobs.predicate_prob:.2f}:")
         changes += _replace_in_file(TRANSFORMS,
             f"if random.random() < {o1:.2f}:",
             f"if random.random() < {knobs.predicate_prob - 0.15:.2f}:")
-    if knobs.predicate_prob != o2:
-        changes += _replace_in_file(TRANSFORMS,
-            f"if len(node.body) > 2 and random.random() < {o2:.2f}:",
-            f"if len(node.body) > 2 and random.random() < {knobs.predicate_prob:.2f}:")
 
-    # 6. BinOp substitution probability (current: 0.47, 0.62)
-    sub_prob1 = max(0.05, 0.65 - knobs.predicate_prob * 0.3)
-    sub_prob2 = min(0.9, 0.62 + (knobs.predicate_prob - 0.75) * 0.5)
+    # 6. BinOp substitution probability (current value in transforms.py: 0.54;
+    #    the old `> 0.47` site was refactored out)
+    sub_prob2 = min(0.9, 0.54 + (knobs.predicate_prob - 0.60) * 0.5)
     changes += _replace_in_file(TRANSFORMS,
-        "if random.random() > 0.47:",
-        f"if random.random() > {sub_prob1:.2f}:")
-    changes += _replace_in_file(TRANSFORMS,
-        "elif random.random() < 0.62 and isinstance(node.right, ast.Constant) and isinstance(node.right.value, int):",
+        "elif random.random() < 0.54 and isinstance(node.right, ast.Constant) and isinstance(node.right.value, int):",
         f"elif random.random() < {sub_prob2:.2f} and isinstance(node.right, ast.Constant) and isinstance(node.right.value, int):")
 
-    # 7. Decoy API count (current: count: int = 10)
+    # 7. Decoy API count (current signature: count: int = 5, seed: int | None = None)
     changes += _replace_in_file(DECOY_APIS,
-        "def __init__(self, count: int = 10):",
-        f"def __init__(self, count: int = {knobs.decoy_count}):")
+        "def __init__(self, count: int = 5, seed: int | None = None):",
+        f"def __init__(self, count: int = {knobs.decoy_count}, seed: int | None = None):")
 
-    # 8. Attention poison fan-out (current: fan_out: int = 15)
+    # 8. Attention poison fan-out (current default: fan_out: int = 0)
     changes += _replace_in_file(ATTN_POISON,
-        "def __init__(self, fan_out: int = 15):",
+        "def __init__(self, fan_out: int = 0):",
         f"def __init__(self, fan_out: int = {knobs.attention_fanout}):")
 
     # 9. Trap depth (current: depth: int = 5)
@@ -313,19 +361,17 @@ def apply_improvements(knobs: KnobState) -> int:
 def rebuild_payload(knobs: Optional[KnobState] = None) -> bool:
     """Run the build pipeline."""
     logger.info("Rebuilding payload...")
+    # scripts/build.py's real interface: --skip takes stage NAMES space-separated
+    # (the old --skip-irgen dash forms were removed; passing them made argparse
+    # exit 2, so every rebuild failed and the loop could never progress). The
+    # knob values (decoy count, fan-out, trap depth) are applied by editing the
+    # obfuscator sources in apply_improvements, not by CLI flags. mba-subs and
+    # opaque-predicates are on by default (only --no-* variants exist).
     cmd = [
         sys.executable, str(BUILD_SCRIPT),
         "--payload", str(SOURCE_PAYLOAD),
-        "--skip-irgen", "--skip-llvmgen", "--skip-encrypt", "--skip-relay",
-        "--mba-subs", "--opaque-predicates",
-        "--decoy-apis",
+        "--skip", "irgen", "llvmgen", "encrypt", "relay",
     ]
-    if knobs:
-        cmd += [f"--decoy-api-count={knobs.decoy_count}",
-                f"--attention-poison={knobs.attention_fanout}",
-                f"--trap-depth={knobs.trap_depth}"]
-    else:
-        cmd += ["--decoy-api-count", "5"]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if result.returncode != 0:
         logger.error("Build failed:\n%s", result.stderr[:2000])
@@ -371,34 +417,53 @@ def check_regressions() -> bool:
     if not tests:
         logger.info("No test files found, skipping regression check")
         return True
-    # Run the 3 obfuscation test files specifically
-    for test_file in ["test_mba_validator.py", "test_opaque_predicates.py", "test_dataflow_mba.py"]:
-        tp = ROOT / test_file
+    # Run the obfuscation test files specifically (they live in tests/)
+    candidates = ["test_mba_validator.py", "test_opaque_predicates_are_true.py",
+                  "test_dataflow_split.py", "test_mba_levels.py"]
+    ran = 0
+    for test_file in candidates:
+        tp = ROOT / "tests" / test_file
         if tp.exists():
-            result = subprocess.run([sys.executable, str(tp)], capture_output=True, text=True, timeout=60)
+            ran += 1
+            # NOTE: `python -m pytest` is broken in some environments (installed
+            # pytest package missing __main__.py), so invoke pytest.main().
+            result = subprocess.run(
+                [sys.executable, "-c",
+                 "import pytest, sys; sys.exit(pytest.main([sys.argv[1], '-q', '-p', 'no:cacheprovider']))",
+                 str(tp)],
+                capture_output=True, text=True, timeout=120)
             if result.returncode != 0:
                 logger.error("Regression in %s:\n%s", test_file, result.stderr[:1000])
                 return False
             logger.info("  %s: PASS", test_file)
+    if not ran:
+        logger.warning("No regression test files found under tests/; skipping check")
     return True
 
 
 # ─── Main Loop ───────────────────────────────────────────────────────────────
 
 def main():
+    cfg = _load_loop_config()
+    proof_threshold = cfg["proof_threshold"]
+    consecutive_target = cfg["consecutive_target"]
+    max_rounds = cfg["max_rounds"]
+    max_bench_failures = cfg["max_bench_failures"]
     round_num = 0
     consecutive_proof = 0
+    consecutive_failures = 0
     knobs = KnobState()
+    _ensure_source_backups()
 
     # Load original payload for comparison
     original = PAYLOAD.read_text() if PAYLOAD.exists() else ""
 
     logger.info("=" * 60)
     logger.info("ADVERSARIAL IMPROVEMENT LOOP")
-    logger.info("Target: %d consecutive rounds all-PROOF", CONSECUTIVE_TARGET)
+    logger.info("Target: %d consecutive rounds all-PROOF", consecutive_target)
     logger.info("=" * 60)
 
-    while round_num < MAX_ROUNDS:
+    while round_num < max_rounds:
         round_num += 1
         logger.info("\n%s ROUND %d %s", "=" * 20, round_num, "=" * 20)
         logger.info("Knobs: %s", json.dumps(knobs.to_dict()))
@@ -431,11 +496,18 @@ def main():
         benchmark = run_benchmark(output_dir)
         results = benchmark.get("results", {})
 
-        # Check if benchmark actually ran
+        # Check if benchmark actually ran. Count the failure instead of
+        # decrementing round_num: decrementing made `while round_num <
+        # MAX_ROUNDS` spin forever on a persistently failing benchmark.
         if benchmark.get("_failed") or not results:
-            logger.error("Benchmark did not produce results, retrying round...")
-            round_num -= 1  # Don't count this round
+            consecutive_failures += 1
+            logger.error("Benchmark did not produce results (failure %d/%d)",
+                         consecutive_failures, max_bench_failures)
+            if consecutive_failures >= max_bench_failures:
+                logger.error("Benchmark persistently failing; aborting loop")
+                break
             continue
+        consecutive_failures = 0
 
         # Phase 5: Analyze results
         any_genuine = False
@@ -451,16 +523,16 @@ def main():
 
         # Phase 6: Check if all PROOF
         all_proof = all(
-            result.get("score", {}).get("score", 0) >= PROOF_THRESHOLD
+            result.get("score", {}).get("score", 0) >= proof_threshold
             for result in results.values()
         )
 
         if all_proof:
             consecutive_proof += 1
-            logger.info("\n>>> ALL PROOF — round %d/%d <<<", consecutive_proof, CONSECUTIVE_TARGET)
-            if consecutive_proof >= CONSECUTIVE_TARGET:
+            logger.info("\n>>> ALL PROOF — round %d/%d <<<", consecutive_proof, consecutive_target)
+            if consecutive_proof >= consecutive_target:
                 logger.info("\n" + "=" * 60)
-                logger.info("TARGET ACHIEVED — %d consecutive all-PROOF rounds!", CONSECUTIVE_TARGET)
+                logger.info("TARGET ACHIEVED — %d consecutive all-PROOF rounds!", consecutive_target)
                 logger.info("=" * 60)
                 break
         else:
@@ -479,15 +551,15 @@ def main():
         else:
             logger.info("All PROOF — no escalation needed")
 
-    if round_num >= MAX_ROUNDS:
+    if round_num >= max_rounds:
         logger.warning("Reached max rounds (%d) without achieving %d consecutive PROOF",
-                       MAX_ROUNDS, CONSECUTIVE_TARGET)
+                       max_rounds, consecutive_target)
 
     # Save final state
     final = {
         "rounds": round_num,
         "consecutive_proof": consecutive_proof,
-        "target_achieved": consecutive_proof >= CONSECUTIVE_TARGET,
+        "target_achieved": consecutive_proof >= consecutive_target,
         "final_knobs": knobs.to_dict(),
     }
     (ROOT / "adversarial_state.json").write_text(json.dumps(final, indent=2))

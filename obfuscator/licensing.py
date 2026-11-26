@@ -267,6 +267,7 @@ def verify(
     replay_ledger=None,
     key_policy=None,
     revocation_list=None,
+    previous_revocation_issued_at: int = 0,
 ) -> Licence:
     """Verify a token or raise LicenceError saying exactly why.
 
@@ -287,8 +288,11 @@ def verify(
 
     ``revocation_list`` (§2 licence revocation): a VERIFIED list dict (from
     ``read_revocation_list``). A token whose id or nonce appears is refused.
-    Pass ``revocation_issued_at`` via the policy's own issued_at to reject a
-    rolled-back list.
+    ``previous_revocation_issued_at`` is the caller's locally persisted
+    high-water mark for revocation lists. It is passed through to
+    ``check_revoked`` so an older signed list cannot un-revoke a licence after
+    a newer list has been seen. Client-side rollback protection still depends
+    on the caller preserving that high-water state.
 
     All four are OPT-IN so existing callers keep their behaviour; the loader
     turns them on. None is a server-side guarantee -- see licence_replay and
@@ -361,7 +365,8 @@ def verify(
     if revocation_list is not None:
         from obfuscator.key_lifecycle import RevocationError, check_revoked
         try:
-            check_revoked(payload, revocation_list)
+            check_revoked(payload, revocation_list,
+                           previous_issued_at=previous_revocation_issued_at)
         except RevocationError as exc:
             raise LicenceError(str(exc)) from exc
     # §2 replay protection. Identity is the signed nonce, so two distinct
@@ -378,6 +383,13 @@ def verify(
                 "licence token replayed: this token was already presented "
                 "inside the ledger window")
     return licence
+
+
+def _hex_address(value) -> bool:
+    """True only for a canonical 20-byte hex address shape."""
+    return (isinstance(value, str) and value.startswith("0x")
+            and len(value) == 42
+            and all(ch in "0123456789abcdefABCDEF" for ch in value[2:]))
 
 
 def chain_owner_of(
@@ -442,8 +454,19 @@ def chain_owner_of(
         raise ValueError(
             "licence chain RPC must use HTTPS (plain HTTP is accepted only "
             "for a loopback literal, for local chain simulation)")
-    if not contract_address.startswith("0x") or len(contract_address) != 42:
-        raise ValueError("licence chain contract must be a 20-byte address")
+    if not _hex_address(contract_address):
+        raise ValueError("licence chain contract must be a 20-byte hex address")
+
+    # Build a per-call opener for HTTPS. urllib's module-level urlopen()
+    # caches a global opener; once any earlier HTTPS call has constructed it,
+    # changing SSL_CERT_FILE later in the process has no effect. Licence
+    # verification must honor the CA bundle configured for this verification,
+    # not whichever TLS context happened to be created first.
+    _opener = None
+    if rpc_url.startswith("https://"):
+        import ssl as _ssl
+        _opener = _request.build_opener(
+            _request.HTTPSHandler(context=_ssl.create_default_context()))
 
     def _rpc(method, params):
         body = _json.dumps({
@@ -461,8 +484,19 @@ def chain_owner_of(
             },
             method="POST",
         )
-        with _request.urlopen(req, timeout=20) as response:
-            document = _json.loads(response.read().decode("utf-8"))
+        open_fn = _opener.open if _opener is not None else _request.urlopen
+        with open_fn(req, timeout=20) as response:
+            raw = response.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            raise RuntimeError("licence chain RPC response exceeds 1 MiB")
+        try:
+            document = _json.loads(raw.decode("utf-8"))
+        except Exception as exc:
+            raise RuntimeError("licence chain RPC returned malformed JSON") from exc
+        if not isinstance(document, dict):
+            raise RuntimeError("licence chain RPC returned a non-object response")
+        if document.get("jsonrpc") != "2.0" or document.get("id") != 1:
+            raise RuntimeError("licence chain RPC returned a mismatched JSON-RPC envelope")
         if document.get("error"):
             raise RuntimeError(str(document["error"]))
         return document.get("result")
@@ -479,9 +513,14 @@ def chain_owner_of(
 
     calldata = "0x6352211e" + int(token_id).to_bytes(32, "big").hex()
     result = _rpc("eth_call", [{"to": contract_address, "data": calldata}, "latest"])
-    if not isinstance(result, str) or len(result) < 66:
-        raise RuntimeError("licence ownerOf returned no address")
-    return "0x" + result[-40:]
+    if (not isinstance(result, str) or len(result) != 66
+            or not result.startswith("0x")
+            or any(ch not in "0123456789abcdefABCDEF" for ch in result[2:])):
+        raise RuntimeError("licence ownerOf returned a malformed ABI address word")
+    word = result[2:]
+    if word[:24] != "0" * 24:
+        raise RuntimeError("licence ownerOf returned a non-canonical ABI address word")
+    return "0x" + word[-40:]
 
 
 def parse_chain_spec(items: Iterable[str]) -> dict:
@@ -496,11 +535,21 @@ def parse_chain_spec(items: Iterable[str]) -> dict:
         if not key or not value:
             raise LicenceError(f"invalid --chain entry {item!r}")
         chain[key] = value
-    for required in ("contract", "token_id", "owner"):
+    for required in ("contract", "token_id", "owner", "chain_id"):
         if required not in chain:
             raise LicenceError(f"--chain is missing required field: {required}")
     chain.setdefault("rpc", "https://ethereum-rpc.publicnode.com")
-    chain.setdefault("chain_id", "1")
+    if not _hex_address(chain["contract"]):
+        raise LicenceError("--chain contract must be a 20-byte hex address")
+    if not _hex_address(chain["owner"]):
+        raise LicenceError("--chain owner must be a 20-byte hex address")
+    try:
+        chain_id = int(str(chain["chain_id"]), 0)
+        token_id = int(str(chain["token_id"]), 0)
+    except (TypeError, ValueError) as exc:
+        raise LicenceError("--chain chain-id and token-id must be integers") from exc
+    if chain_id <= 0 or token_id < 0:
+        raise LicenceError("--chain chain-id must be positive and token-id non-negative")
     return chain
 
 

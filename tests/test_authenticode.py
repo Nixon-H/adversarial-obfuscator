@@ -21,7 +21,9 @@ What is testable, and what these tests establish:
     a signature it cannot produce.
 """
 import os
+import shutil
 import struct
+import subprocess
 import sys
 
 import pytest
@@ -71,7 +73,7 @@ def _make_cert(tmp_path):
 
 def _pe(**overrides):
     """A minimal PE for signing tests: headers only, plus a stub section."""
-    ac = _authenticode()
+    _authenticode()
     e_lfanew = 0x80
     head = bytearray(e_lfanew)
     head[0:2] = b"MZ"
@@ -88,6 +90,74 @@ def _pe(**overrides):
     struct.pack_into("<II", opt, 112 + 10 * 8, 0x3000, 0x48)   # load config
     body = bytes(head) + b"PE\0\0" + bytes(coff) + bytes(opt)
     return body + b"\x00" * 512
+
+
+def _der_node(buf, pos=0):
+    """Return (tag, content_start, end, next_pos) for one definite TLV."""
+    assert pos + 2 <= len(buf)
+    tag = buf[pos]
+    first = buf[pos + 1]
+    cursor = pos + 2
+    if first & 0x80:
+        count = first & 0x7F
+        assert count and cursor + count <= len(buf)
+        length = int.from_bytes(buf[cursor:cursor + count], "big")
+        cursor += count
+    else:
+        length = first
+    end = cursor + length
+    assert end <= len(buf)
+    return tag, cursor, end, end
+
+
+def _der_fields(buf, pos=0):
+    """Children of the DER SEQUENCE at ``pos``, with absolute offsets."""
+    node = _der_node(buf, pos)
+    assert node[0] == 0x30
+    children = []
+    pos = node[1]
+    while pos < node[2]:
+        child = _der_node(buf, pos)
+        children.append(child)
+        pos = child[3]
+    assert pos == node[2]
+    return children
+
+
+def _signer_signature_offset(pkcs7_der):
+    """Locate the signer's signature OCTET STRING without byte searching."""
+    content_info = _der_fields(pkcs7_der)
+    assert len(content_info) == 2 and content_info[1][0] == 0xA0
+    fields = _der_fields(pkcs7_der, content_info[1][1])
+    signer_infos = fields[-1]
+    assert signer_infos[0] == 0x31
+    signer_nodes = []
+    pos = signer_infos[1]
+    while pos < signer_infos[2]:
+        signer_nodes.append((pos, _der_node(pkcs7_der, pos)))
+        pos = signer_nodes[-1][1][3]
+    assert len(signer_nodes) == 1
+    signer_fields = _der_fields(pkcs7_der, signer_nodes[0][0])
+    signature = signer_fields[-1]
+    if signature[0] == 0xA1:                 # optional unsignedAttrs
+        signature = signer_fields[-2]
+    assert signature[0] == 0x04
+    return signature[1]
+
+
+def _attach_win_certificate(unsigned, der):
+    """Attach an arbitrary certificate-table body for adversarial tests."""
+    e_lfanew = struct.unpack_from("<I", unsigned, 0x3C)[0]
+    opt = e_lfanew + 4 + 20
+    sec_entry = opt + 112 + 4 * 8
+    padded = der + b"\x00" * ((8 - len(der) % 8) % 8)
+    win_cert = struct.pack("<IHH", 8 + len(padded), 0x0200, 0x0002) + padded
+    out = bytearray(unsigned)
+    offset = len(out)
+    out.extend(b"\x00" * ((8 - offset % 8) % 8))
+    out.extend(win_cert)
+    struct.pack_into("<II", out, sec_entry, len(out) - len(win_cert), len(win_cert))
+    return bytes(out)
 
 
 # ── the digest: the property that makes a signature verifiable ───────────
@@ -293,7 +363,7 @@ def test_the_verifier_rejects_an_image_modified_after_signing(tmp_path):
     signed[0x200] ^= 0xFF              # one byte inside the image body
     report = verify_pe_signature(bytes(signed))
     assert report["ok"] is False
-    assert "does not appear in the signed content" in report["reason"]
+    assert "digest does not match this PE" in report["reason"]
 
 
 def test_the_verifier_rejects_an_unsigned_image(tmp_path):
@@ -301,6 +371,26 @@ def test_the_verifier_rejects_an_unsigned_image(tmp_path):
     report = verify_pe_signature(_pe())
     assert report["ok"] is False
     assert "no certificate table" in report["reason"]
+
+
+def test_the_verifier_rejects_a_blob_without_the_spc_indirect_data_oid(tmp_path):
+    """Regression: the verifier must check the PKCS#7 contentType OID, not
+    only search for the digest bytes. A crafted blob containing the image
+    digest but a different contentType (same-length OID swap) must fail."""
+    from obfuscator.authenticode_verify import verify_pe_signature
+    ac = _authenticode()
+    cert, key = _make_cert(tmp_path)
+    unsigned = _pe()
+    signed = bytearray(ac.sign_pe(unsigned, cert, key))
+    assert SPC_OID_DER in signed
+    # Swap the SpcIndirectData OID (1.3.6.1.4.1.311.2.1.4) for the same-length
+    # 1.3.6.1.4.1.311.2.1.5: last DER content byte 0x04 -> 0x05.
+    mutated_oid = SPC_OID_DER[:-1] + b"\x05"
+    signed[:] = bytes(signed).replace(SPC_OID_DER, mutated_oid)
+    assert SPC_OID_DER not in bytes(signed)
+    report = verify_pe_signature(bytes(signed))
+    assert report["ok"] is False
+    assert "SpcIndirectData" in report["reason"]
 
 
 def test_native_harden_separates_presence_from_verification(tmp_path):
@@ -316,3 +406,148 @@ def test_native_harden_separates_presence_from_verification(tmp_path):
     assert signed_rep["authenticode_verified"] is True, (
         "the digest does not verify: %s"
         % (signed_rep.get("authenticode_reason"),))
+
+
+# ── real CMS verification and adversarial regressions ─────────────────────
+
+def test_valid_signature_verifies_cms_signer_attributes_and_digest(tmp_path):
+    from obfuscator.authenticode_verify import verify_pe_signature
+
+    ac = _authenticode()
+    cert, key = _make_cert(tmp_path)
+    signed = ac.sign_pe(_pe(), cert, key)
+    report = verify_pe_signature(signed, cert_path=cert)
+    assert report["ok"] is True, report["reason"]
+    assert report["econtent_type"] == ac.SPC_INDIRECT_DATA_OID
+    assert report["content_type_matches"] is True
+    assert report["message_digest_matches"] is True
+    assert report["signer_signature_verified"] is True
+    assert report["digest_matches"] is True
+    assert report["embedded_cert"] is True
+    assert report["pinned_cert_matches"] is True
+
+
+def test_mutated_signer_signature_byte_is_rejected(tmp_path):
+    from obfuscator.authenticode_verify import verify_pe_signature
+
+    ac = _authenticode()
+    cert, key = _make_cert(tmp_path)
+    signed = bytearray(ac.sign_pe(_pe(), cert, key))
+    e_lfanew = struct.unpack_from("<I", signed, 0x3C)[0]
+    opt = e_lfanew + 4 + 20
+    cert_offset, cert_size = struct.unpack_from("<II", signed, opt + 112 + 4 * 8)
+    blob = bytes(signed[cert_offset + 8:cert_offset + cert_size])
+    if blob[1] & 0x80:
+        count = blob[1] & 0x7F
+        der_len = 2 + count + int.from_bytes(blob[2:2 + count], "big")
+    else:
+        der_len = 2 + blob[1]
+    signature_offset = _signer_signature_offset(blob[:der_len])
+    signed[cert_offset + 8 + signature_offset] ^= 0x01
+
+    report = verify_pe_signature(bytes(signed))
+    assert report["ok"] is False
+    assert report["digest_matches"] is True
+    assert report["message_digest_matches"] is True
+    assert report["signer_signature_verified"] is False
+    assert "signature" in report["reason"].lower()
+
+
+def test_fake_der_with_oid_and_digest_is_rejected(tmp_path):
+    from obfuscator.authenticode_verify import verify_pe_signature
+
+    ac = _authenticode()
+    unsigned = _pe()
+    digest = ac.pe_digest(unsigned)
+    fake = ac._der_seq(ac._der_oid(ac.SPC_INDIRECT_DATA_OID),
+                       ac._der_octets(digest))
+    report = verify_pe_signature(_attach_win_certificate(unsigned, fake))
+    assert report["ok"] is False
+    assert report["signer_signature_verified"] is False
+    assert ("SignedData" in report["reason"]
+            or "ContentInfo" in report["reason"]
+            or "expected OID" in report["reason"])
+
+
+def test_truncated_pe_returns_a_stable_failure_report(tmp_path):
+    from obfuscator.authenticode_verify import verify_pe_signature
+
+    ac = _authenticode()
+    cert, key = _make_cert(tmp_path)
+    signed = ac.sign_pe(_pe(), cert, key)
+    e_lfanew = struct.unpack_from("<I", signed, 0x3C)[0]
+    opt = e_lfanew + 4 + 20
+    cert_offset = struct.unpack_from("<I", signed, opt + 112 + 4 * 8)[0]
+    required = {"ok", "reason", "declared_digest", "current_digest",
+                "digest_matches", "embedded_cert", "pinned_cert_matches",
+                "econtent_type", "content_type_matches",
+                "message_digest_matches", "signer_signature_verified"}
+    for cut in (2, 0x3E, 0x80, 0x98, opt + 2, opt + 108,
+                opt + 112 + 5 * 8 - 1, cert_offset - 1, len(signed) - 1):
+        report = verify_pe_signature(signed[:cut])
+        assert required <= set(report)
+        assert report["ok"] is False
+        assert report["reason"]
+
+
+def test_certificate_pin_must_match_the_actual_signer(tmp_path):
+    from obfuscator.authenticode_verify import verify_pe_signature
+
+    ac = _authenticode()
+    good_dir = tmp_path / "good"
+    wrong_dir = tmp_path / "wrong"
+    good_dir.mkdir()
+    wrong_dir.mkdir()
+    cert, key = _make_cert(good_dir)
+    wrong_cert, _wrong_key = _make_cert(wrong_dir)
+    signed = ac.sign_pe(_pe(), cert, key)
+    good = verify_pe_signature(signed, cert_path=cert)
+    bad = verify_pe_signature(signed, cert_path=wrong_cert)
+    assert good["ok"] is True and good["pinned_cert_matches"] is True
+    assert bad["ok"] is False and bad["pinned_cert_matches"] is False
+    assert "pinned" in bad["reason"].lower()
+
+
+def test_missing_openssl_cms_backend_fails_closed(tmp_path, monkeypatch):
+    from obfuscator import authenticode_verify as verifier
+
+    ac = _authenticode()
+    cert, key = _make_cert(tmp_path)
+    signed = ac.sign_pe(_pe(), cert, key)
+    monkeypatch.setattr(verifier, "_openssl_path", lambda: None)
+    report = verifier.verify_pe_signature(signed, cert_path=cert)
+    assert report["ok"] is False
+    assert report["signer_signature_verified"] is False
+    assert "backend unavailable" in report["reason"].lower()
+
+
+def test_emitted_cms_is_accepted_by_openssl(tmp_path):
+    """Independent interoperability check, not the project's own verifier."""
+    from obfuscator.authenticode_verify import _der_length_of, _extract_pkcs7
+
+    openssl = shutil.which("openssl")
+    if openssl is None:
+        pytest.skip("OpenSSL CMS is required by the implementation")
+    ac = _authenticode()
+    cert, key = _make_cert(tmp_path)
+    unsigned = _pe()
+    signed = ac.sign_pe(unsigned, cert, key)
+    blob, _length, _revision, _ctype = _extract_pkcs7(signed)
+    pkcs7_der = blob[:_der_length_of(blob)]
+    cms_path = tmp_path / "signature.der"
+    content_path = tmp_path / "indirect.der"
+    cms_path.write_bytes(pkcs7_der)
+    content_path.write_bytes(ac._spc_indirect_data(ac.pe_digest(unsigned)))
+
+    printed = subprocess.run(
+        [openssl, "cms", "-cmsout", "-inform", "DER", "-in", str(cms_path),
+         "-print"], capture_output=True, text=True, timeout=30, check=True)
+    assert "eContentType:" in printed.stdout
+    assert ac.SPC_INDIRECT_DATA_OID in printed.stdout.split("eContentType:", 1)[1].splitlines()[0]
+    verified = subprocess.run(
+        [openssl, "cms", "-verify", "-binary", "-inform", "DER",
+         "-in", str(cms_path), "-content", str(content_path), "-noverify",
+         "-out", str(tmp_path / "verified.der")],
+        capture_output=True, timeout=30, check=True)
+    assert b"Verification successful" in verified.stderr
+    assert (tmp_path / "verified.der").read_bytes() == content_path.read_bytes()

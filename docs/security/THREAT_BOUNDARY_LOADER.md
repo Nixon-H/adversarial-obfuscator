@@ -166,6 +166,26 @@ implemented as a module. The remaining work is operational: an operator supplies
 a signing key, and the build stamps the artefact. Until then the artefact's
 integrity check remains the internally-consistent kind measured above.
 
+#### Slot coverage and check ordering (measured 2026-11-25/26)
+
+The signature and Merkle/HMAC content filters exclude **only** the exact
+`_NX_PROV_SIG = "..."` and `_NX_PROV_PK = "..."` assignment lines. An earlier
+substring filter excluded every line merely mentioning those names, including
+live verifier lines; attacker code appended to `_nx_prov_sig_s` therefore left
+both the signed bytes and the self-check bytes unchanged. The unbound
+provenance check is now emitted after `_nx_self_check()` as well, so amending
+that check cannot execute before the integrity gate. Regression coverage is in
+`tests/test_provenance_slot_filter.py`; the hardened benchmark artefact
+`harden_v8` was rebuilt and the original injection was verified blocked
+(rc 137, no injected marker, no payload output).
+
+This is still not a promise that no attacker-supplied instruction can ever
+execute before a client-side integrity check in a Python artefact. A suitably
+placed edit can always precede the first check; the guarantee here is narrower
+and evidence-backed: the measured provenance-filter bypass is closed, the
+provenance verifier itself is inside the checked region, and the payload does
+not run after the reproduced amendment.
+
 ### Honest limit of the signature fix
 
 The public key travels IN the artefact, so an attacker who re-signs a modified
@@ -557,3 +577,20 @@ analysis.
 Reproduce with `scripts/ghidra_boundary_check.sh <blob.so>` and
 `NX_PAYLOAD_NEEDLES="<identifiers;literals>"`; the driver and its two Ghidra
 scripts are committed. Full write-up: research log §5u.
+
+## Operator-held blob-key shards
+
+When `NX_SEAL_SHARD` or `NX_TABLE_SHARD` is present while the hybrid loader is
+packed, the effective payload/native-blob key includes a second
+domain-separated mask derived from those values. The shard values are not
+embedded in the artefact; the emitted loader derives the same mask only when
+the operator exports the same value(s) at run time. With neither variable set
+the derivation is byte-identical to the legacy unbound build.
+
+Scope and limitation: this is key-custody hardening for the hybrid/sectioned
+loader, not a proof that a client-side artefact is immune to a patient local
+attacker. A caller who possesses the correct runtime shards can still execute
+and inspect the artefact on a machine they control. Regression coverage:
+`tests/test_operator_blob_key.py` verifies identity behaviour without shards,
+matching-shard execution, missing-shard wrong-key decryption, length-prefix
+separation, and absence of shard literals from generated output.

@@ -119,6 +119,15 @@ def _build_and_run(index, extra=()):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     iterations = int(args[0]) if args else 5
+    # --no-section-split is passed through to the pipeline; --section-split
+    # names the DEFAULT (the pass is on unless --no-section-split), so it
+    # needs no extra flag -- but it is a KNOWN flag now, and unknown --flags
+    # are an error instead of being silently dropped.
+    known = {"--no-section-split", "--section-split"}
+    unknown = [a for a in sys.argv[1:] if a.startswith("--") and a not in known]
+    if unknown:
+        print("unknown flags: %s" % unknown, file=sys.stderr)
+        return 2
     extra = ["--no-section-split"] if "--no-section-split" in sys.argv else []
     failures = []
     for i in range(iterations):

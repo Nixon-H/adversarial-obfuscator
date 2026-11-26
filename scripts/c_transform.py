@@ -733,7 +733,7 @@ def insert_subset_sum_predicates(source: str, seed: bytes,
         table_kb=((1 << half) * 8) // 1024)
     for i, inst in enumerate(instances):
         arr_name = "__nx_ss_set_%02d" % (i,)
-        set_vals = ", ".join(str(v) for v in inst["set"])
+        set_vals = ", ".join("%dULL" % v for v in inst["set"])
         # `__nx_gen` marks every line this pass emits, so a later pass can
         # skip the whole block by marker instead of re-deriving scope from
         # the text. A per-line `static` test was not enough (audit
@@ -743,7 +743,7 @@ def insert_subset_sum_predicates(source: str, seed: bytes,
             "static const unsigned long long %s[] = {%s}; /* __nx_gen */\n"
             "static const int %s_n = %d; /* __nx_gen */\n"
             "static const unsigned long long %s_target = %dULL; /* __nx_gen */\n"
-            % (arr_name, ", ".join("%dULL" % v for v in inst["set"]),
+            % (arr_name, set_vals,
                arr_name, len(inst["set"]),
                arr_name, inst["target"])
         )

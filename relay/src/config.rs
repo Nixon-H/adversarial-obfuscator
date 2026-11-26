@@ -4,7 +4,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub client: ClientConfig,
@@ -32,7 +32,7 @@ pub struct ClientConfig {
     pub handshake_timeout: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RelayConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -44,7 +44,7 @@ pub struct RelayConfig {
     pub socks_password: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CloudflareConfig {
     #[serde(default)]
     pub api_token: Option<String>,
@@ -163,17 +163,6 @@ impl Config {
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            client: ClientConfig::default(),
-            cloudflare: CloudflareConfig::default(),
-            worker: WorkerConfig::default(),
-            cached_services: Vec::new(),
-        }
-    }
-}
-
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
@@ -183,27 +172,6 @@ impl Default for ClientConfig {
             cf_hostnames: Vec::new(),
             relay: RelayConfig::default(),
             handshake_timeout: default_handshake_timeout(),
-        }
-    }
-}
-
-impl Default for RelayConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            url: String::new(),
-            auth_token: String::new(),
-            socks_password: String::new(),
-        }
-    }
-}
-
-impl Default for CloudflareConfig {
-    fn default() -> Self {
-        Self {
-            api_token: None,
-            account_id: None,
-            zone_id: None,
         }
     }
 }

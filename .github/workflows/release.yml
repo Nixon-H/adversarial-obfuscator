@@ -47,8 +47,8 @@ jobs:
     env:
       NIXON_LOG_REDIRECT: "0"
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Install build dependencies
@@ -101,6 +101,7 @@ jobs:
               env=dict(os.environ, NIXON_ARTEFACT_SIGN_KEY=sign_key,
                        NIXON_BUILD_MANIFEST_KEY=sign_key,
                        NIXON_REQUIRE_PROVENANCE="1",
+                       NIXON_REQUIRE_DEP_LOCK="1",
                        NIXON_PROVENANCE_PUBKEY=pin_hex))
           assert build.returncode == 0, "build failed: " + (build.stderr or "")[-500:]
 
@@ -123,6 +124,8 @@ jobs:
           pin_raw = base64.b64decode(m.group(2))
           rec("provenance pin self-consistent",
               m.group(1) == hashlib.sha256(pin_raw).hexdigest()[:16])
+          rec("embedded pin matches independently generated publisher key",
+              pin_raw.hex() == pin_hex)
           pin = pin_raw.hex()
           manifest = json.load(open(art + ".build-manifest.json",
                                     encoding="utf-8"))
@@ -134,9 +137,16 @@ jobs:
               subprocess.run(["git", "rev-parse", "HEAD"],
                              capture_output=True,
                              text=True).stdout.strip())
-          rec("manifest binds the dependency-lock digest",
-              bool((manifest.get("build") or {}).get(
-                  "dependency_lock_digest")))
+          expected_lock_digest = hashlib.sha256(open("requirements.lock", "rb").read()).hexdigest()
+          rec("manifest binds the exact dependency-lock digest",
+              (manifest.get("build") or {}).get("dependency_lock_digest") == expected_lock_digest)
+          ci = (manifest.get("build") or {}).get("ci") or {}
+          rec("manifest binds the current CI workflow identity",
+              ci.get("workflow") == os.environ.get("GITHUB_WORKFLOW") and
+              ci.get("run_id") == os.environ.get("GITHUB_RUN_ID") and
+              ci.get("sha") == os.environ.get("GITHUB_SHA"))
+          rec("manifest records no dependency-lock drift",
+              ((manifest.get("extra") or {}).get("dependency_lock") or {}).get("ok") is True)
 
           def run(path, pin_hex=pin):
               return subprocess.run([sys.executable, path],
@@ -169,10 +179,15 @@ jobs:
               fh.write(digest)
           with open("accepted_artefact.py", "wb") as fh:
               fh.write(published)
+          manifest_bytes = open(art + ".build-manifest.json", "rb").read()
+          with open("accepted_artefact.py.build-manifest.json", "wb") as fh:
+              fh.write(manifest_bytes)
           verdict = "PASS" if all(r["ok"] for r in results) else "FAIL"
           with open("acceptance_report.json", "w", encoding="utf-8") as fh:
               json.dump(dict(schema="nx-release-acceptance/v1",
                              artefact_sha256=digest,
+                             manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
+                             manifest_public_key=pin_hex,
                              manifest_commit=(manifest.get("build") or
                                               {}).get("commit"),
                              checks=results, verdict=verdict),
@@ -181,7 +196,7 @@ jobs:
           assert verdict == "PASS", "the acceptance matrix failed"
           PY
       - name: Upload immutable release artefact + report
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # pinned immutable; upstream tag actions/upload-artifact@v4.4.3
         with:
           name: release-candidate
           path: |
@@ -209,8 +224,8 @@ jobs:
     timeout-minutes: 20
     environment: production
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # pinned immutable; upstream tag actions/download-artifact@v4.1.8
         with:
           name: release-candidate
       - name: Re-verify the downloaded bytes against the accepted digest
@@ -228,9 +243,21 @@ jobs:
               "the downloaded bytes differ from the accepted digest")
           assert actual == report["artefact_sha256"], (
               "the downloaded bytes differ from the attested digest")
+          manifest_bytes = open("accepted_artefact.py.build-manifest.json", "rb").read()
+          manifest_actual = hashlib.sha256(manifest_bytes).hexdigest()
+          assert manifest_actual == report["manifest_sha256"], (
+              "the downloaded manifest differs from the attested manifest digest")
+          import os, sys
+          os.environ["NIXON_REQUIRE_PROVENANCE"] = "1"
+          os.environ["NIXON_BUILD_MANIFEST_PUBKEY"] = report["manifest_public_key"]
+          sys.path.insert(0, os.getcwd())
+          from obfuscator.build_manifest import verify_manifest
+          verification = verify_manifest("accepted_artefact.py")
+          assert verification.get("ok") is True, verification.get("reason")
           assert report["verdict"] == "PASS"
           print("PUBLISH DECISION: all checks pass — these exact bytes "
-                "passed provenance, integrity and the refusal matrix")
+                "passed provenance, integrity, signed-manifest verification, "
+                "and the refusal matrix")
           # The production publish step replaces this line and runs ONLY
           # inside a protected environment with required reviewers; the
           # dry run is the committed, verifiable form of the gate.

@@ -163,8 +163,41 @@ class TestContainer:
         container = pack_bytes(b"Hello", key)
         info = container_info(container)
         assert info["magic"] == "0x4e4958"
-        assert info["version"] == 1
+        assert info["version"] == 3  # v3: random nonce + keyed HMAC, legacy refused
         assert info["original_size"] == 5
+
+    def test_same_plaintext_same_key_gives_different_ciphertext(self):
+        """v3 regression: the nonce is random, not derived from the plaintext,
+        so encrypting the same plaintext twice must not yield equal containers."""
+        key = generate_encryption_seed()
+        plaintext = b"repeatable secret" * 10
+        c1 = pack_bytes(plaintext, key)
+        c2 = pack_bytes(plaintext, key)
+        assert c1 != c2
+        assert unpack_bytes(c1, key) == plaintext
+        assert unpack_bytes(c2, key) == plaintext
+
+    def test_legacy_v1_container_is_rejected(self):
+        """v1 containers have no keyed integrity check and must not be read."""
+        import hashlib as _hl
+        import struct as _st
+        from encrypt import aes as _aes
+        key = generate_encryption_seed()
+        plaintext = b"legacy payload"
+        sha = _hl.sha256(plaintext).digest()
+        nonce = sha[:8]
+        enc = _aes.aes256_ctr_encrypt(plaintext, key, nonce)
+        v1 = _st.pack('<IIII', 0x4E4958, 1, len(plaintext), len(enc)) + sha + enc
+        with pytest.raises(ValueError, match="legacy NIX v1"):
+            unpack_bytes(v1, key)
+
+    def test_tampered_ciphertext_fails_hmac_before_decrypt(self):
+        key = generate_encryption_seed()
+        plaintext = b"mac me"
+        container = bytearray(pack_bytes(plaintext, key))
+        container[-1] ^= 0xFF
+        with pytest.raises(ValueError, match="HMAC"):
+            unpack_bytes(bytes(container), key)
 
     def test_bad_magic(self):
         key = generate_encryption_seed()
@@ -186,38 +219,58 @@ class TestEncryptBinary:
     
     Positive test cases for encryptbinary.
     """
-    def test_encrypt_bulk_mode(self):
-        result = encrypt_binary(
-            os.path.join(BASE_DIR, "build", "orbital-relay"),
-            "/tmp/test_enc_bulk",
-            block_size=64,
-            text_size=4096,
-        )
-        assert result["num_blocks"] > 0
-        assert result["block_size"] == 64
-        assert os.path.getsize("/tmp/test_enc_bulk") > 0
-        os.unlink("/tmp/test_enc_bulk")
+    @staticmethod
+    def _clean(output):
+        # The writer refuses to replace an existing key sidecar (security
+        # property), so tests must remove both artefacts from earlier runs.
+        for path in (output, output + ".key"):
+            if os.path.exists(path):
+                os.unlink(path)
 
-    def test_encrypt_with_seed(self):
-        seed = bytes.fromhex("ab" * 32)
-        result = encrypt_binary(
-            os.path.join(BASE_DIR, "build", "orbital-relay"),
-            "/tmp/test_enc_seeded",
-            seed=seed,
-            text_size=4096,
-        )
-        assert result["seed"] == "ab" * 32
-        os.unlink("/tmp/test_enc_seeded")
+    def test_encrypt_bulk_mode(self, tmp_path):
+        output = str(tmp_path / "test_enc_bulk")
+        self._clean(output)
+        try:
+            result = encrypt_binary(
+                os.path.join(BASE_DIR, "build", "orbital-relay"),
+                output,
+                block_size=64,
+                text_size=4096,
+            )
+            assert result["num_blocks"] > 0
+            assert result["block_size"] == 64
+            assert os.path.getsize(output) > 0
+        finally:
+            self._clean(output)
 
-    def test_encrypt_per_block(self):
-        result = encrypt_binary_per_block(
-            os.path.join(BASE_DIR, "build", "orbital-relay"),
-            "/tmp/test_enc_pb",
-            block_size=128,
-            text_size=4096,
-        )
-        assert result["num_blocks"] > 0
-        os.unlink("/tmp/test_enc_pb")
+    def test_encrypt_with_seed(self, tmp_path):
+        output = str(tmp_path / "test_enc_seeded")
+        self._clean(output)
+        try:
+            seed = bytes.fromhex("ab" * 32)
+            result = encrypt_binary(
+                os.path.join(BASE_DIR, "build", "orbital-relay"),
+                output,
+                seed=seed,
+                text_size=4096,
+            )
+            assert result["seed"] == "ab" * 32
+        finally:
+            self._clean(output)
+
+    def test_encrypt_per_block(self, tmp_path):
+        output = str(tmp_path / "test_enc_pb")
+        self._clean(output)
+        try:
+            result = encrypt_binary_per_block(
+                os.path.join(BASE_DIR, "build", "orbital-relay"),
+                output,
+                block_size=128,
+                text_size=4096,
+            )
+            assert result["num_blocks"] > 0
+        finally:
+            self._clean(output)
 
 
 def test_binary_encrypt_decrypt_roundtrip():

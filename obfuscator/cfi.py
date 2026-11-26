@@ -67,7 +67,6 @@ def emit_snippet(slot_name: str = "_NX_CFI_SEQ",
     through the loader's existing `_nx_self_fail` so the exit path and message
     format stay consistent with the other gates.
     """
-    tag_list = ", ".join('"%s"' % t for t in tags)
     return r'''
 # ── §1 control-flow integrity ────────────────────────────────────────────
 _NX_CFI_SEED = None
@@ -149,8 +148,7 @@ def _nx_cfi_verify():
         _nx_self_fail("control-flow: verification error")
 '''.replace("__CFI_SCHEMA__", schema) \
    .replace("__CFI_SLOT__", slot_name) \
-   .replace("__CFI_COUNT__", str(len(tags))) \
-   .replace('"""', '"""', 1)
+   .replace("__CFI_COUNT__", str(len(tags)))
 
 
 def mark_call(tag: str) -> str:

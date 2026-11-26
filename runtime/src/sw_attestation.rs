@@ -153,7 +153,13 @@ impl MemoryWatch {
         }
     }
 
-    pub fn register_region(&self, addr: *const u8, size: usize) {
+    /// Register a readable memory region for later integrity checks.
+    ///
+    /// # Safety
+    /// `addr` must point to `size` readable bytes that remain allocated and
+    /// unchanged in address until this `MemoryWatch` is dropped. The caller
+    /// must also ensure concurrent mutation cannot create a data race.
+    pub unsafe fn register_region(&self, addr: *const u8, size: usize) {
         let hash = ChallengeHandler::fast_region_hash(unsafe {
             std::slice::from_raw_parts(addr, size)
         });
@@ -239,8 +245,13 @@ impl AttestationEngine {
         self.memory_watch.verify_all()
     }
 
-    pub fn register_critical_region(&self, addr: *const u8, size: usize) {
-        self.memory_watch.register_region(addr, size);
+    /// Register a readable memory region for later integrity checks.
+    ///
+    /// # Safety
+    /// See [`MemoryWatch::register_region`]. The region must remain valid and
+    /// readable for the lifetime of this engine.
+    pub unsafe fn register_critical_region(&self, addr: *const u8, size: usize) {
+        unsafe { self.memory_watch.register_region(addr, size) };
     }
 }
 
@@ -298,7 +309,7 @@ mod tests {
     fn test_memory_watch_register_and_verify() {
         let watch = MemoryWatch::new();
         let data = vec![0x42u8; 64];
-        watch.register_region(data.as_ptr(), data.len());
+        unsafe { watch.register_region(data.as_ptr(), data.len()) };
         assert!(watch.verify_all());
     }
 
@@ -306,7 +317,7 @@ mod tests {
     fn test_memory_watch_detects_tamper() {
         let watch = MemoryWatch::new();
         let mut data = vec![0x42u8; 64];
-        watch.register_region(data.as_ptr(), data.len());
+        unsafe { watch.register_region(data.as_ptr(), data.len()) };
         data[0] = 0xFF;
         assert!(!watch.verify_all());
     }
@@ -327,7 +338,8 @@ mod tests {
     #[test]
     fn test_attestation_engine_verify_integrity() {
         let engine = AttestationEngine::new();
-        engine.register_critical_region(&0x42u8 as *const u8, 1);
+        let data = 0x42u8;
+        unsafe { engine.register_critical_region(&data, 1) };
         let result = engine.verify_integrity();
         assert!(result);
     }

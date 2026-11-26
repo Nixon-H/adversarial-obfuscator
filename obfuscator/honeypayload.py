@@ -15,8 +15,9 @@ Design constraints (each one is a test):
   analyst who executes it does not immediately conclude it is fake.
 * It must be **cheap**: generating it costs a few milliseconds and a few KB.
 * It must be **inert with respect to the real payload**: the decoy's key is
-  derived from the build id only, never from the licence, so breaking it
-  teaches the analyst nothing about the real key chain.
+  derived from operator-held build secret material, never from the licence or
+  from artefact-public values, so breaking it teaches the analyst nothing
+  about the real key chain.
 * The real payload must remain reachable: the decoy never replaces it.
 
 The decoy is emitted as an extra sealed pack (``_NX_HONEY_PACK``) with its own
@@ -118,28 +119,40 @@ def generate_decoy(seed: bytes, vendor: Optional[str] = None) -> str:
         retry=retry, shards=shards)
 
 
-def decoy_key(build_id: str) -> bytes:
+def decoy_key(build_id: str, operator_secret: str) -> bytes:
     """The decoy's sealing key.
 
-    Derived from the BUILD ID ONLY -- never from the licence.  That is what
-    keeps the decoy inert: recovering it tells an analyst nothing about the
-    licence-bound key chain that protects the real payload.
+    The key is domain-separated and keyed by operator-held secret material.
+    Artefact-public values such as the build id or emitted section pack are
+    not sufficient to reconstruct it.  The secret must never be emitted into
+    the artefact or copied benchmark evidence.
     """
-    return hashlib.sha256(
-        b"nx-honey-decoy:" + str(build_id).encode("utf-8")).digest()
+    import hmac
+
+    secret = (operator_secret or "").encode("utf-8")
+    if len(secret) < 16:
+        raise ValueError("operator decoy secret must be at least 16 bytes")
+    return hmac.new(
+        secret,
+        b"nx-honey-decoy-v2:" + str(build_id).encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
 
 
-def build_honey_pack(seed: bytes, build_id: str, *, sections: int = 2) -> dict:
-    """Seal the decoy into its own pack, with its own key hint.
+def build_honey_pack(seed: bytes, build_id: str, *, sections: int = 2,
+                     operator_secret: str) -> dict:
+    """Seal the decoy into its own pack.
 
-    Returns ``{"pack_b85": str, "key_hint": str, "source": str}``.
+    Returns ``{"pack_b85": str, "key_hint": str, "source": str}``.  The pack
+    envelope itself carries the normal section-pack key hint; callers must not
+    emit an additional decoy hint or the operator secret.
     """
     import base64
 
     from obfuscator.section_split import pack_json
 
     source = generate_decoy(seed)
-    key = decoy_key(build_id)
+    key = decoy_key(build_id, operator_secret)
     # Compress with the same envelope the real payload uses, so the two are
     # indistinguishable by shape.
     import zlib

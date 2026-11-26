@@ -214,9 +214,19 @@ def _git_commit():
         out = subprocess.run(
             ["git", "rev-parse", "HEAD"], capture_output=True, text=True,
             timeout=15).stdout.strip()
-        return out or None
+        if out:
+            return out
     except Exception:
-        return None
+        pass
+    # VCS-less build environments (Docker source COPY, sdists) cannot derive
+    # the commit themselves. The build system may inject it explicitly; this
+    # is metadata input, not a substitute for git when git is available.
+    import re
+    for var in ("NIXON_SOURCE_COMMIT", "GITHUB_SHA"):
+        value = os.environ.get(var, "").strip()
+        if re.fullmatch(r"[0-9a-fA-F]{40}", value):
+            return value.lower()
+    return None
 
 
 def _dependency_lock_digest():
@@ -480,13 +490,6 @@ def verify_manifest(artefact_path, public_key=None):
             # incident triage in docs/security/INCIDENT_RESPONSE.md.
             nested = (manifest.get("signature") or {}).get("key_fingerprint")
             signed_copy = manifest.get("signed_key_fingerprint")
-            if signed_copy is not None and nested is not None:
-                if str(nested) != str(signed_copy):
-                    result["reason"] = (
-                        "signing-key fingerprint mismatch: signature block "
-                        "claims %r but the signed body records %r"
-                        % (nested, signed_copy))
-                    return result
             body = {k: v for k, v in manifest.items()
                     if k not in ("signature", "signed")}
             payload = json.dumps(body, sort_keys=True,
@@ -494,6 +497,20 @@ def verify_manifest(artefact_path, public_key=None):
             sig = base64.b64decode(
                 (manifest.get("signature") or {}).get("sig", ""))
             public_key.verify(sig, payload)
+            # Legacy manifests predate the signed top-level copy. Their nested
+            # fingerprint is not itself authenticated, but it can still be
+            # pinned against the trusted verifier key after the signature has
+            # verified; accepting a mismatch would let incident triage
+            # re-attribute the artefact to a key that did not sign it.
+            trusted_fp = hashlib.sha256(_pub_raw(public_key)).hexdigest()[:16]
+            for label, copy in (("signature block", nested),
+                                ("signed body", signed_copy)):
+                if copy is not None and str(copy) != trusted_fp:
+                    result["reason"] = (
+                        "signing-key fingerprint mismatch: %s claims %r "
+                        "but the trusted verifier key is %r"
+                        % (label, copy, trusted_fp))
+                    return result
         except Exception as exc:
             result["reason"] = "signature invalid: %s" % (str(exc)[:120],)
             return result

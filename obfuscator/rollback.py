@@ -111,11 +111,20 @@ def write_mark(path, key, level, artefact_name):
     directory = os.path.dirname(os.path.abspath(path)) or "."
     try:
         fd, tmp = tempfile.mkstemp(dir=directory, prefix=".nx-rb-")
+    except OSError:
+        return False
+    try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, sort_keys=True)
         os.replace(tmp, path)
         return True
     except OSError:
+        # A failed replace must not leave a readable stray mark candidate in
+        # the artefact directory; atomic-write cleanup is part of the contract.
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
         return False
 
 
@@ -137,5 +146,8 @@ def check_rollback(artefact_path, level, key, override_path=None):
             "was already installed here; refusing to downgrade"
             % (level, seen))
     if level > seen or not os.path.exists(path):
-        write_mark(path, key, level, name)
+        if not write_mark(path, key, level, name):
+            raise RuntimeError(
+                "anti-rollback: protection mark could not be written; "
+                "refusing to run with rollback enforcement disarmed")
     return {"level": level, "previous": seen, "mark": path}

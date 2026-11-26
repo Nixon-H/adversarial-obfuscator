@@ -17,7 +17,6 @@ the attack is still exercised, and the refusal is now what is asserted. A test
 that only checks the happy path would not notice if v3 were reverted.
 """
 import copy
-import importlib
 import os
 import sys
 

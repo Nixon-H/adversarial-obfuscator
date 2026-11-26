@@ -147,6 +147,30 @@ class TestReachabilityAnalyzer:
         paths = analyzer.trace_cli_flag("")
         assert paths == []
 
+    def test_trace_staged_skip_flag(self):
+        """--skip <stage> resolves through _SKIP_CATALOG, not a retired dash form.
+
+        The build CLI replaced --skip-irgen/--skip-relay with the staged
+        --skip form.  Treating the old spelling as the only valid token made
+        five shipped features report a missing CLI link.
+        """
+        analyzer = ReachabilityAnalyzer()
+        for stage in ("obfuscate", "irgen", "llvmgen", "encrypt", "relay", "extras"):
+            paths = analyzer.trace_cli_flag(f"--skip {stage}")
+            assert paths, f"--skip {stage} did not resolve"
+            assert all("build.py" in p for p in paths)
+        assert analyzer.trace_cli_flag("--skip not-a-stage") == []
+        assert analyzer.trace_cli_flag("--skip-irgen") == []
+
+    def test_core_pipeline_features_are_reachable(self):
+        """No shipped feature may lose its CLI link to retired flag spelling."""
+        analyzer = ReachabilityAnalyzer()
+        for feature in ("obfuscation", "ir_compilation", "llvm_codegen",
+                        "encryption", "rust_relay"):
+            result = analyzer.analyze_feature(feature)
+            assert result.cli_flag_found, (feature, result.missing_links)
+            assert not any("cli_flag" in link for link in result.missing_links)
+
     def test_trace_phase_found(self):
         analyzer = ReachabilityAnalyzer()
         path = analyzer.trace_phase("phase_obfuscate")
@@ -315,7 +339,9 @@ class TestFeatureMap:
 
     def test_obfuscation_feature(self):
         info = ALL_FEATURES["obfuscation"]
-        assert info["cli_flag"] == "--skip-obfuscate"
+        # The build CLI replaced dash-form skip flags with --skip <stage>;
+        # the registry must carry the form that actually parses.
+        assert info["cli_flag"] == "--skip obfuscate"
         assert info["phase_name"] == "phase_obfuscate"
         assert info["impl_module"] is not None
 

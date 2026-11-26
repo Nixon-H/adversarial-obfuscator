@@ -108,8 +108,8 @@ lumps together three genuinely different things:
 
 * `pipeline.py` — four outbound calls that now pass through `checked_url()`;
 * `sources.py` — the geofence gate's hardcoded endpoint list, **emitted into
-  the artefact** rather than called by the build (7 hits: L2141, L2774, L2835,
-  L2853, L2921, L3142, L3158);
+  the artefact** rather than called by the build (7 hits: L2149, L2782, L2843,
+  L2861, L2929, L3150, L3166);
 * `licensing.py:420` — an RPC URL taken from the **signed licence payload**,
   HTTPS-enforced, contained by the signature rather than a host allowlist.
 

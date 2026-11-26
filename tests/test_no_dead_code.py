@@ -43,8 +43,13 @@ ROOT = Path(__file__).resolve().parent.parent
 # obfuscator/core/pipeline.py copy it into the build dir and compile it
 # alongside payload.c (measured: the built blob exports it and applies the
 # policy -- tests/test_native_enforcement.py).
+#
+# `core_abi_test.cpp` (2026-11-25) is the executed ABI regression harness for
+# the white-box entry points: sizes, empty plaintext, malformed padding,
+# exception containment. `make abi-test` compiles and runs it; the audit also
+# runs it under ASan+UBSan.
 KEPT_NATIVE = {"core.cpp", "whitebox_feistel.cpp", "simd_vm.c", "simd_vm_test.c",
-               "pe_load_config.c", "enforcement.c"}
+               "pe_load_config.c", "enforcement.c", "core_abi_test.cpp"}
 
 # What was removed. The code lives in git history (see
 # archive/rust-runtime/README.md and archive/native/README.md for the

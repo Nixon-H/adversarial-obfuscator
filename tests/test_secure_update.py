@@ -8,7 +8,6 @@ truncated binary that the next start tries to execute). Each test below is one
 of those, and each asserts a refusal.
 """
 import hashlib
-import json
 import os
 import sys
 import time

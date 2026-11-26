@@ -324,6 +324,7 @@ def test_loader_flag_on_same_effective_key_and_e2e():
     eff = derive_effective_key(_RAW_KEY, bid)
     assert ns.get("BLOB_KEY") == eff
     assert ns.get("BLOB_KEY_SB") == eff
+    ns["_nx_cfi_mark"]("enter")
     ns["_exec_fallback"]()
     assert ns.get("SB_E2E") == 123
 

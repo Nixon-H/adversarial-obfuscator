@@ -18,35 +18,35 @@ Security Relevance:
 
 ALL_FEATURES = {
     "obfuscation": {
-        "cli_flag": "--skip-obfuscate",
+        "cli_flag": "--skip obfuscate",
         "phase_name": "phase_obfuscate",
         "impl_module": "obfuscator.core.pipeline",
         "runtime_file": None,
         "test_file": "test_obfuscator.py",
     },
     "ir_compilation": {
-        "cli_flag": "--skip-irgen",
+        "cli_flag": "--skip irgen",
         "phase_name": "phase_ir_compile",
         "impl_module": "irgen.compile",
         "runtime_file": None,
         "test_file": "test_core.py",
     },
     "llvm_codegen": {
-        "cli_flag": "--skip-llvmgen",
+        "cli_flag": "--skip llvmgen",
         "phase_name": "phase_llvm_codegen",
         "impl_module": "llvmgen.lower",
         "runtime_file": None,
         "test_file": "test_native_compile.py",
     },
     "encryption": {
-        "cli_flag": "--skip-encrypt",
+        "cli_flag": "--skip encrypt",
         "phase_name": "phase_encrypt_binary",
         "impl_module": "scripts.phases.phase04_encrypt",
         "runtime_file": "decrypt.rs",
         "test_file": "test_encrypt.py",
     },
     "rust_relay": {
-        "cli_flag": "--skip-relay",
+        "cli_flag": "--skip relay",
         "phase_name": "phase_compile_relay",
         "impl_module": "scripts.phases.phase03_compile",
         "runtime_file": None,
@@ -71,7 +71,7 @@ ALL_FEATURES = {
         "phase_name": "phase_runtime_manifest",
         "impl_module": "scripts.phases.phase05_payload_h",
         "runtime_file": None,
-        "test_file": None,
+        "test_file": "test_runtime_manifest.py",
     },
     "packaging": {
         "cli_flag": None,
@@ -134,7 +134,7 @@ ALL_FEATURES = {
         "phase_name": "phase_adversarial_loop",
         "impl_module": "scripts.phases.phase09_adversarial",
         "runtime_file": None,
-        "test_file": None,
+        "test_file": "test_adversarial_loop_regression.py",
     },
     "provenance_poisoning": {
         "cli_flag": "--anti-rea-level",
@@ -197,7 +197,7 @@ ALL_FEATURES = {
         "phase_name": "phase_self_healing",
         "impl_module": "scripts.phases.phase15_self_healing",
         "runtime_file": "self_healing.rs",
-        "test_file": "test_self_healing_native.py",
+        "test_file": None,
     },
     "code_genome": {
         "cli_flag": "--code-genome",
@@ -211,7 +211,7 @@ ALL_FEATURES = {
         "phase_name": "phase_struct_randomization",
         "impl_module": "scripts.phases.phase17_struct_random",
         "runtime_file": "struct_random.rs",
-        "test_file": "test_struct_random_native.py",
+        "test_file": None,
     },
     "history_bound_decryption": {
         "cli_flag": "--history-bound-decryption",
@@ -427,7 +427,7 @@ ALL_FEATURES = {
         "phase_name": None,
         "impl_module": "irgen.oram",
         "runtime_file": "oram.rs",
-        "test_file": None,
+        "test_file": "test_audit_followup_regression.py",
     },
     "rop": {
         "cli_flag": "--rop",

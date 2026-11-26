@@ -15,21 +15,31 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from flag_catalogue import catalogue  # noqa: E402
 
-# Representative, value-safe transforms: one per major technique family.
+# Representative, value-safe transforms drawn from the live catalogue. The
+# old WANTED list named flags that no longer exist, so the matrix silently
+# collapsed to a single flag. Names are checked below and a missing name is
+# an error rather than a silent skip.
 WANTED = [
-    "--cfg-flatten", "--mba-subs", "--opaque-predicates",
-    "--fragment-strings", "--class-dispatch", "--anti-rea-level",
+    "--anti-rea-level", "--diagnostic", "--include-original",
+    "--no-cfg-flatten", "--no-mba-subs", "--optimize",
 ]
 
 
 def main():
-    by_name = {e["flag"]: e for e in catalogue()}
-    out = []
-    for name in WANTED:
-        entry = by_name.get(name)
-        if entry is None or entry["kind"] == "excluded":
-            continue
-        out.append(" ".join(entry["argv"]))
+    entries = catalogue()
+    by_name = {e["flag"]: e for e in entries}
+    if "--all" in sys.argv:
+        selected = [e for e in entries if e["kind"] != "excluded"]
+    else:
+        selected = []
+        for name in WANTED:
+            entry = by_name.get(name)
+            if entry is None:
+                raise SystemExit("matrix flag %r is not in the live catalogue" % name)
+            if entry["kind"] == "excluded":
+                raise SystemExit("matrix flag %r is excluded from safe builds" % name)
+            selected.append(entry)
+    out = [" ".join(entry["argv"]) for entry in selected]
     print(json.dumps(out))
     return 0
 

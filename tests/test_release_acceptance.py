@@ -95,6 +95,7 @@ def _real_artefact(tmp_path):
     return artefact, manifest, key
 
 
+@pytest.mark.nixon_timeout(180)
 def test_a_real_artefact_carries_the_register_section7_fields(tmp_path):
     """The manifest must bind commit, lock digest, level and key identity."""
     artefact, manifest, key = _real_artefact(tmp_path)

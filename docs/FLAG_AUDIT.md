@@ -306,8 +306,9 @@ protections, and correctly cost nothing at artefact run time.
 | `--rop` | build.py | `` | Fragmentation / execution |
 | `--section-count` | loader | `4` | Fragmentation / execution |
 | `--section-split` | loader | `True` | Fragmentation / execution |
+| `--skip` | build.py | stage names (space-separated: conflict, obfuscate, irgen, llvmgen, encrypt, relay, extras, generate-payload-h) | Fragmentation / execution |
 | `--simd-vm` | build.py | `` | Fragmentation / execution |
-| `--skip-llvmgen` | build.py | `` | Fragmentation / execution |
+
 | `--split-bootstrap` | both | `False` | Fragmentation / execution |
 | `--vm-threshold` | both | `50.0` | Fragmentation / execution |
 
@@ -391,12 +392,12 @@ protections, and correctly cost nothing at artefact run time.
 | `--python` | loader | `<expr>` | Operational / reporting |
 | `--resume` | loader | `` | Operational / reporting |
 | `--silent-fallback` | build.py | `` | Operational / reporting |
-| `--skip-conflict-check` | build.py | `` | Operational / reporting |
-| `--skip-encrypt` | build.py | `` | Operational / reporting |
-| `--skip-extras` | build.py | `` | Operational / reporting |
-| `--skip-irgen` | build.py | `` | Operational / reporting |
-| `--skip-obfuscate` | build.py | `` | Operational / reporting |
-| `--skip-relay` | build.py | `` | Operational / reporting |
+
+
+
+
+
+
 | `--tls-ca-bundle` | loader | `` | Operational / reporting |
 | `--tor` | loader | `` | Operational / reporting |
 | `--tor-proxy` | loader | `None` | Operational / reporting |

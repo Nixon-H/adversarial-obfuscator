@@ -666,7 +666,7 @@ class TestDiversityPool:
         dep1 = dp.distribute_variants()
         time.sleep(0.01)
         dep2 = dp.rotate_variants()
-        assert dep1 != dep2 or True  # at least ran
+        assert dep1 != dep2  # rotation must actually change the deployment
 
     def test_all_variants_semantically_equivalent(self):
         dp = DistributedDiversityPool()

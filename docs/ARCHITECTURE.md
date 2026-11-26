@@ -87,9 +87,9 @@ payload.py
 
 The exact ordering and the optional phases around it are visible in
 `scripts/build.py`; the list above is the load-bearing path, not every branch.
-`--skip-irgen`, `--skip-llvmgen`, `--skip-encrypt`, `--skip-relay`, and
-`--skip-extras` remove stages and are what make the stdlib-only quick start
-possible.
+`--skip irgen llvmgen encrypt relay extras` removes stages (space-separated
+stage names; the old `--skip-<stage>` dash forms were removed) and is what
+makes the stdlib-only quick start possible.
 
 ### 3.1 AST ladder
 
@@ -97,7 +97,7 @@ possible.
 Level 0 disables all 17 ladder transforms; level 4 is the default and enables
 14 of 17. **Level 0 is not a byte-identical copy through the CLI**: always-on
 passes (symbol rename, integrity checksums, string sealing, adversarial
-injection) still run. A byte-identical copy is `--skip-obfuscate` (verified on
+injection) still run. A byte-identical copy is `--skip obfuscate` (verified on
 a 2,635-byte payload: 2,635 bytes out, `diff` clean). The transformer-level AST
 equality holds only when the always-on passes are also switched off, as
 `tests/test_opt_enforcement.py` does.
@@ -233,7 +233,7 @@ constraints, not suggestions:
 
 1. **Level 0 disables the ladder, not the pipeline.** `resolve(0)` enables none
    of the 17 flags, but the CLI still applies always-on passes; byte-identical
-   output is `--skip-obfuscate`.
+   output is `--skip obfuscate`.
 2. **A build must produce a running artefact.** `make e2e` executes it.
 3. **Untrusted input never selects an executable path.** Emitted loader
    snippets contain no `exec`/`eval` over input-derived names

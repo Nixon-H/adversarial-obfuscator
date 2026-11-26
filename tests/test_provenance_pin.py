@@ -15,12 +15,10 @@ acceptance run and recorded in §6c.
 import os
 import sys
 
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from obfuscator.attestation import emit_snippet, stamp_artefact  # noqa: E402
-import hashlib  # noqa: E402
 
 
 def test_the_non_token_check_consults_the_out_of_band_pin():
@@ -92,7 +90,6 @@ def test_stamp_artefact_still_round_trips_through_the_verify_path():
     TypeError — the same call shape the acceptance script hit first).
     """
     import base64 as b64
-    import hashlib
     import re as _re
     from obfuscator.attestation import signed_content
     from cryptography.hazmat.primitives.asymmetric.ed25519 import (

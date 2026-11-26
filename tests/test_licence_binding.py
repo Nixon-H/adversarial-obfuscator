@@ -169,6 +169,32 @@ def test_parse_chain_spec_accepts_required_fields():
     assert chain["chain_id"] == "1"
 
 
+def test_parse_chain_spec_requires_explicit_chain_id():
+    import pytest
+    from obfuscator.licensing import LicenceError, parse_chain_spec
+    with pytest.raises(LicenceError, match="chain_id"):
+        parse_chain_spec([
+            "contract=0x" + "a" * 40,
+            "token-id=1",
+            "owner=0x" + "b" * 40,
+        ])
+
+
+def test_parse_chain_spec_rejects_non_hex_addresses():
+    import pytest
+    from obfuscator.licensing import LicenceError, parse_chain_spec
+    base = [
+        "contract=0x" + "a" * 40,
+        "token-id=1",
+        "owner=0x" + "b" * 40,
+        "chain-id=1",
+    ]
+    with pytest.raises(LicenceError, match="contract"):
+        parse_chain_spec(["contract=0x" + "z" * 40] + base[1:])
+    with pytest.raises(LicenceError, match="owner"):
+        parse_chain_spec(base[:2] + ["owner=0x" + "z" * 40] + base[3:])
+
+
 def test_licence_helper_can_enable_chain_gate():
     from obfuscator.core.pipeline import _licence_runtime_helpers
     src = _licence_runtime_helpers("a" * 64, True, True)
@@ -244,6 +270,7 @@ def test_chain_gate_success_returns_the_payload(tmp_path, monkeypatch):
         "contract": "0x" + "a" * 40,
         "token_id": "7",
         "owner": "0x" + "b" * 40,
+        "chain_id": "1",
     })
 
     def fake_owner_of(rpc, contract, token_id, expected_chain_id=None):
@@ -261,6 +288,7 @@ def test_chain_gate_failure_names_the_cause(tmp_path, monkeypatch, capsys):
         "contract": "0x" + "a" * 40,
         "token_id": "1",
         "owner": "0x" + "b" * 40,
+        "chain_id": "1",
     })
 
     def fake_owner_of(rpc, contract, token_id, expected_chain_id=None):
@@ -288,10 +316,51 @@ def test_chain_gate_missing_signed_fields(tmp_path, monkeypatch, capsys):
         ns["_nx_licence_payload"]()
     err = capsys.readouterr().err
     assert "missing signed chain fields" in err
-    assert set(part.strip() for part in err.split(":")[-1].split(",")) == {
-        "rpc", "contract", "token_id", "owner"}
+    for field in ("rpc", "contract", "token_id", "owner", "chain_id"):
+        assert field in err
 
 
+def test_runtime_licence_expiry_fails_closed(tmp_path, monkeypatch, capsys):
+    payload = _chain_payload({
+        "rpc": "https://example.invalid/v1",
+        "contract": "0x" + "a" * 40,
+        "token_id": "1",
+        "owner": "0x" + "b" * 40,
+        "chain_id": "1",
+    })
+    payload["expires_at"] = 1
+
+    def fake_owner_of(rpc, contract, token_id, expected_chain_id=None):
+        raise AssertionError("ownerOf must not run for an expired licence")
+
+    ns = _exec_chain_helpers(payload, fake_owner_of)
+    monkeypatch.setenv("NIXON_LICENCE", str(_chain_token(tmp_path, payload)))
+    with pytest.raises(SystemExit):
+        ns["_nx_licence_payload"]()
+    assert "licence expired" in capsys.readouterr().err
+
+
+def test_runtime_licence_malformed_expiry_fails_closed(tmp_path, monkeypatch, capsys):
+    payload = _chain_payload({
+        "rpc": "https://example.invalid/v1",
+        "contract": "0x" + "a" * 40,
+        "token_id": "1",
+        "owner": "0x" + "b" * 40,
+        "chain_id": "1",
+    })
+    payload["expires_at"] = "not-a-number"
+
+    def fake_owner_of(rpc, contract, token_id, expected_chain_id=None):
+        raise AssertionError("ownerOf must not run for malformed expiry")
+
+    ns = _exec_chain_helpers(payload, fake_owner_of)
+    monkeypatch.setenv("NIXON_LICENCE", str(_chain_token(tmp_path, payload)))
+    with pytest.raises(SystemExit):
+        ns["_nx_licence_payload"]()
+    assert "malformed expiry" in capsys.readouterr().err
+
+
+@pytest.mark.nixon_timeout(1900)
 def test_bound_build_marks_the_artefact_and_demands_the_token(tmp_path):
     """The source path applies the binding now, so this is the real check.
 
@@ -392,3 +461,90 @@ def _find_artefact(tmp_path):
             if name.endswith("_protected.py"):
                 return os.path.join(root, name)
     return None
+
+
+def _chain_bound_loader_and_token(tmp_path, owner="0x" + "b" * 40):
+    seed = "22" * 32
+    chain = {
+        "rpc": "http://127.0.0.1:8545",
+        "contract": "0x" + "a" * 40,
+        "token_id": "1",
+        "owner": owner,
+        "chain_id": "1",
+    }
+    lic = Licence(
+        licence_id="L-chain-hybrid", customer="acme", issued_at=0,
+        expires_at=2**31, features=("pro",), chain=chain)
+    token = issue(lic, private_key_from_hex(seed))
+    path = tmp_path / "chain-hybrid.licence"
+    path.write_text(token, encoding="utf-8")
+    payload = json.loads(token)["payload"]
+    material = payload["key_material"]
+    src, _, _ = generate_hybrid_loader_script(
+        _BLANKS, b"", _KEY.hex(), build_id="bid-chain-hybrid",
+        customer_salt=material, licence_bound=True, licence_chain=True)
+    return src, path, material, payload
+
+
+def _hybrid_lookup_with_fake_chain(src, fake_owner):
+    start = src.index("def _nx_licence_key(")
+    end = src.index("_BLOB_S0 =", start)
+    ns = {"_NX_CHAIN_ENABLED": True, "_nx_chain_owner_of": fake_owner}
+    exec(compile(src[start:end], "<hybrid_chain_lookup>", "exec"), ns)
+    return ns["_nx_licence_key"]
+
+
+def test_hybrid_chain_gate_is_emitted_only_when_enabled():
+    chained, _, _ = generate_hybrid_loader_script(
+        _BLANKS, b"", _KEY.hex(), build_id="bid-chain-emit",
+        customer_salt="ab" * 32, licence_bound=True, licence_chain=True)
+    assert "def _nx_chain_owner_of(" in chained
+    assert '_NX_CHAIN_ENABLED = "1" == "1"' in chained
+    assert "licence chain verification failed" in chained
+    plain, _, _ = generate_hybrid_loader_script(
+        _BLANKS, b"", _KEY.hex(), build_id="bid-chain-off",
+        customer_salt="ab" * 32, licence_bound=True)
+    assert "def _nx_chain_owner_of(" not in plain
+    assert '_NX_CHAIN_ENABLED = "0" == "1"' in plain
+
+
+def test_hybrid_chain_gate_owner_mismatch_stops_before_key_use(tmp_path, monkeypatch, capsys):
+    src, path, _material, _payload = _chain_bound_loader_and_token(tmp_path)
+    calls = []
+
+    def fake_owner(rpc, contract, token_id, expected_chain_id=None):
+        calls.append((rpc, contract, token_id, expected_chain_id))
+        return "0x" + "c" * 40
+
+    lookup = _hybrid_lookup_with_fake_chain(src, fake_owner)
+    monkeypatch.setenv("NIXON_LICENCE", str(path))
+    with pytest.raises(SystemExit):
+        lookup()
+    assert "licence chain owner mismatch" in capsys.readouterr().err
+    assert calls == [("http://127.0.0.1:8545", "0x" + "a" * 40, 1, 1)]
+
+
+def test_hybrid_chain_gate_rpc_failure_stops_before_key_use(tmp_path, monkeypatch, capsys):
+    src, path, _material, _payload = _chain_bound_loader_and_token(tmp_path)
+
+    def fake_owner(rpc, contract, token_id, expected_chain_id=None):
+        raise RuntimeError("rpc down")
+
+    lookup = _hybrid_lookup_with_fake_chain(src, fake_owner)
+    monkeypatch.setenv("NIXON_LICENCE", str(path))
+    with pytest.raises(SystemExit):
+        lookup()
+    err = capsys.readouterr().err
+    assert "licence chain verification failed: rpc down" in err
+    assert "licence token required" not in err
+
+
+def test_hybrid_chain_gate_correct_owner_returns_key_material(tmp_path, monkeypatch):
+    src, path, material, _payload = _chain_bound_loader_and_token(tmp_path)
+
+    def fake_owner(rpc, contract, token_id, expected_chain_id=None):
+        return "0x" + "B" * 40
+
+    lookup = _hybrid_lookup_with_fake_chain(src, fake_owner)
+    monkeypatch.setenv("NIXON_LICENCE", str(path))
+    assert lookup() == material

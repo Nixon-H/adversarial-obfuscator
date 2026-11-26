@@ -17,6 +17,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 PAYLOAD = '''\
@@ -91,6 +93,7 @@ def _run(path):
     return subprocess.CompletedProcess([sys.executable, path], proc.returncode, out, err)
 
 
+@pytest.mark.nixon_timeout(600)
 def test_section_split_flag_produces_a_working_artifact(tmp_path):
     src_dir, run_dir, source = _prepare(tmp_path, "split")
     proc = _build(str(source), str(run_dir),
@@ -103,6 +106,7 @@ def test_section_split_flag_produces_a_working_artifact(tmp_path):
     assert "SECTION-CLI-OK" in run.stdout, run.stdout[-2000:]
 
 
+@pytest.mark.nixon_timeout(1200)
 def test_section_split_flag_changes_the_artifact(tmp_path):
     """The flag must actually reach the loader, not be swallowed."""
     plain_dir, plain_run, plain_source = _prepare(tmp_path, "plain")

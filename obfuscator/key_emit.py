@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
 
 
 def _keystream(seed: bytes, length: int) -> bytes:
@@ -85,6 +86,38 @@ def derive_effective_key(key: bytes, build_id: str,
     return derived
 
 
+def apply_operator_key_mask(key: bytes, seal_shard: str | None = None,
+                            table_shard: str | None = None) -> bytes:
+    """Bind a payload/blob key to operator-held runtime shards.
+
+    ``NX_SEAL_SHARD`` and ``NX_TABLE_SHARD`` are deliberately not embedded in
+    the artefact.  When either is present at build time the packed payload is
+    sealed with this additional domain-separated mask; the emitted loader
+    records that public binding fact and derives the same mask only when the
+    operator exports the same shard(s) at run time.  Lengths are encoded in
+    the transcript so concatenated shards cannot collide.  With neither shard
+    set at build time this is the identity, preserving legacy unsigned/unbound
+    builds; shard variables that happen to exist only at run time are ignored
+    for those unbound artefacts.
+    """
+    if not isinstance(key, (bytes, bytearray)) or len(key) == 0:
+        raise ValueError("key must be non-empty bytes")
+    seal = str(os.environ.get("NX_SEAL_SHARD", "") if seal_shard is None else seal_shard or "")
+    table = str(os.environ.get("NX_TABLE_SHARD", "") if table_shard is None else table_shard or "")
+    if not seal and not table:
+        return bytes(key)
+    seal_bytes = seal.encode("utf-8")
+    table_bytes = table.encode("utf-8")
+    material = (
+        b"nx-operator-blob:"
+        + str(len(seal_bytes)).encode("ascii") + b":" + seal_bytes
+        + b"|"
+        + str(len(table_bytes)).encode("ascii") + b":" + table_bytes
+    )
+    mask = hashlib.sha256(material).digest()
+    return bytes(b ^ mask[i % len(mask)] for i, b in enumerate(bytes(key)))
+
+
 def split_seed_for_build(build_id: str) -> bytes:
     """Deterministic split seed bound to ``build_id`` (domain-separated)."""
     return hashlib.sha256(("nx-key-split:" + str(build_id)).encode()).digest()
@@ -125,9 +158,12 @@ def emit_key_loader(share0_b64: str, share1_b64: str, build_id: str,
     if '"' in build_id or "\\" in build_id or "\n" in build_id or "\r" in build_id:
         raise ValueError("build_id contains unsafe characters")
     salt = str(customer_salt or "")
+    operator_bound = bool(
+        os.environ.get("NX_SEAL_SHARD") or os.environ.get("NX_TABLE_SHARD"))
     out = (
         "_NX_BUILD_ID = \"%s\"\n" % (build_id,)
         + "_NX_CUSTOMER_SALT = \"%s\"\n" % (salt,)
+        + "_NX_OPERATOR_BOUND = %s\n" % (operator_bound,)
         + "_BLOB_S0 = bytearray(base64.b64decode(\"%s\"))\n" % (share0_b64,)
         + "_BLOB_S1 = bytearray(base64.b64decode(\"%s\"))\n" % (share1_b64,)
         + "_BLOB_RAW = bytearray(_a ^ _b for _a, _b in zip(_BLOB_S0, _BLOB_S1))\n"
@@ -141,6 +177,23 @@ def emit_key_loader(share0_b64: str, share1_b64: str, build_id: str,
             "%s = bytes(_b ^ _BLOB_CMASK[_i %% len(_BLOB_CMASK)] for _i, _b in enumerate(%s))\n"
             % (varname, varname)
         )
+    out += (
+        "import os as _nx_os\n"
+        "_nx_seal_shard = str(_nx_os.environ.get(\"NX_SEAL_SHARD\", \"\") or \"\")\n"
+        "_nx_table_shard = str(_nx_os.environ.get(\"NX_TABLE_SHARD\", \"\") or \"\")\n"
+        "if _NX_OPERATOR_BOUND and (_nx_seal_shard or _nx_table_shard):\n"
+        "    _nx_seal_bytes = _nx_seal_shard.encode(\"utf-8\")\n"
+        "    _nx_table_bytes = _nx_table_shard.encode(\"utf-8\")\n"
+        "    _nx_op_material = (\n"
+        "        b\"nx-operator-blob:\"\n"
+        "        + str(len(_nx_seal_bytes)).encode(\"ascii\") + b\":\" + _nx_seal_bytes\n"
+        "        + b\"|\"\n"
+        "        + str(len(_nx_table_bytes)).encode(\"ascii\") + b\":\" + _nx_table_bytes\n"
+        "    )\n"
+        "    _BLOB_OMASK = _nx_hk.sha256(_nx_op_material).digest()\n"
+        "    %s = bytes(_b ^ _BLOB_OMASK[_i %% len(_BLOB_OMASK)] for _i, _b in enumerate(%s))\n"
+        % (varname, varname)
+    )
     out += (
         "_nx_wipe(_BLOB_S0)\n"
         "_nx_wipe(_BLOB_S1)\n"

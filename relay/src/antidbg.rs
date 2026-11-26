@@ -3,10 +3,12 @@ use std::fs;
 use std::io::Read;
 use std::time::Instant;
 
+type AntiDebugCheck = (&'static str, fn() -> bool);
+
 pub fn run_checks() {
     info!("[antidbg] running startup anti-debug checks");
 
-    let checks: [(&str, fn() -> bool); 12] = [
+    let checks: [AntiDebugCheck; 12] = [
         ("ptrace",           check_ptrace),
         ("tracerpid",        check_tracerpid),
         ("timing",           check_timing),

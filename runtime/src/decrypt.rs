@@ -1,4 +1,5 @@
-use crate::memguard::scrub_memory;
+use crate::jit::JitCode;
+use crate::memguard::ScrubOnDrop;
 
 // Pure Rust AES-256-CTR implementation (no external dependencies)
 
@@ -128,12 +129,26 @@ fn aes_256_encrypt_block(block: &[u8; 16], w: &[u32; 60]) -> [u8; 16] {
         u32::from_be_bytes([block[8], block[9], block[10], block[11]]),
         u32::from_be_bytes([block[12], block[13], block[14], block[15]]),
     ];
+    let _state_guard = unsafe {
+        ScrubOnDrop::new(
+            state.as_mut_ptr().cast::<u8>(),
+            std::mem::size_of_val(&state),
+        )
+    };
     add_round_key(&mut state, &[w[0], w[1], w[2], w[3]]);
     for round in 1..=13 {
         sub_bytes(&mut state);
         shift_rows(&mut state);
         mix_columns(&mut state);
-        add_round_key(&mut state, &[w[4 * round], w[4 * round + 1], w[4 * round + 2], w[4 * round + 3]]);
+        add_round_key(
+            &mut state,
+            &[
+                w[4 * round],
+                w[4 * round + 1],
+                w[4 * round + 2],
+                w[4 * round + 3],
+            ],
+        );
     }
     sub_bytes(&mut state);
     shift_rows(&mut state);
@@ -150,10 +165,13 @@ fn aes_256_encrypt_block(block: &[u8; 16], w: &[u32; 60]) -> [u8; 16] {
 }
 
 pub fn aes_256_ctr_decrypt(data: &mut [u8], key: &[u8; 32], iv: &[u8; 16]) {
-    let w = expand_key(key);
+    let mut w = expand_key(key);
+    let _w_guard =
+        unsafe { ScrubOnDrop::new(w.as_mut_ptr().cast::<u8>(), std::mem::size_of_val(&w)) };
     let mut counter = *iv;
     for chunk in data.chunks_mut(16) {
-        let keystream = aes_256_encrypt_block(&counter, &w);
+        let mut keystream = aes_256_encrypt_block(&counter, &w);
+        let _keystream_guard = unsafe { ScrubOnDrop::new(keystream.as_mut_ptr(), keystream.len()) };
         for (d, k) in chunk.iter_mut().zip(keystream.iter()) {
             *d ^= k;
         }
@@ -167,14 +185,18 @@ pub fn aes_256_ctr_decrypt(data: &mut [u8], key: &[u8; 32], iv: &[u8; 16]) {
 }
 
 pub fn derive_block_key(seed: &[u8; 32], block_index: u32) -> [u8; 32] {
-    let w = expand_key(seed);
+    let mut w = expand_key(seed);
+    let _w_guard =
+        unsafe { ScrubOnDrop::new(w.as_mut_ptr().cast::<u8>(), std::mem::size_of_val(&w)) };
     let mut input = [0u8; 16];
     input[..4].copy_from_slice(&block_index.to_le_bytes());
-    let part1 = aes_256_encrypt_block(&input, &w);
+    let mut part1 = aes_256_encrypt_block(&input, &w);
+    let _part1_guard = unsafe { ScrubOnDrop::new(part1.as_mut_ptr(), part1.len()) };
     for b in input.iter_mut().take(16) {
         *b = b.wrapping_add(1);
     }
-    let part2 = aes_256_encrypt_block(&input, &w);
+    let mut part2 = aes_256_encrypt_block(&input, &w);
+    let _part2_guard = unsafe { ScrubOnDrop::new(part2.as_mut_ptr(), part2.len()) };
     let mut key = [0u8; 32];
     key[..16].copy_from_slice(&part1);
     key[16..].copy_from_slice(&part2);
@@ -183,7 +205,6 @@ pub fn derive_block_key(seed: &[u8; 32], block_index: u32) -> [u8; 32] {
 
 pub fn aes_256_ctr_decrypt_slice(data: &mut [u8], key: &[u8; 32], iv: &[u8; 16]) {
     aes_256_ctr_decrypt(data, key, iv);
-    scrub_memory(key.as_ptr() as *mut u8, key.len());
 }
 
 /// Decrypt a block and compile it via polymorphic JIT.
@@ -196,51 +217,40 @@ pub fn decrypt_and_jit(
     seed: u64,
     enable_microjit: bool,
     accumulated_hash: Option<&[u8; 32]>,
-) -> Result<*mut u8, String> {
-    let effective_key: [u8; 32];
-    let effective_iv: [u8; 16];
+) -> Result<JitCode, String> {
+    let mut effective_key: [u8; 32];
+    let mut effective_iv: [u8; 16];
+    let mut effective_key_guard = None;
 
     let (used_key, used_iv) = if let Some(acc_hash) = accumulated_hash {
-        let mut combined = Vec::with_capacity(64);
+        let mut combined = Vec::with_capacity(68);
         combined.extend_from_slice(key);
         combined.extend_from_slice(acc_hash);
         combined.extend_from_slice(&seed.to_le_bytes());
+        let _combined_guard = unsafe { ScrubOnDrop::new(combined.as_mut_ptr(), combined.len()) };
         let derived = crate::ledger::sha256(&combined);
-        let mut derived_iv = *iv;
-        // Mix accumulated hash into IV
-        for (d, a) in derived_iv.iter_mut().zip(acc_hash.iter()) {
-            *d ^= a;
+        effective_iv = *iv;
+        for (d, a) in effective_iv.iter_mut().zip(acc_hash.iter()) {
+            *d ^= *a;
         }
         effective_key = derived;
-        effective_iv = derived_iv;
+        effective_key_guard =
+            Some(unsafe { ScrubOnDrop::new(effective_key.as_mut_ptr(), effective_key.len()) });
         (&effective_key, &effective_iv)
     } else {
         (key, iv)
     };
 
     let mut decrypted = encrypted_block.to_vec();
+    let _decrypted_guard = unsafe { ScrubOnDrop::new(decrypted.as_mut_ptr(), decrypted.len()) };
     aes_256_ctr_decrypt(&mut decrypted, used_key, used_iv);
 
     let result = if enable_microjit {
-        crate::jit::polymorphic_jit_compile(&decrypted, key, seed)
+        crate::jit::polymorphic_jit_compile(&decrypted, used_key, seed)
     } else {
-        let mut mgr = crate::jit::JitMemoryManager::new();
-        let ptr = mgr.allocate_executable(decrypted.len())?;
-        unsafe {
-            std::ptr::copy_nonoverlapping(decrypted.as_ptr(), ptr, decrypted.len());
-        }
-        #[cfg(target_arch = "x86_64")]
-        unsafe {
-            core::arch::asm!("mfence", options(nostack, nomem));
-        }
-        #[cfg(target_arch = "aarch64")]
-        unsafe {
-            core::arch::asm!("dmb sy", options(nostack, nomem));
-        }
-        let _ = mgr;
-        Ok(ptr)
+        JitCode::new(&decrypted)
     };
-    scrub_memory(key.as_ptr() as *mut u8, key.len());
+    drop(effective_key_guard);
     result
 }
 
@@ -258,11 +268,11 @@ pub fn decrypt_with_hpc_check(
     key: &[u8; 32],
     hpc_seed: u64,
 ) -> Result<Vec<u8>, String> {
-    let derived = crate::hpc_key::derive_key_from_hpc(key, hpc_seed)?;
+    let mut derived = crate::hpc_key::derive_key_from_hpc(key, hpc_seed)?;
+    let _derived_guard = unsafe { ScrubOnDrop::new(derived.as_mut_ptr(), derived.len()) };
     let mut data = encrypted.to_vec();
     let iv = make_nonce(&derived, hpc_seed);
     aes_256_ctr_decrypt(&mut data, &derived, &iv);
-    scrub_memory(derived.as_ptr() as *mut u8, derived.len());
     Ok(data)
 }
 
@@ -275,11 +285,12 @@ pub fn decrypt_with_proof_check(
     if !super::ledger::full_integrity_check(text_section, proof) {
         return Err("Integrity proof verification failed — decryption denied".to_string());
     }
-    let derived_key = super::ledger::derive_decryption_key(key, proof);
+    let mut derived_key = super::ledger::derive_decryption_key(key, proof);
+    let _derived_key_guard =
+        unsafe { ScrubOnDrop::new(derived_key.as_mut_ptr(), derived_key.len()) };
     let mut data = encrypted_data.to_vec();
     let iv = make_nonce(&derived_key, proof.timestamp);
     aes_256_ctr_decrypt(&mut data, &derived_key, &iv);
-    scrub_memory(derived_key.as_ptr() as *mut u8, derived_key.len());
     Ok(data)
 }
 
@@ -292,14 +303,91 @@ pub fn decrypt_with_history_bound(
     accumulated_hash: &[u8; 32],
     fragment_id: u32,
 ) -> Result<Vec<u8>, String> {
-    let mut combined = Vec::with_capacity(64);
+    let mut combined = Vec::with_capacity(68);
     combined.extend_from_slice(key);
     combined.extend_from_slice(accumulated_hash);
     combined.extend_from_slice(&fragment_id.to_le_bytes());
-    let derived = crate::ledger::sha256(&combined);
+    let _combined_guard = unsafe { ScrubOnDrop::new(combined.as_mut_ptr(), combined.len()) };
+    let mut derived = crate::ledger::sha256(&combined);
+    let _derived_guard = unsafe { ScrubOnDrop::new(derived.as_mut_ptr(), derived.len()) };
     let mut data = encrypted_data.to_vec();
     let iv = make_nonce(&derived, fragment_id as u64);
     aes_256_ctr_decrypt(&mut data, &derived, &iv);
-    scrub_memory(derived.as_ptr() as *mut u8, derived.len());
     Ok(data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn decrypt_and_jit_keeps_pages_mapped() {
+        // Regression: the non-microjit path dropped the JitMemoryManager
+        // before returning, so Drop wiped+munmapped the RWX pages and the
+        // returned pointer dangled (use-after-free).
+        let key = [0x11u8; 32];
+        let iv = [0x22u8; 16];
+        let plain = vec![0x48u8, 0x31, 0xC0, 0xC3]; // xor rax,rax; ret
+        let mut enc = plain.clone();
+        aes_256_ctr_decrypt(&mut enc, &key, &iv); // CTR is its own inverse
+        let code = decrypt_and_jit(&enc, &key, &iv, 7, false, None).expect("decrypt_and_jit");
+        // Reading the returned pointer must not fault: pages still owned.
+        let first = unsafe { std::ptr::read_volatile(code.as_ptr()) };
+        assert_eq!(first, 0x48);
+        assert_eq!(unsafe { code.execute(&[]) }.expect("execute"), 0);
+    }
+
+    #[test]
+    fn aes_slice_decrypt_does_not_mutate_caller_key() {
+        let key = [0x5Au8; 32];
+        let original = key;
+        let mut data = [0u8; 16];
+        aes_256_ctr_decrypt_slice(&mut data, &key, &[0u8; 16]);
+        assert_eq!(key, original);
+    }
+
+    #[test]
+    fn decrypt_and_jit_does_not_mutate_caller_key_on_success_or_error() {
+        let key = [0x11u8; 32];
+        let original = key;
+        let iv = [0x22u8; 16];
+        let plain = vec![0x48u8, 0x31, 0xC0, 0xC3];
+        let mut enc = plain.clone();
+        aes_256_ctr_decrypt(&mut enc, &key, &iv);
+        let code = decrypt_and_jit(&enc, &key, &iv, 7, false, None).expect("decrypt");
+        assert_eq!(key, original);
+        drop(code);
+        assert!(decrypt_and_jit(&[], &key, &iv, 7, false, None).is_err());
+        assert_eq!(key, original);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn decrypt_and_jit_history_does_not_mutate_caller_key() {
+        let key = [0x33u8; 32];
+        let original = key;
+        let accumulated = [0x44u8; 32];
+        let seed = 9u64;
+        let mut combined = Vec::new();
+        combined.extend_from_slice(&key);
+        combined.extend_from_slice(&accumulated);
+        combined.extend_from_slice(&seed.to_le_bytes());
+        let derived = crate::ledger::sha256(&combined);
+        let original_iv = [0x55u8; 16];
+        let mut derived_iv = original_iv;
+        for (d, a) in derived_iv.iter_mut().zip(accumulated.iter()) {
+            *d ^= *a;
+        }
+        let plain = vec![0x48u8, 0x31, 0xC0, 0xC3];
+        let mut enc = plain.clone();
+        aes_256_ctr_decrypt(&mut enc, &derived, &derived_iv);
+        let code = decrypt_and_jit(&enc, &key, &original_iv, seed, false, Some(&accumulated))
+            .expect("decrypt with history");
+        assert_eq!(key, original);
+        assert_eq!(unsafe { code.execute(&[]) }.expect("execute"), 0);
+        drop(code);
+        assert!(decrypt_and_jit(&[], &key, &original_iv, seed, false, Some(&accumulated)).is_err());
+        assert_eq!(key, original);
+    }
 }

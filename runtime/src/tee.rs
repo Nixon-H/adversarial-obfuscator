@@ -1,4 +1,4 @@
-use crate::memguard::scrub_memory;
+use crate::memguard::{checked_page_size, round_up_to_page, scrub_slice, ScrubOnDrop};
 use crate::platform::PagePerm;
 use crate::sw_attestation::AttestationEngine;
 #[cfg(feature = "sgx")]
@@ -7,6 +7,17 @@ use std::ptr;
 
 const ENCLAVE_PAGE_SIZE: usize = 4096;
 const ENCLAVE_REGION_SIZE: usize = 64 * 1024;
+
+fn enclave_allocation_size(payload_len: usize) -> Result<usize, String> {
+    let page_size = checked_page_size()?;
+    let payload_region = payload_len
+        .checked_add(ENCLAVE_PAGE_SIZE)
+        .ok_or_else(|| "enclave payload size overflow".to_string())?;
+    let region_size = ENCLAVE_REGION_SIZE.max(payload_region);
+    round_up_to_page(region_size, page_size)
+        .filter(|size| *size > 0)
+        .ok_or_else(|| "enclave allocation size overflow".to_string())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TeeType {
@@ -33,22 +44,19 @@ impl TeePartition {
     pub fn new(tee_type: TeeType) -> Self {
         let measurement = match tee_type {
             TeeType::IntelSgx => [
-                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-                0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
-                0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-                0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
+                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+                0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c,
+                0x1d, 0x1e, 0x1f, 0x20,
             ],
             TeeType::AmdSev => [
-                0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11,
-                0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
-                0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11,
-                0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
+                0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+                0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+                0x66, 0x77, 0x88, 0x99,
             ],
             TeeType::AppleSecureEnclave => [
-                0xfe, 0xed, 0xfa, 0xce, 0xfe, 0xed, 0xfa, 0xce,
-                0xfe, 0xed, 0xfa, 0xce, 0xfe, 0xed, 0xfa, 0xce,
-                0xfe, 0xed, 0xfa, 0xce, 0xfe, 0xed, 0xfa, 0xce,
-                0xfe, 0xed, 0xfa, 0xce, 0xfe, 0xed, 0xfa, 0xce,
+                0xfe, 0xed, 0xfa, 0xce, 0xfe, 0xed, 0xfa, 0xce, 0xfe, 0xed, 0xfa, 0xce, 0xfe, 0xed,
+                0xfa, 0xce, 0xfe, 0xed, 0xfa, 0xce, 0xfe, 0xed, 0xfa, 0xce, 0xfe, 0xed, 0xfa, 0xce,
+                0xfe, 0xed, 0xfa, 0xce,
             ],
             TeeType::None => [0u8; 32],
         };
@@ -83,8 +91,7 @@ impl TeePartition {
         #[cfg(feature = "sgx")]
         {
             if self.tee_type == TeeType::IntelSgx {
-                let enclave_path = std::str::from_utf8(payload)
-                    .unwrap_or("enclave.signed.so");
+                let enclave_path = std::str::from_utf8(payload).unwrap_or("enclave.signed.so");
                 match SgxEnclave::new(enclave_path, true) {
                     Ok(enclave) => {
                         self.measurement = enclave.measurement;
@@ -115,9 +122,7 @@ impl TeePartition {
             }
         }
 
-        let region_size = ENCLAVE_REGION_SIZE.max(payload.len() + ENCLAVE_PAGE_SIZE);
-        let page_size = crate::platform::page_size();
-        let alloc_size = (region_size + page_size - 1) & !(page_size - 1);
+        let alloc_size = enclave_allocation_size(payload.len())?;
 
         let ptr = crate::platform::alloc_pages(alloc_size);
 
@@ -170,10 +175,12 @@ impl TeePartition {
             }
         }
 
-        let key = self.software_seal_key.ok_or_else(|| {
+        let mut key = self.software_seal_key.ok_or_else(|| {
             "software TEE sealing requires an external seal key; \
-             deriving it from the public measurement is not sealing".to_string()
+             deriving it from the public measurement is not sealing"
+                .to_string()
         })?;
+        let _key_guard = unsafe { ScrubOnDrop::new(key.as_mut_ptr(), key.len()) };
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
@@ -182,6 +189,8 @@ impl TeePartition {
         iv_material.extend_from_slice(&key);
         iv_material.extend_from_slice(&self.measurement);
         iv_material.extend_from_slice(&now.to_le_bytes());
+        let _iv_material_guard =
+            unsafe { ScrubOnDrop::new(iv_material.as_mut_ptr(), iv_material.len()) };
         let iv_hash = sha256_digest(&iv_material);
         let iv: [u8; 16] = iv_hash[..16].try_into().expect("sha256 gives 16 bytes");
 
@@ -190,6 +199,7 @@ impl TeePartition {
         let mut tag_input = Vec::with_capacity(16 + sealed.len());
         tag_input.extend_from_slice(&iv);
         tag_input.extend_from_slice(&sealed);
+        let _tag_input_guard = unsafe { ScrubOnDrop::new(tag_input.as_mut_ptr(), tag_input.len()) };
         let tag = hmac_sha256(&key, &tag_input);
 
         let mut result = Vec::with_capacity(32 + 16 + sealed.len() + 32);
@@ -197,7 +207,6 @@ impl TeePartition {
         result.extend_from_slice(&iv);
         result.extend_from_slice(&sealed);
         result.extend_from_slice(&tag);
-        scrub_memory(key.as_ptr() as *mut u8, key.len());
         Ok(result)
     }
 
@@ -220,9 +229,10 @@ impl TeePartition {
         if sealed[..32] != self.measurement {
             return Err("Sealed data belongs to a different enclave".to_string());
         }
-        let key = self.software_seal_key.ok_or_else(|| {
-            "software TEE unsealing requires the external seal key".to_string()
-        })?;
+        let mut key = self
+            .software_seal_key
+            .ok_or_else(|| "software TEE unsealing requires the external seal key".to_string())?;
+        let _key_guard = unsafe { ScrubOnDrop::new(key.as_mut_ptr(), key.len()) };
         let iv = &sealed[32..48];
         let tag_at = sealed.len() - 32;
         let encrypted = &sealed[48..tag_at];
@@ -230,6 +240,7 @@ impl TeePartition {
         let mut tag_input = Vec::with_capacity(16 + encrypted.len());
         tag_input.extend_from_slice(iv);
         tag_input.extend_from_slice(encrypted);
+        let _tag_input_guard = unsafe { ScrubOnDrop::new(tag_input.as_mut_ptr(), tag_input.len()) };
         let expected = hmac_sha256(&key, &tag_input);
         if !ct_eq(tag, &expected) {
             return Err("Sealed data authentication failed".to_string());
@@ -237,7 +248,6 @@ impl TeePartition {
         let mut data = encrypted.to_vec();
         let iv_arr: [u8; 16] = iv.try_into().map_err(|_| "bad IV".to_string())?;
         crate::decrypt::aes_256_ctr_decrypt(&mut data, &key, &iv_arr);
-        scrub_memory(key.as_ptr() as *mut u8, key.len());
         Ok(data)
     }
 
@@ -290,7 +300,9 @@ impl TeePartition {
         #[cfg(feature = "sgx")]
         {
             if self.sgx_enclave.is_some() {
-                eprintln!("TEE: SGX remote attestation not implemented — using software simulation");
+                eprintln!(
+                    "TEE: SGX remote attestation not implemented — using software simulation"
+                );
             }
         }
 
@@ -315,6 +327,9 @@ impl TeePartition {
 
 impl Drop for TeePartition {
     fn drop(&mut self) {
+        if let Some(mut key) = self.software_seal_key.take() {
+            scrub_slice(&mut key);
+        }
         if !self.region_ptr.is_null() && self.region_len > 0 {
             unsafe {
                 ptr::write_bytes(self.region_ptr, 0u8, self.region_len);
@@ -328,26 +343,26 @@ impl Drop for TeePartition {
 fn sha256_digest(data: &[u8]) -> [u8; 32] {
     let mut hash = [0u8; 32];
     let mut h = [
-        0x6a09e667u32, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+        0x6a09e667u32,
+        0xbb67ae85,
+        0x3c6ef372,
+        0xa54ff53a,
+        0x510e527f,
+        0x9b05688c,
+        0x1f83d9ab,
+        0x5be0cd19,
     ];
     let k = [
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
-        0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
-        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
-        0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
-        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
-        0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
-        0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
-        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
     ];
 
     let msg_len_bits = (data.len() as u64) * 8;
@@ -478,6 +493,14 @@ mod tests {
     }
 
     #[test]
+    fn test_enclave_allocation_size_is_checked_and_page_aligned() {
+        let size = enclave_allocation_size(17).expect("valid size");
+        assert!(size >= ENCLAVE_REGION_SIZE);
+        assert_eq!(size % crate::platform::page_size(), 0);
+        assert!(enclave_allocation_size(usize::MAX).is_err());
+    }
+
+    #[test]
     fn test_init_software_fallback() {
         let mut tee = TeePartition::new(TeeType::None);
         let payload = b"test enclave payload";
@@ -515,12 +538,16 @@ mod tests {
     #[test]
     fn test_tampered_seal_fails_authentication() {
         let mut tee = TeePartition::new(TeeType::None);
-        tee.set_software_seal_key(test_seal_key());
+        let key = test_seal_key();
+        tee.set_software_seal_key(key);
         tee.init_enclave(b"payload").unwrap();
-        let mut sealed = tee.seal_data(b"Hello TEE world!").unwrap();
-        let last = sealed.len() - 1;
-        sealed[last] ^= 0x01;
-        assert!(tee.unseal_data(&sealed).is_err());
+        let valid = tee.seal_data(b"Hello TEE world!").unwrap();
+        let mut tampered = valid.clone();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 0x01;
+        assert!(tee.unseal_data(&tampered).is_err());
+        assert_eq!(tee.software_seal_key, Some(key));
+        assert_eq!(tee.unseal_data(&valid).unwrap(), b"Hello TEE world!");
     }
 
     #[test]

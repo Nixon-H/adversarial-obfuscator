@@ -11,7 +11,7 @@ name: All checks
 # Now the individual workflows are reusable (workflow_call) and this file owns the
 # triggers. A push runs ALL of them -- every flag tier, every OS, every Python.
 #
-# Measured with the max-parallel caps in place: the complete 539-job set finishes in
+# Measured with the max-parallel caps in place: the complete job set finishes in
 # 2h39m, and the same push without the three heavy tiers takes 1h42m. Gating them
 # saved under an hour and cost 322 jobs of coverage, so they are not gated. (An
 # earlier estimate of ~21 hours came from a run taken BEFORE the caps, which were
@@ -45,7 +45,7 @@ concurrency:
   group: all-checks-${{ github.ref }}
   # SUPERSEDED PUSHES ARE CANCELLED.
   #
-  # This workflow runs 536 jobs across every OS and Python version, so a run takes
+  # This workflow runs the full job set across every OS and Python version, so a run takes
   # hours. With cancel-in-progress: false, the next push waited for that run to
   # finish -- and with pushes arriving faster than runs complete, nothing ever
   # started: two runs sat queued for over an hour with zero jobs scheduled, and
@@ -97,7 +97,7 @@ jobs:
 
   # --- flag isolation, every tier ---------------------------------------
   # These used to be release-only, weekly-only or manual. They are the long tail
-  # that actually proves each of the ~274 flags works on its own, so they belong
+  # that actually proves each catalogue flag works on its own, so they belong
   # in the per-push set.
   flag-isolation:
     name: Flag isolation (sharded)

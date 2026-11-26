@@ -64,6 +64,11 @@ exclude = [
     "scripts/transfer/corpus",
     "docs",
     "build",
+    # Generated audit/benchmark evidence is not live source. It is kept for
+    # reproduction and review, and the Docker context excludes it as well.
+    "audit",
+    "re-bench",
+    ".benchmarks",
     ".opencode",
     ".mypy_cache",
     ".pytest_cache",

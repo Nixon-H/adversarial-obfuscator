@@ -246,7 +246,9 @@ class TestPhaseRedTeam:
 
         try:
             result = phase_redteam(args, bin_path, args.payload)
-            assert result is not None or True
+            assert result is not None
+            # A structured report with the standard sections, not a bare truthy value.
+            assert hasattr(result, "symbolic_result") and hasattr(result, "timestamp")
         finally:
             os.unlink(bin_path)
             import shutil

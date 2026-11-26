@@ -18,6 +18,7 @@ exercise the loader source the build emits.
 """
 import base64
 import hashlib
+import inspect
 import os
 import sys
 
@@ -100,10 +101,73 @@ def test_emitted_native_blobs_are_packed_with_the_effective_key():
         bid = re.search(r'_NX_BUILD_ID = "([^"]+)"', src).group(1)
         mask = hashlib.sha256(bid.encode()).digest()
         eff = bytes(b ^ mask[i % len(mask)] for i, b in enumerate(ik))
-        plain = bytes(b ^ eff[i % len(eff)] for i, b in enumerate(out))
+        from obfuscator.core.utils import stream_xor_open
+        plain = stream_xor_open(out, eff)
         assert plain[:4] == b"\x7fELF", \
             "packed blob does not decrypt to an ELF with the loader's own key"
 
+
+
+def test_native_blob_pack_failure_fails_closed(monkeypatch):
+    """A valid plaintext blob must never be embedded because packing failed."""
+    import obfuscator.core.utils as utils
+
+    def _broken_envelope(*args, **kwargs):
+        raise RuntimeError("simulated envelope failure")
+
+    monkeypatch.setattr(utils, "stream_xor_envelope", _broken_envelope)
+    raw_elf = b"ELF" + b"" + bytes(range(64))
+    blobs = {"windows": "", "linux": base64.b64encode(raw_elf).decode("ascii"),
+             "darwin": "", "android": ""}
+    with pytest.raises(RuntimeError, match="native blob packing failed"):
+        pipeline.generate_hybrid_loader_script(
+            blobs, b"", "22" * 32, section_split=True)
+
+
+def test_every_native_blob_pack_path_fails_closed():
+    """Both the hybrid and packed-loader paths must refuse envelope failure."""
+    source = inspect.getsource(pipeline)
+    assert "Native blob re-pack failed" not in source
+    assert "Native blob pack failed" not in source
+    assert source.count('"native blob packing failed for %s: %s"') == 2
+
+
+
+def test_native_blob_packing_is_not_recoverable_by_repeating_xor_known_plaintext():
+    """Regression for the artifact-only ELF-header key-recovery attack.
+
+    The pre-fix packer used repeating-key XOR. Since a valid ELF begins with
+    predictable bytes, an analyst could recover the repeating key directly
+    from ciphertext XOR known plaintext. The NXS1 envelope must instead use
+    a nonce-derived stream, so that procedure must not reconstruct the ELF.
+    """
+    import re
+    from obfuscator.key_emit import combine_shares
+    from obfuscator.core.utils import fast_xor_bytes, stream_xor_open
+
+    raw_elf = b"\x7fELF" + b"\x02\x01\x01" + bytes(range(256)) * 4
+    blobs = {"windows": "", "linux": base64.b64encode(raw_elf).decode("ascii"),
+             "darwin": "", "android": ""}
+    src, packed, _fb = pipeline.generate_hybrid_loader_script(
+        dict(blobs), b"", "33" * 32, section_split=True)
+    out = base64.b64decode(packed["linux"], validate=True)
+    assert out.startswith(b"NXS1"), "new native blobs must use a stream envelope"
+
+    s0 = re.search(r'_BLOB_S0 = "([^"]+)"', src)
+    s1 = re.search(r'_BLOB_S1 = "([^"]+)"', src)
+    ik = combine_shares(s0.group(1), s1.group(1))
+    bid = re.search(r'_NX_BUILD_ID = "([^"]+)"', src).group(1)
+    mask = hashlib.sha256(bid.encode()).digest()
+    eff = bytes(b ^ mask[i % len(mask)] for i, b in enumerate(ik))
+
+    # Simulate the old attack over the first 32 ciphertext bytes: recover a
+    # repeating 32-byte "key" from the known ELF header and apply it globally.
+    ct_body = out[20:]
+    recovered = bytes(c ^ p for c, p in zip(ct_body[:32], raw_elf[:32]))
+    old_attack_plain = fast_xor_bytes(ct_body, recovered)
+    assert old_attack_plain != raw_elf, \
+        "the pre-fix repeating-XOR known-plaintext attack still reconstructs the blob"
+    assert stream_xor_open(out, eff) == raw_elf
 
 # ── 4. the payload's __main__ block must compile into the module ─────────
 

@@ -211,6 +211,17 @@ SCHEMA = {
     # fail-closed; absolute paths warn (legit power-user override exists).
     "shadow_compiler.adversarial_loop.history_file": _F(
         "str", "build/evolution_history.json", True, nonempty=True),
+    # Loop termination knobs consumed by adversarial_loop.py:440-444 via
+    # _load_loop_config().  Bounds must match the loader's own validation:
+    # a non-positive value or proof_threshold > 100 aborts the run.
+    "shadow_compiler.adversarial_loop.proof_threshold": _F(
+        "int", 80, True, min=0, max=100),
+    "shadow_compiler.adversarial_loop.consecutive_target": _F(
+        "int", 3, True, min=1, max=100),
+    "shadow_compiler.adversarial_loop.max_rounds": _F(
+        "int", 50, True, min=1, max=1000),
+    "shadow_compiler.adversarial_loop.max_bench_failures": _F(
+        "int", 5, True, min=1, max=100),
     # --- runtime gates ------------------------------------------------------
     "shadow_compiler.runtime.minimal": _BOOL_SEC(True),
     "shadow_compiler.runtime.static_python": _BOOL_SEC(True),

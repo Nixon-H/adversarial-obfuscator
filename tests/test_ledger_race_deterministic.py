@@ -1,32 +1,23 @@
-"""Deterministic regression test for AI-PROTO-007 (ledger check-and-record race).
+"""Deterministic concurrency regression test for AI-PROTO-007.
 
-The register originally recorded no test for this finding, on the argument that
-a race is timing-dependent and a passing test would prove scheduler luck. That
-argument was half right: relying on natural timing IS flaky. But the interleaving
-itself can be forced, and once forced the test is entirely deterministic.
+The original JSON ledger had a check-and-record race: concurrent presenters
+could all observe an identity as absent before any writer stored it. The ledger
+now uses SQLite and performs the read/claim/prune sequence inside a single
+``BEGIN IMMEDIATE`` transaction, so concurrent presenters are serialized at the
+database layer and exactly one can claim the identity inside the window.
 
-How the interleaving is forced, without patching the code under test:
-
-  * ``ReplayLedger._load`` and ``ReplayLedger._store`` are wrapped on the
-    INSTANCE with functions that rendezvous on a ``multiprocessing.Barrier``.
-  * ``_load`` is the READ half of check-and-record, ``_store`` is the WRITE
-    half. Making every reader wait until all workers have read, and only then
-    letting any writer proceed, reproduces exactly the window the defect is
-    about: all N processes observe the identity absent, then all N write.
-  * Nothing about the ledger's own logic is altered -- the wrappers only add a
-    barrier around the real methods, so the test would still fail if the
-    implementation were correct (a correct implementation using O_EXCL or a
-    lock would never let all N reach the write with a stale read).
-
-This is a strict-xfail test: the defect is open, so it fails today, and the
-strict marker demands the marker be removed when a real atomic primitive lands.
+The barrier below is a start-line rendezvous for the public
+``check_and_record`` call, including first-time ledger creation. It does not
+patch or wrap the implementation under test: every worker is released together
+and then races the real atomic claim path. This is not a proof of SQLite internals; it is a regression check that
+the repository uses the atomic path rather than the old load/modify/write
+sequence.
 
 Finding: docs/security/REVIEW_FINDINGS_FILED.md — AI-PROTO-007.
 """
 import multiprocessing as mp
 import sys
 
-import pytest
 
 sys.path.insert(0, __file__.rsplit("/tests/", 1)[0])
 
@@ -38,34 +29,19 @@ def _worker(ledger_path, barrier, results, ok_flag):
     from obfuscator.licence_replay import ReplayLedger
 
     ledger = ReplayLedger(path=ledger_path, window_s=300)
-    real_load = ledger._load
-    real_store = ledger._store
-
-    def load():
-        data = real_load()
-        # Every worker reaches this point before ANY worker writes.
-        try:
-            barrier.wait(timeout=20)
-        except Exception:                       # noqa: BLE001
-            ok_flag.value = 0
-        return data
-
-    def store(data):
-        return real_store(data)
-
-    ledger._load = load
-    ledger._store = store
+    try:
+        # Release every worker together; the atomic claim path does the rest.
+        barrier.wait(timeout=20)
+    except Exception:                           # noqa: BLE001
+        ok_flag.value = 0
+        results.put(False)
+        return
     try:
         results.put(bool(ledger.check_and_record("race-identity")))
     except Exception:                           # noqa: BLE001
         results.put(False)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="AI-PROTO-007 open: check_and_record is load-modify-store with no "
-           "lock, so the interleaving where every presenter reads before any "
-           "writes yields N acceptances instead of 1")
 def test_concurrent_presentations_accept_exactly_once(tmp_path):
     ledger_path = str(tmp_path / "seen.json")
     ctx = mp.get_context("fork") if hasattr(mp, "get_context") else mp

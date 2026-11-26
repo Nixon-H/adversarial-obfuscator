@@ -89,6 +89,7 @@ _OPCODE_OPERAND_BYTES: dict[int, int] = {
     32: 3,  # ENC_MUL
     33: 3,  # FUSED_LOAD_ADD_STORE
     34: 9,  # FUSED_CMP_JMP (reg, u32, u32)
+    35: 4,  # CMP (dst, lhs, rhs, predicate)
 }
 
 
@@ -164,21 +165,37 @@ def remap_bytecode(
     nothing to remap. ``operand_map`` is accepted for call-site
     compatibility and ignored.
 
+    ``opcode_map`` is always the forward logical-to-physical map.  With
+    ``reverse=True`` it is inverted before decoding, and operand widths are
+    looked up from the recovered logical opcode.  Operand bytes are copied
+    verbatim because the wire format carries no operand type tags;
+    ``operand_map`` is accepted for call-site compatibility and ignored.
+
     Security note: This is used build-time to transform bytecode from
-    logical encoding to physical encoding. The reverse transform is
-    used by the runtime ISA derivation.
+    logical encoding to physical encoding.  Truncated instructions are
+    rejected rather than silently producing a different instruction stream.
     """
-    del operand_map, reverse  # no operand tags on the wire
+    del operand_map  # no operand tags on the wire
+    decode_map = ({physical: logical for logical, physical in opcode_map.items()}
+                  if reverse else opcode_map)
     buf = bytearray()
     i = 0
     while i < len(bytecode):
         raw_byte = bytecode[i]
-        buf.append(opcode_map.get(raw_byte, raw_byte) & 0xFF)
+        wire_opcode = decode_map.get(raw_byte, raw_byte)
+        # Forward remapping starts with a logical opcode; reverse remapping
+        # recovers it from the physical byte.  In both cases the width belongs
+        # to the logical instruction, never to the mapped byte value.
+        logical_op = wire_opcode if reverse else raw_byte
+        buf.append(wire_opcode & 0xFF)
         i += 1
 
-        logical_op = raw_byte if raw_byte in _OPCODE_OPERAND_BYTES else opcode_map.get(raw_byte, 0)
         width = _OPCODE_OPERAND_BYTES.get(logical_op, 0)
-        end = min(i + width, len(bytecode))
+        end = i + width
+        if end > len(bytecode):
+            raise ValueError(
+                f"truncated bytecode instruction at byte {i - 1}: "
+                f"expected {width} operand bytes, found {len(bytecode) - i}")
         buf.extend(bytecode[i:end])
         i = end
 
@@ -421,7 +438,8 @@ OPCODE_OPERAND_BYTES: dict[int, int] = {
     24: 0,  # RET
     25: 1,  # PUSH
     26: 1,  # POP
-    27: 3,  # ENTER (reg, lo, hi)
+    27: 2,  # ENTER -- the interpreter's _handle_enter reads a u16 (2 bytes);
+             # the old value 3 here desynced every remap after an ENTER.
     28: 0,  # LEAVE
     29: 3,  # ENC_LOAD (dst, addr, key)
     30: 3,  # ENC_STORE
@@ -429,41 +447,56 @@ OPCODE_OPERAND_BYTES: dict[int, int] = {
     32: 3,  # ENC_MUL
     33: 3,  # FUSED_LOAD_ADD_STORE
     34: 9,  # FUSED_CMP_JMP (reg, u32, u32)
+    35: 4,  # CMP (dst, lhs, rhs, predicate)
     255: 0, # REKEY
 }
 
 
+def _perm_as_bijection(perm: list[int], n: int) -> list[int]:
+    """Reduce ``perm`` to a true permutation (bijection) of range(n).
+
+    generate_field_permutation produces a 16-entry permutation, but operand
+    data is often shorter; mapping perm[i] % n directly is not injective and
+    made shuffle/unshuffle non-inverse. This reduction is deterministic and
+    yields a bijection, so shuffle and unshuffle are exact inverses.
+    """
+    if n <= 0:
+        return []
+    if len(perm) == n and sorted(perm) == list(range(n)):
+        return list(perm)
+    seen: set[int] = set()
+    out: list[int] = []
+    for i in range(n):
+        v = perm[i % len(perm)] % n if perm else i
+        while v in seen:
+            v = (v + 1) % n
+        seen.add(v)
+        out.append(v)
+    return out
+
+
 def apply_field_shuffle(data: bytes, perm: list[int]) -> bytes:
     """
-    Apply a field permutation to operand bytes: result[i] = data[perm[i]].
+    Apply a field permutation to operand bytes: result[i] = data[p[i]] where
+    p is perm reduced to a bijection of range(len(data)).
 
-    This scrambles the byte order of operand data according to the
-    permutation. The permutation must match what generate_field_permutation
-    produced for the same seed/epoch.
+    The permutation must match what generate_field_permutation produced for
+    the same seed/epoch.
     """
     n = len(data)
-    result = bytearray(n)
-    for i in range(n):
-        src_idx = perm[i] if i < len(perm) else i
-        result[i] = data[src_idx % n] if src_idx < n else data[i]
-    return bytes(result)
+    p = _perm_as_bijection(perm, n)
+    return bytes(data[p[i]] for i in range(n))
 
 
 def apply_field_unshuffle(data: bytes, perm: list[int]) -> bytes:
     """
-    Apply the inverse of a field permutation: result[perm[i]] = data[i].
-
-    This restores the original byte order after apply_field_shuffle.
-    The permutation must be the same one used for the forward transform.
+    Exact inverse of apply_field_shuffle: result[p[i]] = data[i].
     """
     n = len(data)
+    p = _perm_as_bijection(perm, n)
     result = bytearray(n)
     for i in range(n):
-        src_idx = perm[i] if i < len(perm) else i
-        if src_idx < n:
-            result[src_idx] = data[i]
-        else:
-            result[i] = data[i]
+        result[p[i]] = data[i]
     return bytes(result)
 
 

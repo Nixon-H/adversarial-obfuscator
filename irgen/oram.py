@@ -19,8 +19,9 @@ the metadata needed by the runtime controller.
 
 Key design decisions:
 - Leaf assignment is deterministic from variable name and seed:
-  SHA-256(varname || seed) % num_blocks. This ensures consistent
-  mapping across runs.
+  SHA-256(varname || seed) % num_blocks. The seed comes from the build
+  secret (or NIXON_ORAM_SEED), never a committed constant, so the
+  mapping stays consistent within a build but is not public.
 - Variables are annotated with # oram: comments at the source level,
   making the ORAM intent visible to the compilation pipeline.
 - The config dict includes a leaf_mapping that maps each variable
@@ -29,6 +30,7 @@ Key design decisions:
 
 import ast
 import hashlib
+import os
 
 _ORAM_ANNOTATION_PREFIX = "# oram:"
 
@@ -105,15 +107,22 @@ def annotate_oram_variables(source: str, variables: list[str]) -> str:
     return "".join(lines)
 
 
-def generate_oram_config(variables: list[str], num_blocks: int) -> dict:
+def generate_oram_config(variables: list[str], num_blocks: int,
+                         seed: bytes | None = None) -> dict:
     """
     Generate ORAM controller configuration dict.
 
     Returns a JSON-serializable dict suitable for runtime
     OramController initialization. Includes the leaf mapping
     for each variable.
+
+    The leaf seed must not be a committed constant: with a predictable seed
+    the position map is public. Pass ``seed`` from the build secret, set
+    ``NIXON_ORAM_SEED`` (hex), or let the default draw OS entropy.
     """
-    seed = b"shadow-compiler-oram-seed"
+    if seed is None:
+        env_seed = os.environ.get("NIXON_ORAM_SEED", "").strip()
+        seed = (bytes.fromhex(env_seed) if env_seed else os.urandom(32))
     mapping = {}
     for v in variables:
         leaf = _leaf_for_variable(v, num_blocks, seed)

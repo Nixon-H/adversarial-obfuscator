@@ -16,11 +16,9 @@ This module asserts NOTHING about cryptographic soundness. A green suite here
 means the description is accurate, not that the design is good.
 """
 import hashlib
-import hmac
 import os
 import sys
 
-import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -96,7 +94,6 @@ def test_the_bundle_states_the_right_pack_version():
 
 def test_the_documented_context_length_matches_the_implementation():
     """§4 documents 28 bytes (v2) or 44 bytes (v3); the code must agree."""
-    import inspect
     from obfuscator import section_split as ss
 
     v2_ctx = ss._mac_context_v2(0, 32, b"\x00" * 16,

@@ -55,7 +55,7 @@ _L1_OPCODES = [
     "JMP", "JZ", "JNZ", "JG", "JL", "JGE", "JLE",
     "CALL", "RET", "PUSH", "POP", "ENTER", "LEAVE",
     "ENC_LOAD", "ENC_STORE", "ENC_ADD", "ENC_MUL",
-    "FUSED_LOAD_ADD_STORE", "FUSED_CMP_JMP",
+    "FUSED_LOAD_ADD_STORE", "FUSED_CMP_JMP", "CMP",
 ]
 
 
@@ -93,27 +93,44 @@ def generate_opcode_map(seed: bytes, num_opcodes: int = 256) -> dict[int, int]:
     return logical_map
 
 
+# Operand width per LOGICAL opcode (same table as vm/ephemeral_isa.py's
+# _OPCODE_OPERAND_BYTES, keyed by logical opcode number). Duplicated here so
+# irgen does not import the vm package.
+_OPERAND_WIDTHS: dict[int, int] = {
+    0: 0, 1: 2, 2: 2, 3: 2, 4: 2, 5: 2, 6: 2, 7: 2, 8: 2, 9: 1, 10: 2,
+    11: 2, 12: 2, 13: 2, 14: 3, 15: 2, 16: 4, 17: 4, 18: 4, 19: 4, 20: 4,
+    21: 4, 22: 4, 23: 4, 24: 0, 25: 1, 26: 1, 27: 2, 28: 0, 29: 3, 30: 3,
+    31: 3, 32: 3, 33: 3, 34: 9, 35: 4,
+}
+
+
 def remap_bytecode(bytecode: bytearray, opcode_map: dict[int, int]) -> bytearray:
     """
     Remap bytecode opcodes using the given opcode map.
 
-    Each byte in the input bytecode is mapped through the inverse
-    of the opcode map to find its logical opcode, then through
-    the forward map to its new physical value.
+    Walks the stream at INSTRUCTION BOUNDARIES using each opcode's fixed
+    operand width and copies operand bytes verbatim: the wire format has no
+    operand type tags, so remapping operand bytes would corrupt them (the
+    old byte-at-a-time loop did exactly that). Input opcode bytes are logical
+    opcodes and are mapped directly. Passing the inverse map restores the
+    original stream. An inverse-then-forward lookup is wrong for a full
+    permutation because a logical opcode can equal another opcode's physical
+    value and be misclassified before the direct mapping.
     """
     if len(bytecode) == 0:
         return bytearray(bytecode)
 
-    remapped = bytearray(len(bytecode))
-    inverse = {v: k for k, v in opcode_map.items()}
+    remapped = bytearray()
 
     i = 0
-    while i < len(bytecode):
-        raw_op = bytecode[i]
-        logical = inverse.get(raw_op, raw_op)
-        physical = opcode_map.get(logical, raw_op)
-        remapped[i] = physical & 0xFF
-        i += 1
+    n = len(bytecode)
+    while i < n:
+        logical = bytecode[i]
+        physical = opcode_map.get(logical, logical)
+        remapped.append(physical & 0xFF)
+        width = _OPERAND_WIDTHS.get(logical, 0)
+        remapped.extend(bytecode[i + 1:i + 1 + width])
+        i += 1 + width
 
     return remapped
 
@@ -282,28 +299,16 @@ def apply_fusion_plan(
     fusion_plan: list[dict],
     opcode_map: dict,
 ) -> bytearray:
-    """
-    Apply a fusion plan to remap bytecode.
+    """Apply wire-level fusion/splitting.
 
-    Currently a stub; the actual fusion/splitting logic requires
-    a more detailed understanding of each opcode's operand layout.
-    Returns the bytecode unchanged for now.
+    The planner can describe candidate fusions, but no semantics-preserving
+    wire transformer is implemented. Fail closed rather than returning the
+    input unchanged and claiming the transform ran.
     """
     if not _phase2_enabled():
         raise RuntimeError("Advanced Protection (IR mutation) is disabled in config")
-
-
-
-    result = bytearray(bytecode)
-
-    for decision in fusion_plan:
-        if decision["type"] == "fuse":
-            pass
-
-        elif decision["type"] == "split":
-            pass
-
-    return result
+    raise NotImplementedError(
+        "wire-level fusion/splitting is not implemented; use opcode mutation")
 
 
 def mutate_instruction_universe(
@@ -314,14 +319,18 @@ def mutate_instruction_universe(
     """
     Apply all mutation transformations at the specified level.
 
-    Level 1: opcode map permutation only.
-    Level 2: adds handler permutation.
-    Level 3: adds fusion/splitting plan.
+    Level 1: base opcode-map permutation.
+    Level 2: alternate seeded opcode-map permutation plus handler-order metadata.
+    Level 3: alternate seeded opcode-map permutation plus handler-order metadata.
 
-    Returns the mutated bytecode and metadata describing the mutations.
+    Wire-level fusion/splitting remains explicitly unsupported; it is not
+    silently reported as applied. All implemented levels preserve instruction
+    boundaries and operands.
     """
     if not _phase2_enabled():
         raise RuntimeError("Advanced Protection (IR mutation) is disabled in config")
+    if level not in (1, 2, 3):
+        raise ValueError("mutation level must be 1, 2, or 3")
 
     metadata = {
         "level": level,
@@ -330,8 +339,13 @@ def mutate_instruction_universe(
         "fusion_plan": [],
     }
 
-    opcode_map = generate_opcode_map(seed)
+    # Each supported level uses a distinct deterministic permutation. This
+    # makes levels 2 and 3 real bytecode mutations rather than metadata-only
+    # no-ops, while preserving the operand-width contract.
+    map_seed = seed if level == 1 else seed + b":level:%d" % level
+    opcode_map = generate_opcode_map(map_seed)
     metadata["opcode_map"] = opcode_map
+    metadata["unsupported_transforms"] = ["wire_fusion", "wire_splitting"]
 
     bytecode = remap_bytecode(bytecode, opcode_map)
 
@@ -350,11 +364,6 @@ def mutate_instruction_universe(
             variant_seed = hashlib.sha256(seed + struct.pack('<I', opcode)).digest()
             permutation = permute_handler(template, variant_seed)
             metadata["handler_permutations"][opcode] = permutation
-
-    if level >= 3:
-        fusion_plan = generate_fusion_plan(seed)
-        metadata["fusion_plan"] = fusion_plan
-        bytecode = apply_fusion_plan(bytecode, fusion_plan, opcode_map)
 
     return bytecode, metadata
 

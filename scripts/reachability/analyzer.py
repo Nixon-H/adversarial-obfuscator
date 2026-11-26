@@ -145,13 +145,21 @@ class ReachabilityAnalyzer:
         self._build_tree = ast.parse(self._build_source)
 
     def trace_cli_flag(self, flag: str) -> List[str]:
-        """Search the build.py AST for argparse registrations of the given CLI flag.
+        """Search build.py for the registration that makes ``flag`` reachable.
+
+        Dash-form options are matched against argparse registrations.  The
+        build CLI also owns a staged form, ``--skip <stage>``, whose stage
+        names live in ``_SKIP_CATALOG``; the retired dash forms
+        (``--skip-irgen`` and friends) no longer exist, so a staged flag is
+        resolved through the catalogue instead of being reported missing.
 
         Returns a list of "build.py:<lineno>" strings for each match.
         """
         self._ensure_build_parsed()
         if not flag:
             return []
+        if flag.startswith("--skip ") and len(flag.split()) == 2:
+            return self._trace_skip_stage(flag.split()[1].strip().lower())
         paths = []
         flag_clean = flag.lstrip("-").replace("-", "_")
         for node in ast.walk(self._build_tree):
@@ -166,6 +174,24 @@ class ReachabilityAnalyzer:
                         if kw.arg == "dest" and isinstance(kw.value, ast.Constant):
                             if kw.value.value == flag_clean:
                                 paths.append(f"build.py:{node.lineno}")
+        return paths
+
+    def _trace_skip_stage(self, stage: str) -> List[str]:
+        """Resolve ``--skip <stage>`` against build.py's _SKIP_CATALOG."""
+        if not stage:
+            return []
+        paths = []
+        for node in ast.walk(self._build_tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            if "_SKIP_CATALOG" not in names or not isinstance(node.value, ast.Dict):
+                continue
+            for key, value in zip(node.value.keys, node.value.values):
+                if isinstance(key, ast.Constant) and key.value == stage:
+                    paths.append(f"build.py:{key.lineno if key.lineno else node.lineno}")
+                    if isinstance(value, ast.Constant):
+                        paths.append(f"build.py:{value.lineno}")
         return paths
 
     def trace_phase(self, phase_name: str) -> Optional[str]:

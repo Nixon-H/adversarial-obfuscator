@@ -194,7 +194,9 @@ impl SgxEnclave {
     /// Returns `Err` if [`sgx_unseal_data`] fails, e.g. the blob was
     /// tampered with or was sealed by a different enclave.
     pub fn unseal(&self, sealed_data: &[u8]) -> Result<Vec<u8>, String> {
-        let mut aad_buf = [0u8; 32];
+        // seal() authenticated the MRENCLAVE measurement as associated data;
+        // unsealing with zeroed AAD can never verify that MAC.
+        let mut aad_buf = self.measurement;
         let mut aad_len: u32 = aad_buf.len() as u32;
         let mut text_buf = vec![0u8; sealed_data.len() * 2];
         let mut text_len: u32 = text_buf.len() as u32;
@@ -214,6 +216,9 @@ impl SgxEnclave {
             return Err(format!(
                 "SGX: sgx_unseal_data failed with status 0x{status:04x}"
             ));
+        }
+        if aad_len as usize != aad_buf.len() {
+            return Err("SGX: unseal returned unexpected AAD length".to_string());
         }
 
         text_buf.truncate(text_len as usize);

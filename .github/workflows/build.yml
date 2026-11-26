@@ -11,8 +11,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # pinned immutable; original actions/checkout@v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Install LLVM (llc for the lowering tests)
@@ -65,7 +65,7 @@ jobs:
           fi
           command -v llc && llc --version | head -1
       - name: Obfuscate test payload
-        run: python3 scripts/build.py --payload tests/fixtures/test_payload.py --skip-relay --no-cfg-flatten
+        run: python3 scripts/build.py --payload tests/fixtures/test_payload.py --skip relay --no-cfg-flatten
       - name: Feature report generated from the artefact
         # The build writes build/artefact_manifest.json (artefact hash,
         # C symbols, Rust modules reachable + enabled, loader gates it
@@ -106,7 +106,7 @@ jobs:
         # fire and crashers would never upload. always() + if-no-files-found
         # keeps the step green when there is nothing to upload.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pinned immutable; original actions/upload-artifact@v4
         with:
           name: fuzz-crashers
           path: relay/fuzz/artifacts/
@@ -116,9 +116,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # pinned immutable; original actions/checkout@v4
       - name: Cache Cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # pinned immutable; original actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -126,7 +126,7 @@ jobs:
             relay/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@6a52aad76a94a5fbc50d567bb5be24419801c1fb  # pinned immutable; original dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt, clippy
           targets: x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu, aarch64-unknown-linux-gnu
@@ -147,9 +147,9 @@ jobs:
           fi
           command -v llc && llc --version | head -1
       - name: Run pipeline (full)
-        run: python3 scripts/build.py --payload tests/fixtures/test_payload.py --skip-relay
+        run: python3 scripts/build.py --payload tests/fixtures/test_payload.py --skip relay
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pinned immutable; original actions/upload-artifact@v4
         with:
           name: orbital-relay-linux
           path: build/orbital-relay
@@ -159,9 +159,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # pinned immutable; original actions/checkout@v4
       - name: Cache Cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # pinned immutable; original actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -169,7 +169,7 @@ jobs:
             relay/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@6a52aad76a94a5fbc50d567bb5be24419801c1fb  # pinned immutable; original dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt, clippy
           targets: x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu, aarch64-unknown-linux-gnu
@@ -180,7 +180,7 @@ jobs:
         continue-on-error: true
         run: make relay-win
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pinned immutable; original actions/upload-artifact@v4
         with:
           name: orbital-relay-win
           path: build/orbital-relay-win.exe
@@ -190,9 +190,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # pinned immutable; original actions/checkout@v4
       - name: Cache Cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # pinned immutable; original actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
@@ -200,7 +200,7 @@ jobs:
             relay/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@6a52aad76a94a5fbc50d567bb5be24419801c1fb  # pinned immutable; original dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt, clippy
           targets: x86_64-unknown-linux-gnu, x86_64-pc-windows-gnu, aarch64-unknown-linux-gnu
@@ -211,7 +211,7 @@ jobs:
         continue-on-error: true
         run: make relay-linux-arm
       - name: Upload ARM64 artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pinned immutable; original actions/upload-artifact@v4
         with:
           name: orbital-relay-linux-arm
           path: build/orbital-relay-linux-arm

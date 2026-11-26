@@ -27,7 +27,9 @@ def _parse(src: str) -> ast.Module:
 
 
 def _execute(code: str, ns: dict | None = None) -> None:
-    exec(code, ns or {})
+    if ns is None:
+        ns = {}
+    exec(code, ns)
 
 
 def test_fake_call_graph_creates_functions():
@@ -130,8 +132,9 @@ result = add(2, 3)
     poisoner = ProvenancePoisoner(seed=42)
     tree = poisoner.poison(tree, {"categories": ProvenancePoisoner.CATEGORIES})
     code = ast.unparse(tree)
-    _execute(code)
-    assert True
+    namespace = {}
+    _execute(code, namespace)
+    assert namespace["result"] == 5
 
 
 def test_metrics_fake_call_graph_complexity():

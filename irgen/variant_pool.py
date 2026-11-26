@@ -8,17 +8,17 @@ structurally different implementations. Only one is selected per build.
 
 Architectural Role:
 Pre-build diversity pass. Generates multiple variants of each target
-function using different transformation strategies (loop-to-recursion,
-recursion-to-loop, table-driven, unrolled). One variant is selected
-per build based on the build seed.
+function. One variant is selected per build based on the build seed.
 
 Security Relevance:
-- Each build gets different implementations of the same function.
+- Each build gets a differently named/scrambled copy of the same function.
 - The selection is deterministic per build seed but unpredictable
   across builds.
 - Variants use scrambled variable names (BLAKE2b-derived).
-- Variant strategies include bottom-up loop conversion, top-down
-  recursive memoization, table-driven substitution, and loop unrolling.
+- The four strategy slots currently emit semantic-preserving renamed copies:
+  the previous rewrites (recursion-to-loop, memoization, table lookup, loop
+  unrolling) were not semantics-preserving and have been disabled rather
+  than shipped as "equivalent" variants.
 
 Threat model: Binary diffing, cross-build comparison, signature detection.
 
@@ -35,6 +35,7 @@ import json
 import os
 import sys
 import copy
+import symtable
 from typing import Optional
 
 
@@ -89,196 +90,145 @@ def affine_decode(x: int, A: int, b: int) -> int:
 
 # ---- Variant Strategies ----
 
-def _strategy_loop_bottomup(source: str, func_name: str, seed: bytes) -> str:
-    """
-    Convert recursive calls to iterative loops (bottom-up).
+def _identifier_names(tree: ast.AST) -> set[str]:
+    """Collect every identifier spelling that a generated name must avoid."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Name, ast.arg, ast.FunctionDef,
+                             ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.id if isinstance(node, ast.Name) else
+                      node.arg if isinstance(node, ast.arg) else node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                names.add((alias.asname or alias.name).split('.')[0])
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            names.update(node.names)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names.add(node.name)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.add(node.rest)
+    return names
 
-    Replaces recursive function bodies with stack-based iterative
-    equivalents. This changes the call structure completely.
+
+def _fresh_identifier(base: str, reserved: set[str]) -> str:
+    """Return ``base`` or a deterministic unused suffix, never a collision."""
+    candidate = base
+    index = 1
+    while candidate in reserved:
+        candidate = f"{base}_{index}"
+        index += 1
+    reserved.add(candidate)
+    return candidate
+
+
+def _renamed_copy(source: str, func_name: str, suffix: str) -> str:
+    """Return a semantic-preserving copy of ``func_name`` under a new name.
+
+    The old per-strategy rewrites claimed semantic equivalence while emitting
+    undefined variables, empty stacks and changed signatures. Until a rewrite
+    can be verified against the original for arbitrary Python, the safe
+    variant is an exact copy whose definition and references are renamed
+    consistently.
     """
     tree = ast.parse(source)
-    node = _find_func(tree, func_name)
-    if node is None:
+    if _find_func(tree, func_name) is None:
         return source
-
-    renamed_func = f"{func_name}_loop"
-    new_body = []
-
-    for stmt in node.body:
-        if isinstance(stmt, ast.Return) and _has_while_recursion(stmt, func_name):
-            loop_body = _recursion_to_loop(stmt, func_name, renamed_func, seed)
-            new_body.extend(loop_body)
-        elif isinstance(stmt, ast.Assign) and _is_recursive_call(stmt.value, func_name):
-            loop_body = _recursion_to_loop(stmt, func_name, renamed_func, seed)
-            new_body.extend(loop_body)
-        else:
-            new_body.append(stmt)
-
-    new_func_node = ast.FunctionDef(
-        name=renamed_func,
-        args=node.args,
-        body=new_body,
-        decorator_list=[],
-        lineno=node.lineno or 0,
-        col_offset=node.col_offset or 0,
-    )
-
     new_tree = copy.deepcopy(tree)
-    for i, b in enumerate(new_tree.body):
-        if isinstance(b, ast.FunctionDef) and b.name == func_name:
-            new_tree.body[i] = new_func_node
-            break
+    new_name = _fresh_identifier(
+        f"{func_name}_{suffix}", _identifier_names(new_tree))
+    module_table = symtable.symtable(source, "<variant>", "exec")
+    scope_tables: dict[tuple[str, str, int], list[symtable.SymbolTable]] = {}
 
+    def collect_tables(table):
+        for child in table.get_children():
+            # Python 3.13 returns an enum for get_type(); 3.12 returns a str.
+            scope_type = child.get_type()
+            scope_value = getattr(scope_type, "value", scope_type)
+            key = (scope_value, child.get_name(), child.get_lineno())
+            scope_tables.setdefault(key, []).append(child)
+            collect_tables(child)
+
+    collect_tables(module_table)
+
+    class _RenameReferences(ast.NodeTransformer):
+        def __init__(self):
+            self.table = module_table
+
+        def visit_Name(self, node):
+            if node.id != func_name:
+                return node
+            is_module_reference = self.table is module_table
+            is_global_reference = (
+                func_name in self.table.get_identifiers()
+                and self.table.lookup(func_name).is_global()
+            )
+            if is_module_reference or is_global_reference:
+                node.id = new_name
+            return node
+
+        def _visit_scope(self, key, body):
+            candidates = scope_tables.get(key, [])
+            previous = self.table
+            if candidates:
+                self.table = candidates.pop(0)
+            for node in body:
+                self.visit(node)
+            self.table = previous
+
+        def visit_FunctionDef(self, node):
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            self.visit(node.args)
+            if node.returns is not None:
+                self.visit(node.returns)
+            self._visit_scope(("function", node.name, node.lineno), node.body)
+            return node
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_ClassDef(self, node):
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            for base in node.bases:
+                self.visit(base)
+            for keyword in node.keywords:
+                self.visit(keyword)
+            self._visit_scope(("class", node.name, node.lineno), node.body)
+            return node
+
+        def visit_Lambda(self, node):
+            self.visit(node.args)
+            self._visit_scope(("function", "lambda", node.lineno), (node.body,))
+            return node
+
+    new_tree = _RenameReferences().visit(new_tree)
+    for node in new_tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == func_name:
+            node.name = new_name
+            break
     return ast.unparse(new_tree)
+
+
+def _strategy_loop_bottomup(source: str, func_name: str, seed: bytes) -> str:
+    """Loop-based variant slot: currently a semantic-preserving renamed copy."""
+    return _renamed_copy(source, func_name, "loop")
 
 
 def _strategy_recursive_topdown(source: str, func_name: str, seed: bytes) -> str:
-    """
-    Add memoization cache to create a top-down recursive variant.
-
-    Wraps the function with a cache that uses a single tuple arg.
-    This changes the function signature and internal logic.
-    """
-    tree = ast.parse(source)
-    node = _find_func(tree, func_name)
-    if node is None:
-        return source
-
-    renamed_func = f"{func_name}_rec"
-    memo_name = f"__memo_{func_name}_{hex(_derive_constant(seed, 'memo') & 0xFFFF)[2:]}"
-
-    memo_init = ast.parse(
-        f"{memo_name} = {{}}"
-    ).body[0]
-
-    cache_check = ast.parse(
-        f"if {memo_name}.get(args) is not None:\n"
-        f"    return {memo_name}[args]"
-    ).body[0]
-
-    new_args = ast.arguments(
-        posonlyargs=[],
-        args=[ast.arg(arg="args")],
-        kwonlyargs=[],
-        kw_defaults=[],
-        defaults=[],
-    )
-
-    new_body = [memo_init, cache_check]
-
-    for stmt in node.body:
-        new_body.append(stmt)
-
-    update_memo = ast.parse(
-        f"if args not in {memo_name}:\n"
-        f"    {memo_name}[args] = result"
-    ).body[0]
-
-    new_body.append(update_memo)
-
-    new_func_node = ast.FunctionDef(
-        name=renamed_func,
-        args=new_args,
-        body=new_body,
-        decorator_list=[],
-        lineno=node.lineno or 0,
-        col_offset=node.col_offset or 0,
-    )
-
-    new_tree = copy.deepcopy(tree)
-    for i, b in enumerate(new_tree.body):
-        if isinstance(b, ast.FunctionDef) and b.name == func_name:
-            new_tree.body[i] = new_func_node
-            break
-
-    return ast.unparse(new_tree)
+    """Recursive/memoized variant slot: semantic-preserving renamed copy."""
+    return _renamed_copy(source, func_name, "rec")
 
 
 def _strategy_table_driven(source: str, func_name: str, seed: bytes) -> str:
-    """
-    Replace operations with table-driven equivalents.
-
-    Initializes a lookup table and replaces operations with table
-    accesses. This changes the computational pattern from arithmetic
-    to data-driven.
-    """
-    tree = ast.parse(source)
-    node = _find_func(tree, func_name)
-    if node is None:
-        return source
-
-    renamed_func = f"{func_name}_table"
-    table_name = f"__table_{func_name}"
-
-    table_init = ast.parse(
-        f"{table_name} = [i for i in range(256)]"
-    ).body[0]
-
-    new_body = [table_init]
-
-    for stmt in node.body:
-        transformed = _replace_calls_with_table_lookup(stmt, table_name, seed)
-        new_body.append(transformed)
-
-    new_func_node = ast.FunctionDef(
-        name=renamed_func,
-        args=node.args,
-        body=new_body,
-        decorator_list=[],
-        lineno=node.lineno or 0,
-        col_offset=node.col_offset or 0,
-    )
-
-    new_tree = copy.deepcopy(tree)
-    for i, b in enumerate(new_tree.body):
-        if isinstance(b, ast.FunctionDef) and b.name == func_name:
-            new_tree.body[i] = new_func_node
-            break
-
-    return ast.unparse(new_tree)
+    """Table-driven variant slot: semantic-preserving renamed copy."""
+    return _renamed_copy(source, func_name, "table")
 
 
 def _strategy_unrolled(source: str, func_name: str, seed: bytes) -> str:
-    """
-    Unroll loops and inline expressions.
-
-    Replaces loops with unrolled bodies (for small constant bounds)
-    and inlines constant expressions.
-    """
-    tree = ast.parse(source)
-    node = _find_func(tree, func_name)
-    if node is None:
-        return source
-
-    renamed_func = f"{func_name}_unrolled"
-    new_body = []
-
-    for stmt in node.body:
-        if isinstance(stmt, ast.For):
-            unrolled = _unroll_loop(stmt, seed)
-            new_body.extend(unrolled)
-        elif isinstance(stmt, ast.While):
-            unrolled = _unroll_loop(stmt, seed)
-            new_body.extend(unrolled)
-        else:
-            new_body.append(_inline_expressions(stmt, seed))
-
-    new_func_node = ast.FunctionDef(
-        name=renamed_func,
-        args=node.args,
-        body=new_body,
-        decorator_list=[],
-        lineno=node.lineno or 0,
-        col_offset=node.col_offset or 0,
-    )
-
-    new_tree = copy.deepcopy(tree)
-    for i, b in enumerate(new_tree.body):
-        if isinstance(b, ast.FunctionDef) and b.name == func_name:
-            new_tree.body[i] = new_func_node
-            break
-
-    return ast.unparse(new_tree)
+    """Unrolled variant slot: semantic-preserving renamed copy."""
+    return _renamed_copy(source, func_name, "unrolled")
 
 
 # ---- Helper Functions ----
@@ -371,32 +321,92 @@ def _scramble_variable_names(source: str, seed: bytes) -> str:
     """
     Rename user-defined variables with deterministic BLAKE2b-derived names.
 
-    Only names the code actually binds are renamed: parameters, assignment
-    targets and loop variables. Builtins, imported names and function names
-    keep their spelling, and parameters are renamed at their ``arg`` node as
-    well as at every use, so the function still binds what its body reads.
+    Only assignment targets and loop variables are renamed. Parameters keep
+    their spelling because keyword call labels are part of the callable API.
+    Builtins, imported names and function names also keep their spelling.
     """
     tree = ast.parse(source)
     builtin_names = set(dir(builtins))
 
-    bound: set[str] = set()
+    class _ClassBodyBindings(ast.NodeVisitor):
+        """Collect class attributes without descending into nested scopes."""
+
+        def __init__(self):
+            self.names: set[str] = set()
+
+        def visit_Name(self, node):
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                self.names.add(node.id)
+
+        def visit_FunctionDef(self, node):
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            self.visit(node.args)
+            if node.returns is not None:
+                self.visit(node.returns)
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_ClassDef(self, node):
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            for base in node.bases:
+                self.visit(base)
+            for keyword in node.keywords:
+                self.visit(keyword)
+
+        def visit_Lambda(self, node):
+            self.visit(node.args)
+
+        def visit_comprehension(self, node):
+            self.visit(node.iter)
+            for condition in node.ifs:
+                self.visit(condition)
+
+    # Keep API-visible names and bindings whose string fields are not
+    # rewritten by VarRenamer: parameters, imports, callable/attribute bases,
+    # class attributes, exception targets and pattern captures.
+    fixed: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.arg):
-            bound.add(node.arg)
-        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
-            bound.add(node.id)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            bound.add(node.name)
+        if isinstance(node, ast.ClassDef):
+            fixed.add(node.name)
+            class_bindings = _ClassBodyBindings()
+            for statement in node.body:
+                class_bindings.visit(statement)
+            fixed.update(class_bindings.names)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            fixed.add(node.name)
+        elif isinstance(node, ast.arg):
+            fixed.add(node.arg)
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             for alias in node.names:
-                bound.add((alias.asname or alias.name).split('.')[0])
+                fixed.add((alias.asname or alias.name).split('.')[0])
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            fixed.add(node.func.id)
+        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            fixed.add(node.value.id)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            fixed.update(node.names)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            fixed.add(node.name)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            fixed.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            fixed.add(node.rest)
+
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
 
     var_map: dict[str, str] = {}
-    for name in sorted(bound - builtin_names):
+    reserved = _identifier_names(tree) | builtin_names
+    for name in sorted(bound - builtin_names - fixed):
         if name.startswith("__"):
             continue
         h = _blake2b(seed + name.encode(), 4)
-        var_map[name] = f"v_{int.from_bytes(h, 'little'):08x}"
+        base = f"v_{int.from_bytes(h, 'little'):08x}"
+        var_map[name] = _fresh_identifier(base, reserved)
 
     class VarRenamer(ast.NodeTransformer):
         def visit_Name(self, node: ast.Name) -> ast.Name:
@@ -405,8 +415,7 @@ def _scramble_variable_names(source: str, seed: bytes) -> str:
             return node
 
         def visit_arg(self, node: ast.arg) -> ast.arg:
-            if node.arg in var_map:
-                node.arg = var_map[node.arg]
+            self.generic_visit(node)
             return node
 
     tree = VarRenamer().visit(tree)

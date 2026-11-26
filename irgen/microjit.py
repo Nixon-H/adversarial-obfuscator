@@ -112,11 +112,159 @@ _NOP_TEMPLATES: list[bytes] = [
 ]
 
 
+def _push_register(reg: int) -> bytes:
+    if reg <= 7:
+        return bytes((0x50 + reg,))
+    return bytes((0x41, 0x50 + reg - 8))
+
+
+def _pop_register(reg: int) -> bytes:
+    if reg <= 7:
+        return bytes((0x58 + reg,))
+    return bytes((0x41, 0x58 + reg - 8))
+
+
+def _add_rsp_immediate(size: int) -> bytes:
+    if size == 0:
+        return b""
+    if size < 128:
+        return b"\x48\x83\xc4" + bytes((size,))
+    return b"\x48\x81\xc4" + struct.pack("<I", size)
+
+
+def _sub_rsp_immediate(size: int) -> bytes:
+    if size == 0:
+        return b""
+    if size < 128:
+        return b"\x48\x83\xec" + bytes((size,))
+    return b"\x48\x81\xec" + struct.pack("<I", size)
+
+
+def _lea_rbp_from_rsp(frame_size: int) -> bytes:
+    if frame_size == 0:
+        return b"\x48\x89\xe5"
+    if frame_size < 128:
+        return b"\x48\x8d\x6c\x24" + bytes((frame_size,))
+    return b"\x48\x8d\xac\x24" + struct.pack("<I", frame_size)
+
+
+def _lea_rsp_from_rbp(frame_size: int) -> bytes:
+    if frame_size == 0:
+        return b"\x48\x89\xec"
+    return b"\x48\x8d\xa5" + struct.pack("<i", -frame_size)
+
+
+def _store_register_at_rbp(reg: int, offset: int) -> bytes:
+    rex = 0x48 | (0x04 if reg >= 8 else 0)
+    modrm = ((reg & 7) << 3) | 0x05
+    return bytes((rex, 0x89, modrm)) + struct.pack("<I", offset)
+
+
+def _load_register_from_rbp(reg: int, offset: int) -> bytes:
+    rex = 0x48 | (0x04 if reg >= 8 else 0)
+    modrm = ((reg & 7) << 3) | 0x05
+    return bytes((rex, 0x8B, modrm)) + struct.pack("<I", offset)
+
+
 # ---- x86_64 instruction parser helpers ----
 
 def _rex_prefix(b: int) -> bool:
     """Check if a byte is a REX prefix (0x40-0x4F, excluding 0x40)."""
     return (b & 0xF0) == 0x40 and b != 0x40
+
+
+def _is_vex(code: bytes, pos: int) -> bool:
+    """True when ``code[pos:]`` starts with a VEX/EVEX prefix in 64-bit mode."""
+    if pos + 1 >= len(code):
+        return False
+    first, second = code[pos], code[pos + 1]
+    if first == 0xC5:  # VEX2: the mod field must be 11b in long mode
+        return (second & 0xC0) == 0xC0
+    if first == 0xC4:  # VEX3
+        return (second & 0xC0) == 0xC0
+    if first == 0x62:  # EVEX
+        return (second & 0xC0) == 0xC0
+    return False
+
+
+def _fully_decodable(code: bytes) -> bool:
+    """Conservative gate: refuse to rewrite a block with any unknown byte."""
+    pos = 0
+    while pos < len(code):
+        length = _instruction_length(code, pos)
+        if length <= 0:
+            return False
+        pos += length
+    return True
+
+
+# Opcodes whose operands include implicit registers (stack pointer, accumulator,
+# flags or CL). Rewriting their register fields with a mapping that does not
+# model those implicit uses silently changes semantics.
+_IMPLICIT_FIRST = set(range(0x50, 0x60)) | set(range(0x90, 0x98)) | {
+    0x9C, 0x9D, 0xC3, 0xC9, 0xCA, 0xCB, 0xCC, 0xCD, 0xCF,
+    0xA4, 0xA5, 0xA6, 0xA7, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF,
+    0xD4, 0xD5, 0xE8, 0xE9, 0xEB, 0xF4, 0xFC, 0xFD,
+}
+_IMPLICIT_TWO = {0x05, 0x31, 0xA2, 0x0B}  # syscall, rdtsc, cpuid, ud2
+
+
+def _uses_implicit_registers(code: bytes, offset: int, length: int) -> bool:
+    """True if the instruction at ``offset`` has implicit register operands."""
+    end = min(offset + length, len(code))
+    pos = offset
+    while pos < end and (_rex_prefix(code[pos]) or code[pos] in (
+            0x66, 0x67, 0xF0, 0xF2, 0xF3, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65)):
+        pos += 1
+    if pos >= end:
+        return True
+    opcode = code[pos]
+    if opcode == 0x0F:
+        if pos + 1 >= end or code[pos + 1] in _IMPLICIT_TWO:
+            return True
+        return False
+    if opcode in _IMPLICIT_FIRST:
+        return True
+    # shift-by-CL uses the accumulator and CL even though ModRM encodes only
+    # one operand; div/mul/idiv/imul write implicit EDX:EAX pairs.
+    if opcode in (0xD0, 0xD1, 0xD2, 0xD3, 0xF6, 0xF7):
+        if pos + 1 < end:
+            reg_field = (code[pos + 1] >> 3) & 7
+            if opcode in (0xF6, 0xF7) and reg_field in (4, 5, 6, 7):
+                return True
+            if opcode in (0xD0, 0xD1, 0xD2, 0xD3) and reg_field == 0:
+                return True
+    return False
+
+
+def _adjusts_stack_pointer(code: bytes, offset: int, length: int) -> bool:
+    """True if the instruction writes RSP/RBP or uses an implicit stack reg."""
+    if _uses_implicit_registers(code, offset, length):
+        return True
+    end = min(offset + length, len(code))
+    pos = offset
+    while pos < end and (_rex_prefix(code[pos]) or code[pos] in (
+            0x66, 0x67, 0xF0, 0xF2, 0xF3, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65)):
+        pos += 1
+    if pos + 1 >= end:
+        return False
+    opcode = code[pos]
+    # Arithmetic with a ModRM register destination (add/sub/and/or/xor/cmp)
+    # and data moves whose destination is the stack pointer.
+    arithmetic = {0x01, 0x03, 0x09, 0x0B, 0x21, 0x23, 0x29, 0x2B,
+                  0x31, 0x33, 0x81, 0x83, 0x89, 0x8B}
+    if opcode not in arithmetic:
+        return False
+    modrm = code[pos + 1]
+    mod_bits = modrm >> 6
+    reg_field = (modrm >> 3) & 7
+    rm_field = modrm & 7
+    if mod_bits == 3:
+        # Register-register form: either side may be the stack pointer.
+        return reg_field in (REG_RSP, REG_RBP) or rm_field in (REG_RSP, REG_RBP)
+    # Memory form: RBP/RSP in rm is the address base, not a write to the
+    # stack pointer, so only a stack register used as data is a problem.
+    return reg_field in (REG_RSP, REG_RBP)
 
 
 def _instruction_length(code: bytes, offset: int) -> int:
@@ -134,6 +282,11 @@ def _instruction_length(code: bytes, offset: int) -> int:
     rex = 0
     prefixes = 0
     while pos < len(code):
+        if _is_vex(code, pos):
+            # The hand decoder does not model VEX/EVEX opcode maps; returning
+            # 0 lets callers refuse the whole block instead of guessing a
+            # length and splitting real instructions.
+            return 0
         b = code[pos]
         if _rex_prefix(b):
             rex = b
@@ -331,7 +484,8 @@ def _get_instruction_regs(code: bytes, offset: int) -> set[int]:
         regs.add(reg)
         return regs
     if opcode_len == 1 and 0xB0 <= first <= 0xBF:
-        reg = (first - 0xB0) | (1 if rex_b else 0)
+        base = 0xB8 if first >= 0xB8 else 0xB0
+        reg = (first - base) | (1 if rex_b else 0)
         regs.add(reg)
         return regs
     has_modrm = False
@@ -388,131 +542,67 @@ class MicroJITEngine:
         """In-place shuffle of a sequence."""
         self._rng.shuffle(seq)
 
-    # ---- Prologue generation ----
+    # ---- Shared prologue/epilogue layout ----
+
+    def _frame_layout(self):
+        """One deterministic layout plan shared by both halves of a function."""
+        cached = getattr(self, "_cached_frame_layout", None)
+        if cached is not None:
+            return cached
+        rng = random.Random(self.seed ^ 0x4D4943524F4A4954)
+        saved = [REG_RBX, REG_R12, REG_R13, REG_R14, REG_R15]
+        rng.shuffle(saved)
+        cached = {
+            "variant": rng.randrange(3),
+            "frame": rng.choice([0, 8, 16, 24, 32, 64, 128]),
+            "saved": saved,
+        }
+        self._cached_frame_layout = cached
+        return cached
 
     def generate_prologue(self) -> bytes:
-        """
-        Generate a random function prologue with polymorphic register save order.
-
-        Variants:
-        0: push rbp; mov rbp, rsp; push regs; sub rsp, frame
-        1: push regs; push rbp; sub rsp, frame; lea rbp, [rsp+frame]
-        2: push rbp; mov rbp, rsp; sub rsp, frame; push regs (reversed)
-        3: sub rsp, frame+8*N; push rbp; mov rbp, rsp; mov [rsp+off], regs
-        """
-        saved_regs = [REG_RBX, REG_RBP, REG_R12, REG_R13, REG_R14, REG_R15]
-        self._shuffle(saved_regs)
-        stack_frame_sizes = [0, 8, 16, 24, 32, 64, 128]
-        frame_size = self._choice(stack_frame_sizes)
-        variant = self._randrange(0, 4)
+        """Generate a prologue whose exact inverse is ``generate_epilogue``."""
+        layout = self._frame_layout()
+        saved = layout["saved"]
+        frame = layout["frame"]
+        variant = layout["variant"]
         parts = []
-        if variant == 0:
-            parts.append(b'\x55')
-            parts.append(b'\x48\x89\xe5')
-            for r in saved_regs:
-                if r <= 7:
-                    if r == REG_RBP:
-                        continue
-                    parts.append(bytes([0x50 + r]))
-                else:
-                    parts.append(bytes([0x41, 0x50 + (r - 8)]))
-            if frame_size > 0:
-                if frame_size < 128:
-                    parts.append(b'\x48\x83\xec' + bytes([frame_size]))
-                else:
-                    parts.append(b'\x48\x81\xec' + struct.pack('<I', frame_size))
-        elif variant == 1:
-            for r in saved_regs:
-                if r <= 7:
-                    parts.append(bytes([0x50 + r]))
-                else:
-                    parts.append(bytes([0x41, 0x50 + (r - 8)]))
-            parts.append(b'\x55')
-            if frame_size > 0:
-                parts.append(b'\x48\x83\xec' + bytes([frame_size]))
-                parts.append(b'\x48\x8d\x6c\x24' + bytes([frame_size]))
-            else:
-                parts.append(b'\x48\x89\xe5')
-        elif variant == 2:
-            parts.append(b'\x55')
-            parts.append(b'\x48\x89\xe5')
-            if frame_size > 0:
-                parts.append(b'\x48\x81\xec' + struct.pack('<I', frame_size))
-            for r in reversed(saved_regs):
-                if r <= 7:
-                    parts.append(bytes([0x50 + r]))
-                else:
-                    parts.append(bytes([0x41, 0x50 + (r - 8)]))
+        if variant in (0, 2):
+            parts.extend((b"\x55", b"\x48\x89\xe5"))  # push rbp; mov rbp,rsp
+        if variant == 2:
+            parts.append(_sub_rsp_immediate(frame))
+            parts.extend(_push_register(reg) for reg in saved)
         else:
-            if frame_size > 0:
-                parts.append(b'\x48\x83\xec' + bytes([frame_size + 8 * len(saved_regs)]))
+            parts.extend(_push_register(reg) for reg in saved)
+            if variant == 0:
+                parts.append(_sub_rsp_immediate(frame))
             else:
-                parts.append(b'\x48\x83\xec' + bytes([8 * len(saved_regs)]))
-            parts.append(b'\x55')
-            parts.append(b'\x48\x89\xe5')
-            offset = 0
-            for r in saved_regs:
-                if r <= 7:
-                    parts.append(b'\x48\x89\xbc\x24' + struct.pack('<I', offset))
-                else:
-                    parts.append(b'\x4c\x89\xbc\x24' + struct.pack('<I', offset))
-                offset += 8
-
-        return b''.join(parts)
-
-    # ---- Epilogue generation ----
+                parts.append(b"\x55")  # push rbp after callee-saved registers
+                parts.append(b"\x48\x89\xe5")
+                parts.append(_sub_rsp_immediate(frame))
+        return b"".join(parts)
 
     def generate_epilogue(self) -> bytes:
-        """
-        Generate a random function epilogue with polymorphic register restore order.
-
-        Variants:
-        0: pop regs; pop rbp; ret
-        1: leave; pop regs (reversed); ret
-        2: mov rsp, rbp; pop regs (reversed); pop rbp; ret
-        3: pop rbp; mov regs from stack; add rsp, N; ret
-        """
-        saved_regs = [REG_RBX, REG_RBP, REG_R12, REG_R13, REG_R14, REG_R15]
-        self._shuffle(saved_regs)
-        variant = self._randrange(0, 4)
+        """Generate the exact stack/register inverse of the shared layout."""
+        layout = self._frame_layout()
+        saved = list(reversed(layout["saved"]))
+        frame = layout["frame"]
+        variant = layout["variant"]
         parts = []
         if variant == 0:
-            for r in saved_regs:
-                if r <= 7:
-                    parts.append(bytes([0x58 + r]))
-                else:
-                    parts.append(bytes([0x41, 0x58 + (r - 8)]))
-            parts.append(b'\x5d')
-            parts.append(b'\xc3')
+            parts.append(_add_rsp_immediate(frame))
+            parts.extend(_pop_register(reg) for reg in saved)
+            parts.append(b"\x5d")  # pop rbp
         elif variant == 1:
-            parts.append(b'\xc9')
-            for r in reversed(saved_regs):
-                if r <= 7:
-                    parts.append(bytes([0x58 + r]))
-                else:
-                    parts.append(bytes([0x41, 0x58 + (r - 8)]))
-            parts.append(b'\xc3')
-        elif variant == 2:
-            parts.append(b'\x48\x89\xec')
-            for r in reversed(saved_regs):
-                if r <= 7:
-                    parts.append(bytes([0x58 + r]))
-                else:
-                    parts.append(bytes([0x41, 0x58 + (r - 8)]))
-            parts.append(b'\x5d')
-            parts.append(b'\xc3')
+            parts.append(_add_rsp_immediate(frame))
+            parts.append(b"\xc9")  # leave: mov rsp,rbp; pop rbp
+            parts.extend(_pop_register(reg) for reg in saved)
         else:
-            parts.append(b'\x5d')
-            offset = 0
-            for r in reversed(saved_regs):
-                if r <= 7:
-                    parts.append(b'\x48\x8b\xbc\x24' + struct.pack('<I', offset))
-                else:
-                    parts.append(b'\x4c\x8b\xbc\x24' + struct.pack('<I', offset))
-                offset += 8
-            parts.append(b'\x48\x81\xc4' + struct.pack('<I', offset + 8))
-            parts.append(b'\xc3')
-        return b''.join(parts)
+            parts.extend(_pop_register(reg) for reg in saved)
+            parts.append(b"\x48\x89\xec")  # mov rsp,rbp (discard frame)
+            parts.append(b"\x5d")
+        parts.append(b"\xc3")
+        return b"".join(parts)
 
     # ---- NOP sled generation ----
 
@@ -535,65 +625,73 @@ class MicroJITEngine:
 
     # ---- Instruction reordering ----
 
-    def reorder_instructions(self, code: bytes, basic_block: list) -> bytes:
-        """
-        Reorder independent instructions within basic blocks and insert
-        random NOPs.
+    @staticmethod
+    def _safe_to_reorder(instruction: bytes) -> bool:
+        """Allow only decoded, flag-neutral, register-only instructions."""
+        if instruction in _NOP_TEMPLATES or instruction == b"\xc3":
+            return True
+        if len(instruction) == 10 and instruction[0] & 0xF8 == 0x48 \
+                and 0xB8 <= instruction[1] <= 0xBF:
+            return True  # mov r64, imm64
+        if len(instruction) == 3 and instruction[0] & 0xF8 == 0x48 \
+                and instruction[1] == 0x89 and instruction[2] & 0xC0 == 0xC0:
+            return True  # mov r64, r64 (register-direct ModRM)
+        return False
 
-        `basic_block` is a list of (start, end) tuples defining basic
-        block boundaries. Instructions within each block are grouped
-        by register dependency; independent groups are shuffled.
+    def reorder_instructions(self, code: bytes, basic_block: list) -> bytes:
+        """Shuffle only independent safe instructions and insert boundary NOPs.
+
+        Any undecodable, memory, flag-changing, control-flow, stack, VEX, or
+        otherwise unmodeled instruction makes the entire rewrite fail closed.
         """
         if not basic_block:
             return code
         result = bytearray()
         prev_end = 0
         for start, end in sorted(basic_block):
+            if start < prev_end or start < 0 or end > len(code) or end <= start:
+                return code
             if start > prev_end:
                 result.extend(code[prev_end:start])
-            block_bytes = code[start:end]
-            instrs = self._slice_instructions(block_bytes)
-            if len(instrs) >= 2:
-                dep_groups = self._find_independent_groups(block_bytes, instrs)
-                for group in dep_groups:
+            block = code[start:end]
+            boundaries = _instruction_boundaries(block)
+            instructions = []
+            for left, right in zip(boundaries, boundaries[1:]):
+                instruction = block[left:right]
+                if not self._safe_to_reorder(instruction):
+                    return code
+                instructions.append(instruction)
+            if b"\xc3" in instructions and instructions[-1] != b"\xc3":
+                return code
+
+            groups = []
+            current = []
+            used_regs = set()
+            for instruction in instructions:
+                if instruction == b"\xc3":
+                    if current:
+                        groups.append(current)
+                        current = []
+                        used_regs = set()
+                    groups.append([instruction])
+                    continue
+                regs = _get_instruction_regs(instruction, 0)
+                if current and used_regs & regs:
+                    groups.append(current)
+                    current = []
+                    used_regs = set()
+                current.append(instruction)
+                used_regs |= regs
+            if current:
+                groups.append(current)
+
+            for group in groups:
+                if len(group) > 1:
                     self._shuffle(group)
-                reordered = []
-                for group in dep_groups:
-                    reordered.extend(group)
-                reordered.sort(key=lambda x: dep_groups.index(
-                    next(g for g in dep_groups if x in g)
-                ))
-                new_block = bytearray()
-                for idx_in_group_list in range(len(reordered)):
-                    def find_next(groups, current_list_idx):
-                        target = reordered[current_list_idx]
-                        for gi, g in enumerate(groups):
-                            for ii, (inst_idx, off, length) in enumerate(g):
-                                if inst_idx == target[0]:
-                                    return (gi, ii, inst_idx, off, length)
-                        return None
-                    info = None
-                    for gi, g in enumerate(dep_groups):
-                        for ii, (inst_idx, off, length) in enumerate(g):
-                            if inst_idx == reordered[idx_in_group_list][0]:
-                                info = (off, length)
-                                break
-                        if info:
-                            break
-                    if info:
-                        off, length = info
-                        new_block.extend(block_bytes[off:off + length])
-                block_out = bytes(new_block)
-            else:
-                block_out = block_bytes
-            nop_count = self._randrange(0, 3)
-            if nop_count > 0 and block_out:
-                insert_pos = self._randrange(0, len(block_out))
-                result.extend(block_out[:insert_pos])
-                result.extend(self.generate_nop_sled(nop_count))
-                result.extend(block_out[insert_pos:])
-            else:
-                result.extend(block_out)
+                for instruction in group:
+                    result.extend(instruction)
+                    if instruction != b"\xc3" and self._randrange(0, 4) == 0:
+                        result.extend(self.generate_nop_sled(self._randrange(1, 3)))
             prev_end = end
         if prev_end < len(code):
             result.extend(code[prev_end:])
@@ -645,6 +743,10 @@ class MicroJITEngine:
         """
         if not register_map:
             return code
+        if not _fully_decodable(code):
+            # VEX/EVEX or an unknown opcode: a partial rewrite would corrupt
+            # instruction boundaries, so leave the block untouched.
+            return code
         # RSP and RBP are structural: remapping either one breaks every
         # stack access in the block, so they stay pinned.
         register_map = {old_r: new_r for old_r, new_r in register_map.items()
@@ -655,9 +757,10 @@ class MicroJITEngine:
         pos = 0
         while pos < len(result):
             instr_len = _instruction_length(result, pos)
-            if instr_len == 0:
-                pos += 1
-                continue
+            if instr_len == 0 or _uses_implicit_registers(result, pos, instr_len):
+                # A remap that ignores implicit stack/accumulator/CL operands
+                # changes semantics; refuse the whole block.
+                return code
             self._swap_regs_in_instruction(result, pos, instr_len, register_map)
             pos += instr_len
         return bytes(result)
@@ -788,13 +891,18 @@ class MicroJITEngine:
         """
         if offset_delta == 0:
             return code
+        if not _fully_decodable(code):
+            return code
         result = bytearray(code)
         pos = 0
         while pos < len(result):
             length = _instruction_length(result, pos)
             if length == 0:
-                pos += 1
-                continue
+                return code
+            if _adjusts_stack_pointer(result, pos, length):
+                # Shifting local offsets without also adjusting the prologue
+                # frame size (or a push/pop) changes which locals are read.
+                return code
             p = pos
             while p < pos + min(length, 4):
                 b = result[p]
@@ -857,6 +965,10 @@ class MicroJITEngine:
         shifting to produce a semantically equivalent but structurally
         different code block.
         """
+        if not _fully_decodable(block):
+            # NOP insertion uses the hand decoder's boundaries; on VEX or an
+            # unknown opcode those boundaries are guesses, so do nothing.
+            return bytes(block)
         block = bytearray(block)
         reg_map = self.generate_random_register_map()
         block = bytearray(self.swap_regrites(bytes(block), reg_map))

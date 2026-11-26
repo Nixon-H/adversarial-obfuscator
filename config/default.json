@@ -113,7 +113,11 @@
       "enabled": true,
       "deobfuscation_threshold": 0.7,
       "evolution_iterations": 1,
-      "history_file": "build/evolution_history.json"
+      "history_file": "build/evolution_history.json",
+      "proof_threshold": 80,
+      "consecutive_target": 3,
+      "max_rounds": 50,
+      "max_bench_failures": 5
     },
     "runtime": {
       "minimal": true,

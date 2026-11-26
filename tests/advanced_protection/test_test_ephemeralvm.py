@@ -42,8 +42,7 @@ class TestEphemeralVM:
         assert remapped != original
         assert len(remapped) == len(original)
 
-        inverse = {v: k for k, v in omap.items()}
-        restored = remap_bytecode(remapped, inverse)
+        restored = remap_bytecode(remapped, omap, reverse=True)
         assert restored == original
 
     def test_remap_bytecode_roundtrip_multi_inst(self):
@@ -66,8 +65,7 @@ class TestEphemeralVM:
         assert remapped != original
         assert len(remapped) == len(original)
 
-        inverse = {v: k for k, v in omap.items()}
-        restored = remap_bytecode(remapped, inverse)
+        restored = remap_bytecode(remapped, omap, reverse=True)
         assert restored == original
 
     def test_operand_map_generation_and_remapping(self):
@@ -97,10 +95,20 @@ class TestEphemeralVM:
         assert remapped != original
         assert len(remapped) == len(original)
 
-        inverse_op = {v: k for k, v in omap.items()}
-        inverse_operand = {v: k for k, v in opmap.items()}
-        restored = remap_bytecode(remapped, inverse_op, inverse_operand, reverse=True)
+        restored = remap_bytecode(remapped, omap, opmap, reverse=True)
         assert restored == original
+
+    def test_remap_bytecode_reverse_infers_operand_width(self):
+        from vm.ephemeral_isa import generate_ephemeral_opcode_map, remap_bytecode
+        from vm.vm_isa import VMInstruction, VMOpcode, VMOperand
+        omap = generate_ephemeral_opcode_map(b"reverse-width-seed", 256)
+        original = b"".join(bytes(inst.encode()) for inst in [
+            VMInstruction(VMOpcode.CALL, [(VMOperand.ABS_ADDR, 0x40)]),
+            VMInstruction(VMOpcode.MOV, [(VMOperand.REG, 1), (VMOperand.IMM8, 7), (VMOperand.IMM8, 0)]),
+            VMInstruction(VMOpcode.RET),
+        ])
+        remapped = remap_bytecode(original, omap)
+        assert remap_bytecode(remapped, omap, reverse=True) == original
 
     def test_interpreter_dispatch_table_generation(self):
         from vm.ephemeral_isa import (

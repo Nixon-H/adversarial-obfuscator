@@ -107,6 +107,20 @@ contract LicenceERC721 {
         emit Transfer(address(0), to, tokenId);
     }
 
+    /// Move a licence token to a different owner.  Only the current holder may
+    /// transfer; approval operators are intentionally not implemented because
+    /// the licence gate needs a direct ownership boundary.  Once transferred,
+    /// the old owner's signed licence no longer matches ownerOf and fails.
+    function transferFrom(address from, address to, uint256 tokenId) public {
+        require(to != address(0), "cannot transfer to zero address");
+        require(_owners[tokenId] == from, "wrong source owner");
+        require(_owners[tokenId] == msg.sender, "not the token holder");
+        _owners[tokenId] = to;
+        _balances[from] -= 1;
+        _balances[to] += 1;
+        emit Transfer(from, to, tokenId);
+    }
+
     /// Revoke: burn the token — the artifact stops on the next run.
     function burn(uint256 tokenId) public {
         require(_owners[tokenId] == msg.sender, "not the token holder");

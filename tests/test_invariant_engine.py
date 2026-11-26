@@ -109,28 +109,24 @@ class TestSecurityInvariantEngine:
         for f in files:
             assert f.endswith(".py")
 
-    def test_read_source(self):
+    def test_read_source(self, tmp_path):
         e = SecurityInvariantEngine()
-        tmp_file = "/tmp/_test_source.py"
-        with open(tmp_file, "w") as f:
-            f.write("x = 1\n")
-        source = e._read_source(tmp_file)
+        tmp_file = tmp_path / "_test_source.py"
+        tmp_file.write_text("x = 1\n", encoding="utf-8")
+        source = e._read_source(str(tmp_file))
         assert source == "x = 1\n"
-        os.remove(tmp_file)
 
     def test_read_source_nonexistent(self):
         e = SecurityInvariantEngine()
         source = e._read_source("/tmp/nonexistent_file.py")
         assert source == ""
 
-    def test_read_lines(self):
+    def test_read_lines(self, tmp_path):
         e = SecurityInvariantEngine()
-        tmp_file = "/tmp/_test_lines.py"
-        with open(tmp_file, "w") as f:
-            f.write("a\nb\nc\n")
-        lines = e._read_lines(tmp_file)
+        tmp_file = tmp_path / "_test_lines.py"
+        tmp_file.write_text("a\nb\nc\n", encoding="utf-8")
+        lines = e._read_lines(str(tmp_file))
         assert len(lines) == 3
-        os.remove(tmp_file)
 
     def test_read_lines_nonexistent(self):
         e = SecurityInvariantEngine()

@@ -155,18 +155,17 @@ class TestTrustBoundaryMapper:
         files = mapper._find_python_files("nonexistent_dir_xyz")
         assert files == []
 
-    def test_extract_functions_empty_file(self):
+    def test_extract_functions_empty_file(self, tmp_path):
         mapper = TrustBoundaryMapper()
-        tmp_file = "/tmp/_test_empty.py"
+        tmp_file = str(tmp_path / "_test_empty.py")
         with open(tmp_file, "w") as f:
             f.write("# just a comment\n")
         functions = mapper._extract_functions(tmp_file)
         assert functions == []
-        os.remove(tmp_file)
 
-    def test_extract_functions_with_content(self):
+    def test_extract_functions_with_content(self, tmp_path):
         mapper = TrustBoundaryMapper()
-        tmp_file = "/tmp/_test_funcs.py"
+        tmp_file = str(tmp_path / "_test_funcs.py")
         with open(tmp_file, "w") as f:
             f.write("def foo():\n    pass\nasync def bar():\n    pass\n")
         functions = mapper._extract_functions(tmp_file)
@@ -174,7 +173,6 @@ class TestTrustBoundaryMapper:
         names = [f[0] for f in functions]
         assert "foo" in names
         assert "bar" in names
-        os.remove(tmp_file)
 
     def test_detect_entry_points_match(self):
         mapper = TrustBoundaryMapper()

@@ -70,34 +70,31 @@ class TestDependencyGraphValidator:
         assert "foo" in name
         assert "bar" in name
 
-    def test_extract_imports_standard(self):
+    def test_extract_imports_standard(self, tmp_path):
         v = DependencyGraphValidator()
-        tmp_file = "/tmp/_test_imports.py"
+        tmp_file = str(tmp_path / "_test_imports.py")
         with open(tmp_file, "w") as f:
             f.write("import os\nimport sys\nfrom collections import defaultdict\n")
         imports = v._extract_imports(tmp_file)
         assert "os" in imports
         assert "sys" in imports
         assert "collections" in imports
-        os.remove(tmp_file)
 
-    def test_extract_imports_empty(self):
+    def test_extract_imports_empty(self, tmp_path):
         v = DependencyGraphValidator()
-        tmp_file = "/tmp/_test_no_imports.py"
+        tmp_file = str(tmp_path / "_test_no_imports.py")
         with open(tmp_file, "w") as f:
             f.write("x = 42\n")
         imports = v._extract_imports(tmp_file)
         assert imports == []
-        os.remove(tmp_file)
 
-    def test_extract_imports_syntax_error(self):
+    def test_extract_imports_syntax_error(self, tmp_path):
         v = DependencyGraphValidator()
-        tmp_file = "/tmp/_test_bad_syntax.py"
+        tmp_file = str(tmp_path / "_test_bad_syntax.py")
         with open(tmp_file, "w") as f:
             f.write("this is not valid python @@@\n")
         imports = v._extract_imports(tmp_file)
         assert imports == []
-        os.remove(tmp_file)
 
     def test_build_graph(self):
         v = DependencyGraphValidator()

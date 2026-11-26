@@ -83,7 +83,7 @@ def test_legit_in_tree_hook_allowed():
         "import sys as _s",
         "_orig = _s.addaudithook",
         "_s.addaudithook(lambda ev, args: seen.append(ev))",
-        "assert _s.addaudithook is not _orig or True",
+        "assert callable(_s.addaudithook)",
         "_s.audit('nixon.probe')",
         "assert 'nixon.probe' in seen, seen",
         "print('LEGIT-OK')",

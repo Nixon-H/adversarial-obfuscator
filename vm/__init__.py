@@ -29,8 +29,18 @@ from __future__ import annotations
 import hashlib
 
 from .vm_isa import VMOpcode, VMInstruction, VMOperand, VM_PROPERTIES, _phase2_enabled
-from .bytecode_compiler import compile_to_bytecode, encrypt_bytecode, decrypt_bytecode
-from .interpreter import VMInterpreter
+from .bytecode_compiler import (
+    BytecodeAuthenticationError,
+    compile_to_bytecode,
+    encrypt_bytecode,
+    decrypt_bytecode,
+)
+from .interpreter import (
+    VMInterpreter,
+    DISPATCH_SWITCH, DISPATCH_INDIRECT, DISPATCH_COMPUTED_GOTO,
+    ENCODING_FIXED, ENCODING_VARIABLE, ENCODING_FIELD_SHUFFLE,
+    DISPATCH_NAMES, ENCODING_NAMES,
+)
 from .ephemeral_isa import (
     generate_ephemeral_opcode_map,
     generate_ephemeral_operand_map,
@@ -480,6 +490,27 @@ int vm_execute(
                 }}
                 break;
             }}
+            case 35: {{
+                uint8_t d = vm_read_reg(&vm, bc, bc_len);
+                uint8_t a = vm_read_reg(&vm, bc, bc_len);
+                uint8_t b = vm_read_reg(&vm, bc, bc_len);
+                uint8_t predicate = vm_read_byte(&vm, bc, bc_len);
+                uint64_t av = vm_get_reg(&vm, a);
+                uint64_t bv = vm_get_reg(&vm, b);
+                int bits = (av <= UINT32_MAX && bv <= UINT32_MAX) ? 32 : 64;
+                int64_t sa = bits == 32 ? (int64_t)(uint32_t)av : (int64_t)av;
+                int64_t sb = bits == 32 ? (int64_t)(uint32_t)bv : (int64_t)bv;
+                int result = 0;
+                if (predicate == 0) result = sa == sb;
+                else if (predicate == 1) result = sa != sb;
+                else if (predicate == 2) result = sa < sb;
+                else if (predicate == 3) result = sa <= sb;
+                else if (predicate == 4) result = sa > sb;
+                else if (predicate == 5) result = sa >= sb;
+                vm_set_reg(&vm, d, (uint64_t)result);
+                vm_set_reg(&vm, VM_REG_FLAGS, (uint64_t)(result ? 0 : VM_FLAG_ZERO));
+                break;
+            }}
             default:
                 vm.halted = 1;
                 break;
@@ -535,6 +566,7 @@ int vm_execute(
 
 __all__ = [
     "VMOpcode", "VMInstruction", "VMOperand", "VM_PROPERTIES",
+    "BytecodeAuthenticationError",
     "compile_to_bytecode", "encrypt_bytecode", "decrypt_bytecode",
     "VMInterpreter", "mutating_vm_pipeline", "ephemeral_vm_pipeline",
     "generate_ephemeral_opcode_map", "generate_ephemeral_operand_map",

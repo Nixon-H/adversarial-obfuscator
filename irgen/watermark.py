@@ -35,6 +35,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import struct
 from typing import Any, Optional
 
@@ -271,10 +272,21 @@ class BCHCode:
         Compute the BCH generator polynomial.
 
         The generator is the LCM of minimal polynomials for
-        exponents 1, 3, 5, ..., 2t-1.
+        exponents 1, 3, 5, ..., 2t-1. Distinct cyclotomic cosets yield
+        distinct irreducible minimal polynomials, which are coprime, so
+        multiplying each coset's polynomial ONCE (dedup by coset) gives
+        exactly the LCM. The old code multiplied every exponent's minimal
+        polynomial, so colliding cosets (e.g. 9 and 33 mod 255) were
+        multiplied twice and g no longer divided x^n - 1 -- encode/decode
+        failed even with zero errors.
         """
         g = _Poly([1])
+        seen_cosets = set()
         for i in range(1, 2 * self.t + 1, 2):
+            coset = tuple(self._cyclotomic_coset(i))
+            if coset in seen_cosets:
+                continue
+            seen_cosets.add(coset)
             m = self._minimal_poly(i)
             g = g * m
         return g
@@ -300,7 +312,8 @@ class BCHCode:
         data_bit_count = len(data) * 8
         max_data_bits = self.k
         if data_bit_count > max_data_bits:
-            data = data[: max_data_bits // 8]
+            raise ValueError(
+                f"data exceeds BCH capacity of {max_data_bits // 8} bytes")
 
         bits: list[int] = []
         for byte in data:
@@ -316,9 +329,13 @@ class BCHCode:
             if b:
                 m_poly = m_poly + _Poly([0] * (len(bits) - 1 - i) + [1])
 
-        padded = _Poly(
-            [0] * (self.n - self.k) + m_poly.coeffs
-        )
+        # m_poly.coeffs must be exactly k long: bit i lives at power k-1-i,
+        # so leading zero bits would otherwise shift the whole message down
+        # and misalign the codeword (roundtrip failed even at zero errors).
+        mc = list(m_poly.coeffs)
+        if len(mc) < self.k:
+            mc += [0] * (self.k - len(mc))
+        padded = _Poly([0] * (self.n - self.k) + mc)
         rem = padded % self.g
         codeword = padded + rem
 
@@ -348,24 +365,39 @@ class BCHCode:
         Returns:
             Corrected data bytes.
         """
+        if not 0 <= data_bits <= self.k:
+            raise ValueError("data_bits exceeds BCH capacity")
+        if len(codeword) * 8 < self.n:
+            raise ValueError("truncated BCH codeword")
+
         bits: list[int] = []
         for byte in codeword:
             for i in range(7, -1, -1):
                 bits.append((byte >> i) & 1)
         bits = bits[: self.n]
 
-        syndromes: list[int] = [0] * (2 * self.t)
-        for i in range(1, 2 * self.t + 1):
-            syndromes[i - 1] = self.gf.eval_poly(
-                bits, _gf.alog[i]
-            )
+        def compute_syndromes() -> list[int]:
+            return [
+                self.gf.eval_poly(bits, _gf.alog[i])
+                for i in range(1, 2 * self.t + 1)
+            ]
 
+        syndromes = compute_syndromes()
         if any(s != 0 for s in syndromes):
             err_loc = self._berlekamp_massey(syndromes)
+            degree = err_loc.deg()
             error_positions = self._chien_search(err_loc)
+            if (degree <= 0 or degree > self.t
+                    or len(error_positions) != degree
+                    or len(error_positions) > self.t
+                    or any(pos >= self.n for pos in error_positions)):
+                raise ValueError("uncorrectable BCH codeword")
             for pos in error_positions:
-                if 0 <= pos < len(bits):
-                    bits[pos] ^= 1
+                bits[pos] ^= 1
+            # A locator with the right degree is not enough: reject a word
+            # unless every syndrome is zero after correction.
+            if any(s != 0 for s in compute_syndromes()):
+                raise ValueError("uncorrectable BCH codeword")
 
         result_bytes = bytearray((data_bits + 7) // 8)
         for i in range(data_bits):
@@ -388,6 +420,7 @@ class BCHCode:
         B = _Poly([1])
         L = 0
         m = 1
+        b = 1  # previous non-zero discrepancy
 
         for r in range(1, len(syndromes) + 1):
             d = syndromes[r - 1]
@@ -401,21 +434,23 @@ class BCHCode:
                 m += 1
             else:
                 T = Lambda.copy()
-                shift_poly = _Poly(
-                    [0] * m + B.coeffs
-                )
-                d_inv = _gf.inv(d)
+                shift_poly = _Poly([0] * m + B.coeffs)
+                # scale by d / b (NOT d alone -- the old code used inv(d)
+                # and never tracked b, so the locator was wrong whenever
+                # errors were present).
+                scale = _gf.mul(_gf.inv(b), d)
                 scaled_shift = _Poly(
-                    [_gf.mul(d_inv, c) for c in shift_poly.coeffs]
+                    [_gf.mul(scale, c) for c in shift_poly.coeffs]
                 )
                 Lambda = Lambda + scaled_shift
 
-                if 2 * L >= r:
-                    m += 1
-                else:
+                if 2 * L <= r:
                     B = T
                     L = r - L
+                    b = d
                     m = 1
+                else:
+                    m += 1
 
         return Lambda
 
@@ -426,7 +461,9 @@ class BCHCode:
         """
         positions: list[int] = []
         for k in range(self.n):
-            power = (self.n - 1 - k) % self.n
+            # Error at bit position k (power k) puts a locator root at
+            # x = alpha^(-k); evaluate at alog[(-k) mod n].
+            power = (-k) % self.n
             if Lambda.eval(_gf.alog[power]) == 0:
                 positions.append(k)
         return positions
@@ -459,22 +496,24 @@ def generate_watermark(
     combined = hashlib.blake2b(
         customer_id + build_id, digest_size=32
     ).digest()
+    bch = BCHCode(n=255, t=20)
+    payload = combined[: bch.k // 8]
 
     raw_bits: list[int] = []
-    for byte in combined[:16]:
+    for byte in payload:
         for i in range(7, -1, -1):
             raw_bits.append((byte >> i) & 1)
 
     if error_correct:
-        bch = BCHCode(n=255, t=20)
-        encoded = bch.encode(combined[:16])
-        encoded_bits: list[int] = []
-        for byte in encoded:
-            for i in range(7, -1, -1):
-                encoded_bits.append((byte >> i) & 1)
+        encoded = bch.encode(payload)
     else:
-        encoded = combined[:16]
-        encoded_bits = list(raw_bits)
+        encoded = payload
+    encoded_bits: list[int] = []
+    for byte in encoded:
+        for i in range(7, -1, -1):
+            encoded_bits.append((byte >> i) & 1)
+    if error_correct:
+        encoded_bits = encoded_bits[:bch.n]
 
     patterns: dict[int, str] = {}
     rand = random.Random(hashlib.blake2b(build_id).digest())
@@ -487,6 +526,9 @@ def generate_watermark(
         "patterns": patterns,
         "bch_used": error_correct,
         "bit_count": len(encoded_bits),
+        "data_bits": len(payload) * 8,
+        "capacity_bytes": bch.k // 8,
+        "build_seed": build_id.hex(),
     }
 
     return encoded, metadata
@@ -528,11 +570,48 @@ def _make_opaque_predicate(
         return xor
 
 
+_DEFAULT_BUILD_SEED = bytes(16)
+_WATERMARK_LABEL_RE = re.compile(
+    r"^_wm_([0-9a-f]{16})_([01])_(\d+)_([01])_([0-9a-f]{8})$")
+
+
+def _coerce_build_seed(value: Any) -> bytes:
+    if value is None:
+        return _DEFAULT_BUILD_SEED
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, (bytearray, memoryview)):
+        return bytes(value)
+    if isinstance(value, str):
+        return value.encode()
+    return str(value).encode()
+
+
+def _watermark_sequence_id(func_name: str, seed: bytes, bch_used: bool) -> str:
+    digest = hashlib.blake2b(b"nixon-ir-watermark-v1", digest_size=8)
+    digest.update(seed)
+    digest.update(b"\0")
+    digest.update(func_name.encode())
+    digest.update(b"\1" if bch_used else b"\0")
+    return digest.hexdigest()
+
+
+def _watermark_marker_tag(sequence_id: str, seed: bytes, index: int,
+                          bit: int, bch_used: bool) -> str:
+    digest = hashlib.blake2b(b"nixon-ir-watermark-bit-v1", digest_size=4)
+    digest.update(seed)
+    digest.update(bytes.fromhex(sequence_id))
+    digest.update(index.to_bytes(4, "big"))
+    digest.update(bytes((bit, 1 if bch_used else 0)))
+    return digest.hexdigest()
+
+
 def _make_watermark_block(
     func: IrFunction,
     pattern_type: str,
     bit_val: int,
     rand: random.Random,
+    label: Optional[str] = None,
 ) -> IrBlock:
     """
     Create a watermark block with the specified pattern.
@@ -544,7 +623,8 @@ def _make_watermark_block(
 
     Both patterns are structurally valid but unreachable at runtime.
     """
-    block = func.new_block(label=f"_wm_{pattern_type}_{bit_val}_{rand.randint(0, 0xFFFF):04x}")
+    block = func.new_block(
+        label=label or f"_wm_{pattern_type}_{bit_val}_{rand.randint(0, 0xFFFF):04x}")
 
     local_var = block.alloca(IrType.i32())
     const_zero = IrValue.const_int(0)
@@ -615,51 +695,61 @@ def embed_watermark(
     if not _PHASE2_ENABLED:
         return ir_module
 
-    encoded_bits = metadata.get("encoded", [])
+    encoded_bits = list(metadata.get("encoded", []))
     if not encoded_bits:
         for byte in watermark:
             for i in range(7, -1, -1):
                 encoded_bits.append((byte >> i) & 1)
+    if any(bit not in (0, 1) for bit in encoded_bits):
+        raise ValueError("watermark bits must be 0 or 1")
+
+    # One canonical sequence per module.  Repeating the payload in every
+    # function made detection concatenate duplicate watermarks.
+    func = next((candidate for candidate in ir_module.functions
+                 if candidate.blocks), None)
+    if func is None or not encoded_bits:
+        return ir_module
 
     patterns = metadata.get("patterns", {})
-    build_seed_val = hashlib.sha256(
-        str(metadata.get("build_seed", "")).encode()
-    ).digest()
+    build_seed = _coerce_build_seed(metadata.get("build_seed"))
+    bch_used = bool(metadata.get("bch_used", False))
+    sequence_id = _watermark_sequence_id(func.name, build_seed, bch_used)
+    build_seed_val = hashlib.sha256(build_seed).digest()
 
     rand = random.Random(
         hashlib.blake2b(build_seed_val + watermark).digest()
     )
 
-    for func in ir_module.functions:
-        if not func.blocks:
-            continue
-        for bit_idx, bit_val in enumerate(encoded_bits):
-            pattern_key = patterns.get(bit_idx, f"bit_{bit_idx}")
-            _make_watermark_block(func, pattern_key, bit_val, rand)
+    for bit_idx, bit_val in enumerate(encoded_bits):
+        pattern_key = patterns.get(bit_idx, f"bit_{bit_idx}")
+        tag = _watermark_marker_tag(
+            sequence_id, build_seed, bit_idx, bit_val, bch_used)
+        label = f"_wm_{sequence_id}_{int(bch_used)}_{bit_idx}_{bit_val}_{tag}"
+        _make_watermark_block(func, pattern_key, bit_val, rand, label=label)
 
-            insert_pos = (
-                int.from_bytes(
-                    hashlib.blake2b(
-                        struct.pack(">I", bit_idx) + build_seed_val,
-                        digest_size=4,
-                    ).digest(),
-                    "little",
-                )
-                % len(func.blocks)
+        insert_pos = (
+            int.from_bytes(
+                hashlib.blake2b(
+                    struct.pack(">I", bit_idx) + build_seed_val,
+                    digest_size=4,
+                ).digest(),
+                "little",
             )
+            % len(func.blocks)
+        )
 
-            if insert_pos < len(func.blocks):
-                last = func.blocks.pop()
-                func.blocks.insert(insert_pos, last)
-                # Point the taken edge at the block that now follows, so the
-                # watermark block is not its own successor.
-                if insert_pos + 1 < len(func.blocks):
-                    target = func.blocks[insert_pos + 1].label
-                else:
-                    target = func.blocks[0].label
-                term = last.terminator
-                if term is not None and term.opcode == "br" and len(term.operands) >= 3:
-                    term.operands[1] = target
+        if insert_pos < len(func.blocks):
+            last = func.blocks.pop()
+            func.blocks.insert(insert_pos, last)
+            # Point the taken edge at the block that now follows, so the
+            # watermark block is not its own successor.
+            if insert_pos + 1 < len(func.blocks):
+                target = func.blocks[insert_pos + 1].label
+            else:
+                target = func.blocks[0].label
+            term = last.terminator
+            if term is not None and term.opcode == "br" and len(term.operands) >= 3:
+                term.operands[1] = target
 
     return ir_module
 
@@ -685,53 +775,65 @@ def detect_watermark(
     if not _PHASE2_ENABLED:
         return None
 
-    recovered_bits: list[int] = []
-    pattern_count = 0
-
-    expected_label_prefixes = ["_wm_"]
-
-    for func in ir_module.functions:
+    seed = _coerce_build_seed(build_seed)
+    candidates: list[tuple[int, str, bool, int, int]] = []
+    for func_index, func in enumerate(ir_module.functions):
+        expected_sequences = {
+            bch_used: _watermark_sequence_id(func.name, seed, bch_used)
+            for bch_used in (False, True)
+        }
         for block in func.blocks:
-            if not any(
-                block.label.startswith(p) for p in expected_label_prefixes
-            ):
+            match = _WATERMARK_LABEL_RE.match(block.label)
+            if not match:
                 continue
+            sequence_id, ecc_text, index_text, bit_text, tag = match.groups()
+            bch_used = ecc_text == "1"
+            index, bit = int(index_text), int(bit_text)
+            if sequence_id != expected_sequences[bch_used]:
+                continue
+            if tag != _watermark_marker_tag(
+                    sequence_id, seed, index, bit, bch_used):
+                continue
+            if not (block.terminator and block.terminator.opcode == "br"
+                    and len(block.terminator.operands) >= 3):
+                continue
+            has_alloca = any(inst.opcode == "alloca" for inst in block.instructions)
+            has_load = any(inst.opcode == "load" for inst in block.instructions)
+            has_arithmetic = any(
+                inst.opcode in ("add", "sub", "mul", "div")
+                for inst in block.instructions)
+            if not (has_alloca and has_load) or int(has_arithmetic) != bit:
+                continue
+            candidates.append((func_index, sequence_id, bch_used, index, bit))
 
-            if block.terminator and block.terminator.opcode == "br":
-                if len(block.terminator.operands) >= 3:
-                    has_alloca = any(
-                        inst.opcode == "alloca"
-                        for inst in block.instructions
-                    )
-                    has_load = any(
-                        inst.opcode == "load"
-                        for inst in block.instructions
-                    )
-                    has_arithmetic = any(
-                        inst.opcode
-                        in ("add", "sub", "mul", "div")
-                        for inst in block.instructions
-                    )
-
-                    if has_alloca and has_load:
-                        if has_arithmetic:
-                            recovered_bits.append(1)
-                        else:
-                            recovered_bits.append(0)
-                        pattern_count += 1
-
-    if pattern_count < 16:
+    if not candidates:
+        return None
+    sequences = {(func_index, sequence_id, bch_used)
+                 for func_index, sequence_id, bch_used, _index, _bit in candidates}
+    # Duplicate payloads or mixed watermark generations are ambiguous rather
+    # than a longer canonical sequence.
+    if len(sequences) != 1:
         return None
 
-    result_bytes = bytearray((len(recovered_bits) + 7) // 8)
+    candidates.sort(key=lambda item: item[3])
+    indices = [item[3] for item in candidates]
+    if indices != list(range(len(candidates))):
+        return None
+    recovered_bits = [item[4] for item in candidates]
+    bch_used = candidates[0][2]
+    if not bch_used and len(recovered_bits) % 8:
+        return None
+
+    codeword = bytearray((len(recovered_bits) + 7) // 8)
     for i, bit in enumerate(recovered_bits):
         if bit:
-            byte_idx = i // 8
-            bit_idx = 7 - (i % 8)
-            if byte_idx < len(result_bytes):
-                result_bytes[byte_idx] |= 1 << bit_idx
-
-    return bytes(result_bytes)
+            codeword[i // 8] |= 1 << (7 - (i % 8))
+    if bch_used:
+        bch = BCHCode(n=255, t=20)
+        if len(recovered_bits) != bch.n:
+            raise ValueError("invalid BCH watermark length")
+        return bch.decode(bytes(codeword), bch.k)
+    return bytes(codeword)
 
 
 # ---------------------------------------------------------------------------
@@ -741,45 +843,19 @@ def detect_watermark(
 def detect_watermark_from_binary(
     binary_path: str, build_seed: bytes
 ) -> Optional[bytes]:
+    """Detect a watermark in a compiled binary.
+
+    NOT IMPLEMENTED. Recovering the watermark requires lifting machine code
+    back to IR with the watermark block's alloca/load/arithmetic pattern. The
+    old implementation fabricated empty 16-byte blocks with `jmp` terminators;
+    detect_watermark only classifies blocks with `br` terminators and real
+    instructions, so it always returned None. Fail loudly instead of reporting
+    a false negative. Use `detect` on the IR for a real check.
     """
-    Detect watermark from a compiled binary.
-
-    Lifts the binary back to an IR-like representation by creating
-    basic blocks from binary chunks, then runs detect_watermark on
-    the lifted graph.
-
-    This is a heuristic: it creates blocks at 16-byte intervals
-    within the first 64KB of the binary and checks for watermark
-    patterns.
-    """
-    if not _PHASE2_ENABLED:
-        return None
-
-    if not os.path.exists(binary_path):
-        return None
-
-    try:
-        with open(binary_path, "rb") as f:
-            data = f.read()
-    except Exception:
-        return None
-
-    lifted = IrModule("lifted_binary")
-
-    main_func = IrFunction("_start")
-    lifted.functions.append(main_func)
-
-    current_block = main_func.new_block("lifted_entry")
-
-    for i in range(0, min(len(data), 65536), 16):
-        chunk_label = f"_wm_lift_{i:08x}"
-        chunk_block = main_func.new_block(label=chunk_label)
-        current_block.set_terminator(
-            "jmp", operands=[chunk_block.label]
-        )
-        current_block = chunk_block
-
-    return detect_watermark(lifted, build_seed)
+    raise NotImplementedError(
+        "binary watermark detection requires a machine-code lifter; "
+        "run `detect` on the IR instead"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -811,6 +887,10 @@ def main():
     embed_p.add_argument("-o", "--output", required=True, help="Output IR file")
     embed_p.add_argument(
         "--watermark", required=True, help="Watermark bytes (hex)"
+    )
+    embed_p.add_argument(
+        "--seed", default="00" * 16,
+        help="Build seed used to authenticate marker placement (hex)",
     )
 
     detect_p = sub.add_parser("detect", help="Detect watermark in IR")
@@ -847,6 +927,7 @@ def main():
             "encoded": [],
             "patterns": {},
             "bch_used": False,
+            "build_seed": bytes.fromhex(args.seed),
         }
         for byte in watermark_bytes:
             for i in range(7, -1, -1):
@@ -869,7 +950,10 @@ def main():
 
     elif args.command == "detect-binary":
         seed = bytes.fromhex(args.seed)
-        wm = detect_watermark_from_binary(args.binary, seed)
+        try:
+            wm = detect_watermark_from_binary(args.binary, seed)
+        except NotImplementedError as exc:
+            raise SystemExit(f"detect-binary: {exc}") from exc
         if wm:
             print(f"Detected watermark: {wm.hex()}")
         else:

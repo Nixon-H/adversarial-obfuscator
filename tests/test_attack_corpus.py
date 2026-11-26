@@ -142,6 +142,19 @@ class TestAttackCorpus:
         assert "severity_distribution" in result
         assert isinstance(result["corpus_entries"], int)
 
+    def test_oversized_generated_test_artifact_is_bounded(self, monkeypatch):
+        from scripts.attack_corpus import corpus as corpus_module
+        with tempfile.TemporaryDirectory() as td:
+            tests_dir = os.path.join(td, "tests")
+            os.makedirs(tests_dir)
+            fpath = os.path.join(tests_dir, "generated_payload.py")
+            with open(fpath, "w") as f:
+                f.write("# attack bypass replay adversarial soundness\n")
+            monkeypatch.setattr(corpus_module, "_MAX_SOURCE_SCAN_BYTES", 8)
+            corpus = corpus_module.AttackCorpus()
+            corpus.scan_test_files(td)
+            assert len(corpus.entries) == 0
+
     def test_corpus_entry_dataclass(self):
         from scripts.attack_corpus.corpus import CorpusEntry
         entry = CorpusEntry(
