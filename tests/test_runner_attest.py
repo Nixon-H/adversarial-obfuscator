@@ -274,3 +274,18 @@ def test_failed_farm_attestation_is_fail_closed_by_default():
     assert "raise SystemExit" in block
     assert "unverified farm output is refused" in block
     assert "NIXON_REQUIRE_FARM_ATTEST" not in pipe
+
+
+def test_farm_attestation_verification_errors_are_fail_closed():
+    """A verifier/import/IO error must not silently disarm the farm gate."""
+    pipe = open(os.path.join(ROOT, "obfuscator", "core", "pipeline.py"),
+                encoding="utf-8").read()
+    start = pipe.find("FARM-RUNNER INTEGRITY")
+    end = pipe.find("_fat = find_native_blobs", start)
+    assert start >= 0 and end > start
+    block = pipe[start:end]
+    assert "farm attestation check skipped" not in block
+    assert "farm attestation verification error" in block
+    assert "could not be " in block
+    assert "unverified farm output is refused" in block
+    assert block.count("raise SystemExit") >= 2
