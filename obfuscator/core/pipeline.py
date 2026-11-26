@@ -3162,7 +3162,12 @@ def _nx_customer_mask(_key):
         if _salt:
             # Customer binding: a second, domain-separated mask, so an
             # artefact built for one customer does not decrypt for
-            # another.
+            # another.  Keep a separately domain-separated lineage root for
+            # the anti-rollback mark: the payload key is normally random per
+            # build, while the customer/licence salt can remain stable across
+            # a reissued artefact lineage.
+            globals()['_NX_ROLLBACK_ROOT'] = _nx_hk.sha256(
+                b"nx-rollback-root:" + _salt.encode()).digest()
             _cmask = _nx_hk.sha256(b"nx-customer:" + _salt.encode()).digest()
             _key = bytes(_b ^ _cmask[_i % len(_cmask)] for _i, _b in enumerate(_key))
         _seal = str(_nx_os.environ.get("NX_SEAL_SHARD", "") or "")

@@ -16,13 +16,19 @@ Design.
     beside the artefact. If the artefact's level is BELOW the mark, it refuses
     to run -- that is the downgrade case.
   * If it is above, the mark is raised.
-  * The mark is HMAC'd with the build key so a hand-edited mark cannot lower it
-    without also knowing the key.
+  * The mark is HMAC'd with a domain-separated runtime rollback key. Emitted
+    loaders prefer a customer/licence lineage root when one is available, so a
+    payload-key rotation does not invalidate the lineage; unbound builds fall
+    back to their reconstructed payload key and therefore only recognise marks
+    written with the same key material. The raw payload key is never embedded
+    in the loader as a contiguous rollback secret.
 
-**Honest limit, stated here and in the tests.** A high-water mark stored on the
-client protects only against an attacker who does not delete it. Someone who
-removes the file, or runs the artefact in a clean directory, gets the old build
-to run again. Real anti-rollback requires the issuer (or a server) to refuse
+**Honest limits, stated here and in the tests.** A high-water mark stored on
+the client protects only against an attacker who does not delete it. Someone
+who removes the file, or runs the artefact in a clean directory, gets the old
+build to run again. Cross-build continuity additionally requires the customer
+or licence binding material to remain stable; freshly re-keyed artefacts start
+a new lineage. Real anti-rollback requires the issuer (or a server) to refuse
 old builds. This implementation raises a downgrade from "copy a file" to
 "delete a file AND know you had to" -- useful against casual rollback, useless
 against a determined local attacker. Saying that is more valuable than
@@ -75,7 +81,9 @@ def derive_mark_key(root_key):
     The rollback gate must not embed the payload key as a contiguous literal.
     Deriving a domain-separated mark key from the already reconstructed runtime
     key keeps the raw payload key split/masked while avoiding key reuse across
-    the payload-decryption and mark-authentication domains.
+    the payload-decryption and mark-authentication domains. Emitted loaders
+    prefer the customer/licence lineage root when one is available because a
+    random per-build payload key cannot validate marks written by other builds.
     """
     return hashlib.sha256(
         b"nx-rollback/v1/key:" + bytes(root_key)).digest()
@@ -168,7 +176,9 @@ def _nx_rollback_gate():
         _nx_rb_base = _nx_rb_os.path.dirname(_nx_rb_art)
         _nx_rb_name = _nx_rb_os.path.basename(_nx_rb_art)
         _nx_rb_path = _nx_rb_os.path.join(_nx_rb_base, '.nx-rollback-mark')
-        _nx_rb_root = globals().get('_NX_EFF_KEY') or globals().get('BLOB_KEY')
+        _nx_rb_root = (globals().get('_NX_ROLLBACK_ROOT')
+                       or globals().get('_NX_EFF_KEY')
+                       or globals().get('BLOB_KEY'))
         if not _nx_rb_root:
             return 'mark-unwritable'
         _nx_rb_key = _nx_rb_hashlib.sha256(
