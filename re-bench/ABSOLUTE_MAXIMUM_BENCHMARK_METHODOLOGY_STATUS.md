@@ -1,5 +1,15 @@
 # ABSOLUTE MAXIMUM benchmark methodology and acceptance status
 
+
+> **2026-11-27 status supersession:** benchmark status statements in this
+> historical document may refer to incomplete Hy4/TokenHarbor/Kern lanes. The
+> completed operator-authorised replacement lane is
+> `opencode-go/deepseek-v4.1-flash`: 114/114 active records structurally valid
+> across 6 variants × 19 scenarios, one attempt per cell, diagnostic-only rather
+> than statistical acceptance. Current status:
+> `re-bench/ABSOLUTE_MAXIMUM_FINAL_CLOSEOUT_20261127.md` and
+> `re-bench/ABSOLUTE_MAXIMUM_DEEPSEEK_FINAL_REPORT_20261126.md`.
+
 Date: 2026-11-26. This report records the current benchmark methodology controls and the exact reason the benchmark remains incomplete.
 
 ## Controls implemented
