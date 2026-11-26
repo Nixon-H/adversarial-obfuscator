@@ -1,5 +1,6 @@
 """Regression tests for benchmark harness isolation controls."""
 import importlib.util
+import json
 
 import pytest
 from pathlib import Path
@@ -405,7 +406,7 @@ def test_sandbox_endpoint_exposure_contains_only_model_required_socket_links(tmp
     source = tmp_path / 'proxy-source'
     exposed_root = tmp_path / 'exposed-root'
     source.mkdir()
-    for name in ('tokenharbor.sock', 'evm.sock', 'opencode-mitm.sock', 'opencode-connect.sock'):
+    for name in ('tokenharbor.sock', 'kern.sock', 'evm.sock', 'opencode-mitm.sock', 'opencode-connect.sock'):
         (source / name).write_text('endpoint-placeholder')
     (source / 'proxy.log').write_text('metadata must not be exposed')
     monkeypatch.setattr(bench, 'ENDPOINT_SOURCE', source)
@@ -426,6 +427,14 @@ def test_sandbox_endpoint_exposure_contains_only_model_required_socket_links(tmp
     assert 'tokenharbor.sock' in th_expected
     assert 'opencode-mitm.sock' not in th_expected
     assert 'opencode-connect.sock' not in th_expected
+
+    kern_dir = bench.ensure_sandbox_endpoint_links('kern/inkling-2-mini')
+    kern_expected = set(bench.endpoint_files_for('kern/inkling-2-mini'))
+    assert sorted(p.name for p in kern_dir.iterdir()) == sorted(kern_expected)
+    assert 'kern.sock' in kern_expected
+    assert 'tokenharbor.sock' not in kern_expected
+    assert 'opencode-mitm.sock' not in kern_expected
+    assert 'opencode-connect.sock' not in kern_expected
 
 
 def test_benchmark_binds_per_model_endpoint_directory_not_proxy_log_directory():
@@ -491,13 +500,15 @@ def test_static_scenario_prompt_explicitly_forbids_execution():
 
 def test_resume_watchdog_multilane_uses_authorized_models_and_avoids_success_batch_probes():
     source = _read_tool_text('resume_absmax_benchmark_when_quota.py')
-    assert 'LANES=[HY4_MODEL,TOKEN_FREE_MODEL,TOKEN_PAID_MODEL]' in source
+    assert 'LANES=[KERN_MODEL,TOKEN_FREE_MODEL,TOKEN_PAID_MODEL]' in source
     assert 'probe_model(lane)' in source
     assert 'if current_lane:' in source
     assert "provider_error=any('free-limit'" in source
     assert "if rec.get('returncode')!=0 or provider_error:" in source
-    assert "'available':p.returncode==0 and not quota" in source
-    assert "'available':p.returncode==0 and not quota and ok_text" not in source
+    # Probe availability must require assistant-text/token evidence, not rc0
+    # alone, and must not require an exact 'ok' reply.
+    assert 'available=(returncode==0 and not quota and (assistant_text or token_usage))' in source
+    assert "'available':p.returncode==0 and not quota" not in source
     assert 'probe_needed' not in source
 
 
@@ -527,3 +538,302 @@ def test_tokenharbor_proxy_authorizes_only_free_and_1017_models():
     assert "deepseek-v4.1-flash-1017" in source
     assert 'model not in AUTHORIZED_MODELS' in source
     assert 'allowed_models' in source
+
+
+def test_kern_endpoint_family_and_socket_files_are_separate():
+    bench = _load('ai_bench_harness_kern_endpoints', ROOT / 're-bench/tools/ai_bench.py')
+    assert bench.endpoint_family('kern/inkling-2-mini') == 'kern'
+    assert bench.endpoint_files_for('kern/inkling-2-mini') == ('evm.sock', 'kern.sock')
+    assert bench.endpoint_files_for('tokenharbor/deepseek-v4.1-flash:free') == ('evm.sock', 'tokenharbor.sock')
+    assert bench.KERN_MODEL in bench.MODELS
+    assert 'opencode/hy4-flash-free' not in bench.MODELS
+
+
+def test_kern_legitimate_secrets_fail_closed_without_redacting_proxy(tmp_path, monkeypatch):
+    bench = _load('ai_bench_harness_kern_guard', ROOT / 're-bench/tools/ai_bench.py')
+    monkeypatch.setattr(bench, 'kern_redacting_proxy_ready', lambda: False)
+    monkeypatch.setattr(bench, 'OUT', tmp_path / 'bench-out')
+    def forbidden_prep(*args):
+        raise AssertionError('workspace preparation must not copy runtime secrets when the Kern redacting proxy is unavailable')
+    monkeypatch.setattr(bench, 'prep_workspace', forbidden_prep)
+    result = bench.one(('absolute-native-only', 'legitimate-runtime-secrets', 'kern/inkling-2-mini', 99))
+    assert result['harness_error'] == 'kern-legitimate-runtime-secrets-blocked-redacting-proxy-unavailable'
+    assert result['returncode'] is None
+    assert result['validation']['answer_valid'] is False
+
+
+def test_kern_proxy_rewrites_local_model_and_never_logs_secret_content():
+    source = _read_tool_text('kern_unix_proxy.py')
+    assert "UPSTREAM='https://api.kern-llm.org/v1'" in source
+    assert "LOCAL_MODEL='inkling-2-mini'" in source
+    assert "obj['model']=MODEL" in source
+    assert "KEY=os.environ.get('KERN_API_KEY','')" in source
+    assert 'request_redactions' in source and 'response_redactions' in source
+    assert "req.add_header('Authorization','Bearer '+KEY)" in source
+
+
+def test_resume_watchdog_lanes_are_exactly_the_authorized_models():
+    resume = _load('resume_watchdog_authorized_lanes', ROOT / 're-bench/tools/resume_absmax_benchmark_when_quota.py')
+    assert resume.LANES == [resume.KERN_MODEL, resume.TOKEN_FREE_MODEL, resume.TOKEN_PAID_MODEL]
+    assert resume.KERN_MODEL == 'kern/inkling-2-mini'
+    assert resume.HY4_MODEL == 'opencode/hy4-flash-free'
+    assert resume.TOKEN_FREE_MODEL == 'tokenharbor/deepseek-v4.1-flash:free'
+    assert resume.TOKEN_PAID_MODEL == 'tokenharbor/deepseek-v4.1-flash-1017'
+    assert resume.HY4_MODEL not in resume.LANES
+
+
+def test_resume_watchdog_cmdline_matcher_distinguishes_outer_from_worker():
+    resume = _load('resume_watchdog_cmdline_matcher', ROOT / 're-bench/tools/resume_absmax_benchmark_when_quota.py')
+    assert resume.cmdline_is_outer_watchdog('python3 re-bench/tools/resume_absmax_benchmark_when_quota.py --probe-interval 300 ')
+    assert resume.cmdline_is_outer_watchdog('python3 /home/nixon/Projects/adversarial-obfuscator/re-bench/tools/resume_absmax_benchmark_when_quota.py ')
+    assert not resume.cmdline_is_outer_watchdog('python3 re-bench/tools/resume_absmax_benchmark_when_quota.py --worker --status-file /tmp/x.json ')
+    assert not resume.cmdline_is_outer_watchdog('python3 unrelated_script.py --probe-interval 300 ')
+    assert not resume.cmdline_is_outer_watchdog('')
+    assert not resume.cmdline_is_outer_watchdog(None)
+
+
+def test_resume_watchdog_fence_rejects_live_outer_watchdog_process(tmp_path):
+    import subprocess, sys
+    resume = _load('resume_watchdog_fence_live', ROOT / 're-bench/tools/resume_absmax_benchmark_when_quota.py')
+    # Spawn a real live process whose cmdline matches an outer watchdog; the
+    # fence must refuse to start a second instance even though this legacy
+    # process holds no flock.
+    script = tmp_path / 'resume_absmax_benchmark_when_quota.py'
+    script.write_text('import time\ntime.sleep(60)\n')
+    proc = subprocess.Popen([sys.executable, str(script)])
+    try:
+        pidfile = tmp_path / 'watchdog.pid'
+        pidfile.write_text(str(proc.pid))
+        fence = resume.acquire_watchdog_fence(pidfile)
+        assert fence['acquired'] is False
+        assert fence['conflict_pid'] == proc.pid
+        # The watchdog must fail safely: no scan/probe/job side effects, and
+        # the recorded pid file still belongs to the live instance.
+        assert pidfile.read_text().strip() == str(proc.pid)
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_resume_watchdog_fence_acquires_stale_pidfile_and_recovers_after_death(tmp_path):
+    import subprocess, sys, os
+    resume = _load('resume_watchdog_fence_stale', ROOT / 're-bench/tools/resume_absmax_benchmark_when_quota.py')
+    pidfile = tmp_path / 'watchdog.pid'
+    # A pid that cannot be a live process is stale and must not block startup.
+    pidfile.write_text('4194303')
+    fence = resume.acquire_watchdog_fence(pidfile)
+    assert fence['acquired'] is True
+    assert fence['pid'] == os.getpid()
+    assert pidfile.read_text().strip() == str(os.getpid())
+    fence['handle'].close()
+    # A live outer watchdog that exits releases the lane: after process death
+    # the recorded pid is stale and a new watchdog may take over.
+    script = tmp_path / 'resume_absmax_benchmark_when_quota.py'
+    script.write_text('import time\ntime.sleep(60)\n')
+    proc = subprocess.Popen([sys.executable, str(script)])
+    try:
+        pidfile.write_text(str(proc.pid))
+        conflict = resume.acquire_watchdog_fence(pidfile)
+        assert conflict['acquired'] is False
+    finally:
+        proc.kill()
+        proc.wait()
+    takeover = resume.acquire_watchdog_fence(pidfile)
+    assert takeover['acquired'] is True
+    takeover['handle'].close()
+
+
+def test_resume_watchdog_fence_second_acquire_conflicts_via_flock(tmp_path):
+    resume = _load('resume_watchdog_fence_flock', ROOT / 're-bench/tools/resume_absmax_benchmark_when_quota.py')
+    pidfile = tmp_path / 'watchdog.pid'
+    first = resume.acquire_watchdog_fence(pidfile)
+    assert first['acquired'] is True
+    try:
+        second = resume.acquire_watchdog_fence(pidfile)
+        assert second['acquired'] is False
+        assert second['mechanism'] == 'flock-conflict'
+    finally:
+        first['handle'].close()
+
+
+def test_resume_watchdog_hy4_cooldown_uses_freshest_record_not_historical_maximum(tmp_path):
+    import json, os, time
+    resume = _load('resume_watchdog_cooldown_freshest', ROOT / 're-bench/tools/resume_absmax_benchmark_when_quota.py')
+    results = tmp_path / 'results'
+    results.mkdir()
+    now = time.time()
+    # An older record with a very long retry window is still active, but the
+    # fresher record has already expired: the lane must not stay blocked by
+    # the stale historical maximum.
+    old = {'provider_error': {'type': 'provider.free-limit', 'message': 'Free usage limit reached', 'retryAfterMs': 24 * 3600 * 1000}}
+    old_path = results / 'absolute-native-only__crypto-construction__opencode_hy4-flash-free__a1.json'
+    old_path.write_text(json.dumps(old))
+    os.utime(old_path, (now - 3600, now - 3600))
+    fresh = {'provider_error': {'type': 'provider.free-limit', 'message': 'Free usage limit reached', 'retryAfterMs': 1000}}
+    fresh_path = results / 'absolute-native-only__loader-initialization-order__opencode_hy4-flash-free__a2.json'
+    fresh_path.write_text(json.dumps(fresh))
+    os.utime(fresh_path, (now - 10, now - 10))
+    cd = resume.hy4_free_limit_cooldown(tmp_path)
+    assert cd['active'] is False
+    assert cd['latest_free_limit']['result_file'] == fresh_path.name
+    # When the freshest record is still inside its retry window, that window
+    # is honoured exactly.
+    os.utime(fresh_path, (now, now))
+    fresh2 = {'provider_error': {'type': 'provider.free-limit', 'message': 'Free usage limit reached', 'retryAfterMs': 60000}}
+    fresh_path.write_text(json.dumps(fresh2))
+    cd2 = resume.hy4_free_limit_cooldown(tmp_path)
+    assert cd2['active'] is True
+    assert 1 <= cd2['remaining_seconds'] <= 60
+    assert cd2['latest_free_limit']['retry_after_ms'] == 60000
+
+
+def test_resume_watchdog_advisory_cap_treats_long_cooldowns_as_advisory():
+    import time
+    resume = _load('resume_watchdog_advisory_cap', ROOT / 're-bench/tools/resume_absmax_benchmark_when_quota.py')
+    now = time.time()
+    # A multi-hour cooldown may only suppress probing for one advisory window
+    # (30-60 minutes), never for the whole recorded cooldown.
+    assert resume.advisory_capped_until(now + 20 * 3600, now, 2700) == now + 2700
+    # A short cooldown is honoured exactly.
+    assert resume.advisory_capped_until(now + 600, now, 2700) == now + 600
+    assert resume.advisory_capped_until(0, now, 2700) == 0.0
+    # The watchdog applies the cap at both cooldown consumption sites and to
+    # the fresh probe's own retryAfterMs backoff for the Hy4 lane.
+    source = _read_tool_text('resume_absmax_benchmark_when_quota.py')
+    assert source.count('advisory_capped_until(float(cooldown.get(') >= 2
+    assert 'advisory_capped_until(float(blocked_until[lane] or 0),now,args.advisory_probe_interval)' in source
+    assert "'--advisory-probe-interval',type=int,default=2700" in source
+
+
+def test_resume_watchdog_probe_assessment_requires_assistant_evidence_not_exact_ok():
+    import json
+    resume = _load('resume_watchdog_probe_assessment', ROOT / 're-bench/tools/resume_absmax_benchmark_when_quota.py')
+    text_events = '\n'.join([
+        json.dumps({'type': 'step_start', 'part': {}}),
+        json.dumps({'type': 'text', 'part': {'type': 'text', 'text': 'Sure — the probe reply need not be exactly ok.'}}),
+        json.dumps({'type': 'step_finish', 'part': {'type': 'step-finish', 'tokens': {'input': 10, 'output': 3, 'reasoning': 0}}}),
+    ])
+    a = resume.assess_hy4_probe_output(text_events, '', 0)
+    assert a['available'] is True
+    assert a['assistant_text_evidence'] is True
+    assert a['token_usage_evidence'] is True
+    # Assistant text that is not exactly 'ok' still proves availability.
+    assert a['ok_text'] is False or a['available'] is True
+    # Token usage alone is sufficient evidence of a served completion.
+    tokens_only = json.dumps({'type': 'step_finish', 'part': {'type': 'step-finish', 'tokens': {'input': 5, 'output': 1, 'reasoning': 0, 'cache': {'read': 0, 'write': 0}}}})
+    a2 = resume.assess_hy4_probe_output(tokens_only, '', 0)
+    assert a2['available'] is True
+    assert a2['assistant_text_evidence'] is False
+    assert a2['token_usage_evidence'] is True
+    # rc0 with neither assistant text nor token usage proves nothing: an early
+    # client/harness failure can exit zero without ever reaching the model.
+    zero_run = json.dumps({'type': 'step_finish', 'part': {'type': 'step-finish', 'tokens': {'input': 0, 'output': 0, 'reasoning': 0}}})
+    a3 = resume.assess_hy4_probe_output(zero_run, '', 0)
+    assert a3['available'] is False
+    # Nonzero return code is never available, even with assistant evidence.
+    a4 = resume.assess_hy4_probe_output(text_events, '', 1)
+    assert a4['available'] is False
+    # A free-limit error event is quota evidence even when other events exist,
+    # and its retryAfterMs is surfaced for backoff.
+    quota_event = json.dumps({'type': 'error', 'error': {'type': 'provider.free-limit', 'message': 'Free usage limit reached', 'retryAfterMs': 30000}})
+    a5 = resume.assess_hy4_probe_output(quota_event + '\n' + text_events, '', 0)
+    assert a5['available'] is False
+    assert a5['quota_limited'] is True
+    assert a5['retry_after_ms'] == 30000
+
+
+def test_resume_watchdog_probe_env_mirrors_benchmark_without_credentials(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    resume = _load('resume_watchdog_probe_env', ROOT / 're-bench/tools/resume_absmax_benchmark_when_quota.py')
+    monkeypatch.setenv('ABSMAX_PROBE_TMP_ROOT', str(tmp_path))
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        env = kwargs.get('env') or {}
+        captured['cmd'] = list(cmd)
+        captured['env'] = dict(env)
+        captured['cwd'] = kwargs.get('cwd')
+        home = Path(env.get('HOME', ''))
+        cfg = home / '.config/opencode/opencode.json'
+        captured['config'] = json.loads(cfg.read_text()) if cfg.exists() else None
+        captured['data_db_exists'] = (home / '.local/share/opencode/opencode.db').exists()
+        return SimpleNamespace(returncode=1, stdout='', stderr='simulated probe failure')
+
+    monkeypatch.setattr(resume.subprocess, 'run', fake_run)
+    result = resume.probe_hy4()
+    assert result['available'] is False
+    env = captured['env']
+    # The environment is the minimal benchmark OpenCode environment: no
+    # inherited host credentials, exact key set, redacting-MITM egress path.
+    assert set(env) == {'PATH', 'HOME', 'USER', 'LOGNAME', 'LANG', 'LC_ALL', 'TMPDIR', 'PYTHONUNBUFFERED',
+                        'OPENCODE_DISABLE_AUTOUPDATE', 'HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy',
+                        'NO_PROXY', 'no_proxy', 'SSL_CERT_FILE', 'NODE_EXTRA_CA_CERTS'}
+    assert env['HTTPS_PROXY'] == 'http://127.0.0.1:9898'
+    assert env['NO_PROXY'] == '127.0.0.1,localhost'
+    assert env['OPENCODE_DISABLE_AUTOUPDATE'] == '1'
+    assert env['SSL_CERT_FILE'] == '/home/nixon/absmax-tokenharbor-proxy/opencode-mitm-ca-bundle.pem'
+    assert env['NODE_EXTRA_CA_CERTS'] == env['SSL_CERT_FILE']
+    assert env['PATH'] == '/usr/local/bin:/usr/bin:/bin'
+    assert not any(('KEY' in k or 'TOKEN' in k or 'SECRET' in k or 'CREDENTIAL' in k) for k in env)
+    # Fresh per-probe OpenCode state carries the credential-free minimal
+    # provider config benchmark attempts use, with only the dummy proxy apiKey.
+    assert captured['data_db_exists'] is True
+    cfg = captured['config']
+    assert cfg is not None
+    tokenharbor = (cfg.get('provider') or {}).get('tokenharbor') or {}
+    assert (tokenharbor.get('options') or {}).get('apiKey') == 'credential-isolated-local-proxy'
+    assert 'kern' not in json.dumps(cfg).lower()
+    # Invocation flags match the benchmark harness invocation.
+    cmd = captured['cmd']
+    assert cmd[0].endswith('/opencode')
+    for flag in ('run', '--standalone', '--format', 'json', '--auto', '--archived', '--model', 'opencode/hy4-flash-free'):
+        assert flag in cmd
+
+
+def test_resume_watchdog_outer_fences_before_any_scan_or_probe():
+    source = _read_tool_text('resume_absmax_benchmark_when_quota.py')
+    assert 'fence=acquire_watchdog_fence(WATCHDOG_PIDFILE)' in source
+    assert 'another outer watchdog is already active' in source
+    # The unconditional pre-fence pid write must not exist any more: the pid
+    # file is only written after the fence is acquired.
+    assert "(ORCH/'resume_quota_watchdog.pid').write_text(str(os.getpid()))" not in source
+    fence_pos = source.index('fence=acquire_watchdog_fence(WATCHDOG_PIDFILE)')
+    scan_pos = source.index("run_worker('post',scan_only=True,model=lane)")
+    assert fence_pos < scan_pos
+
+
+def test_kern_proxy_redacts_json_escaped_runtime_licence():
+    sec = ROOT / 're-bench/secrets/absolute-native-only/cipher/runtime.licence'
+    if not sec.exists():
+        pytest.skip('benchmark runtime licence fixture is unavailable')
+    import json
+    kern = _load('kern_unix_proxy_redaction_test', ROOT / 're-bench/tools/kern_unix_proxy.py')
+    raw = sec.read_text().strip()
+    escaped = json.dumps(raw)[1:-1]
+    redacted, count = kern.redact_bytes(('prefix ' + escaped + ' suffix').encode())
+    assert count == 1
+    assert escaped.encode() not in redacted
+    assert raw.encode() not in redacted
+    assert b'<redacted-' in redacted
+
+
+def test_benchmark_agent_is_step_limited_and_recorded():
+    source = _read_tool_text('ai_bench.py')
+    assert 'BENCHMARK_AGENT_STEPS=18' in source
+    assert "'steps':BENCHMARK_AGENT_STEPS" in source
+    assert "'--agent',BENCHMARK_AGENT" in source
+    assert 'benchmark_agent_prompt_sha256' in source
+    assert 'Never exceed 15 tool invocations' in source
+
+
+def test_final_text_json_materialization_preserves_model_content(tmp_path):
+    bench = _load('ai_bench_final_answer_materialization', ROOT / 're-bench/tools/ai_bench.py')
+    payload = {'artifact_type': 'x', 'claims': ['evidence-backed'], 'nested': {'ok': True}}
+    out = bench.materialize_final_answer_json(tmp_path, {'text': json.dumps(payload)})
+    assert out['materialized'] is True
+    assert json.loads((tmp_path / 'answer.json').read_text()) == payload
+    (tmp_path / 'answer.json').unlink()
+    out = bench.materialize_final_answer_json(tmp_path, {'text': 'not json'})
+    assert out['materialized'] is False
+    assert not (tmp_path / 'answer.json').exists()
