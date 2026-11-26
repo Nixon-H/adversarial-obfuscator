@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-11-27T01:45:00Z",
+  "generated_utc": "2026-11-26T20:14:07Z",
   "interpretation": "Final corrected partition aggregate. The initial fresh run completed all nine partitions; build-native-loader and unit-static-3 exposed documentation/CLI drift. After the corrective fixes, those two partitions were rerun independently and replace their initial red results here. Earlier green partitions are retained because the only intervening product-runtime behavioral correction was the deprecated --public warning path, and no test outside build-native-loader invokes --public. The intervening Dockerfile/Makefile/test-opcount changes are test infrastructure: the Makefile/Dockerfile surface is exercised or inspected in the rerun build-native-loader partition, and test_opcount_truth.py is in the rerun unit-static-3 partition. Remaining intervening changes were documentation or test inventory only.",
   "initial_run": {
     "out_dir": "/home/nixon/absmax-scratch/final-partition-tests",
