@@ -2753,7 +2753,7 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
     if protection_level is not None:
         try:
             from obfuscator.rollback import emit_rollback_snippet as _rb_emit
-            _phase4_suffix += _rb_emit(int(protection_level), str(key_hex)) + "\n"
+            _phase4_suffix += _rb_emit(int(protection_level)) + "\n"
             _phase4_suffix += (
                 "_NX_ROLLBACK_GATE = _nx_rollback_gate()\n"
                 "if _NX_ROLLBACK_GATE == \"refused\":\n"
@@ -5966,13 +5966,15 @@ def build_project(args):
             args._native_blob_dict = {k: v for k, v in blobs.items() if v}
             # Client-side anti-rollback needs a monotonic ordering input. No
             # trustworthy operator-controlled release counter exists yet, so
-            # production builds use the build UNIX timestamp. This is not a
-            # claim of server-authoritative rollback protection; it orders
-            # artifacts for the local high-water mark without adding another
-            # undocumented operator environment variable.
+            # production builds use the build UNIX timestamp in nanoseconds;
+            # whole-second resolution would make same-second release builds
+            # indistinguishable to the high-water mark. This is not a claim of
+            # server-authoritative rollback protection; it orders artifacts for
+            # the local high-water mark without adding another undocumented
+            # operator environment variable.
             _rb_level = getattr(args, '_protection_level', None)
             if not isinstance(_rb_level, int) or _rb_level < 0:
-                _rb_level = int(time.time())
+                _rb_level = int(time.time_ns())
                 args._protection_level = _rb_level
             hybrid_loader_src, real_blobs_dict, real_fallback_str = generate_hybrid_loader_script(
                 blobs, real_fallback_enc, blob_key_hex, native_only=is_native_only,
