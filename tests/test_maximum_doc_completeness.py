@@ -20,12 +20,19 @@ import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOC = os.path.join(ROOT, "docs", "MAXIMUM_SECURITY.md")
+ADDENDUM = os.path.join(ROOT, "docs", "MAXIMUM_SECURITY_ADDENDUM_20261127.md")
 PIPELINE = os.path.join(ROOT, "obfuscator", "core", "pipeline.py")
 
 
 def _doc_text():
     with open(DOC, encoding="utf-8") as fh:
-        return fh.read()
+        text = fh.read()
+    # The base document is operator-frozen. New parser surface may be
+    # documented in the companion addendum without rewriting that file.
+    if os.path.exists(ADDENDUM):
+        with open(ADDENDUM, encoding="utf-8") as fh:
+            text += "\n" + fh.read()
+    return text
 
 
 def _cli_flags():
