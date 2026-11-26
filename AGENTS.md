@@ -12,7 +12,7 @@
 
 - Do not modify the authoritative benchmark artifacts under `re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/builds/`; benchmark validity depends on their fixed SHA-256 identities.
 - Provider, timeout, harness, malformed-answer, and over-tool-limit records are invalid evidence, not resistance evidence.
-- TokenHarbor and OpenCode/Hy4 benchmark lanes are separate model lanes. Authorised lanes are `opencode/hy4-flash-free`, `tokenharbor/deepseek-v4.1-flash:free`, and fallback `tokenharbor/deepseek-v4.1-flash-1017`; do not substitute unauthorized models. Use exactly one multi-lane resume watchdog.
+- Kern and TokenHarbor benchmark lanes are separate model lanes. The operator-directed primary lane is `kern/inkling-2-mini`; TokenHarbor fallback lanes are `tokenharbor/deepseek-v4.1-flash:free` and `tokenharbor/deepseek-v4.1-flash-1017`. The retired OpenCode/Hy4 lane is not part of new benchmark campaigns unless the operator explicitly re-authorises it. Do not substitute unauthorized models. Use exactly one benchmark runner or multi-lane resume watchdog at a time.
 - Benchmark secrets and licence-derived keys must remain outside agent sandboxes and must be redacted from provider-bound traffic.
 - Evidence redaction verification uses `python3 re-bench/tools/redact_benchmark_credentials.py` followed by `python3 re-bench/tools/scan_secret_redaction.py`; the scanner covers raw results, live copied workspaces, OpenCode state, historical invalid/smoke roots, copied OpenCode home, action-verification output, scratch evidence, and proxy operational logs across exact/JSON/base64/hex representations and should report `credential_hits=0`.
 
