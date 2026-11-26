@@ -144,11 +144,11 @@ Validation evidence is `re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/CLOUD_FINAL4_VALID
 ## Verification and evidence hygiene
 
 - Final focused harness/provenance/build-farm/failure-mode regression lane: 127 passed.
-- Final corrected partitioned suite: 30,853 passed, 9 skipped, 0 failed; all 9 partitions rc 0 (`re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/final_partition_test_aggregate_20261127.json`).
+- Final post-closeout partitioned suite: 30,853 passed, 9 skipped, 0 failed; all 9 partitions rc 0 in one direct run (`re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/final_partition_test_aggregate_20261127.json`).
 - `make lint`: passed.
 - Python compilation of the benchmark tooling: passed.
 - `git diff --check` over the intended commit paths: clean.
-- Final credential-redaction scan after closeout: 83,493 files scanned, 479 secret representations checked, `credential_hits=0` (`re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/final_closeout_redaction_scan_20261127.json`).
+- Final credential-redaction scan after closeout: 83,518 files scanned, 479 secret representations checked, `credential_hits=0` (`re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/final_closeout_redaction_scan_20261127.json`).
 - Staged-diff scan found no provider-key prefixes or private-key material.
 - Invalid original records were archived outside active result globs rather than deleted.
 
