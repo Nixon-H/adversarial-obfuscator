@@ -12,6 +12,7 @@ high-water mark kept beside the artefact, MAC'd with the build key.
 Deleting it, or running in a clean directory, lets the old build run again.
 Real anti-rollback needs the issuer or a server to refuse old builds.
 """
+import hashlib
 import os
 import sys
 
@@ -141,6 +142,54 @@ def test_generated_loader_does_not_embed_the_payload_key_for_rollback(tmp_path):
     assert "_NX_ROLLBACK_KEY_HEX" not in src
     assert key_hex not in src
     assert "nx-rollback/v1/key:" in src
+
+
+
+def test_emitted_rollback_lineage_root_survives_payload_key_rotation(tmp_path):
+    artefact = tmp_path / "payload_protected.py"
+    artefact.write_text("print('x')\n", encoding="utf-8")
+    lineage_root = hashlib.sha256(b"nx-rollback-root:lineage-secret").digest()
+
+    def loaded(level, payload_key):
+        snippet = rb.emit_rollback_snippet(level)
+        ns = {"__file__": str(artefact),
+              "_NX_ROLLBACK_ROOT": lineage_root,
+              "BLOB_KEY": payload_key}
+        exec(compile(snippet, str(artefact), "exec"), ns)
+        return ns
+
+    assert loaded(5, b"a" * 32)["_nx_rollback_gate"]() == "ok"
+    assert loaded(4, b"b" * 32)["_nx_rollback_gate"]() == "refused"
+    assert loaded(6, b"c" * 32)["_nx_rollback_gate"]() == "ok"
+    assert rb.read_mark(str(tmp_path / rb.MARK_NAME),
+                        key=rb.derive_mark_key(lineage_root),
+                        artefact_name=artefact.name) == 6
+
+
+def test_generated_loader_lineage_survives_payload_key_rotation(tmp_path):
+    import subprocess
+    import sys
+    from obfuscator.core.pipeline import generate_hybrid_loader_script
+
+    artefact = tmp_path / "payload_protected.py"
+    env = dict(os.environ, NIXON_LOG_REDIRECT="0", NIXON_LADDER_DEBUG="1")
+
+    def write_and_run(level, key_hex):
+        src, _blobs, _fallback = generate_hybrid_loader_script(
+            {}, b"print('RB_PAYLOAD_OK')", key_hex,
+            build_id="rollback-test", protection_level=level,
+            customer_salt="lineage-secret", self_check=False)
+        artefact.write_text(src, encoding="utf-8")
+        return subprocess.run([sys.executable, str(artefact)],
+                              capture_output=True, text=True, timeout=30,
+                              env=env)
+
+    first = write_and_run(20, "11" * 32)
+    assert first.returncode == 0, first.stderr[-500:]
+    downgrade = write_and_run(10, "22" * 32)
+    assert downgrade.returncode == 137
+    assert "rollback-refused" in downgrade.stderr
+    assert "RB_PAYLOAD_OK" not in downgrade.stdout
 
 
 
