@@ -157,3 +157,19 @@ def test_generated_farm_workflow_uses_only_the_hash_locked_install():
     assert "install upx" not in yaml_text
     assert any(remote == "requirements-farm.lock" and os.path.exists(local)
                for remote, local in farm_driver_dependencies())
+
+
+def test_artifact_workflows_do_not_install_unused_upx():
+    """UPX is not used by the acceptance/release jobs and must not be an
+    unverified package-manager supply-chain exception there."""
+    offenders = []
+    for path in sorted(glob.glob(os.path.join(WORKFLOWS, "*.yml"))):
+        with open(path, encoding="utf-8") as fh:
+            for no, line in enumerate(fh, 1):
+                if line.lstrip().startswith("#"):
+                    continue
+                if "install upx" in line or "install -y upx" in line:
+                    offenders.append("%s:%d: %s" % (os.path.basename(path), no, line.strip()))
+    assert not offenders, (
+        "UPX is not invoked by these artifact workflows; installing it is an "
+        "unnecessary unhashed supply-chain exception:\n  " + "\n  ".join(offenders))

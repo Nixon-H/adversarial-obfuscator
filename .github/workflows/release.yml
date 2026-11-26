@@ -57,7 +57,7 @@ jobs:
         # setuptools nor wheel and verified no hashes at all -- in the job that
         # BUILDS AND SIGNS the release. requirements.lock carries all three
         # (plus pycparser, which the old lock omitted) with 548 SHA-256 lines.
-        run: pip install --require-hashes -r requirements.lock && sudo apt-get update && sudo apt-get install -y upx
+        run: pip install --require-hashes -r requirements.lock
       - name: Build, sign and run the acceptance matrix
         run: |
           python3 - <<'PY'
