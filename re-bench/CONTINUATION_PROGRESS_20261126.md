@@ -138,3 +138,41 @@ Additional fixes just applied:
 Final partition aggregate: 30,773 passed, 9 skipped, 0 failed across corrected partition evidence. No continuation commit created because of mixed pre-existing dirty tree.
 - Post-commit full-suite review exposed an invariant-engine scalability defect: untracked `re-bench/` and `audit/` evidence trees were included in recursive source scans, causing `test_check_no_silent_fallback` to exceed the per-test timeout. Fixed the directory exclusion and added regression coverage; focused result: 23 passed in 37.81s.
 - Commits created: `89a6527` hardening/validation evidence, `fb4f7af` farm dependency lock.
+
+### Kern replacement benchmark and cloud-profile continuation
+
+- Cloud farm race/attestation defects were repaired: per-artifact runner attestations are bound to standardized artifact names and exact uploaded bytes, concurrent local farm use is serialized with an OS-held lock, and farm failure now refuses single-OS fallback artifacts.
+- `maximum-cloud` validation: build rc 0, farm attestations 3/3 hardening-verified, windows/linux/darwin NXS1 blobs present, positive runtime control passed, negative no-secret control failed closed. Artifact SHA-256 `f9c5256d796c57fccc81e0eff0064b5743a1768e2dc203dfa3fc91651965a395`.
+- `absolute-cloud` validation: build rc 0, farm attestations 3/3 hardening-verified, windows/linux/darwin NXS1 blobs present, positive runtime control passed, negative no-secret control failed closed. Artifact SHA-256 `9bfdadef9414f9f79b0529f16bfa9591423f6f93bc53a5f9dbea83e1e6330dc0`.
+- Machine-readable cloud validation: `re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/cloud_final4_validation.json`, `all_valid=true`.
+- Both cloud artifacts and exact matching generated secrets were promoted into the benchmark locations without mutating the preserved original absolute/native artifact pins.
+- A disposable-farm-repository retention weakness was fixed: farm repositories now delete by default after use because they contain uploaded payload source; retention requires explicit `--keep-farm-repo`. Regression coverage added.
+- Focused farm/harness regression after the retention and matrix changes: **110 passed**.
+- The Kern profile matrix now covers all 6 variants and all 19 scenarios, capped at 2 concurrent attempts because Kern explicitly enforces at most 2 in-flight requests per client IP.
+- Current Kern lane is externally unavailable with authenticated upstream HTTP 502/Cloudflare bad-gateway responses; unauthenticated edge probing returns HTTP 401, confirming the endpoint exists but the authenticated model path is unhealthy. The single profile-matrix watchdog remains active and will resume when the lane returns HTTP 200.
+- Current completed Kern evidence before the outage: 5 valid records, 0 validated exploitable markers. Two source-assisted exact-secret disclosures are expected source-control results, not obfuscation breaks.
+- Precision analysis now covers all six variants dynamically and preserves artifact identity even when packed outer surfaces hide literal assignments.
+- Current redaction scan: **credential_hits=0**, 82,288 files scanned.
+
+## OpenCode Go DeepSeek replacement lane progress
+
+- The benchmark lane was retargeted from unhealthy Kern to credential-isolated `opencode-go/deepseek-v4.1-flash`. Sandboxes receive no real provider credential; the host Unix proxy redacts benchmark secrets and licence-derived key material from provider-bound traffic.
+- Cache instrumentation is numeric-only. Current matrix-lane weighted cache-hit rate is about 74.7% across 209 successful model requests; request-side exact-secret redactions are active and no response-side secret redactions have been required.
+- The core key/no-key/source-assisted chain is actively running. At this checkpoint it has 16 local result records, 15 structurally valid, with no validated fix-requiring secrets-withheld exploit marker. Observed payload/solution recoveries are expected source-assisted controls or the inherently customer-machine legitimate-secrets boundary.
+- A real evidence-hygiene gap was found and fixed: operator-composed effective native keys were not previously included in exact redaction because the operator mask was omitted. `redact_benchmark_credentials.py` and `opencode_go_unix_proxy.py` now include licence operator masks and operator-composed effective keys; the proxy restarted with 599 exact redaction entries, and the confirmed leaked key file in copied evidence was redacted.
+- Full 6x19 scenario coverage is not complete. The core chain remains active in the background, and `run_deepseek_remaining_scenarios.py` is prepared for the complementary 15-scenario slice after the core chain finishes. Final redaction scanning must wait until active legitimate-secrets workspaces are cleaned.
+
+## OpenCode Go DeepSeek completion correction
+
+The earlier checkpoint above was written while the replacement lane was still running. Final state for the OpenCode Go lane is now:
+
+- Core local matrix: 16/16 structurally valid records.
+- Core validated-cloud matrix: 8/8 structurally valid records.
+- Extended 15-scenario slice: 90/90 structurally valid records after four preserved invalid records were archived and retried.
+- Combined aggregate: 114/114 structurally valid active records, zero active invalid records.
+- Weighted OpenCode Go cache-hit rate: about 70.94%; maximum per-request hit rate about 99.96%.
+- Final exact-secret redaction scan after retry: credential_hits=0 across 83,475 scanned files.
+- No full non-source external-attacker break was validated.
+- The significant confirmed weakness remains the customer-controlled runtime-secret boundary: `maximum-local / legitimate-runtime-secrets` produced a native-object extraction (`native_linux.bin`, 190,024 bytes, SHA-256 `95388ca4790f9e02718b31a62852ac4f994c2d2446889f7dc59b5a5a024c959e`) without exact master-secret recovery or independent semantic reconstruction.
+- Source-assisted secret/semantic recoveries are expected control evidence because `original_source.py` was intentionally supplied.
+- Final report: `re-bench/ABSOLUTE_MAXIMUM_DEEPSEEK_FINAL_REPORT_20261126.md`.

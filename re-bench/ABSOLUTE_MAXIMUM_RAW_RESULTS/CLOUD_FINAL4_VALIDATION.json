@@ -1,0 +1,254 @@
+{
+  "generated": 1795702778.9991791,
+  "variants": {
+    "maximum-cloud": {
+      "variant": "maximum-cloud",
+      "build_result_exists": true,
+      "artifact_exists": true,
+      "build": {
+        "returncode": 0,
+        "artifact_sha256": "f9c5256d796c57fccc81e0eff0064b5743a1768e2dc203dfa3fc91651965a395",
+        "artifact_size": 1327566,
+        "artifact_selected_form": "dist-universal",
+        "elapsed_seconds": 228.53384693700355
+      },
+      "artifact": {
+        "sha256": "f9c5256d796c57fccc81e0eff0064b5743a1768e2dc203dfa3fc91651965a395",
+        "size": 1327566,
+        "native": {
+          "natives_present": true,
+          "lengths": {
+            "windows": 236912,
+            "linux": 253416,
+            "darwin": 622280,
+            "android": 0
+          },
+          "decoded_sizes": {
+            "windows": 177684,
+            "linux": 190060,
+            "darwin": 466708
+          },
+          "decoded_sha256": {
+            "windows": "2f332e877551349e8365193fc95a25814f6119d8598bd5c2dd76f5d3edc67623",
+            "linux": "e425e9a055170235f68e3216f05cc825423547ddf6cfb7dcdb1df6fd354e995c",
+            "darwin": "7446b695b1ad0ffc08d26d47368bc132dfb20e6599cecc831939fed7689831c8"
+          },
+          "magic": {
+            "windows": "nxs1-container",
+            "linux": "nxs1-container",
+            "darwin": "nxs1-container"
+          }
+        }
+      },
+      "artifact_matches_build_manifest": true,
+      "runtime_control": {
+        "with_secrets": {
+          "returncode": 0,
+          "stdout_sha256": "d9d34b5c820045756b0bd7eb21a72540e6575744efd01a3dd307a72df1f0c623",
+          "stdout_len": 40,
+          "stderr_len": 0,
+          "timeout": false
+        },
+        "without_secrets": {
+          "returncode": 137,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout_len": 0,
+          "stderr_len": 106,
+          "timeout": false
+        },
+        "positive_ok": true,
+        "negative_fail_closed": true
+      },
+      "attestations": {
+        "runner-attestation-payload.dylib.json": {
+          "payload_sha256": "0b1879da7cbb6536f9a290e2cb7e6a8fab5c33d8ad387e88a2ba34862f92536a",
+          "artifacts": {
+            "payload.dylib": "8a8d3b42eae797f2245e86ec72477fce196ab379112840410dad5239d5dec78d"
+          },
+          "hardening_ok": true,
+          "missing": [],
+          "wrong": [],
+          "inert": [],
+          "partial": [],
+          "unavailable": [
+            "pie",
+            "no_heap_exec"
+          ],
+          "smoke_test": {
+            "blob": "payload.cpython-311-darwin.so",
+            "error": "ValueError: string KEK unavailable: this artefact requires the string-seal shard in the environment variable named by the build; refusing to load without it",
+            "loaded": false
+          }
+        },
+        "runner-attestation-payload.pyd.json": {
+          "payload_sha256": "0b1879da7cbb6536f9a290e2cb7e6a8fab5c33d8ad387e88a2ba34862f92536a",
+          "artifacts": {
+            "payload.pyd": "1420f4928259284273579ba293e1572e709528e9503cc229e04018a6ce56f206"
+          },
+          "hardening_ok": true,
+          "missing": [],
+          "wrong": [],
+          "inert": [],
+          "partial": [],
+          "unavailable": [],
+          "smoke_test": {
+            "blob": "payload.cp311-win_amd64.pyd",
+            "error": "ValueError: string KEK unavailable: this artefact requires the string-seal shard in the environment variable named by the build; refusing to load without it",
+            "loaded": false
+          }
+        },
+        "runner-attestation-payload.so.json": {
+          "payload_sha256": "0b1879da7cbb6536f9a290e2cb7e6a8fab5c33d8ad387e88a2ba34862f92536a",
+          "artifacts": {
+            "payload.so": "b40e4403e6ea6d723886bf4503e5b0e3708b777cfcc4542946d52967b440a965"
+          },
+          "hardening_ok": true,
+          "missing": [],
+          "wrong": [],
+          "inert": [],
+          "partial": [],
+          "unavailable": [],
+          "smoke_test": {
+            "blob": "payload.cpython-311-x86_64-linux-gnu.so",
+            "error": "ValueError: string KEK unavailable: this artefact requires the string-seal shard in the environment variable named by the build; refusing to load without it",
+            "loaded": false
+          }
+        }
+      },
+      "cross_platform_blob_presence": {
+        "windows": true,
+        "linux": true,
+        "darwin": true
+      },
+      "cross_platform_magic_ok": true,
+      "attestation_count": 3,
+      "attestation_all_hardening_ok": true,
+      "valid_cloud_candidate": true
+    },
+    "absolute-cloud": {
+      "variant": "absolute-cloud",
+      "build_result_exists": true,
+      "artifact_exists": true,
+      "build": {
+        "returncode": 0,
+        "artifact_sha256": "9bfdadef9414f9f79b0529f16bfa9591423f6f93bc53a5f9dbea83e1e6330dc0",
+        "artifact_size": 4416391,
+        "artifact_selected_form": "dist-universal",
+        "elapsed_seconds": 453.8682472639921
+      },
+      "artifact": {
+        "sha256": "9bfdadef9414f9f79b0529f16bfa9591423f6f93bc53a5f9dbea83e1e6330dc0",
+        "size": 4416391,
+        "native": {
+          "natives_present": true,
+          "lengths": {
+            "windows": 865648,
+            "linux": 909288,
+            "darwin": 1860764,
+            "android": 0
+          },
+          "decoded_sizes": {
+            "windows": 649236,
+            "linux": 681964,
+            "darwin": 1395572
+          },
+          "decoded_sha256": {
+            "windows": "8109d7954d251dfa012e0fee238ca1dc651bf50244430cb9edabcb6511fdced1",
+            "linux": "254772f0bfed7b28bc0f3d2299972f5ab0876f9b7af3e0ebe5636eb44b0542ca",
+            "darwin": "921644268de512a955fc4d1ecc82985a4f4a60b1f0ebacf1913143b6f9819de2"
+          },
+          "magic": {
+            "windows": "nxs1-container",
+            "linux": "nxs1-container",
+            "darwin": "nxs1-container"
+          }
+        }
+      },
+      "artifact_matches_build_manifest": true,
+      "runtime_control": {
+        "with_secrets": {
+          "returncode": 0,
+          "stdout_sha256": "d9d34b5c820045756b0bd7eb21a72540e6575744efd01a3dd307a72df1f0c623",
+          "stdout_len": 40,
+          "stderr_len": 0,
+          "timeout": false
+        },
+        "without_secrets": {
+          "returncode": 137,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout_len": 0,
+          "stderr_len": 106,
+          "timeout": false
+        },
+        "positive_ok": true,
+        "negative_fail_closed": true
+      },
+      "attestations": {
+        "runner-attestation-payload.dylib.json": {
+          "payload_sha256": "12456e23ae6a084e74e4d2f1701a58a2eed6049e135e98a7d0952fce1af3fe9c",
+          "artifacts": {
+            "payload.dylib": "3fcc3629d76b6fb9dc306f2bbb9528df3338339218717bd49a1a8b3443d573bd"
+          },
+          "hardening_ok": true,
+          "missing": [],
+          "wrong": [],
+          "inert": [],
+          "partial": [],
+          "unavailable": [
+            "pie",
+            "no_heap_exec"
+          ],
+          "smoke_test": {
+            "blob": "payload.cpython-311-darwin.so",
+            "error": "ValueError: string KEK unavailable: this artefact requires the string-seal shard in the environment variable named by the build; refusing to load without it",
+            "loaded": false
+          }
+        },
+        "runner-attestation-payload.pyd.json": {
+          "payload_sha256": "12456e23ae6a084e74e4d2f1701a58a2eed6049e135e98a7d0952fce1af3fe9c",
+          "artifacts": {
+            "payload.pyd": "208ea763609458c46a92fb3360b38b590ad48003a4a7e1b7f6bec18d41a6ab31"
+          },
+          "hardening_ok": true,
+          "missing": [],
+          "wrong": [],
+          "inert": [],
+          "partial": [],
+          "unavailable": [],
+          "smoke_test": {
+            "blob": "payload.cp311-win_amd64.pyd",
+            "error": "ValueError: string KEK unavailable: this artefact requires the string-seal shard in the environment variable named by the build; refusing to load without it",
+            "loaded": false
+          }
+        },
+        "runner-attestation-payload.so.json": {
+          "payload_sha256": "12456e23ae6a084e74e4d2f1701a58a2eed6049e135e98a7d0952fce1af3fe9c",
+          "artifacts": {
+            "payload.so": "1395d352e08cc5914b254917038ebd7446ca0b411859d159f85218d453a2842a"
+          },
+          "hardening_ok": true,
+          "missing": [],
+          "wrong": [],
+          "inert": [],
+          "partial": [],
+          "unavailable": [],
+          "smoke_test": {
+            "blob": "payload.cpython-311-x86_64-linux-gnu.so",
+            "error": "ValueError: string KEK unavailable: this artefact requires the string-seal shard in the environment variable named by the build; refusing to load without it",
+            "loaded": false
+          }
+        }
+      },
+      "cross_platform_blob_presence": {
+        "windows": true,
+        "linux": true,
+        "darwin": true
+      },
+      "cross_platform_magic_ok": true,
+      "attestation_count": 3,
+      "attestation_all_hardening_ok": true,
+      "valid_cloud_candidate": true
+    }
+  },
+  "all_valid": true
+}

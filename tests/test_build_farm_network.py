@@ -14,7 +14,6 @@ Three defects in the cloud-build path, all recorded in
 These tests drive the real methods with a stubbed ``requests`` module,
 so no network is touched.
 """
-import hashlib
 import io
 import json
 import os
@@ -333,3 +332,59 @@ def test_create_disposable_repo_does_not_treat_arbitrary_422_as_success(monkeypa
     farm = nutils.GitHubBuildFarm.__new__(nutils.GitHubBuildFarm)
     farm.base_url = "https://api.github.com"; farm.headers = {}; farm.proxies = None; farm.username = "u"; farm.repo_name = "r"
     assert farm.create_disposable_repo() is False
+
+
+def test_farm_repo_cleanup_deletes_by_default():
+    from types import SimpleNamespace
+    from obfuscator.core import pipeline
+
+    class Farm:
+        def __init__(self):
+            self.deleted = 0
+        def delete_repo(self):
+            self.deleted += 1
+            return True
+
+    farm = Farm()
+    assert pipeline._farm_repo_cleanup_error(
+        farm, SimpleNamespace(keep_farm_repo=False)) is None
+    assert farm.deleted == 1
+
+
+def test_farm_repo_cleanup_explicit_keep_is_the_only_retention_path():
+    from types import SimpleNamespace
+    from obfuscator.core import pipeline
+
+    class Farm:
+        def __init__(self):
+            self.deleted = 0
+        def delete_repo(self):
+            self.deleted += 1
+            return True
+
+    farm = Farm()
+    assert pipeline._farm_repo_cleanup_error(
+        farm, SimpleNamespace(keep_farm_repo=True)) is None
+    assert farm.deleted == 0
+
+
+def test_farm_repo_cleanup_failure_is_reported_for_fail_closed_caller():
+    from types import SimpleNamespace
+    from obfuscator.core import pipeline
+
+    class Farm:
+        def delete_repo(self):
+            return False
+
+    assert pipeline._farm_repo_cleanup_error(
+        Farm(), SimpleNamespace(keep_farm_repo=False)) == 'delete_repo returned false'
+
+
+def test_build_parser_exposes_keep_farm_repo_as_explicit_opt_in():
+    from obfuscator.core import pipeline
+    import argparse
+    parser, _subs = pipeline.build_parser()
+    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    build = sub.choices['build']
+    flattened = {x for a in build._actions for x in a.option_strings}
+    assert '--keep-farm-repo' in flattened

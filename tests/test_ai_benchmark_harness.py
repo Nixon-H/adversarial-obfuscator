@@ -868,7 +868,7 @@ def test_source_assisted_workspace_receives_original_source(tmp_path, monkeypatc
 def test_two_turn_finalisation_command_uses_continue_only_when_answer_missing():
     bench = _load('ai_bench_two_turn_command', ROOT / 're-bench/tools/ai_bench.py')
     cmd = bench.opencode_shell_command('absolute', 'runtime-secrets-withheld', 3, 'kern/inkling-2-mini', 'analysis prompt')
-    assert '--continue' in cmd
+    assert '--session' in cmd
     assert 'if [ ! -s answer.json ]; then' in cmd
     assert 'analysis prompt' in cmd
     assert 'mandatory finalisation turn' in cmd
@@ -948,3 +948,101 @@ def test_cloud_build_integrity_regressions():
     assert 'artifact_matches_build_manifest' in validator
     assert 'nxs1-container' in validator
     assert 'positive_ok' in validator and 'negative_fail_closed' in validator
+
+
+def test_deepseek_flash_plan_lane_is_explicitly_configured():
+    bench = _load('ai_bench_deepseek_flash_plan_lane', ROOT / 're-bench/tools/ai_bench.py')
+    assert 'tokenharbor/deepseek-v4.1-flash' in bench.MODELS
+    assert bench.endpoint_files_for('tokenharbor/deepseek-v4.1-flash') == ('evm.sock', 'tokenharbor.sock')
+    proxy = _read_tool_text('tokenharbor_unix_proxy.py')
+    assert "'deepseek-v4.1-flash:free','deepseek-v4.1-flash-1017'" in proxy or "deepseek-v4.1-flash-1017" in proxy
+    assert 'prompt_cache_hit_tokens' in proxy
+    assert 'cache_hit_rate' in proxy
+
+
+def test_opencode_go_deepseek_lane_is_credential_isolated():
+    bench = _load('ai_bench_opencode_go_lane', ROOT / 're-bench/tools/ai_bench.py')
+    assert 'opencode-go/deepseek-v4.1-flash' in bench.MODELS
+    assert bench.endpoint_family('opencode-go/deepseek-v4.1-flash') == 'opencode-go'
+    assert bench.endpoint_files_for('opencode-go/deepseek-v4.1-flash') == ('evm.sock', 'opencode-go.sock')
+    proxy = _read_tool_text('opencode_go_unix_proxy.py')
+    assert 'https://opencode.ai/zen/go/v1' in proxy
+    assert 'x-opencode-session' in proxy
+    assert 'prompt_cache_hit_tokens' in proxy
+    assert 'OPENCODE_API_KEY missing' in proxy
+
+
+def test_benchmark_prompt_uses_cache_friendly_stable_prefix():
+    bench = _load('ai_bench_cache_prefix_prompt', ROOT / 're-bench/tools/ai_bench.py')
+    a = bench.prompt_for('absolute', 'runtime-secrets-withheld', 'variant specific text')
+    b = bench.prompt_for('maximum-cloud', 'legitimate-runtime-secrets', 'other variant text')
+    # Scenario/variant metadata must not appear before the stable instructional
+    # prefix; prompt cache hits require exact leading-token equality.
+    assert a.index('Benchmark target metadata follows') == b.index('Benchmark target metadata follows')
+    assert a[:a.index('Benchmark target metadata follows')] == b[:b.index('Benchmark target metadata follows')]
+    assert 'deepseek-cache-prefix-v1' in bench.PROMPT_VERSION
+
+
+def test_redaction_covers_cloud_final4_secret_root():
+    source = _read_tool_text('redact_benchmark_credentials.py')
+    assert 'cloud-final4-secrets' in source
+    assert 'artifact_subdir' in source
+    assert 'validated replacement artifacts' in source
+
+
+def test_two_turn_finalisation_reuses_explicit_session():
+    bench = _load('ai_bench_two_turn_session', ROOT / 're-bench/tools/ai_bench.py')
+    cmd = bench.opencode_shell_command('absolute', 'runtime-secrets-withheld', 3, 'opencode-go/deepseek-v4.1-flash', 'analysis prompt')
+    assert cmd.count('--session') == 2
+    assert 'ses_absmax_absolute-runtime-secrets-withheld-a3' in cmd
+    assert 'if [ ! -s answer.json ]; then' in cmd
+
+
+def test_secret_bearing_scenarios_fail_closed_for_each_external_lane():
+    source = _read_tool_text('ai_bench.py')
+    assert 'secrets_included=bool(SCENARIOS[scenario][1])' in source
+    assert "model.startswith('opencode-go/') and secrets_included" in source
+    assert 'opencode-go-runtime-secrets-blocked-redacting-proxy-unavailable' in source
+    assert source.count('and secrets_included') >= 3
+
+
+def test_opencode_go_proxy_has_ready_metadata_and_cache_pinning():
+    proxy = _read_tool_text('opencode_go_unix_proxy.py')
+    assert 'opencode-go-proxy.ready' in proxy
+    assert 'redaction_count' in proxy
+    assert "prompt_cache_key" in proxy
+    assert 'absmax-benchmark-deepseek-v1' in proxy
+    assert 'include_usage' in proxy
+    assert 'for sec in sorted(root.glob' in proxy
+
+
+def test_opencode_go_proxy_sets_exact_buffered_content_length():
+    proxy = _read_tool_text('opencode_go_unix_proxy.py')
+    assert "self.send_header('Transfer-Encoding','chunked')" in proxy
+    assert 'chunk boundaries' in proxy
+    assert 'first-byte progress' in proxy
+
+
+def test_opencode_go_cache_summary_is_numeric_only():
+    source = _read_tool_text('summarize_opencode_go_cache.py')
+    assert 'prompt_cache_hit_tokens' in source
+    assert 'weighted_cache_hit_rate' in source
+    assert 'cache_write_5m_tokens' in source
+    assert 'messages' not in source
+    assert 'prompt_content' not in source
+
+
+def test_result_preserves_validation_materialisation_fields():
+    source = _read_tool_text('ai_bench.py')
+    assert "for validation_key in ('answer_json_exists','answer_json_valid','solution_py_exists','secret_recovered'" in source
+    assert "result[validation_key]=validation.get(validation_key)" in source
+
+
+def test_operator_composed_effective_key_is_redacted():
+    redactor = _read_tool_text('redact_benchmark_credentials.py')
+    proxy = _read_tool_text('opencode_go_unix_proxy.py')
+    for source in (redactor, proxy):
+        assert 'nx-operator-blob:' in source
+        assert 'licence-operator-mask' in source
+        assert 'licence-effective-native-key-operator' in source
+        assert 'str(len(seal)).encode' in source

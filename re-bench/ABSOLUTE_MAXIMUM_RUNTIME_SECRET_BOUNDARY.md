@@ -105,3 +105,36 @@ The most robust product design is often architectural minimization: ship only no
 - They are not a boundary against a customer-machine attacker with legitimate runtime secrets.
 - No source change in this continuation has solved AM-001.
 - The correct completion state for this item is therefore **documented architectural limitation with defined remediation paths**, not “fixed.”
+
+## OpenCode Go DeepSeek confirmation, 2026-11-26 continuation
+
+The credential-isolated `opencode-go/deepseek-v4.1-flash` benchmark reproduced the boundary in the current artifact set. In `maximum-local / legitimate-runtime-secrets`, the agent recovered a native payload object as `native_linux.bin`:
+
+- size: 190,024 bytes
+- SHA-256: `95388ca4790f9e02718b31a62852ac4f994c2d2446889f7dc59b5a5a024c959e`
+- scenario: customer-machine attacker with legitimate runtime secrets
+- exact hidden master secret recovered in that attempt: no
+- independently passing semantic reconstruction in that attempt: no
+
+This is partial native-material recovery, not a full semantic break. It confirms the same boundary using an independent model lane and the final validated artifacts.
+
+The same benchmark found no fix-requiring recovery in non-source external-attacker scenarios. Full semantic recovery occurred mainly in source-assisted control scenarios, where `original_source.py` was intentionally supplied and recovery is expected by construction.
+
+## Practical remediation decision
+
+The direct customer-machine confidentiality weakness cannot be completely fixed in a client-side executable. A mitigation that merely hides the temporary `.so` better, moves it into memory, or adds more obfuscation can raise cost but cannot change the underlying key-possession problem: the customer machine must already possess enough key material to run the payload.
+
+The correct remediation order is therefore:
+
+1. **Architectural fix when confidentiality matters:** move the sensitive operation or decision server-side. The client should receive only an authenticated result. This is the real fix.
+2. **Remote key-release / short-lived wrapped keys:** reduce reuse and exposure windows where server-side execution of the whole operation is impossible. This does not prevent capture during a valid local execution window.
+3. **Per-customer/per-build isolation:** make extracted material affect only the compromised customer/build. Do not reuse licence key material, shards, or native payload images across customers.
+4. **Native loader/payload handshake:** close simple direct-import reuse of an extracted object by requiring a fresh loader-mediated handshake after licence, provenance, host, and rollback checks. This is valuable defense-in-depth, but because both loader and native object run on the hostile host it remains patchable/instrumentable and is not cryptographic confidentiality.
+5. **Hardware-backed key custody or TEE execution:** use only where the target platform genuinely supports it. Without remote attestation and a hardware trust boundary this is not a general solution.
+6. **Memfd/in-memory native loading and faster plaintext wiping:** useful hygiene against casual disk capture, but not a fix for static key-derived extraction or a privileged debugger.
+
+The benchmark does not justify claiming that more packing, more section splitting, or more obfuscation can solve this boundary. The product can raise attack cost substantially; it cannot convert customer-held key material into a server-side secret.
+
+## Current fix status
+
+No client-side source change is claimed as a complete fix for this boundary. The confirmed required action is architectural: use server-side execution or remote key release for genuinely confidential operations. Native handshake hardening and memory-loading hygiene may be implemented as defense-in-depth in a future change, but must be documented as cost-raising measures rather than boundary fixes.

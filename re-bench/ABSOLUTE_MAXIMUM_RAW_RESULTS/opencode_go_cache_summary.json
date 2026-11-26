@@ -1,0 +1,25 @@
+{
+  "generated": 1795720351.5845928,
+  "log": "/home/nixon/absmax-tokenharbor-proxy/opencode-go-proxy.log",
+  "since": 1795705047.0,
+  "records": 1321,
+  "successful_model_requests": 1298,
+  "prompt_tokens": 29491231,
+  "cache_read_tokens": 20921472,
+  "input_tokens_not_cached": 8569759,
+  "output_tokens": 1727085,
+  "weighted_cache_hit_rate": 0.709413,
+  "mean_per_request_cache_hit_rate": 0.713315,
+  "max_per_request_cache_hit_rate": 0.999601,
+  "min_per_request_cache_hit_rate": 0.0,
+  "cache_write_5m_tokens": 0,
+  "cache_write_1h_tokens": 0,
+  "request_redactions": 1486,
+  "response_redactions": 0,
+  "cost_total": 0,
+  "allowance_total": 1.43068717,
+  "statuses": {
+    "200": 1298,
+    "proxy-error": 23
+  }
+}
