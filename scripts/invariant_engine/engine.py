@@ -114,7 +114,7 @@ class SecurityInvariantEngine:
         Outputs:
         True if the directory should be skipped.
         """
-        skip = {".git", ".svn", "__pycache__", "node_modules", ".venv", "venv", ".tox", ".pytest_cache", ".eggs", "eggs", "dist", "relay", ".agents", ".claude"}
+        skip = {".git", ".svn", "__pycache__", "node_modules", ".venv", "venv", ".tox", ".pytest_cache", ".eggs", "eggs", "dist", "build", "relay", ".agents", ".claude", "re-bench", "audit"}
         return dir_name in skip or dir_name.startswith(".")
 
     def _find_py_files(self) -> list[str]:

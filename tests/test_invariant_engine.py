@@ -157,6 +157,18 @@ class TestSecurityInvariantEngine:
         assert isinstance(result, InvariantResult)
         assert result.invariant_name == "no_silent_fallback"
 
+    def test_invariant_file_walk_excludes_generated_evidence_trees(self, tmp_path):
+        (tmp_path / "re-bench").mkdir()
+        (tmp_path / "audit").mkdir()
+        (tmp_path / "src").mkdir()
+        (tmp_path / "re-bench" / "generated.py").write_text("x=1\n")
+        (tmp_path / "audit" / "generated.py").write_text("x=1\n")
+        (tmp_path / "src" / "real.py").write_text("x=1\n")
+        e = SecurityInvariantEngine(root_dir=str(tmp_path))
+        files = e._find_py_files()
+        assert str(tmp_path / "src" / "real.py") in files
+        assert not any("re-bench" in path or "audit" in path for path in files)
+
     def test_check_no_undocumented_assumptions(self):
         e = SecurityInvariantEngine()
         result = e._check_no_undocumented_assumptions()
