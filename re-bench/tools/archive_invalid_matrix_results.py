@@ -34,7 +34,7 @@ def main():
         if args.provider_only and not cat.startswith('provider-'):continue
         # Structural no-answer records with provider errors are invalid infrastructure
         # evidence. Archive them outside the active result glob before retrying.
-        suffix='.invalid-'+cat.replace('/','_').replace(':','_')+'.json'
+        suffix='.invalid-'+cat.replace('/','_').replace(':','_')+'.evidence'
         dst=p.with_name(p.name+suffix)
         n=0
         while dst.exists():
