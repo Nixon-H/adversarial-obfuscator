@@ -107,7 +107,7 @@ The same attempt did not recover the exact hidden master secret and did not pass
 
 It confirms the documented customer-controlled runtime-secret boundary: when the attacker controls the customer machine and has legitimate runtime secrets, native payload material can be extracted for offline analysis. This is a real architectural limitation of client-side protection. It cannot be completely fixed by more obfuscation.
 
-Detailed boundary analysis and remediation ordering are in `re-bench/ABSOLUTE_MAXIMUM_RUNTIME_SECRET_BOUNDARY.md`.
+Detailed boundary analysis and remediation ordering are in `re-bench/ABSOLUTE_MAXIMUM_RUNTIME_SECRET_BOUNDARY.md`. The formal decision record is `re-bench/ABSOLUTE_MAXIMUM_AM001_ARCHITECTURAL_DECISION_20261127.md`: AM-001 is accepted as an architectural limitation, not falsely marked fixed.
 
 ## `maximum-packed` provenance anomaly resolution
 
@@ -153,7 +153,7 @@ Validation evidence is `re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/CLOUD_FINAL4_VALID
 
 ## Remaining limitations
 
-- One attempt per cell in this lane; the results are broad evidence, not statistical resistance estimates.
+- One attempt per cell in this lane; the results are broad evidence, not statistical resistance estimates. The statistical acceptance amendment in `re-bench/ABSOLUTE_MAXIMUM_BENCHMARK_ACCEPTANCE.md` formally classifies this campaign as diagnostic-only and preserves the five-valid-attempt standard for any future release-oriented statistical campaign.
 - The scoring rubric measures reconstruction progress and independently validated recovery; it is not a release gate by itself.
 - No SGX/TEE execution, public-chain execution, production signing/notarisation, or credentialed remote deployment was performed.
 - Client-side artifacts still cannot guarantee confidentiality against a fully hostile customer-controlled host with legitimate runtime secrets.

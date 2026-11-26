@@ -5269,6 +5269,8 @@ def _verify_build_licence_document(document, public_key_hex, args):
 
 def build_project(args):
     source = args.source
+    if getattr(args, 'public', False):
+        UI.warn('--public is a deprecated legacy alias; disposable farm repositories are deleted by default (use --keep-farm-repo to retain one for debugging)')
     # §7 dependency pinning, checked on the environment that BUILDS the
     # artefact. requirements.lock already pins the full closure with artifact
     # hashes and CI installs from it, but nothing compared the INSTALLED

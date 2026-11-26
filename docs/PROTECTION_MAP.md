@@ -210,7 +210,7 @@ change; nothing is turned off.**
 | `--access one-shot` | self-destructs the artefact after one run — breaks re-runs. Add it only for burn-after-use payloads. |
 | `--package native-only` | removes the bytecode fallback entirely. Stronger, but a farm failure then bricks the artefact for that OS. |
 | `--fast` | **weakens** — turns every kill into a warning. Never in a max build. |
-| `--public` | nukes the build repo after building (Flash Mode). Operational, not a protection. |
+| `--public` | deprecated legacy alias; farm repositories are deleted by default after use. Operational, not a protection. |
 | `--debug-dump-raw` | writes the rename log — the exact leak found in the 2026-11-14 benchmark. |
 | `--pin-structure` | debugging aid: pins emitter draws so two builds match. Reduces per-build polymorphism. |
 | `--exclude …` | nothing is excluded at ABSOLUTE; every shield family is on. |

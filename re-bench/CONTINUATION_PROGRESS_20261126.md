@@ -176,3 +176,10 @@ The earlier checkpoint above was written while the replacement lane was still ru
 - The significant confirmed weakness remains the customer-controlled runtime-secret boundary: `maximum-local / legitimate-runtime-secrets` produced a native-object extraction (`native_linux.bin`, 190,024 bytes, SHA-256 `95388ca4790f9e02718b31a62852ac4f994c2d2446889f7dc59b5a5a024c959e`) without exact master-secret recovery or independent semantic reconstruction.
 - Source-assisted secret/semantic recoveries are expected control evidence because `original_source.py` was intentionally supplied.
 - Final report: `re-bench/ABSOLUTE_MAXIMUM_DEEPSEEK_FINAL_REPORT_20261126.md`.
+
+## 2026-11-27 formal closeout decisions
+
+- AM-001 is formally accepted as an architectural client-side execution boundary, not marked fixed. Decision record: `re-bench/ABSOLUTE_MAXIMUM_AM001_ARCHITECTURAL_DECISION_20261127.md`.
+- The completed OpenCode Go DeepSeek matrix is formally classified as broad diagnostic evidence only: 114/114 active records structurally valid, but one attempt per cell. It does not satisfy the retained five-valid-attempt statistical acceptance standard.
+- Authoritative current closeout: `re-bench/ABSOLUTE_MAXIMUM_FINAL_CLOSEOUT_20261127.md`.
+- `profile_matrix_inventory.json`, `final_hashes.txt`, `benchmark_acceptance_criteria.json`, and `ABSOLUTE_MAXIMUM_BUILD_MANIFEST.json` were reconciled to the final cloud artifact identities and DeepSeek diagnostic status.
