@@ -27,7 +27,7 @@ The final verification summary was regenerated after the continuation work. The 
 - `tokenharbor/deepseek-v4.1-flash:free`: HTTP 429; provider reports reset on 2 Dec 2026 at 15:07 UTC.
 - `tokenharbor/deepseek-v4.1-flash-1017`: HTTP 402 pass-allowance exhausted.
 
-One multi-lane watchdog is running and probes the lanes in authorised priority order. It does not substitute models and does not overwrite existing attempt evidence.
+A corrected multi-lane watchdog was restarted after direct isolated probes showed that `opencode/hy4-flash-free` can return HTTP 200 when the local OpenCode startup state is minimal. Historical free-limit records are no longer treated as proof of current unavailability; the watchdog probes first and uses provider cooldown only after a fresh quota failure. Internal subagent lanes remain qualitative local evidence only: they do not replace or statistically complete the authorized external-model benchmark lanes.
 
 ## Acceptance rule now in force
 
