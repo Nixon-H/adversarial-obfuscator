@@ -24,9 +24,6 @@ from obfuscator.kernel_gen import (
     render_pyx,
 )
 
-TMP = "/tmp/nxk_fast_tests"
-
-
 # ---------------------------------------------------------------------------
 # render-path unit tests (no toolchain needed)
 # ---------------------------------------------------------------------------
@@ -121,15 +118,16 @@ def test_fast_pyx_valid_syntax():
 # compiled-kernel tests (skip gracefully without a toolchain)
 # ---------------------------------------------------------------------------
 
-def _build_fast(seed, ops=None):
-    os.makedirs(TMP, exist_ok=True)
+def _build_fast(seed, workdir, ops=None):
+    workdir = str(workdir)
+    os.makedirs(workdir, exist_ok=True)
     # NOTE: seed pins the module name (derive_symbols), so this MUST build
     # the FULL FAST_OPS set (superset of every op the tests touch) — a
     # narrower ops= would produce a module missing attributes.
     ops = tuple(ops) if ops is not None else tuple(FAST_OPS) + ("print",)
-    pyx, mod, omap = build_kernel(TMP, seed, ops=ops, fast=set(FAST_OPS))
+    pyx, mod, omap = build_kernel(workdir, seed, ops=ops, fast=set(FAST_OPS))
     assert os.path.isfile(pyx)
-    so, msg = cythonize_kernel(pyx, TMP)
+    so, msg = cythonize_kernel(pyx, workdir)
     return so, msg, mod, omap
 
 
@@ -146,8 +144,8 @@ def _load(mod, path):
 
 
 @pytest.fixture(scope="module")
-def fastmod():
-    so, msg, mod, omap = _build_fast(b"fast-parity-seed")
+def fastmod(tmp_path_factory):
+    so, msg, mod, omap = _build_fast(b"fast-parity-seed", tmp_path_factory.mktemp("nxk-fast-parity"))
     if so is None:
         pytest.skip("toolchain missing: %s" % msg)
     return _load(mod, so)
@@ -373,9 +371,9 @@ def test_fast_fallback_errors_match_builtin(fastmod):
                            getattr(bi, op), *a, **k)
 
 
-def test_fast_uniqueness_preserved():
-    so1, msg1, mod1, map1 = _build_fast(b"fast-seed-1", ops=("len", "abs"))
-    so2, msg2, mod2, map2 = _build_fast(b"fast-seed-2", ops=("len", "abs"))
+def test_fast_uniqueness_preserved(tmp_path):
+    so1, msg1, mod1, map1 = _build_fast(b"fast-seed-1", tmp_path / "one", ops=("len", "abs"))
+    so2, msg2, mod2, map2 = _build_fast(b"fast-seed-2", tmp_path / "two", ops=("len", "abs"))
     assert mod1 != mod2
     assert set(map1) == set(map2)
     assert set(map1.values()).isdisjoint(set(map2.values()))

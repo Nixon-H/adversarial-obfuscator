@@ -81,7 +81,7 @@ class TestSpeculationObfuscator:
         from obfuscator.speculation_obfuscation import obfuscate_with_speculation
         source = "def f(x): return x + 1"
         result = obfuscate_with_speculation(source)
-        assert "_spec_arr_" in result or True  # at least one gadget type inserted
+        assert "_spec_arr_" in result  # the array-bounds gadget must be inserted
 
     def test_speculation_obfuscation_deterministic(self):
         from obfuscator.speculation_obfuscation import obfuscate_with_speculation

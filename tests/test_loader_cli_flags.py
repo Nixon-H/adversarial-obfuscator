@@ -13,6 +13,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -59,6 +61,7 @@ def test_watermark_gate_is_emitted_into_the_loader():
 
 
 
+@pytest.mark.nixon_timeout(180)
 def test_the_watermark_flag_arms_the_loader_watermark_gate(tmp_path):
     """--watermark is the loader's watermark message, and it is reachable."""
     source = tmp_path / "p.py"
@@ -77,6 +80,7 @@ def test_the_watermark_flag_arms_the_loader_watermark_gate(tmp_path):
     assert built, "the build produced no output"
 
 
+@pytest.mark.nixon_timeout(180)
 def test_the_lock_hwid_flag_does_not_warn(tmp_path):
     source = tmp_path / "p.py"
     source.write_text(PAYLOAD, encoding="utf-8")

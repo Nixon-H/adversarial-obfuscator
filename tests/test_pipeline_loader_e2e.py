@@ -58,12 +58,14 @@ def pipeline_artifact(tmp_path_factory):
     return artifact
 
 
+@pytest.mark.nixon_timeout(2500)
 def test_pipeline_artifact_parses(pipeline_artifact):
     import ast
     with open(pipeline_artifact, encoding="utf-8") as fh:
         ast.parse(fh.read())
 
 
+@pytest.mark.nixon_timeout(2500)
 def test_pipeline_artifact_runs(pipeline_artifact):
     env = dict(os.environ)
     env["NIXON_LOG_REDIRECT"] = "0"
@@ -73,6 +75,7 @@ def test_pipeline_artifact_runs(pipeline_artifact):
     assert "hello-nixon" in proc.stdout, proc.stdout[-2000:]
 
 
+@pytest.mark.nixon_timeout(2500)
 def test_pipeline_artifact_writes_no_stray_dump_file(pipeline_artifact):
     """The artifact must not dump the decrypted payload to a fixed path.
 

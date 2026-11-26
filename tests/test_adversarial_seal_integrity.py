@@ -23,6 +23,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import obfuscator.adversarial as adv
@@ -85,6 +87,7 @@ def test_prompt_injection_leaves_decoder_stub_alone():
     assert "randn" not in body, "dead code was injected into the stub"
 
 
+@pytest.mark.nixon_timeout(900)
 def test_end_to_end_artifact_runs_across_seeds():
     """The real regression: build -> artifact must run.
 

@@ -106,34 +106,31 @@ class TestEvidenceCompletenessScorer:
         assert scorer.root_dir is not None
         assert scorer.claims == []
 
-    def test_scan_file_for_claims_found(self):
+    def test_scan_file_for_claims_found(self, tmp_path):
         scorer = EvidenceCompletenessScorer()
-        tmp_file = "/tmp/_test_claims.py"
+        tmp_file = str(tmp_path / "_test_claims.py")
         with open(tmp_file, "w") as f:
             f.write("# This is an unbreakable system\n")
             f.write("# It is provably secure\n")
         matches = scorer._scan_file_for_claims(tmp_file)
         assert len(matches) >= 1
-        os.remove(tmp_file)
 
-    def test_scan_file_for_claims_not_found(self):
+    def test_scan_file_for_claims_not_found(self, tmp_path):
         scorer = EvidenceCompletenessScorer()
-        tmp_file = "/tmp/_test_no_claims.py"
+        tmp_file = str(tmp_path / "_test_no_claims.py")
         with open(tmp_file, "w") as f:
             f.write("# just a harmless comment\n")
             f.write("x = 42\n")
         matches = scorer._scan_file_for_claims(tmp_file)
         assert matches == []
-        os.remove(tmp_file)
 
-    def test_scan_file_for_claims_empty(self):
+    def test_scan_file_for_claims_empty(self, tmp_path):
         scorer = EvidenceCompletenessScorer()
-        tmp_file = "/tmp/_test_empty.py"
+        tmp_file = str(tmp_path / "_test_empty.py")
         with open(tmp_file, "w"):
             pass
         matches = scorer._scan_file_for_claims(tmp_file)
         assert matches == []
-        os.remove(tmp_file)
 
     def test_get_keywords(self):
         scorer = EvidenceCompletenessScorer()
@@ -146,15 +143,14 @@ class TestEvidenceCompletenessScorer:
         keywords = scorer._get_keywords("a b c")
         assert keywords == []
 
-    def test_check_source_exists_found(self):
+    def test_check_source_exists_found(self, tmp_path):
         scorer = EvidenceCompletenessScorer()
-        tmp_file = "/tmp/_test_src.py"
+        tmp_file = str(tmp_path / "_test_src.py")
         with open(tmp_file, "w") as f:
             f.write("def secure_function():\n    pass\n")
         found, files = scorer._check_source_exists("secure_function")
         assert isinstance(found, bool)
         assert isinstance(files, list)
-        os.remove(tmp_file)
 
     def test_check_test_exists_no_tests_dir(self):
         scorer = EvidenceCompletenessScorer(root_dir="/tmp/nonexistent_test_xyz")

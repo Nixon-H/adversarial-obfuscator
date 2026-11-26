@@ -25,7 +25,6 @@ import glob
 import os
 import re
 
-import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORKFLOWS = os.path.join(ROOT, ".github", "workflows")
@@ -33,7 +32,6 @@ WORKFLOWS = os.path.join(ROOT, ".github", "workflows")
 #: Install commands that are legitimately not hash-locked, each with a reason.
 #: Adding to this list should be a deliberate act with a stated justification.
 ALLOWED_UNHASHED = (
-    "pip-audit==",      # verification tool, never a build input
     "ruff",             # lint tool, pinned by version in the lock now anyway
 )
 
@@ -102,3 +100,60 @@ def test_setuptools_is_exactly_pinned_in_the_source_list():
     assert re.search(r"^setuptools==", text, re.M), (
         "setuptools still uses a floating floor; --generate-hashes needs an "
         "exact version, and the artefact-producing jobs install this package")
+
+
+def test_the_pip_audit_lock_exists_and_is_hashed():
+    """The auditor itself must not be an unverified supply-chain exception."""
+    path = os.path.join(ROOT, "requirements-pip-audit.lock")
+    assert os.path.exists(path), (
+        "requirements-pip-audit.lock is missing; pip-audit must install "
+        "through --require-hashes rather than as a trusted exception")
+    text = open(path, encoding="utf-8").read()
+    assert re.search(r"^pip-audit==2\.10\.1", text, re.M), (
+        "pip-audit 2.10.1 is not pinned in requirements-pip-audit.lock")
+    assert "--hash=sha256:" in text, (
+        "requirements-pip-audit.lock carries no artifact hashes")
+
+
+def test_no_unhashed_pip_audit_install_exception_remains():
+    offenders = []
+    for name, no, line in _install_lines():
+        if "pip-audit" in line and "--require-hashes" not in line:
+            offenders.append("%s:%d: %s" % (name, no, line.strip()))
+    assert not offenders, (
+        "pip-audit installs must use requirements-pip-audit.lock with "
+        "--require-hashes:\n  " + "\n  ".join(offenders))
+
+
+def test_the_farm_lock_exists_and_carries_hashes_for_all_build_tools():
+    path = os.path.join(ROOT, "requirements-farm.lock")
+    assert os.path.exists(path), (
+        "requirements-farm.lock is missing; the generated native-build farm "
+        "would have no hash-locked dependency file to install")
+    text = open(path, encoding="utf-8").read()
+    packages = re.findall(r"^([A-Za-z0-9_.-]+)==", text, re.M)
+    assert sorted(p.lower() for p in packages) == ["cython", "packaging", "setuptools", "wheel"]
+    for pkg in packages:
+        block = re.search(r"^%s==[^\n]*(?:\n    .*)*" % re.escape(pkg),
+                          text, re.M)
+        assert block and "--hash=sha256:" in block.group(0), (
+            "%s is present in requirements-farm.lock without artifact hashes" % pkg)
+
+
+def test_the_farm_lock_hashes_are_copied_from_the_main_lock():
+    main = open(os.path.join(ROOT, "requirements.lock"), encoding="utf-8").read()
+    farm = open(os.path.join(ROOT, "requirements-farm.lock"), encoding="utf-8").read()
+    main_hashes = set(re.findall(r"--hash=sha256:([0-9a-f]{64})", main))
+    farm_hashes = set(re.findall(r"--hash=sha256:([0-9a-f]{64})", farm))
+    assert farm_hashes and farm_hashes <= main_hashes
+
+
+def test_generated_farm_workflow_uses_only_the_hash_locked_install():
+    from obfuscator.core.utils import farm_driver_dependencies, render_farm_yaml
+
+    yaml_text = render_farm_yaml("payload.py")
+    assert yaml_text.count("pip install --require-hashes -r requirements-farm.lock") == 3
+    assert "pip install cython" not in yaml_text
+    assert "install upx" not in yaml_text
+    assert any(remote == "requirements-farm.lock" and os.path.exists(local)
+               for remote, local in farm_driver_dependencies())

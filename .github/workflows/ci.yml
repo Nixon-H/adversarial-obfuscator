@@ -54,11 +54,11 @@ jobs:
         # otherwise ship silently (CI previously pinned 3.12 only).
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # pinned immutable; original actions-rust-lang/setup-rust-toolchain@v1
       - name: Install LLVM (llc for the lowering tests)
         # tests/test_native_lowering.py carries ~21 regression tests for
         # the IR -> LLVM defects (shr dropped, gep losing indices, phi
@@ -160,8 +160,8 @@ jobs:
     env:
       NIXON_LOG_REDIRECT: "0"
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Install build dependencies
@@ -206,6 +206,9 @@ jobs:
           pin = public_key_hex(private_key_from_hex(key))
           os.environ["NIXON_ARTEFACT_SIGN_KEY"] = key
           os.environ["NIXON_BUILD_MANIFEST_KEY"] = key
+          os.environ["NIXON_BUILD_MANIFEST_PUBKEY"] = private_key_from_hex(key).public_key().public_bytes(
+              encoding=serialization.Encoding.Raw,
+              format=serialization.PublicFormat.Raw).hex()
           os.environ["NIXON_REQUIRE_PROVENANCE"] = "1"
           b = subprocess.run([sys.executable, "-m", "obfuscator.core.pipeline",
                               "build", "tests/fixtures/payload_probe.py",
@@ -232,13 +235,23 @@ jobs:
               (manifest.get("build") or {}).get("commit") ==
               subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
                              text=True).stdout.strip())
-          rec("manifest binds the dependency-lock digest",
-              bool((manifest.get("build") or {}).get("dependency_lock_digest")))
+          expected_lock_digest = hashlib.sha256(open("requirements.lock", "rb").read()).hexdigest()
+          rec("manifest binds the exact dependency-lock digest",
+              (manifest.get("build") or {}).get("dependency_lock_digest") == expected_lock_digest)
+          ci = (manifest.get("build") or {}).get("ci") or {}
+          rec("manifest binds the current CI workflow identity",
+              ci.get("workflow") == os.environ.get("GITHUB_WORKFLOW") and
+              ci.get("run_id") == os.environ.get("GITHUB_RUN_ID") and
+              ci.get("sha") == os.environ.get("GITHUB_SHA"))
+          rec("manifest records no dependency-lock drift",
+              ((manifest.get("extra") or {}).get("dependency_lock") or {}).get("ok") is True)
           text = published.decode("utf-8", "replace")
           m = re.search(r'_NX_PROV_PK = "([0-9a-f]{16}): ([A-Za-z0-9+/=]+)"', text)
           pin_bytes = base64.b64decode(m.group(2))
           rec("embedded key fingerprint self-consistent",
               m.group(1) == hashlib.sha256(pin_bytes).hexdigest()[:16])
+          rec("embedded pin matches independently generated publisher key",
+              pin_bytes.hex() == os.environ["NIXON_BUILD_MANIFEST_PUBKEY"])
 
           # 3. REFUSAL MATRIX (each row RUNS the artefact).
           def pinned_run(env_overrides=None):
@@ -309,7 +322,7 @@ jobs:
           PY
       - name: Upload acceptance report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pinned immutable; original actions/upload-artifact@v4
         with:
           name: acceptance-report
           path: "**/acceptance_report.json"
@@ -323,7 +336,7 @@ jobs:
     # default) so a vulnerable pin breaks the build until a human bumps
     # the pin after reviewing the advisory. Deliberately no --fix
     # auto-mutation in CI. NOTE (2026-09-28): pins were bumped
-    # (requests 2.33.0, urllib3 2.7.0, cryptography 50.0.0, pytest 9.0.3)
+    # (requests 2.33.0, urllib3 2.8.0, cryptography 50.0.0, pytest 9.0.3)
     # and a local `pip-audit -r requirements.txt` run reports clean, so
     # this job is green on current pins. That is the gate working as
     # designed: it will go red the moment a new advisory matches a pin.
@@ -333,23 +346,17 @@ jobs:
     # vulnerable indirect dependency is only visible there.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Install pip-audit
-        # VERSION-PINNED (finding AI-SC-003 remainder). `pip install pip-audit`
-        # was unpinned, so the auditor itself could change between runs and a
-        # silent version bump would alter what the gate reports.
-        #
-        # Full --require-hashes is NOT applied here and the reason is stated
-        # rather than glossed: pip-audit's own dependency tree is large and
-        # changes frequently, and it is a verification TOOL rather than a build
-        # input -- it never runs inside the artefact and contributes no code to
-        # the deliverable. Pinning the version makes a change visible in review,
-        # which is the property that matters for an auditor. The build
-        # dependencies themselves ARE hash-locked above.
-        run: pip install pip-audit==2.10.1
+        # HASH-PINNED (AI-SC-003 remainder closed). The auditor is a
+        # verification tool rather than a build input, but an unverified
+        # auditor is still supply-chain attack surface: a substituted package
+        # could suppress or misreport advisories. requirements-pip-audit.lock
+        # pins pip-audit 2.10.1 and its transitive dependencies by SHA-256.
+        run: pip install --require-hashes -r requirements-pip-audit.lock
       - name: Audit the direct pins (hard gate)
         run: pip-audit -r requirements.txt --desc
       - name: Audit the hash-pinned lock (hard gate)
@@ -366,10 +373,10 @@ jobs:
     # for v3 migration.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # pinned immutable; original gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -380,7 +387,7 @@ jobs:
     # human review. Always exits 0 (|| true); reviewers check the log.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Show requirements.txt diff (informational)
@@ -397,8 +404,8 @@ jobs:
     # `make lint-upgrade` prints the same thing locally.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Compare the pinned ruff with the latest release

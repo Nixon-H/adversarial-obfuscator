@@ -13,7 +13,6 @@ These tests pin both cases, because a field that is only ever exercised in CI
 would be untested on every developer machine, and a field that is only ever
 tested locally would never be tested at all.
 """
-import json
 import os
 import sys
 
@@ -125,9 +124,11 @@ def test_the_record_does_not_invoke_anything(clean_ci_env, tmp_path,
 
 # ── §7 is now fully recorded ──────────────────────────────────────────
 
-def test_the_manifest_records_all_nine_section7_fields(clean_ci_env,
-                                                       tmp_path):
-    """The whole §7 list, in one place, so a regression names its field."""
+def test_the_manifest_records_all_section7_fields(clean_ci_env, tmp_path):
+    """The whole §7 list a bare build_manifest() records, in one place, so a
+    regression names its field. The ninth field, pack format version, is written
+    by the pipeline (extra.pack), not build_manifest; it is pinned by
+    tests/test_manifest_pack_version.py."""
     manifest = _manifest(tmp_path)
     tool = manifest.get("toolchain") or {}
     build = manifest.get("build") or {}
@@ -143,8 +144,6 @@ def test_the_manifest_records_all_nine_section7_fields(clean_ci_env,
         "dependency-lock digest": "dependency_lock_digest" in build,
         "final artifact digest": bool((manifest.get("artefact") or {})
                                       .get("sha256")),
-        "pack format version": "pack" in (manifest.get("extra") or {})
-                                        or True,  # see note below
         "protection level": manifest.get("protection_level") is not None,
     }
     missing = [k for k, v in recorded.items() if not v]

@@ -411,8 +411,10 @@ def test_loader_transforms_marker_guard():
                               tx_function_intent=False, tx_speculation=False)
     try:
         out = _run_loader_transforms(src, args)
-        # If the marker survived, fine; the build-level guard would also pass.
-        assert "_NX_PART_NATIVE_DICT_PLACEHOLDER" in out or True
+        # The marker MUST survive the loader transforms: build_project fails
+        # closed (SystemExit) when a pass consumes it, so a surviving marker
+        # here is the required behaviour, not an optional one.
+        assert "_NX_PART_NATIVE_DICT_PLACEHOLDER" in out
     except SystemExit as e:
         assert "marker" in str(e) or "transform" in str(e)
 
@@ -432,7 +434,6 @@ def test_vm_compile_container_has_no_key_material(tmp_path):
     import argparse
     import json
     import os
-    import stat
     from vm.__main__ import _cmd_compile
 
     src = tmp_path / "in.py"
@@ -440,19 +441,43 @@ def test_vm_compile_container_has_no_key_material(tmp_path):
     out = tmp_path / "out.json"
     args = argparse.Namespace(input=str(src), output=str(out),
                               functions="add",
-                              seed=b"0123456789abcdef")
+                              seed=b"0123456789abcdef",
+                              key_out=None)
     assert _cmd_compile(args) == 0
 
     container = json.loads(out.read_text())
     assert "key" not in container and "seed" not in container
+    assert container.get("encrypted") is True
     assert set(container) >= {"bytecode", "num_functions", "bytecode_size"}
 
+    # No key material is persisted unless --key-out is passed explicitly:
+    # seed -> key, so a stored seed beside the ciphertext is a self-contained
+    # break.
     sidecar = str(out) + ".key"
-    assert os.path.exists(sidecar)
-    mode = stat.S_IMODE(os.stat(sidecar).st_mode)
+    assert not os.path.exists(sidecar)
+
+
+def test_vm_compile_key_out_writes_key_only_0600(tmp_path):
+    import argparse
+    import os
+    import stat
+    from vm.__main__ import _cmd_compile
+
+    src = tmp_path / "in.py"
+    src.write_text("def add(a, b):\n    return a + b\n")
+    out = tmp_path / "out.json"
+    key_out = tmp_path / "key.bin"
+    args = argparse.Namespace(input=str(src), output=str(out),
+                              functions="add",
+                              seed=b"0123456789abcdef",
+                              key_out=str(key_out))
+    assert _cmd_compile(args) == 0
+
+    mode = stat.S_IMODE(os.stat(key_out).st_mode)
     assert mode == 0o600, oct(mode)
-    text = open(sidecar).read()
-    assert "seed=" in text and "key=" in text
+    text = open(key_out).read()
+    assert "key=" in text
+    assert "seed=" not in text, "the seed must never be persisted (seed -> key)"
 
 
 def test_research_sidecars_withhold_key_material():
@@ -752,6 +777,7 @@ def _e2e_artifact(tmp_path_factory):
     return base, artifact
 
 
+@pytest.mark.nixon_timeout(700)
 def test_loader_blocks_the_bench_capture_shim(_e2e_artifact, tmp_path):
     """The capture shim that defeated the 2026-11-14 bench artefact must be
     blocked: exit 3 with the interpreter-integrity reason, and the shim's
@@ -781,6 +807,7 @@ def test_loader_blocks_the_bench_capture_shim(_e2e_artifact, tmp_path):
     assert not (workdir / "capture.log").exists()
 
 
+@pytest.mark.nixon_timeout(700)
 def test_loader_blocks_a_shim_that_never_touches_zipfile(_e2e_artifact, tmp_path):
     """Defence in depth: a sitecustomize shim that leaves zipfile alone
     (and would dodge the zipfile check) must still be caught by the
@@ -808,6 +835,7 @@ def test_loader_blocks_a_shim_that_never_touches_zipfile(_e2e_artifact, tmp_path
     assert "startup-hook-external" in (proc.stdout + proc.stderr)
 
 
+@pytest.mark.nixon_timeout(700)
 def test_loader_refuses_a_tampered_artifact(_e2e_artifact, tmp_path):
     """Self-hash: flipping one byte inside the sealed payload blob must be
     refused — the artefact may not run attacker-modified code."""
@@ -853,6 +881,7 @@ def test_loader_refuses_a_tampered_artifact(_e2e_artifact, tmp_path):
     assert "E2E_OK" not in proc.stdout, "tampered artefact produced payload output"
 
 
+@pytest.mark.nixon_timeout(700)
 def test_loader_runs_clean_without_any_shim(_e2e_artifact):
     """Control: the same build with no shim runs the payload normally —
     and the original function name did not survive the renaming pass."""
@@ -870,6 +899,7 @@ def test_loader_runs_clean_without_any_shim(_e2e_artifact):
     assert "orbital_secret_payload_fn" not in artifact_text
 
 
+@pytest.mark.nixon_timeout(700)
 def test_build_leaves_no_rename_log_beside_the_payload(_e2e_artifact):
     """The 2026-11-14 bench agent recovered every payload symbol from the
     .renamelog sidecar the build wrote beside the source — no crypto

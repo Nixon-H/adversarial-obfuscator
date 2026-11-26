@@ -34,7 +34,9 @@ def _add_function():
     a = IrValue(IrType.i32(), '%a')
     b = IrValue(IrType.i32(), '%b')
     result = block._make('add', IrType.i32(), [a, b])
-    block.set_terminator('ret', operands=[result.result])
+    # IR terminator shape is [return_type, value]; a bare [value] is malformed
+    # and makes the compiler see no return value at all.
+    block.set_terminator('ret', operands=[IrType.i32(), result.result])
     return func
 
 
@@ -80,8 +82,7 @@ def test_remap_keeps_call_and_ret_intact():
     remapped = remap_bytecode(original, omap)
     assert len(remapped) == len(original)
 
-    inverse = {v: k for k, v in omap.items()}
-    assert remap_bytecode(remapped, inverse) == original
+    assert remap_bytecode(remapped, omap, reverse=True) == original
 
 
 def test_remapped_program_still_executes():

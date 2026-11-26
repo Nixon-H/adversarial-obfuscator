@@ -25,17 +25,33 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 # Add cross-compilation targets
 RUN rustup target add x86_64-pc-windows-gnu aarch64-unknown-linux-gnu
 
-# Copy project
+# Copy project. SOURCE_COMMIT is supplied by the outer build command because
+# .git is deliberately excluded from the context; the tester-stage manifest
+# acceptance test can then bind the exact source revision honestly.
+ARG SOURCE_COMMIT=""
+ENV NIXON_SOURCE_COMMIT=${SOURCE_COMMIT}
 WORKDIR /build
 COPY . .
 
 # Install Python dependencies (failures propagate: a tester image must
-# never look green while broken).
-RUN pip3 install --no-cache-dir -r requirements.txt
+# never look green while broken). ubuntu:24.04 ships the PEP 668
+# EXTERNALLY-MANAGED marker, so a bare `pip3 install` into the system
+# environment is refused; --break-system-packages is required in this
+# disposable build image.
+# --ignore-installed avoids trying to uninstall distro-managed packages whose
+# RECORD files are absent (notably wheel on Ubuntu 24.04).
+RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed -r requirements.txt
 
 # Build
 RUN make all
 
-# Testing image
+# Testing image. The suite's compatibility/lint gates call ruff directly, so
+# install the same pinned version as requirements-dev.lock in the image too.
 FROM builder AS tester
+# Node is a test-time dependency of the Cloudflare-worker and JS-digest
+# compatibility tests. Install it only in the tester stage so the builder
+# toolchain layer remains reusable.
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed ruff==0.16.1
 RUN make test

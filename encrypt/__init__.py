@@ -18,6 +18,7 @@ Dependencies:
 
 import argparse
 import sys
+from pathlib import Path
 
 from . import encrypt as _encrypt
 from . import container as _container
@@ -50,6 +51,22 @@ def container_info(*args, **kwargs):
 
 def generate_encryption_seed():
     return _aes.generate_encryption_seed()
+
+
+def _cli_read_bytes(path_text, label):
+    """Read a CLI-supplied file after resolving and checking it is a file."""
+    path = Path(path_text).resolve()
+    if not path.is_file():
+        raise SystemExit(f'{label} is not a file: {path_text}')
+    return path.read_bytes()
+
+
+def _cli_write_bytes(path_text, data, label):
+    """Write a CLI-supplied output after refusing directory targets."""
+    path = Path(path_text).resolve()
+    if path.exists() and path.is_dir():
+        raise SystemExit(f'{label} is a directory: {path_text}')
+    path.write_bytes(data)
 
 
 def main(argv=None):
@@ -121,23 +138,27 @@ def main(argv=None):
             print(f'  .rodata:       skipped ({result["rodata_skipped_reason"]})')
 
     elif args.command == 'pack':
-        container = _container.pack_encrypted_payload(args.input, args.key)
-        with open(args.output, 'wb') as f:
-            f.write(container)
+        if len(args.key) != 32:
+            raise SystemExit('key must be 32 bytes (64 hex characters)')
+        payload = _cli_read_bytes(args.input, 'input')
+        container = _container.pack_bytes(payload, args.key)
+        _cli_write_bytes(args.output, container, 'output')
         info = _container.container_info(container)
         print(f'Packed: {info["original_size"]} -> {info["total_size"]} bytes')
 
     elif args.command == 'unpack':
-        with open(args.input, 'rb') as f:
-            container = f.read()
-        plaintext = _container.unpack_encrypted_payload(container, args.key)
-        with open(args.output, 'wb') as f:
-            f.write(plaintext)
+        if len(args.key) != 32:
+            raise SystemExit('key must be 32 bytes (64 hex characters)')
+        container = _cli_read_bytes(args.input, 'input container')
+        try:
+            plaintext = _container.unpack_encrypted_payload(container, args.key)
+        except ValueError as exc:
+            raise SystemExit(f'unpack failed: {exc}') from exc
+        _cli_write_bytes(args.output, plaintext, 'output')
         print(f'Unpacked: {len(plaintext)} bytes -> {args.output}')
 
     elif args.command == 'info':
-        with open(args.input, 'rb') as f:
-            container = f.read()
+        container = _cli_read_bytes(args.input, 'input container')
         info = _container.container_info(container)
         for k, v in info.items():
             print(f'  {k}: {v}')

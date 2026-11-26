@@ -58,12 +58,14 @@ def artifact(tmp_path_factory):
     return _build(str(work))
 
 
+@pytest.mark.nixon_timeout(1000)
 def test_the_untampered_artifact_runs(artifact):
     run = _run(artifact)
     assert run.returncode == 0, run.stderr[-2000:]
     assert _MARKER in run.stdout
 
 
+@pytest.mark.nixon_timeout(1000)
 def test_every_tampered_artifact_fails(artifact, tmp_path):
     """A flipped byte anywhere must not look like a clean run."""
     with open(artifact, "rb") as fh:
@@ -85,6 +87,7 @@ def test_every_tampered_artifact_fails(artifact, tmp_path):
         "a tampered artifact looked like a clean run: %r" % (failures,))
 
 
+@pytest.mark.nixon_timeout(1000)
 def test_tampering_with_the_self_check_is_detected(artifact, tmp_path):
     """Editing the self-check's own code must not disable it.
 

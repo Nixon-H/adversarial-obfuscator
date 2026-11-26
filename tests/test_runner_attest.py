@@ -184,6 +184,47 @@ def test_the_embedded_driver_emits_the_attestation_fields():
         assert field in driver, "driver does not record %r" % (field,)
 
 
+def test_generated_farm_yaml_actions_are_sha_pinned():
+    """The farm workflow is generated at runtime, so the static-workflow pin
+    test cannot see it. A mutable action in this YAML would execute upstream
+    code inside the exact runner that builds and attests native payloads."""
+    import re
+
+    from obfuscator.core.utils import render_farm_yaml
+
+    yaml_text = render_farm_yaml("payload.py")
+    refs = []
+    for line in yaml_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#") or "uses:" not in line:
+            continue
+        ref = stripped.split("uses:", 1)[1].strip().split()[0]
+        refs.append((ref, line))
+    assert refs, "the generated farm workflow contains no action references"
+    floating = [ref for ref, _line in refs
+                if not re.search(r"@[0-9a-f]{40}$", ref)]
+    assert not floating, "floating generated-farm action refs: %r" % floating
+    uncommented = [ref for ref, line in refs if "pinned immutable;" not in line]
+    assert not uncommented, (
+        "generated-farm pins must carry the original action/version identity: "
+        "%r" % uncommented)
+
+
+def test_generated_farm_yaml_uploads_runner_attestation():
+    """The controller fails closed on a missing attestation, so the workflow
+    must return runner-attestation.json with every payload object."""
+    from obfuscator.core.utils import render_farm_yaml
+
+    yaml_text = render_farm_yaml("payload.py")
+    marker = "- name: Upload Artifact"
+    start = yaml_text.find(marker)
+    assert start >= 0, "generated farm workflow has no Upload Artifact step"
+    body = yaml_text[start:start + 1000]
+    assert "path: |" in body
+    assert "payload${{ matrix.suffix }}" in body
+    assert "runner-attestation.json" in body
+
+
 def test_the_embedded_driver_records_both_seeds():
     """Seed provenance travels with the attestation, per §5."""
     from obfuscator.core.utils import render_farm_driver
@@ -201,3 +242,35 @@ def test_summary_is_human_readable():
 
 def test_payload_digest_matches_hashlib():
     assert payload_digest(PAYLOAD) == hashlib.sha256(PAYLOAD).hexdigest()
+
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def test_controller_binds_attestation_to_the_exact_uploaded_source():
+    """The pre-pass can upload .nx_farm_payload.py rather than `source`.
+
+    Hashing the original file in that case both rejects correct attestations
+    and fails to bind the bytes the runner actually received. This is a source
+    policy regression test for the controller-side comparison.
+    """
+    pipe = open(os.path.join(ROOT, "obfuscator", "core", "pipeline.py"),
+                encoding="utf-8").read()
+    start = pipe.find("FARM-RUNNER INTEGRITY")
+    end = pipe.find("_ra_res = _ra_verify", start)
+    assert start >= 0 and end > start
+    block = pipe[start:end]
+    assert 'open(_farm_src, "rb").read()' in block
+    assert 'open(source, "rb").read()' not in block
+
+
+def test_failed_farm_attestation_is_fail_closed_by_default():
+    """Attestation evidence is a gate, not a warning most builds may ignore."""
+    pipe = open(os.path.join(ROOT, "obfuscator", "core", "pipeline.py"),
+                encoding="utf-8").read()
+    start = pipe.find("farm attestation FAILED")
+    assert start >= 0
+    block = pipe[start:start + 1200]
+    assert "raise SystemExit" in block
+    assert "unverified farm output is refused" in block
+    assert "NIXON_REQUIRE_FARM_ATTEST" not in pipe

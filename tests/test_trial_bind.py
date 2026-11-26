@@ -361,6 +361,7 @@ def test_loader_with_trial_has_gate(tmp_path, monkeypatch):
     ns = {"__name__": "trial_on_loader"}
     exec(compile(src, "<trial_on_loader>", "exec"), ns)
     assert ns.get("_NX_TRIAL_GATE") == "ok"
+    ns["_nx_cfi_mark"]("enter")
     ns["_exec_fallback"]()
     assert ns.get("TRIAL_E2E") == 42
 

@@ -108,13 +108,13 @@ def test_full_transform_includes_new_transforms():
     assert result.transforms_applied
 
 
-def test_full_transform_compiles():
+def test_full_transform_compiles(tmp_path):
     import subprocess
     import sysconfig
 
     result = transform_c(CYX_C, b"np-hard-compile")
     py_inc = sysconfig.get_paths()["include"]
-    out = "/tmp/test_np_hard.c"
+    out = str(tmp_path / "test_np_hard.c")
     with open(out, "w") as fh:
         fh.write(result.source)
     proc = subprocess.run(

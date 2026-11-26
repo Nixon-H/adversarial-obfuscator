@@ -15,7 +15,6 @@ snapshot, so adding a flag without documenting it fails here.
 import os
 import re
 import subprocess
-import sys
 
 import pytest
 

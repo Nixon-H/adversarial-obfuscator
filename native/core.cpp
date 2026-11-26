@@ -32,6 +32,8 @@
 #include <stdexcept>
 #include <cstdio>
 #include <ctime>
+#include <limits>
+#include <memory>
 #include "whitebox_feistel.h"
 
 // NOTE: no flavor `#if` in this file: WhiteboxCrypto, WhiteboxEnhanced
@@ -46,6 +48,19 @@
 // (see whitebox_feistel.{h,cpp}); raw key wiped after derivation so only
 // lookup tables persist. Obfuscation-grade (table-inversion barrier),
 // composed with AES-CTR + runtime decrypt — never the sole secrecy layer.
+
+// PKCS#7 always appends 1..WB_BLOCK bytes. Zero is an unambiguous error
+// sentinel because every valid ciphertext is at least one block long.
+static bool wbc_checked_encrypted_size(size_t plain_len, size_t* encrypted_len) {
+    if (!encrypted_len) return false;
+    if (plain_len > std::numeric_limits<size_t>::max() - WB_BLOCK) {
+        *encrypted_len = 0;
+        return false;
+    }
+    *encrypted_len = ((plain_len / WB_BLOCK) + 1) * WB_BLOCK;
+    return true;
+}
+
 class WhiteboxCrypto {
 private:
     nixon_wb::WbTables _t;
@@ -72,7 +87,12 @@ public:
     }
 
     std::vector<uint8_t> encrypt(const std::vector<uint8_t>& data) {
-        std::vector<uint8_t> result = data;
+        size_t padded_len = 0;
+        if (!wbc_checked_encrypted_size(data.size(), &padded_len))
+            throw std::length_error("WhiteboxCrypto plaintext is too large");
+        std::vector<uint8_t> result;
+        result.reserve(padded_len);
+        result.insert(result.end(), data.begin(), data.end());
         size_t pad = WB_BLOCK - (result.size() % WB_BLOCK);
         if (pad == 0) pad = WB_BLOCK;
         for (size_t i = 0; i < pad; ++i) result.push_back((uint8_t)pad);
@@ -81,17 +101,25 @@ public:
         return result;
     }
 
-    std::vector<uint8_t> decrypt(const std::vector<uint8_t>& data) {
-        if (data.empty() || (data.size() % WB_BLOCK) != 0) return {};
-        std::vector<uint8_t> result = data;
+    bool decrypt(const std::vector<uint8_t>& data, std::vector<uint8_t>& result) const {
+        result.clear();
+        if (data.empty() || (data.size() % WB_BLOCK) != 0) return false;
+        result = data;
         for (size_t off = 0; off < result.size(); off += WB_BLOCK)
             nixon_wb::wb_feistel_block(_t, result.data() + off, true);
         uint8_t pad = result.back();
-        if (pad == 0 || pad > WB_BLOCK || pad > result.size()) return {};
-        for (size_t i = 0; i < pad; ++i)
-            if (result[result.size() - 1 - i] != pad) return {};
+        if (pad == 0 || pad > WB_BLOCK || pad > result.size()) {
+            result.clear();
+            return false;
+        }
+        for (size_t i = 0; i < pad; ++i) {
+            if (result[result.size() - 1 - i] != pad) {
+                result.clear();
+                return false;
+            }
+        }
         result.resize(result.size() - pad);
-        return result;
+        return true;
     }
 };
 
@@ -99,50 +127,97 @@ public:
 extern "C" {
 #endif
 
+// Additive status/out-parameter ABI. Status values are stable:
+//   0 = success, -1 = invalid argument/ciphertext, -2 = size overflow,
+//   -3 = internal/allocation failure. No C++ exception crosses this boundary.
+// On every return, *out is NULL and *out_len is zero unless status is 0.
+// A successful empty plaintext still returns a freeable one-byte sentinel with
+// *out_len == 0, so success is never confused with the legacy NULL error result.
+__attribute__((visibility("default"))) int WBC_encrypt_ex(
+        WhiteboxCrypto* wbc, const uint8_t* data, size_t len,
+        uint8_t** out, size_t* out_len) {
+    if (out) *out = nullptr;
+    if (out_len) *out_len = 0;
+    if (!out || !out_len || !wbc || (!data && len)) return -1;
+
+    size_t encrypted_len = 0;
+    if (!wbc_checked_encrypted_size(len, &encrypted_len)) return -2;
+
+    try {
+        std::vector<uint8_t> v;
+        if (len) v.assign(data, data + len);
+        std::vector<uint8_t> res = wbc->encrypt(v);
+        if (res.size() != encrypted_len) return -3;
+        std::unique_ptr<uint8_t[]> buffer(new uint8_t[res.size()]);
+        std::copy(res.begin(), res.end(), buffer.get());
+        *out = buffer.release();
+        *out_len = res.size();
+        return 0;
+    } catch (...) {
+        return -3;
+    }
+}
+
+__attribute__((visibility("default"))) int WBC_decrypt_ex(
+        WhiteboxCrypto* wbc, const uint8_t* data, size_t len,
+        uint8_t** out, size_t* out_len) {
+    if (out) *out = nullptr;
+    if (out_len) *out_len = 0;
+    if (!out || !out_len || !wbc || !data || !len || (len % WB_BLOCK)) return -1;
+
+    try {
+        std::vector<uint8_t> v(data, data + len);
+        std::vector<uint8_t> res;
+        if (!wbc->decrypt(v, res)) return -1;
+        std::unique_ptr<uint8_t[]> buffer(new uint8_t[res.empty() ? 1 : res.size()]);
+        if (res.empty()) {
+            buffer[0] = 0;
+        } else {
+            std::copy(res.begin(), res.end(), buffer.get());
+        }
+        *out = buffer.release();
+        *out_len = res.size();
+        return 0;
+    } catch (...) {
+        return -3;
+    }
+}
+
 __attribute__((visibility("default"))) WhiteboxCrypto* WBC_new(const uint8_t* key, size_t key_len) {
+    // A NULL key with a non-zero length would be dereferenced by the
+    // constructor; return the same error sentinel as an invalid key.
+    if (!key && key_len) return nullptr;
     try { return new WhiteboxCrypto(key, key_len); }
-    catch (std::bad_alloc&) { return nullptr; }
-    catch (std::invalid_argument&) { return nullptr; }
+    catch (...) { return nullptr; }
 }
 __attribute__((visibility("default"))) void WBC_del(WhiteboxCrypto* wbc) {
     delete wbc;
 }
 __attribute__((visibility("default"))) uint8_t* WBC_encrypt(WhiteboxCrypto* wbc, const uint8_t* data, size_t len) {
-    try {
-        if (!wbc || (!data && len)) return nullptr;
-        std::vector<uint8_t> v(data, data + len);
-        std::vector<uint8_t> res = wbc->encrypt(v);
-        // NOTE: padded output is LONGER than input (PKCS#7 to 16 B).
-        // Callers must size the buffer as ((len/16)+1)*16. The padded
-        // length is recoverable as: out_len = ((len/16)+1)*16.
-        uint8_t* out = new uint8_t[res.size()];
-        std::copy(res.begin(), res.end(), out);
-        return out;
-    } catch (std::bad_alloc&) { return nullptr; }
+    uint8_t* out = nullptr;
+    size_t out_len = 0;
+    if (WBC_encrypt_ex(wbc, data, len, &out, &out_len) != 0) return nullptr;
+    return out;
 }
 __attribute__((visibility("default"))) size_t WBC_encrypted_size(size_t plain_len) {
-    return ((plain_len / WB_BLOCK) + 1) * WB_BLOCK;
+    size_t encrypted_len = 0;
+    wbc_checked_encrypted_size(plain_len, &encrypted_len);
+    return encrypted_len;
 }
 __attribute__((visibility("default"))) uint8_t* WBC_decrypt(WhiteboxCrypto* wbc, const uint8_t* data, size_t len) {
-    try {
-        if (!wbc || !data) return nullptr;
-        std::vector<uint8_t> v(data, data + len);
-        std::vector<uint8_t> res = wbc->decrypt(v);
-        if (res.empty() && len) return nullptr;  // bad padding
-        uint8_t* out = new uint8_t[res.size() ? res.size() : 1];
-        std::copy(res.begin(), res.end(), out);
-        return out;
-    } catch (std::bad_alloc&) { return nullptr; }
+    uint8_t* out = nullptr;
+    size_t out_len = 0;
+    if (WBC_decrypt_ex(wbc, data, len, &out, &out_len) != 0) return nullptr;
+    return out;
 }
 __attribute__((visibility("default"))) size_t WBC_decrypted_size(WhiteboxCrypto* wbc, const uint8_t* data, size_t len) {
-    // Peek decrypted length without allocating: total minus PKCS#7 pad.
-    // Returns 0 on invalid input/padding.
+    // Zero is both the valid empty length and the historical invalid-input
+    // sentinel. Use WBC_decrypt_ex when success/error must be distinguished.
     if (!wbc || !data || !len || (len % WB_BLOCK)) return 0;
-    // Decrypt last block only to read pad byte: full decrypt is cheap
-    // enough here; keep API simple and correct.
     try {
         std::vector<uint8_t> v(data, data + len);
-        std::vector<uint8_t> res = wbc->decrypt(v);
+        std::vector<uint8_t> res;
+        if (!wbc->decrypt(v, res)) return 0;
         return res.size();
     } catch (...) { return 0; }
 }
@@ -238,8 +313,7 @@ extern "C" {
 
 __attribute__((visibility("default"))) WhiteboxEnhanced* WBE_new(int num_rounds, const uint8_t* tboxes, const uint8_t* inv_tboxes, const uint8_t* mix_keys) {
     try { return new WhiteboxEnhanced(num_rounds, tboxes, inv_tboxes, mix_keys); }
-    catch (std::bad_alloc&) { return nullptr; }
-    catch (std::invalid_argument&) { return nullptr; }
+    catch (...) { return nullptr; }
 }
 __attribute__((visibility("default"))) void WBE_del(WhiteboxEnhanced* wbe) {
     delete wbe;
@@ -251,7 +325,7 @@ __attribute__((visibility("default"))) uint8_t* WBE_encrypt(WhiteboxEnhanced* wb
         uint8_t* out = new uint8_t[len];
         std::copy(res.begin(), res.end(), out);
         return out;
-    } catch (std::bad_alloc&) { return nullptr; }
+    } catch (...) { return nullptr; }
 }
 __attribute__((visibility("default"))) uint8_t* WBE_decrypt(WhiteboxEnhanced* wbe, const uint8_t* data, size_t len) {
     try {
@@ -260,7 +334,7 @@ __attribute__((visibility("default"))) uint8_t* WBE_decrypt(WhiteboxEnhanced* wb
         uint8_t* out = new uint8_t[len];
         std::copy(res.begin(), res.end(), out);
         return out;
-    } catch (std::bad_alloc&) { return nullptr; }
+    } catch (...) { return nullptr; }
 }
 
 #ifdef __cplusplus
@@ -353,12 +427,16 @@ extern "C" {
 #endif
 
 __attribute__((visibility("default"))) void* FHE_new(size_t batch_size) {
-    FheHandle* h = new (std::nothrow) FheHandle();
-    if (!h) return nullptr;
-    h->batch_size = (uint32_t)(batch_size ? batch_size : 1);
-    fhe_random_bytes(h->key, sizeof(h->key));
-    fhe_random_bytes(h->nonce, sizeof(h->nonce));
-    return (void*)h;
+    try {
+        std::unique_ptr<FheHandle> h(new (std::nothrow) FheHandle());
+        if (!h) return nullptr;
+        h->batch_size = (uint32_t)(batch_size ? batch_size : 1);
+        fhe_random_bytes(h->key, sizeof(h->key));
+        fhe_random_bytes(h->nonce, sizeof(h->nonce));
+        return h.release();
+    } catch (...) {
+        return nullptr;
+    }
 }
 
 __attribute__((visibility("default"))) uint32_t* FHE_encrypt_batch(
@@ -429,46 +507,61 @@ __attribute__((visibility("default"))) void FHE_free_array(uint32_t* p) {
 
 __attribute__((visibility("default"))) void* ORAM_new(int size) {
     if (size <= 0) size = 1;
-    OramHandle* h = new (std::nothrow) OramHandle();
-    if (!h) return nullptr;
-    h->size = size;
-    h->pos = new (std::nothrow) int[size];
-    h->inv = new (std::nothrow) int[size];
-    h->data = new (std::nothrow) uint32_t[size];
-    if (!h->pos || !h->inv || !h->data) {
-        delete[] h->pos; delete[] h->inv; delete[] h->data; delete h;
+    OramHandle* h = nullptr;
+    try {
+        h = new (std::nothrow) OramHandle();
+        if (!h) return nullptr;
+        h->size = size;
+        h->pos = nullptr;
+        h->inv = nullptr;
+        h->data = nullptr;
+        h->pos = new (std::nothrow) int[size];
+        h->inv = new (std::nothrow) int[size];
+        h->data = new (std::nothrow) uint32_t[size];
+        if (!h->pos || !h->inv || !h->data) {
+            delete[] h->pos; delete[] h->inv; delete[] h->data; delete h;
+            return nullptr;
+        }
+        for (int i = 0; i < size; ++i) { h->pos[i] = i; h->inv[i] = i; h->data[i] = 0; }
+        oram_shuffle(h);
+        return (void*)h;
+    } catch (...) {
+        if (h) {
+            delete[] h->pos; delete[] h->inv; delete[] h->data; delete h;
+        }
         return nullptr;
     }
-    for (int i = 0; i < size; ++i) { h->pos[i] = i; h->inv[i] = i; h->data[i] = 0; }
-    oram_shuffle(h);
-    return (void*)h;
 }
 
 __attribute__((visibility("default"))) uint32_t ORAM_access(
         void* handle, bool is_write, int block_id, uint32_t data) {
-    OramHandle* h = (OramHandle*)handle;
-    if (!h) return 0;
-    if (block_id < 0 || block_id >= h->size) return 0;
-    uint32_t value = h->data[h->pos[block_id]];
-    if (is_write) {
-        h->data[h->pos[block_id]] = data;
-        // Re-randomise the physical layout after every write, so the
-        // memory layout does not reveal which slot was touched.
-        std::random_device rd;
-        int other = (int)(rd() % (uint32_t)h->size);
-        if (other != block_id) {
-            int pa = h->pos[block_id];
-            int pb = h->pos[other];
-            h->data[pa] = h->data[pb];
-            h->data[pb] = data;
-            h->pos[block_id] = pb;
-            h->pos[other] = pa;
-            h->inv[pb] = block_id;
-            h->inv[pa] = other;
+    try {
+        OramHandle* h = (OramHandle*)handle;
+        if (!h) return 0;
+        if (block_id < 0 || block_id >= h->size) return 0;
+        uint32_t value = h->data[h->pos[block_id]];
+        if (is_write) {
+            h->data[h->pos[block_id]] = data;
+            // Re-randomise the physical layout after every write, so the
+            // memory layout does not reveal which slot was touched.
+            std::random_device rd;
+            int other = (int)(rd() % (uint32_t)h->size);
+            if (other != block_id) {
+                int pa = h->pos[block_id];
+                int pb = h->pos[other];
+                h->data[pa] = h->data[pb];
+                h->data[pb] = data;
+                h->pos[block_id] = pb;
+                h->pos[other] = pa;
+                h->inv[pb] = block_id;
+                h->inv[pa] = other;
+            }
+            return data;
         }
-        return data;
+        return value;
+    } catch (...) {
+        return 0;
     }
-    return value;
 }
 
 #ifdef __cplusplus
@@ -494,6 +587,11 @@ __attribute__((visibility("default"))) uint8_t* CompileToMarshal(const char* sou
     // of handing the analyst a crash dialog / register state / core dump.
     // Idempotent per the header (sigaction/.SetErrorMode are idempotent).
     nixon_suppress_crash_dialogs();
+    // Validate FFI inputs before acquiring the GIL: a NULL out_size would be
+    // written on every error path, and Py_CompileStringExFlags needs a source.
+    if (!source_code || !out_size) return nullptr;
+    if (!filename) filename = "<unknown>";
+
     PyGILState_STATE gstate = PyGILState_Ensure();
 
     PyObject* code_obj = Py_CompileStringExFlags(source_code, filename, Py_file_input, NULL, -1);
@@ -531,7 +629,7 @@ __attribute__((visibility("default"))) uint8_t* CompileToMarshal(const char* sou
     try {
         out_buffer = new uint8_t[length];
         std::copy(buffer, buffer + length, out_buffer);
-    } catch (std::bad_alloc&) {
+    } catch (...) {
         Py_DECREF(marshal_bytes);
         PyGILState_Release(gstate);
         *out_size = 0;

@@ -41,6 +41,39 @@ def build_pipeline(source, seed=None, mba_validator=None, extra_options=None):
     t = ObfuscationTransformer(seed=seed, mba_validator=mba_validator)
     return t.transform(source, options=extra_options)
 
+
+def _write_private_key_file(path, secret_text):
+    """Atomically create/replace a local secret file with mode 0600.
+
+    Writing a predictable dotfile first and chmodding it afterwards leaves a
+    umask-dependent exposure window and follows a planted symlink. mkstemp in
+    the destination directory creates a unique private file before the atomic
+    replace, so neither race controls the final target.
+    """
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    basename = os.path.basename(path)
+    fd, tmp = tempfile.mkstemp(prefix=basename + ".", dir=directory)
+    try:
+        try:
+            os.fchmod(fd, 0o600)
+        except (AttributeError, OSError):
+            os.chmod(tmp, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(secret_text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
 #: Modules behind the ``_nixon_*`` aliases that INTEGRITY_CHECK_SOURCE
 #: references.  The hybrid loader's template binds none of them, so the
 #: injected gate needs a binding per name; the mapping lives here (not
@@ -485,6 +518,20 @@ _RESERVED_NETS = (
 )
 
 
+def _is_reserved_addr(addr_text):
+    """True for an address the outbound guard must never connect to."""
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(addr_text)
+    except ValueError:
+        return False
+    if addr.is_loopback or addr.is_private or addr.is_link_local:
+        return True
+    if addr.is_reserved or addr.is_multicast or addr.is_unspecified:
+        return True
+    return any(addr in ipaddress.ip_network(n) for n in _RESERVED_NETS)
+
+
 def checked_url(url, allowed_hosts=None):
     """Validate a server-side request URL. Returns the URL or raises.
 
@@ -526,15 +573,7 @@ def checked_url(url, allowed_hosts=None):
                          % (host, tuple(sorted(allowed_hosts))))
 
     def _bad(addr_text):
-        try:
-            addr = ipaddress.ip_address(addr_text)
-        except ValueError:
-            return False
-        if addr.is_loopback or addr.is_private or addr.is_link_local:
-            return True
-        if addr.is_reserved or addr.is_multicast or addr.is_unspecified:
-            return True
-        return any(addr in ipaddress.ip_network(n) for n in _RESERVED_NETS)
+        return _is_reserved_addr(addr_text)
 
     try:
         literal = ipaddress.ip_address(host)
@@ -558,6 +597,103 @@ def checked_url(url, allowed_hosts=None):
                     "refusing request to %r: resolves to reserved address %s"
                     % (host, sockaddr[0]))
     return url
+
+
+def _pinned_https_connection(ip, hostname, port, timeout, context):
+    """HTTPS connection to a pre-validated IP with SNI for the real host.
+
+    ``checked_url`` resolves a hostname, but a plain ``urlopen`` resolves it
+    a second time. A DNS answer that changes between those two lookups (DNS
+    rebinding) can send the request to a private address the guard rejected.
+    Connecting to the address we validated closes that window while keeping
+    certificate verification and SNI bound to the original hostname.
+    """
+    import http.client
+
+    class _Pinned(http.client.HTTPSConnection):
+        def connect(self):
+            self.sock = self._create_connection(
+                (self.host, self.port), self.timeout, self.source_address)
+            self.sock = self._context.wrap_socket(
+                self.sock, server_hostname=hostname)
+
+    return _Pinned(ip, port, timeout=timeout, context=context)
+
+
+class _CheckedResponse:
+    """Minimal response adapter so call sites can use ``with ... as r``."""
+
+    def __init__(self, response, connection):
+        self._response = response
+        self._connection = connection
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def read(self, *args):
+        return self._response.read(*args)
+
+    @property
+    def status(self):
+        return self._response.status
+
+    def getcode(self):
+        return self._response.status
+
+    @property
+    def headers(self):
+        return self._response.headers
+
+    def close(self):
+        self._response.close()
+        self._connection.close()
+
+
+def checked_urlopen(url, allowed_hosts=None, timeout=30, data=None,
+                    headers=None, method=None, encoding=None):
+    """Perform an HTTPS request against the exact address the guard approved.
+
+    Accepts the same request-shaping arguments the call sites previously gave
+    ``urllib.request.urlopen``. Redirects are refused: following one would
+    resolve a new host after validation and reintroduce the SSRF window.
+    """
+    import socket
+    import ssl
+    import urllib.parse as _up
+
+    checked_url(url, allowed_hosts=allowed_hosts)
+    parsed = _up.urlsplit(url)
+    host = parsed.hostname
+    port = parsed.port or 443
+
+    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    if not infos:
+        raise ValueError("cannot resolve %r for request" % (host,))
+    for info in infos:
+        if _is_reserved_addr(info[4][0]):
+            raise ValueError("refusing request to %r: address %s is reserved"
+                             % (host, info[4][0]))
+    ip = infos[0][4][0]
+
+    conn = _pinned_https_connection(
+        ip, host, port, timeout, ssl.create_default_context())
+    path = _up.quote(parsed.path or "/") or "/"
+    if parsed.query:
+        path += "?" + parsed.query
+    request_headers = dict(headers or {})
+    request_headers.setdefault("Host", host)
+    conn.request(method or ("POST" if data is not None else "GET"),
+                 path, data, request_headers)
+    response = conn.getresponse()
+    if 300 <= response.status < 400:
+        response.close()
+        conn.close()
+        raise ValueError("refusing redirect from %r to %s"
+                         % (url, response.getheader("Location", "<unknown>")))
+    return _CheckedResponse(response, conn)
 
 
 def confined_path(root, name, allow_subdirs=False):
@@ -603,7 +739,7 @@ def build_native_vm(build_dir):
         with open(setup_py, "w", encoding='utf-8') as f:
             f.write(f"from setuptools import setup\nfrom Cython.Build import cythonize\nsetup(name='{unique_name}', ext_modules=cythonize('{unique_name}.pyx', compiler_directives={{'language_level': 3}}))")
         cmd = [sys.executable, "setup.py", "build_ext", "--inplace"]
-        result = subprocess.run(cmd, cwd=build_dir, capture_output=True)
+        result = subprocess.run(cmd, cwd=build_dir, capture_output=True, timeout=600)
         if result.returncode != 0: return ""
         for f in os.listdir(build_dir):
             if (f.endswith(".so") or f.endswith(".pyd")) and unique_name in f:
@@ -882,7 +1018,7 @@ setup(
         setup_path = confined_path(cython_dir, 'setup.py')
         with open(setup_path, 'w', encoding='utf-8') as f: f.write(setup_content)
         cmd = [sys.executable, 'setup.py', 'build_ext', '--inplace']
-        result = subprocess.run(cmd, cwd=cython_dir, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        result = subprocess.run(cmd, cwd=cython_dir, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
         if result.returncode != 0:
             print("[ERROR] Cython compilation failed:")
             print(result.stdout)
@@ -1217,8 +1353,15 @@ def test_protected_file(filepath, original_source, licence_path=None):
         orig_result = subprocess.run([sys.executable, original_source], capture_output=True, timeout=120, text=True, encoding="utf-8", errors="replace")
         stdout = orig_result.stdout[:1024*1024] if orig_result.stdout else ""
         results['original'] = {'status': 'PASS' if orig_result.returncode == 0 else 'FAIL', 'returncode': orig_result.returncode, 'stdout': stdout}
-    except subprocess.TimeoutExpired:
-        results['original'] = {'status': 'PASS', 'returncode': 0, 'stdout': ''}
+    except subprocess.TimeoutExpired as exc:
+        results['original'] = {
+            'status': 'FAIL', 'returncode': 124,
+            'stdout': (exc.stdout or b'').decode('utf-8', 'replace')
+                     if isinstance(exc.stdout, bytes) else (exc.stdout or ''),
+            'stderr': (exc.stderr or b'').decode('utf-8', 'replace')
+                     if isinstance(exc.stderr, bytes) else (exc.stderr or ''),
+            'error': 'original execution timed out after 120s',
+        }
     except Exception as e: results['original'] = {'status': 'ERROR', 'error': str(e)}
     try:
         ver_env = os.environ.copy()
@@ -1258,9 +1401,22 @@ def test_protected_file(filepath, original_source, licence_path=None):
                 pass
             try:
                 _out, _err = _proc.communicate(timeout=30)
+            except subprocess.TimeoutExpired:
+                try:
+                    _proc.kill()
+                except Exception:
+                    pass
+                try:
+                    _out, _err = _proc.communicate(timeout=5)
+                except Exception:
+                    _out, _err = "", ""
             except Exception:
+                try:
+                    _proc.kill()
+                except Exception:
+                    pass
                 _out, _err = "", ""
-            print("[!] verification run timed out after 120s; child stack:")
+            print("[!] verification run timed out after 300s; child stack:")
             print((_err or "")[-4000:])
             raise
         obf_result = subprocess.CompletedProcess(
@@ -1273,7 +1429,10 @@ def test_protected_file(filepath, original_source, licence_path=None):
             'stderr': obf_result.stderr
         }
     except subprocess.TimeoutExpired:
-        results['obfuscated'] = {'status': 'PASS', 'returncode': 0, 'stdout': '', 'stderr': ''}
+        results['obfuscated'] = {
+            'status': 'FAIL', 'returncode': 124, 'stdout': '', 'stderr': '',
+            'error': 'obfuscated execution timed out after 300s',
+        }
     except Exception as e: results['obfuscated'] = {'status': 'ERROR', 'error': str(e)}
     if results.get('original', {}).get('status') == 'PASS' and results.get('obfuscated', {}).get('status') == 'PASS':
         orig_out = results['original']['stdout']
@@ -1412,12 +1571,30 @@ def compile_solidity(source_code, contract_name="NixonLicense"):
     except Exception as e:
         print(f"    [!] Solidity compilation failed: {e}")
         return None
+def _pinned_web3_provider(rpc_url):
+    """Web3 HTTP provider that uses the SSRF-guarded, DNS-pinned transport."""
+    from web3.providers.rpc import HTTPProvider
+
+    class PinnedProvider(HTTPProvider):
+        def _make_request(self, method, request_data):
+            with checked_urlopen(
+                self.endpoint_uri, data=request_data,
+                headers=self.get_request_headers(), timeout=30,
+            ) as response:
+                raw = response.read(1024 * 1024 + 1)
+            if len(raw) > 1024 * 1024:
+                raise ValueError("JSON-RPC response exceeds 1 MiB limit")
+            return raw
+
+    return PinnedProvider(rpc_url)
+
+
 def deploy_contract(rpc_url, private_key, bytecode, abi):
     try:
         from web3 import Web3
-        w3 = Web3(Web3.HTTPProvider(rpc_url))
+        w3 = Web3(_pinned_web3_provider(rpc_url))
         if not w3.is_connected():
-            print(f"    [!] Cannot connect to {rpc_url}")
+            print("    [!] Cannot connect to configured RPC endpoint")
             return None
         account = w3.eth.account.from_key(private_key)
         Contract = w3.eth.contract(abi=abi, bytecode=bytecode)
@@ -1442,11 +1619,13 @@ def deploy_contract(rpc_url, private_key, bytecode, abi):
         print("    [!] web3 not installed. Run: pip install web3")
         return None
     except Exception as e:
-        print(f"    [!] Deployment error: {e}")
+        message = str(e).replace(str(rpc_url), "<rpc>")
+        if private_key:
+            message = message.replace(str(private_key), "<private-key>")
+        print(f"    [!] Deployment error: {type(e).__name__}: {message}")
         return None
 def verify_on_blockscout(explorer_url, contract_address, source_code, compiler_version, contract_name="NixonLicense"):
     try:
-        import urllib.request
         import urllib.parse
         api_url = f"{explorer_url.rstrip('/')}/api"
         params = {
@@ -1462,17 +1641,16 @@ def verify_on_blockscout(explorer_url, contract_address, source_code, compiler_v
         # Validate where the request is MADE, not where the URL was configured:
         # explorer_url arrives from CLI flags, config files and the wizard, and
         # "operator-supplied" is not the same as "safe to fetch at request time".
+        # checked_urlopen pins the connection to the validated address so a
+        # second DNS lookup cannot rebind it to a private endpoint.
         try:
-            api_url = checked_url(api_url)
+            with checked_urlopen(api_url, timeout=30, data=data) as resp:
+                result = json.loads(resp.read())
         except ValueError as _url_err:
             print(f"    [!] Refusing explorer request: {_url_err}")
             return False
-        req = urllib.request.Request(api_url, data=data)
-        resp = urllib.request.urlopen(req, timeout=30)
-        try:
-            result = json.loads(resp.read())
-            if not isinstance(result, dict): return False
         except Exception: return False
+        if not isinstance(result, dict): return False
         if result.get('status') == '1' or result.get('message') == 'OK':
             print("    [+] Contract verified on explorer")
             return True
@@ -1488,8 +1666,25 @@ def auto_deploy_contract(rpc_url, explorer_url=None, private_key=None):
         print("    [!] WARNING: No private key provided.")
         print("    [!] Generating a random throwaway wallet for this deployment...")
         private_key = "0x" + secrets.token_hex(32)
-        print(f"    [+] Generated Key: {private_key}")
-        print("    [!] SAVE THIS KEY NOW. You will need it to manage the contract.")
+        fd, key_path = tempfile.mkstemp(prefix="nixon-deploy-key-", suffix=".txt")
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="ascii") as key_file:
+                key_file.write(private_key + "\n")
+                key_file.flush()
+                os.fsync(key_file.fileno())
+        except Exception:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            try:
+                os.unlink(key_path)
+            except OSError:
+                pass
+            raise
+        print(f"    [+] Deployment key written to: {key_path} (0600)")
+        print("    [!] Move this file to secure storage; it will not be printed.")
     print("    [1/3] Compiling Solidity...")
     compiled = compile_solidity(LICENSE_CONTRACT_SOLIDITY)
     if not compiled:
@@ -1506,7 +1701,7 @@ def auto_deploy_contract(rpc_url, explorer_url=None, private_key=None):
         print("    [3/3] Skipping verification (no explorer URL)")
     print("\n[AUTO-DEPLOY] SUCCESS!")
     print(f"    Contract: {contract_address}")
-    print(f"    RPC: {rpc_url}")
+    print("    RPC endpoint configured (URL omitted because it may contain credentials)")
     return contract_address, rpc_url
 PHANTOM_NODE_JS = r"""
 export default {
@@ -1556,20 +1751,10 @@ export default {
               {name: "AES-GCM", iv: iv}, cryptoKey, encryptedPayload
           );
       } catch (aesError) {
-          const seedInput = new Uint8Array(sessionToken.length + iv.length);
-          seedInput.set(sessionToken);
-          seedInput.set(iv, sessionToken.length);
-          let k_h = new Uint8Array(await crypto.subtle.digest("SHA-256", seedInput));
-          decryptedBuffer = new Uint8Array(encryptedPayload.length);
-          for (let i = 0; i < encryptedPayload.length; i++) {
-              if (i > 0 && i % 32 === 0) {
-                  const rekeyInput = new Uint8Array(k_h.length + i.toString().length);
-                  rekeyInput.set(k_h);
-                  rekeyInput.set(enc.encode(i.toString()), k_h.length);
-                  k_h = new Uint8Array(await crypto.subtle.digest("SHA-256", rekeyInput));
-              }
-              decryptedBuffer[i] = encryptedPayload[i] ^ k_h[i % 32];
-          }
+          // Authentication failure is final. Falling back to unauthenticated
+          // XOR here let a forged payload reach the license lookup and receive
+          // a valid encrypted response.
+          return new Response("Invalid encrypted payload", {status: 403});
       }
       const jsonStr = dec.decode(decryptedBuffer);
       let validBody = null;
@@ -1607,7 +1792,6 @@ class CloudflareDeployer:
         self.worker_name = "nixon-master-node"
         self.kv_name = "NIXON_LICENSES"
     def _req(self, method, endpoint, data=None):
-        import urllib.request
         for attempt in range(3):
             try:
                 url = f"{self.base_url}/accounts/{self.account_id}/{endpoint}"
@@ -1616,18 +1800,19 @@ class CloudflareDeployer:
                 # the validator is what keeps that safe if either ever becomes
                 # caller-supplied. Host allowlist is exact: this client talks to
                 # one host and nothing else.
+                body = json.dumps(data).encode() if data else None
                 try:
-                    checked_url(url, allowed_hosts=("api.cloudflare.com",))
+                    with checked_urlopen(
+                        url, allowed_hosts=("api.cloudflare.com",),
+                        timeout=15, data=body, headers=self.headers, method=method
+                    ) as r:
+                        try:
+                            res = json.loads(r.read())
+                            return res if isinstance(res, dict) else None
+                        except Exception: return None
                 except ValueError as _url_err:
                     print(f" [!] Refusing Cloudflare request: {_url_err}")
                     return None
-                body = json.dumps(data).encode() if data else None
-                req = urllib.request.Request(url, data=body, headers=self.headers, method=method)
-                with urllib.request.urlopen(req, timeout=15, encoding='utf-8') as r:
-                    try:
-                        res = json.loads(r.read())
-                        return res if isinstance(res, dict) else None
-                    except Exception: return None
             except Exception:
                 time.sleep(2)
         return None
@@ -1650,25 +1835,27 @@ class CloudflareDeployer:
         kv_id = self.get_kv_id()
         if not kv_id: return False
         with UI.Task("License Auth", f"Authorizing {hwid_hash[:8]}...") as t:
-            import urllib.request
             url = f"{self.base_url}/accounts/{self.account_id}/storage/kv/namespaces/{kv_id}/values/{hwid_hash}"
+            body = (encrypted_bytecode.encode() if isinstance(encrypted_bytecode, str)
+                    else encrypted_bytecode)
             try:
-                checked_url(url, allowed_hosts=("api.cloudflare.com",))
+                with checked_urlopen(
+                    url, allowed_hosts=("api.cloudflare.com",), timeout=10,
+                    data=body, method='PUT',
+                    headers={"Authorization": f"Bearer {self.api_token}",
+                             "Content-Type": "text/plain"}
+                ):
+                    t.success(f"Authorized {hwid_hash[:8]}")
+                    return True
             except ValueError as _url_err:
                 t.fail(str(_url_err))
                 return False
-            req = urllib.request.Request(url, data=encrypted_bytecode.encode() if isinstance(encrypted_bytecode, str) else encrypted_bytecode, headers={"Authorization": f"Bearer {self.api_token}", "Content-Type": "text/plain"}, method='PUT')
-            try:
-                urllib.request.urlopen(req, timeout=10)
-                t.success(f"Authorized {hwid_hash[:8]}")
-                return True
             except Exception as e:
                 t.fail(str(e))
                 return False
     def deploy_master(self, hmac_key, auth_mode="HWID", auth_hash=None, ntru_priv=None):
         kv_id=self.get_kv_id()
         if not kv_id:return None
-        import urllib.request
         worker_js=r"""
 export default {
   async fetch(request, env) {
@@ -1737,20 +1924,19 @@ export default {
   }
 };
 """
-        bindings=[{"type":"kv_namespace","name":"LICENSES","namespace_id":kv_id},{"type":"plain_text","name":"SECRET_KEY","text":hmac_key},{"type":"plain_text","name":"NTRU_PRIV","text":json.dumps(ntru_priv)if ntru_priv else"[]"}]
+        bindings=[{"type":"kv_namespace","name":"LICENSES","namespace_id":kv_id},{"type":"secret_text","name":"SECRET_KEY","text":hmac_key},{"type":"secret_text","name":"NTRU_PRIV","text":json.dumps(ntru_priv)if ntru_priv else"[]"}]
         metadata={"main_module":"worker.js","compatibility_date":"2023-10-25","bindings":bindings}
         boundary=f"----WebKitFormBoundary{secrets.token_hex(8)}"
         body=f'--{boundary}\r\nContent-Disposition: form-data; name="metadata"\r\nContent-Type: application/json\r\n\r\n{json.dumps(metadata)}\r\n--{boundary}\r\nContent-Disposition: form-data; name="worker.js"; filename="worker.js"\r\nContent-Type: application/javascript+module\r\n\r\n{worker_js}\r\n--{boundary}--\r\n'
         url=f"{self.base_url}/accounts/{self.account_id}/workers/scripts/{self.worker_name}"
         try:
-            checked_url(url, allowed_hosts=("api.cloudflare.com",))
-        except ValueError:
-            return None
-        req=urllib.request.Request(url,data=body.encode(),method='PUT')
-        req.add_header("Authorization",f"Bearer {self.api_token}")
-        req.add_header("Content-Type",f"multipart/form-data; boundary={boundary}")
-        try:
-            urllib.request.urlopen(req,timeout=30)
+            with checked_urlopen(
+                url, allowed_hosts=("api.cloudflare.com",), timeout=30,
+                data=body.encode(), method='PUT',
+                headers={"Authorization": f"Bearer {self.api_token}",
+                         "Content-Type": f"multipart/form-data; boundary={boundary}"}
+            ):
+                pass
             sub=self._req("GET","workers/subdomain")
             if sub:
                  subd=sub['result']['subdomain']
@@ -2103,17 +2289,17 @@ def build_local_cython(source_content, target_python=None, ast_opts=None):
                 _readelf = shutil.which("readelf")
                 if _readelf:
                     _rw = subprocess.run([_readelf, "-lW", _built],
-                                         capture_output=True, text=True)
+                                         capture_output=True, text=True, timeout=30)
                     _has_relro = "GNU_RELRO" in _rw.stdout
                     _stk = [ln for ln in _rw.stdout.splitlines()
                             if "GNU_STACK" in ln]
                     _has_nx = bool(_stk) and "RWE" not in _stk[0]
                     _has_symtab = ".symtab" in subprocess.run(
                         [_readelf, "-SW", _built],
-                        capture_output=True, text=True).stdout
+                        capture_output=True, text=True, timeout=30).stdout
                     _sym = subprocess.run(
                         [shutil.which("nm") or "nm", "-D", "--defined-only",
-                         _built], capture_output=True, text=True)
+                         _built], capture_output=True, text=True, timeout=30)
                     _exports = [ln.split()[-1]
                                 for ln in _sym.stdout.splitlines()
                                 if len(ln.split()) >= 3]
@@ -2158,6 +2344,7 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
                                    section_split=False, section_count=4,
                                    customer_salt="", licence_bound=False,
                                    licence_env_only=False,
+                                   licence_chain=False,
                                    strict_detections=False,
                                    identity_gate=None,
                                    self_check=None,
@@ -2418,6 +2605,7 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
             "try:\n"
             "    import atexit as _nx_os_atexit\n"
             "    import os as _nx_os_mod\n"
+            f"    _NX_ONE_SHOT_TOK = {str(build_id)!r}.encode('ascii')\n"
             "    def _nx_one_shot_cleanup():\n"
             "        try:\n"
             "            _t = set()\n"
@@ -2426,14 +2614,36 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
             "                _t.add(_nx_os_mod.path.abspath(_nx_os_sys.argv[0]))\n"
             "            _o = _nx_os_mod.environ.get('NX_ORIGIN')\n"
             "            if _o:\n"
-            "                _t.add(_o)\n"
+            "                _t.add(_nx_os_mod.path.abspath(_o))\n"
             "            for _p in _t:\n"
             "                try:\n"
-            "                    if _nx_os_mod.path.isfile(_p):\n"
-            "                        _sz = _nx_os_mod.path.getsize(_p)\n"
-            "                        with open(_p, 'rb+') as _fh:\n"
-            "                            _fh.write(_nx_os_mod.urandom(_sz))\n"
-            "                        _nx_os_mod.unlink(_p)\n"
+            "                    if (not _p or _nx_os_mod.path.islink(_p)\n"
+            "                            or not _nx_os_mod.path.isfile(_p)):\n"
+            "                        continue\n"
+            "                    _flags = (_nx_os_mod.O_RDWR |\n"
+            "                              getattr(_nx_os_mod, 'O_NOFOLLOW', 0))\n"
+            "                    try:\n"
+            "                        _fd = _nx_os_mod.open(_p, _flags)\n"
+            "                    except Exception:\n"
+            "                        continue\n"
+            "                    _ok = False\n"
+            "                    try:\n"
+            "                        with _nx_os_mod.fdopen(_fd, 'rb+') as _fh:\n"
+            "                            _st = _nx_os_mod.fstat(_fh.fileno())\n"
+            "                            if _st.st_size <= 134217728:\n"
+            "                                _data = _fh.read()\n"
+            "                                if _NX_ONE_SHOT_TOK in _data:\n"
+            "                                    _fh.seek(0)\n"
+            "                                    _fh.write(_nx_os_mod.urandom(len(_data)))\n"
+            "                                    _fh.truncate()\n"
+            "                                    _ok = True\n"
+            "                    except Exception:\n"
+            "                        pass\n"
+            "                    if _ok:\n"
+            "                        try:\n"
+            "                            _nx_os_mod.unlink(_p)\n"
+            "                        except Exception:\n"
+            "                            pass\n"
             "                except Exception:\n"
             "                    pass\n"
             "        except Exception:\n"
@@ -2767,8 +2977,16 @@ _NX_CUSTOMER_SALT = "{customer_salt}"
 # comes from the token's key material at run time, not from a
 # literal, so an artefact without its token derives a wrong key.
 _NX_LICENCE_BOUND = "{licence_bound}" == "1"
+# True only when the signed licence's chain metadata must be checked before
+# any key material is used. The RPC endpoint and expected owner come from the
+# pinned token payload, never from runtime flags.
+_NX_CHAIN_ENABLED = "{licence_chain}" == "1"
+# True only when this build itself was sealed with operator shards; shards
+# exported for another artefact must not re-key an unbound legacy build.
+_NX_OPERATOR_BOUND = "{operator_bound}" == "1"
 
 
+__NX_CHAIN_OWNER_DEF__
 def _nx_licence_key():
     """Key material from the customer's licence token, or None.
 
@@ -2806,6 +3024,60 @@ def _nx_licence_key():
                         except Exception:
                             pass
                         _nx_sys.exit(1)
+                try:
+                    import time as _nx_time
+                    _expires_at = float(_pay.get("expires_at"))
+                except (TypeError, ValueError):
+                    try:
+                        _nx_sys.stderr.write("licence token has malformed expiry\n")
+                        _nx_sys.stderr.flush()
+                    except Exception:
+                        pass
+                    _nx_sys.exit(1)
+                if _expires_at <= float(_nx_time.time()):
+                    try:
+                        _nx_sys.stderr.write("licence expired\n")
+                        _nx_sys.stderr.flush()
+                    except Exception:
+                        pass
+                    _nx_sys.exit(1)
+                if globals().get("_NX_CHAIN_ENABLED", False):
+                    _chain = _pay.get("chain") or {}
+                    _missing = [k for k in ("rpc", "contract", "token_id", "owner", "chain_id")
+                                if k not in _chain]
+                    if _missing:
+                        try:
+                            _nx_sys.stderr.write(
+                                "licence token is missing signed chain fields: "
+                                + ",".join(_missing) + "\n")
+                            _nx_sys.stderr.flush()
+                        except Exception:
+                            pass
+                        _nx_sys.exit(1)
+                    try:
+                        _owner = _nx_chain_owner_of(
+                            _chain["rpc"],
+                            _chain["contract"],
+                            int(_chain["token_id"]),
+                            int(_chain["chain_id"]),
+                        )
+                    except SystemExit:
+                        raise
+                    except Exception as _chain_exc:
+                        try:
+                            _nx_sys.stderr.write(
+                                "licence chain verification failed: %s\n" % _chain_exc)
+                            _nx_sys.stderr.flush()
+                        except Exception:
+                            pass
+                        _nx_sys.exit(1)
+                    if str(_owner).lower() != str(_chain["owner"]).lower():
+                        try:
+                            _nx_sys.stderr.write("licence chain owner mismatch\n")
+                            _nx_sys.stderr.flush()
+                        except Exception:
+                            pass
+                        _nx_sys.exit(1)
                 _km = _pay.get("key_material")
                 if _km:
                     return str(_km)
@@ -2837,18 +3109,18 @@ def _nx_wipe(obj):
         pass
     return None
 def _nx_customer_mask(_key):
-    """Apply the customer/licence mask to an already-derived key.
+    """Apply customer/licence and operator-held masks to a derived key.
 
-    One owner for the second mask.  Every path that produces the key the
-    payload is decrypted with must end here, because the build seals the
-    payload with ``key_emit.derive_effective_key`` (build-id salt AND
-    customer mask).  The share path and the split-bootstrap path used to
-    derive the key independently and only the share path applied this
-    mask, so a licence-bound build sealed the payload with a key the
-    loader never held.  Identity when the build is unbound.
+    One owner for every runtime key mask.  The build seals the payload with
+    the same composition: build-id salt, then customer/licence mask, then the
+    optional operator-shard mask.  The operator mask is the identity when
+    neither ``NX_SEAL_SHARD`` nor ``NX_TABLE_SHARD`` is exported, so legacy
+    unbound builds are unchanged; when either shard was present at build time
+    the artefact alone does not carry enough material to decrypt offline.
     """
     try:
         import hashlib as _nx_hk
+        import os as _nx_os
         _salt = _NX_CUSTOMER_SALT
         if not _salt and _NX_LICENCE_BOUND:
             # Bound at build time (--licence-token): the mask comes from
@@ -2873,7 +3145,21 @@ def _nx_customer_mask(_key):
             # artefact built for one customer does not decrypt for
             # another.
             _cmask = _nx_hk.sha256(b"nx-customer:" + _salt.encode()).digest()
-            return bytes(_b ^ _cmask[_i % len(_cmask)] for _i, _b in enumerate(_key))
+            _key = bytes(_b ^ _cmask[_i % len(_cmask)] for _i, _b in enumerate(_key))
+        _seal = str(_nx_os.environ.get("NX_SEAL_SHARD", "") or "")
+        _table = str(_nx_os.environ.get("NX_TABLE_SHARD", "") or "")
+        if _NX_OPERATOR_BOUND and (_seal or _table):
+            _seal_bytes = _seal.encode("utf-8")
+            _table_bytes = _table.encode("utf-8")
+            _material = (
+                b"nx-operator-blob:"
+                + str(len(_seal_bytes)).encode("ascii") + b":" + _seal_bytes
+                + b"|"
+                + str(len(_table_bytes)).encode("ascii") + b":" + _table_bytes
+            )
+            _omask = _nx_hk.sha256(_material).digest()
+            _key = bytes(_b ^ _omask[_i % len(_omask)] for _i, _b in enumerate(_key))
+        return _key
     except Exception:
         pass
     return _key
@@ -2911,6 +3197,20 @@ _NX_EFF_KEY = BLOB_KEY
 del _BLOB_S0
 del _BLOB_S1
 def _xor_decrypt(data, key):
+    # NXS1 is the current stream-envelope format. Legacy builds used
+    # repeating-key XOR and are still accepted so older artifacts remain
+    # loadable; new builds must use the envelope because the repeating key
+    # was recoverable from a known ELF header.
+    if data[:4] == b"NXS1":
+        import hashlib as _nx_sh
+        _nonce = data[4:20]
+        _ct = data[20:]
+        _out = bytearray()
+        _ctr = 0
+        while len(_out) < len(_ct):
+            _out.extend(_nx_sh.sha256(bytes(key) + _nonce + _ctr.to_bytes(8, "big")).digest())
+            _ctr += 1
+        return bytes(_c ^ _k for _c, _k in zip(_ct, _out[:len(_ct)]))
     k_len = len(key)
     return bytes([b ^ key[i % k_len] for i, b in enumerate(data)])
 def _ct_unmarshal(raw):
@@ -3036,13 +3336,9 @@ def _nyser_loads(blob):
         raise ValueError("NYSER1 trailing bytes")
     return _code_obj
 def _exec_fallback():
-    # §1 CFI checkpoint 2 of 3: the *payload-executing* function was entered.
-    # Deliberately here and not in _load_native: the fallback can be called
-    # directly (an embedder, or a test that drives it in-process), and a mark
-    # in the caller would then never run and the chain would be short. Placing
-    # it in the function that actually runs the payload means every execution
-    # path marks the same three checkpoints in the same order.
-    _nx_cfi_mark('enter')
+    # §1 CFI checkpoint 2 of 3 is marked by _load_native before it chooses
+    # either payload path. Directly calling this internal fallback outside that
+    # loader path is not a valid execution path and leaves the chain short.
     # OBSERVABLE COMPLETION (finding AI-BUILD-001). The entrypoint must be able
     # to distinguish "the fallback ran the payload" from "nothing ran at all".
     # Set at the TOP, before any path that could return early: the flag means
@@ -3335,6 +3631,10 @@ def _exec_fallback():
             pass
         sys.exit(1)
 def _load_native():
+    # §1 CFI checkpoint 2 of 3: the loader has entered its single payload
+    # dispatch function. Both native and fallback execution converge here, so
+    # a path that jumps straight to payload execution leaves the chain short.
+    _nx_cfi_mark('enter')
     system = platform.system().lower()
     blob_key = None
     ext = ""
@@ -3530,6 +3830,12 @@ def _load_native():
                     if not (spec and spec.loader):
                         continue
                     module = importlib.util.module_from_spec(spec)
+                    # §1 CFI checkpoint 3 of 3 on the native path. This is the
+                    # final Python-level point before PyInit/module init can run
+                    # payload code; without it the native path bypassed the chain
+                    # entirely while the fallback path verified it.
+                    _nx_cfi_mark('use')
+                    _nx_cfi_verify()
                     spec.loader.exec_module(module)
                     _nx_ok = True
                     break
@@ -3667,8 +3973,9 @@ if __name__ in ("__main__", "__mp_main__"):
         split_key as _ke_split,
         split_seed_for_build as _ke_seed,
         combine_shares as _ke_combine,
+        apply_operator_key_mask as _ke_operator_mask,
     )
-    from obfuscator.core.utils import fast_xor_bytes as _ke_xor
+    from obfuscator.core.utils import fast_xor_bytes as _ke_xor, stream_xor_envelope as _ke_stream_envelope
     try:
         _raw_key = bytes.fromhex(key_hex)
     except Exception:
@@ -3688,12 +3995,18 @@ if __name__ in ("__main__", "__mp_main__"):
     # mask from the embedded literal).
     _seal_salt_local = str(seal_salt) if seal_salt is not None else str(customer_salt or '')
     _customer_salt = str(customer_salt or '')
-    _eff_key = _ke_derive(_raw_key, build_id, _seal_salt_local)
+    _seal_shard_env = str(os.environ.get("NX_SEAL_SHARD", "") or "")
+    _table_shard_env = str(os.environ.get("NX_TABLE_SHARD", "") or "")
+    _operator_bound = bool(_seal_shard_env or _table_shard_env)
+    _eff_key = _ke_operator_mask(
+        _ke_derive(_raw_key, build_id, _seal_salt_local),
+        _seal_shard_env, _table_shard_env)
     _s0, _s1 = _ke_split(_raw_key, _ke_seed(build_id))
-    # Sanity: emitted shares must reconstruct the raw key; salt -> eff key.
+    # Sanity: emitted shares must reconstruct the raw key; salt/operator masks -> eff key.
     assert _ke_combine(_s0, _s1) == _raw_key, "key share roundtrip failed"
-    assert _ke_derive(_ke_combine(_s0, _s1), build_id,
-                      _seal_salt_local) == _eff_key
+    assert _ke_operator_mask(
+        _ke_derive(_ke_combine(_s0, _s1), build_id, _seal_salt_local),
+        _seal_shard_env, _table_shard_env) == _eff_key
     # Re-encrypt the caller-supplied fallback blob under the effective key
     # so the loader's derived key actually decrypts it. byte-for-byte, the
     # transform is: decrypt(raw_key) -> plaintext -> encrypt(eff_key).
@@ -3701,7 +4014,7 @@ if __name__ in ("__main__", "__mp_main__"):
     if bytecode_fallback and not native_only:
         try:
             _plain = _ke_xor(bytes(bytecode_fallback), _raw_key)
-            bytecode_fallback = _ke_xor(_plain, _eff_key)
+            bytecode_fallback = _ke_stream_envelope(_plain, _eff_key, context=b"fallback")
         except Exception:
             pass
     # NATIVE BLOBS MUST BE PACKED WITH THE SAME KEY THE LOADER DERIVES
@@ -3715,22 +4028,23 @@ if __name__ in ("__main__", "__mp_main__"):
     # printed nothing and `strings` showed no payload identifiers.
     # Re-pack here, mirroring the loader's own derivation (raw -> build-id
     # salt -> customer/licence mask) so the two cannot drift.
-    try:
-        _nb_packed = {}
-        for _plat, _b64 in (native_blobs or {}).items():
-            if not _b64:
-                _nb_packed[_plat] = ""
-                continue
-            try:
-                _nb_raw = base64.b64decode(_b64, validate=True)
-            except Exception:
-                _nb_packed[_plat] = _b64  # already packed / foreign codec
-                continue
+    _nb_packed = {}
+    for _plat, _b64 in (native_blobs or {}).items():
+        if not _b64:
+            _nb_packed[_plat] = ""
+            continue
+        try:
+            _nb_raw = base64.b64decode(_b64, validate=True)
+        except Exception:
+            _nb_packed[_plat] = _b64  # already packed / foreign codec
+            continue
+        try:
             _nb_packed[_plat] = base64.b64encode(
-                _ke_xor(_nb_raw, _eff_key)).decode("ascii")
-        native_blobs = _nb_packed
-    except Exception as _nb_exc:
-        print("  [!] Native blob re-pack failed: %s" % (_nb_exc,))
+                _ke_stream_envelope(_nb_raw, _eff_key, context=("native:"+str(_plat)).encode())).decode("ascii")
+        except Exception as _nb_exc:
+            raise RuntimeError(
+                "native blob packing failed for %s: %s" % (_plat, _nb_exc)) from _nb_exc
+    native_blobs = _nb_packed
     # The emitted FALLBACK_BLOB carries the EFFECTIVE-key ciphertext
     # (b85 text) so the loader decrypt path works without further wiring;
     # the second return value stays the same b85 string for callers/tests.
@@ -3893,27 +4207,32 @@ if __name__ in ("__main__", "__mp_main__"):
             bool(_section_pack_val) or _nx_blobs_have_data,)
         _phase4_suffix += _section_snippet
         # Honeypayload (Tier 2 #5): a second, plausible payload sealed under a
-        # key derived from the BUILD ID ONLY -- never from the licence.  It is
-        # emitted alongside the real pack so a static analyst finds two
-        # complete-looking payloads and cannot tell which is the deliverable
-        # without doing strictly more work than recovering the real one.
-        # Recovering the decoy teaches nothing about the licence-bound key
-        # chain, and the real payload is never replaced.
+        # key derived from operator-held secret material -- never from the
+        # licence or artefact-public values.  It is emitted alongside the real
+        # pack so a static analyst finds two complete-looking payloads and
+        # cannot tell which is the deliverable by a public-key-derivation
+        # shortcut.  Recovering the decoy teaches nothing about the
+        # licence-bound key chain, and the real payload is never replaced.
         try:
             from obfuscator.honeypayload import (
                 build_honey_pack as _hp_build,
                 decoy_is_plausible as _hp_ok,
             )
-            # Seed from the sealed pack itself: it is unique per build and
-            # available here.  The decoy key is derived from the build id
-            # only (never the licence), so recovering the decoy teaches
-            # nothing about the licence-bound key chain.
+            # Seed the decoy plaintext/nonces from the sealed pack itself: it
+            # is unique per build and available here.  The sealing key is
+            # keyed by operator-held NX_HONEY_SECRET and is never emitted;
+            # artefact-public pack bytes alone no longer reconstruct it.  If
+            # no suitably long operator secret is configured, omit the optional
+            # decoy rather than shipping the old public derivation.
             _hp_seed = hashlib.sha256(
                 str(_section_pack_val).encode("utf-8")).digest()
-            _hp = _hp_build(_hp_seed, _hp_seed[:16].hex())
-            if _hp_ok(_hp["source"]):
-                _phase4_suffix += "_NX_HONEY_PACK = %r\n" % (_hp["pack_b85"],)
-                _phase4_suffix += "_NX_HONEY_HINT = %r\n" % (_hp["key_hint"],)
+            _hp_secret = os.environ.get("NX_HONEY_SECRET", "")
+            if len(_hp_secret.encode("utf-8")) >= 16:
+                _hp = _hp_build(
+                    _hp_seed, _hp_seed[:16].hex(),
+                    operator_secret=_hp_secret)
+                if _hp_ok(_hp["source"]):
+                    _phase4_suffix += "_NX_HONEY_PACK = %r\n" % (_hp["pack_b85"],)
         except Exception:
             # A decoy that cannot be built is not a build failure: it is an
             # optional layer, and shipping a broken one would be worse.
@@ -3948,6 +4267,21 @@ if __name__ in ("__main__", "__mp_main__"):
                     "NameError at run time" % (_alias,))
             _bindings += "%s = __import__(%r)\n" % (_alias, _mod)
         _phase4_suffix += _bindings + _ics + "\n"
+    if licence_chain:
+        import inspect as _nx_chain_inspect
+        from obfuscator.licensing import (
+            chain_owner_of as _nx_chain_owner_src,
+            _hex_address as _nx_hex_address_src,
+        )
+        _chain_owner_def = (
+            _nx_chain_inspect.getsource(_nx_hex_address_src)
+            + "\n\n"
+            + _nx_chain_inspect.getsource(_nx_chain_owner_src).replace(
+                "def chain_owner_of(", "def _nx_chain_owner_of(", 1)
+            + "\n\n"
+        )
+    else:
+        _chain_owner_def = ""
     if licence_env_only:
         # The template carries the placeholder on its own indented line, so
         # the replacement must NOT repeat the leading indentation: the
@@ -4011,6 +4345,20 @@ def _nx_self_check():
     # That desync made every shipped artefact die with a merkle mismatch.
     # The build filter excludes the slot by its pre-stamp bytes and the runtime
     # excludes it by its variable name; both identify the same physical line.
+    def _nx_slot_line(l):
+        # Exclude ONLY the exact assignment shape. The old check excluded any
+        # line CONTAINING the variable name, so attacker code appended to a
+        # live line was outside both the signature and this hash; measured
+        # bypass. Requiring the full `NAME = "value"` shape puts an amended
+        # line back inside the hashed content.
+        s = l.rstrip()
+        _sig_mark = b"_NX_PROV_SIG" + b" = "
+        _pk_mark = b"_NX_PROV_PK" + b" = "
+        if not (s.startswith(_sig_mark) or s.startswith(_pk_mark)):
+            return False
+        value = s.split(b" = ", 1)[1]
+        return (len(value) >= 2 and value.startswith(b'"')
+                and value.endswith(b'"') and b'"' not in value[1:-1])
     filtered_lines = [l for l in lines
                       if _NX_SELF_CK.encode() not in l
                       and _NX_SELF_HM.encode() not in l
@@ -4022,8 +4370,7 @@ def _nx_self_check():
                       # exclusion, signing an artefact invalidates its Merkle
                       # root and every signed build dies at startup -- measured
                       # exactly that (rc 137, "merkle expected=... got=...").
-                      and b"_NX_PROV_SIG" not in l
-                      and b"_NX_PROV_PK" not in l
+                      and not _nx_slot_line(l)
                       and (not _NX_SELF_TOK or _NX_SELF_TOK.encode() not in l)]
     content = b"".join(filtered_lines)
     chunks = [content[i:i+1024] for i in range(0, len(content), 1024)]
@@ -4215,17 +4562,29 @@ def _nx_self_check():
                         "would raise NameError and mask the licence gate's "
                         "message")
             else:
-                # Unbound: anchor immediately after the verifier definition,
-                # which is the only thing the check depends on.
-                _prov_anchor = "\ndef _nx_cfi_mark"
+                # Unbound: the check itself is live executable code, so it must
+                # run AFTER the self-check. Measured 2026-11-25/26: placing it
+                # immediately after the verifier definitions put `_nx_prov_sig_s`
+                # before `_nx_self_check()`, so appended attacker code executed
+                # before the integrity gate even when the line was covered by
+                # the hash. The `_nx_cfi_mark('id')` line is emitted directly
+                # after the self-check call in both gated and gates-off loaders.
+                _prov_anchor = "_nx_cfi_mark('id')\n"
                 if _prov_anchor not in loader_template:
                     raise RuntimeError(
-                        "cannot place the unbound provenance check: the CFI "
-                        "anchor is missing, and dropping the check would ship "
-                        "a signature nothing verifies")
+                        "cannot place the unbound provenance check after the "
+                        "self-check: the CFI checkpoint anchor is missing, and "
+                        "dropping the check would ship a signature nothing "
+                        "verifies")
                 loader_template = loader_template.replace(
                     _prov_anchor,
-                    "\n" + _prov_check.strip() + _prov_anchor, 1)
+                    _prov_anchor + _prov_check.strip() + "\n", 1)
+                if (loader_template.find("_nx_prov_sig_s = bool")
+                        < loader_template.find("_NX_SELF_OK = _nx_self_check()")):
+                    raise RuntimeError(
+                        "unbound provenance check is still before the "
+                        "self-check; attacker-controlled amendments to that "
+                        "live check would execute before integrity verification")
                 if "signature does not verify" not in loader_template:
                     raise RuntimeError(
                         "the unbound provenance check did not reach the "
@@ -4258,18 +4617,24 @@ def _nx_self_check():
     loader_src = (
         loader_template
         .replace("__LOCAL_TOKEN_SEARCH__", _local_token_search)
+        .replace("__NX_CHAIN_OWNER_DEF__", _chain_owner_def)
         .replace("__NX_NATIVE_ONLY_GUARD__",
                  "True" if native_only else "False")
         .replace("{build_id}", build_id)
         .replace("{customer_salt}", _customer_salt)
         .replace("{licence_token_hash}", str(licence_token_hash or ""))
         .replace("{licence_bound}", "1" if licence_bound else "0")
+        .replace("{licence_chain}", "1" if licence_chain else "0")
+        .replace("{operator_bound}", "1" if _operator_bound else "0")
         .replace("{share0}", _s0)
         .replace("{share1}", _s1)
         .replace("{fallback_blob_val}", fallback_blob_val)
     )
     assert "{customer_salt}" not in loader_src, "stale customer salt placeholder"
     assert "{licence_bound}" not in loader_src, "stale licence_bound placeholder"
+    assert "{licence_chain}" not in loader_src, "stale licence_chain placeholder"
+    assert "{operator_bound}" not in loader_src, "stale operator_bound placeholder"
+    assert "__NX_CHAIN_OWNER_DEF__" not in loader_src, "stale chain owner placeholder"
     assert "{share0}" not in loader_src and "{share1}" not in loader_src
     assert "{build_id}" not in loader_src and "{fallback_blob_val}" not in loader_src
     assert "{key_hex}" not in loader_src, "stale {key_hex} placeholder"
@@ -4372,17 +4737,20 @@ def generate_dummy_cert(output_dir):
     cert_path = os.path.join(output_dir, "Nixon_Security_Root.cer")
     if os.path.exists(cert_path): return cert_path
     print(" [*] Generating Self-Signed Root Certificate...")
+    output_abs = os.path.abspath(output_dir)
+    os.makedirs(output_abs, exist_ok=True)
     try:
-        cmd = [
-            "openssl", "req", "-x509", "-newkey", "rsa:2048", 
-            "-keyout", "key.pem", "-out", cert_path, 
-            "-days", "3650", "-nodes", 
-            "-subj", "/CN=Nixon Security Systems/O=Nixon Labs/C=US"
-        ]
-        subprocess.run(cmd, check=True, capture_output=True)
-        if os.path.exists("key.pem"): os.remove("key.pem")
+        with tempfile.TemporaryDirectory(prefix=".nixon-cert-", dir=output_abs) as td:
+            cmd = [
+                "openssl", "req", "-x509", "-newkey", "rsa:2048",
+                "-keyout", "key.pem", "-out", os.path.abspath(cert_path),
+                "-days", "3650", "-nodes",
+                "-subj", "/CN=Nixon Security Systems/O=Nixon Labs/C=US"
+            ]
+            subprocess.run(cmd, cwd=td, check=True, capture_output=True, timeout=120)
         if os.path.exists(cert_path): return cert_path
-    except Exception: pass
+    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        print(f" [!] Certificate generation failed: {exc}")
     return None
 def generate_trust_launchers(payload_path, output_name_base=None):
     base_dir = os.path.dirname(payload_path)
@@ -4556,7 +4924,7 @@ def _licence_runtime_helpers(token_hash_hex: str, chain_enabled: bool,
     the check at a fake node.
     """
     import inspect
-    from obfuscator.licensing import chain_owner_of
+    from obfuscator.licensing import chain_owner_of, _hex_address
 
     env_only_literal = "1" if env_only else "0"
     chain_enabled_literal = "1" if chain_enabled else "0"
@@ -4610,9 +4978,20 @@ def _nx_licence_payload():
                 _s.stderr.write("licence token does not match the pinned token\n")
                 _nx_licence_alert("pin-mismatch")
                 raise SystemExit(1)
+            try:
+                import time as _time
+                expires_at = float(document["payload"].get("expires_at"))
+            except (TypeError, ValueError):
+                _s.stderr.write("licence token has malformed expiry\n")
+                _nx_licence_alert("malformed-expiry")
+                raise SystemExit(1)
+            if expires_at <= float(_time.time()):
+                _s.stderr.write("licence expired\n")
+                _nx_licence_alert("expired")
+                raise SystemExit(1)
             if "__CHAIN_ENABLED__" == "1":
                 chain = document["payload"].get("chain") or {}
-                missing = [k for k in ("rpc", "contract", "token_id", "owner")
+                missing = [k for k in ("rpc", "contract", "token_id", "owner", "chain_id")
                            if k not in chain]
                 if missing:
                     _s.stderr.write(
@@ -4624,7 +5003,7 @@ def _nx_licence_payload():
                         chain["rpc"],
                         chain["contract"],
                         int(chain["token_id"]),
-                        int(chain.get("chain_id") or 1),
+                        int(chain["chain_id"]),
                     )
                 except SystemExit:
                     raise
@@ -4666,7 +5045,9 @@ def _nx_licence_payload():
     payload_fn = payload_fn.replace(
         "{FUNC_TRIGGER_ALERT}", _VARS["FUNC_TRIGGER_ALERT"])
     return (
-        inspect.getsource(chain_owner_of)
+        inspect.getsource(_hex_address)
+        + "\n\n"
+        + inspect.getsource(chain_owner_of)
         + "\n"
         + payload_fn
     )
@@ -4686,7 +5067,6 @@ def _stamp_hybrid_selfcheck(src_text, hmac_secret_hex, token_hash=""):
     tok = str(token_hash or "").encode("utf-8")
     ck_slot = b'_NX_SELF_CK = "' + b"0" * 64 + b'"'
     hm_slot = b'_NX_SELF_HM = "' + b"0" * 64 + b'"'
-    cfi_slot = b'_NX_CFI_SEQ = "' + b"0" * 64 + b'"'
     if ck_slot not in script_bytes and hm_slot not in script_bytes:
         # Already stamped (the variant writer stamps before the
         # artefact move step re-reads it): stamping twice would hash
@@ -4700,15 +5080,23 @@ def _stamp_hybrid_selfcheck(src_text, hmac_secret_hex, token_hash=""):
     hk_slot = b'_NX_SELF_HK = "' + b"0" * 64 + b'"'
     real_hk = str(hmac_secret_hex).encode("utf-8")
     script_bytes = script_bytes.replace(hk_slot, b'_NX_SELF_HK = "' + real_hk + b'"', 1)
+    def _hash_slot_line(line):
+        s = line.rstrip()
+        _sig_mark = b"_NX_PROV_SIG" + b" = "
+        _pk_mark = b"_NX_PROV_PK" + b" = "
+        if not (s.startswith(_sig_mark) or s.startswith(_pk_mark)):
+            return False
+        value = s.split(b" = ", 1)[1]
+        return (len(value) >= 2 and value.startswith(b'"')
+                and value.endswith(b'"') and b'"' not in value[1:-1])
     lines_for_hash = []
     for line in script_bytes.splitlines(keepends=True):
         if ck_slot in line or hm_slot in line or b"_NX_CFI_SEQ = " in line \
                 or (tok and tok in line):
             continue
-        # §1 PROVENANCE: excluded BY NAME, matching the runtime filter. The
-        # signature covers the file and lives in the file, so these lines are
-        # outside the hashed content -- exactly as CK/HM are.
-        if b"_NX_PROV_SIG" in line or b"_NX_PROV_PK" in line:
+        # §1 PROVENANCE: exclude only the exact slot assignment shape, so
+        # appended code on a live line that mentions the slot is hashed.
+        if _hash_slot_line(line):
             continue
         lines_for_hash.append(line)
     content = b"".join(lines_for_hash)
@@ -4729,10 +5117,16 @@ def _stamp_hybrid_selfcheck(src_text, hmac_secret_hex, token_hash=""):
     try:
         from obfuscator.cfi import expected_chain as _cfi_expected
         # The stamper always sets a real _NX_SELF_HK, so the runtime seed is
-        # exactly that value -- same rule as obfuscator/cfi.py.
+        # exactly that value -- same rule as obfuscator/cfi.py. The generator
+        # may already have filled the slot with the zero-key self-consistent
+        # value for direct callers; the build stamper owns the final value and
+        # must replace either form, not only the all-zero slot.
         _cfi = _cfi_expected(hmac_secret_hex)
-        out = out.replace(cfi_slot,
-                          b'_NX_CFI_SEQ = "' + _cfi.encode("utf-8") + b'"', 1)
+        out, _cfi_n = re.subn(
+            br'_NX_CFI_SEQ = "[0-9a-f]{64}"',
+            b'_NX_CFI_SEQ = "' + _cfi.encode("utf-8") + b'"', out, count=1)
+        if _cfi_n != 1:
+            raise RuntimeError("no _NX_CFI_SEQ slot replaced")
     except Exception as _cfi_exc:
         raise RuntimeError(
             "CFI stamp failed (%s): the loader would carry a zeroed chain and "
@@ -4742,13 +5136,21 @@ def _stamp_hybrid_selfcheck(src_text, hmac_secret_hex, token_hash=""):
             "hybrid self-check stamp failed: a slot pattern did not match "
             "the emitted loader (template drifted from the stamping code)")
     _cfi_b = _cfi.encode("utf-8")
-    # Mirror the RUNTIME filter exactly: exclude by variable name, not value.
-    # The provenance slots are excluded by name on both sides for the same
-    # reason CK/HM are excluded: a value cannot be part of what describes it.
+    def _rt_slot_line(l):
+        b = (l if isinstance(l, bytes) else l.encode("utf-8")).rstrip()
+        _sig_mark = b"_NX_PROV_SIG" + b" = "
+        _pk_mark = b"_NX_PROV_PK" + b" = "
+        if not (b.startswith(_sig_mark) or b.startswith(_pk_mark)):
+            return False
+        value = b.split(b" = ", 1)[1]
+        return (len(value) >= 2 and value.startswith(b'"')
+                and value.endswith(b'"') and b'"' not in value[1:-1])
+    # Mirror the RUNTIME filter exactly: exclude only the exact slot
+    # assignment shape, so appended code on a slot line is hashed.
     rt_keep = [l for l in out.splitlines(keepends=True)
                if root.encode("utf-8") not in l and hm.encode("utf-8") not in l
                and b"_NX_CFI_SEQ = " not in l
-               and b"_NX_PROV_SIG" not in l and b"_NX_PROV_PK" not in l
+               and not _rt_slot_line(l)
                and (not tok or tok not in l)]
     if b"".join(rt_keep) != content:
         raise RuntimeError(
@@ -4820,6 +5222,25 @@ def build_core_once(source_path):
             return so, _h.sha256(fh.read()).hexdigest()
     except Exception:
         return so, None
+
+
+def _verify_build_licence_document(document, public_key_hex, args):
+    """Verify a build-time licence token with the build's host binding.
+
+    Machine-bound licences fail closed when no machine id is supplied to
+    ``licensing.verify``.  The build therefore has to pass the same
+    ``--access hwid=...`` value it is about to embed; otherwise every
+    correctly machine-bound token is unbuildable and a mismatched token
+    would only fail at the customer rather than at issue/build time.
+    """
+    import json as _lic_json
+    from obfuscator.licensing import public_key_from_hex as _lic_pk
+    from obfuscator.licensing import verify as _lic_verify
+    return _lic_verify(
+        _lic_json.dumps(document, separators=(",", ":")),
+        _lic_pk(public_key_hex),
+        hwid=str(getattr(args, "hwid", "") or "") or None,
+    )
 
 
 def build_project(args):
@@ -4935,8 +5356,13 @@ def build_project(args):
     _licence_token_hash = ""
     if _licence_path:
         import json as _lic_json
-        with open(_licence_path, "r", encoding="utf-8") as _lic_fh:
-            _lic_doc = _lic_json.load(_lic_fh)
+        try:
+            with open(_licence_path, "r", encoding="utf-8") as _lic_fh:
+                _lic_doc = _lic_json.load(_lic_fh)
+        except OSError as _lic_os_exc:
+            raise SystemExit("cannot read licence token %s: %s" % (_licence_path, _lic_os_exc))
+        except ValueError as _lic_json_exc:
+            raise SystemExit("licence token %s is not valid JSON: %s" % (_licence_path, _lic_json_exc))
         _lic_payload = (_lic_doc or {}).get("payload") or {}
         _lic_km = _lic_payload.get("key_material")
         if not _lic_km:
@@ -4948,11 +5374,9 @@ def build_project(args):
                 "licence binding: set NIXON_LICENCE_PUBLIC_KEY to the issuer "
                 "public key so the artefact can pin the signed token")
         from obfuscator.licensing import canonical as _lic_canonical
-        from obfuscator.licensing import public_key_from_hex as _lic_pk
-        from obfuscator.licensing import verify as _lic_verify
         try:
-            _lic_verify(_lic_json.dumps(_lic_doc, separators=(",", ":")),
-                        _lic_pk(_licence_public_key))
+            _verify_build_licence_document(
+                _lic_doc, _licence_public_key, args)
         except Exception as _lic_verify_exc:
             raise SystemExit(
                 "licence token signature verification failed: %s"
@@ -5078,6 +5502,13 @@ def build_project(args):
                 # shipping an unvirtualised blob.
                 'vm_dispatch': (str(os.environ.get('NIXON_VM_DISPATCH', '')).strip().lower()
                                 or None),
+                # --lowering must reach the native blob too. The general
+                # bytecode option map already carried it, but this native
+                # subset omitted it, so native-only artifacts silently dropped
+                # the requested lowering families even when the parser accepted
+                # them. apply_ast_mutation inline-packs the shim, keeping the
+                # extension self-contained.
+                'lowering': str(getattr(args, 'lowering', '') or ''),
                 'hwid': str(getattr(args, 'hwid', '') or ''),
                 'trial_seconds': None,
             }
@@ -5260,8 +5691,14 @@ def build_project(args):
                                             except Exception:
                                                 _ra_doc = None
                                             break
+                                    # Compare against the exact bytes uploaded
+                                    # to the farm. When the AST pre-pass wrote
+                                    # .nx_farm_payload.py, hashing the original
+                                    # source instead would falsely reject a
+                                    # correct attestation and fail to bind the
+                                    # bytes the runner actually received.
                                     _ra_expect = hashlib.sha256(
-                                        open(source, "rb").read()).hexdigest()
+                                        open(_farm_src, "rb").read()).hexdigest()
                                     _ra_dl = []
                                     for _ra_name in os.listdir(_ra_dir):
                                         if _ra_name.endswith(
@@ -5289,11 +5726,9 @@ def build_project(args):
                                             "farm attestation FAILED: %s"
                                             % ("; ".join(
                                                 _ra_res["problems"][:3]),))
-                                        if os.environ.get(
-                                                "NIXON_REQUIRE_FARM_ATTEST") == "1":
-                                            raise SystemExit(
-                                                "farm runner attestation failed "
-                                                "and NIXON_REQUIRE_FARM_ATTEST=1")
+                                        raise SystemExit(
+                                            "farm runner attestation failed; "
+                                            "unverified farm output is refused")
                                 except SystemExit:
                                     raise
                                 except Exception as _ra_exc:
@@ -5529,6 +5964,7 @@ def build_project(args):
                 licence_token_hash=str(_licence_token_hash or ''),
                 licence_bound=_licence_bound,
                 licence_env_only=_licence_env_only,
+                licence_chain=_licence_chain_enabled,
                 strict_detections=bool(getattr(args, 'strict_detections', True)),
             )
             if getattr(args, 'section_split', False):
@@ -5693,12 +6129,7 @@ def build_project(args):
             UI.dot_item("Master Key", "Loaded existing HMAC Key", "OK")
         except FileNotFoundError:
             args._cf_hmac_key = secrets.token_hex(32)
-            with open(key_file, "w", encoding='utf-8') as f:
-                f.write(args._cf_hmac_key)
-            try:
-                os.chmod(key_file, 0o600)
-            except Exception:
-                pass
+            _write_private_key_file(key_file, args._cf_hmac_key)
             UI.dot_item("Master Key", "Generated new HMAC Key", "SAVED")
         deployed_url = deployer.deploy_master(hmac_key=args._cf_hmac_key)
         if deployed_url:
@@ -6022,7 +6453,7 @@ def _VERIFY_INTEGRITY():
                     try:
                         from obfuscator.attestation import stamp_artefact
                         from obfuscator.licensing import (
-                            private_key_from_hex, public_key_hex)
+                            private_key_from_hex)
                         _prov_priv = private_key_from_hex(_prov_key_hex)
                         _candidate = stamp_artefact(_candidate, _prov_priv)
                         # KEY FINGERPRINT (double-stamp fix, 2026-11-19). The
@@ -6158,6 +6589,16 @@ def _VERIFY_INTEGRITY():
                         )
                         xor_dec_source = '''def _xor_decrypt(data, key):
     """NIXON_PROTECTED"""
+    if data[:4] == b"NXS1":
+        import hashlib as _nx_sh
+        _nonce = data[4:20]
+        _ct = data[20:]
+        _out = bytearray()
+        _ctr = 0
+        while len(_out) < len(_ct):
+            _out.extend(_nx_sh.sha256(bytes(key) + _nonce + _ctr.to_bytes(8, "big")).digest())
+            _ctr += 1
+        return bytes(_c ^ _k for _c, _k in zip(_ct, _out[:len(_ct)]))
     k_len = len(key)
     return bytes([b ^ key[i % k_len] for i, b in enumerate(data)])
 '''
@@ -6408,6 +6849,7 @@ def _VERIFY_INTEGRITY():
                 # not the payload).
                 _loadable_plats, _rejected_plats = native_blob_loadability(
                     native_blobs)
+                from obfuscator.core.utils import stream_xor_envelope
                 _packed = {}
                 for _plat, _b64 in native_blobs.items():
                     if not _b64:
@@ -6415,11 +6857,15 @@ def _VERIFY_INTEGRITY():
                         continue
                     try:
                         _raw_blob = base64.b64decode(_b64)
-                        _packed[_plat] = base64.b64encode(
-                            fast_xor_bytes(_raw_blob, _rt_blob_key)).decode("ascii")
-                    except Exception as _pk_exc:
-                        print("  [!] Native blob pack failed for %s: %s" % (_plat, _pk_exc))
+                    except Exception:
                         _packed[_plat] = _b64
+                        continue
+                    try:
+                        _packed[_plat] = base64.b64encode(
+                            stream_xor_envelope(_raw_blob, _rt_blob_key, context=("native:"+str(_plat)).encode())).decode("ascii")
+                    except Exception as _pk_exc:
+                        raise RuntimeError(
+                            "native blob packing failed for %s: %s" % (_plat, _pk_exc)) from _pk_exc
                 native_blobs = _packed
                 _native_blobs_packed = True
                 if _loadable_plats:
@@ -7813,8 +8259,11 @@ def main():
             ntru_priv_key = None
             ntru_pub_key = None
             if True:
-                s_s = secrets.randbits(32)
-                rng = random.Random(s_s)
+                # Licence-worker key material must not be reduced to a
+                # 32-bit PRNG seed: a deployed private key is long-lived and
+                # brute-forceable if seeded this way. SystemRandom draws the
+                # sparse coefficient positions directly from os.urandom.
+                rng = secrets.SystemRandom()
                 N=509; Q=2048
                 priv = [0]*N
                 for i in rng.sample(range(N), 15): priv[i] = 1
@@ -8191,7 +8640,8 @@ def main():
                     _bf_key = None
                 _ma_written = 0
                 for _ma_name in os.listdir(dist_dir):
-                    if not _ma_name.endswith("_protected.py"):
+                    if not (_ma_name.endswith("_protected.py") or
+                            _ma_name.endswith("_protected_dbg.py")):
                         continue
                     _ma_art = os.path.join(dist_dir, _ma_name)
                     _ma_path = _wm(

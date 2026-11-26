@@ -64,7 +64,7 @@ def test_loader_prefix_roundtrip():
 
 def test_legacy_no_prefix_still_works():
     legacy = zlib.compress(PAYLOAD, 9)
-    assert legacy[0] not in BACKEND_IDS.values() or True
+    assert legacy[0] not in BACKEND_IDS.values()
     assert unpack_and_decompress(legacy) == PAYLOAD
 
 

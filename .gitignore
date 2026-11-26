@@ -96,7 +96,7 @@ builds/
 # (config/relay.json and anything a local run drops there), but the two
 # files the BUILD ITSELF depends on are tracked:
 #
-#   config/default.json        the feature configuration (97 keys); every
+#   config/default.json        the feature configuration (98 keys); every
 #                               Phase 2 protection is gated on it, so a
 #                               clone without it silently builds a
 #                               different, weaker artifact
@@ -109,6 +109,8 @@ config/*
 !config/default.json
 !config/baseline_report.json
 ci-artifacts/
+.originals/
+adversarial_output/
 
 # Build intermediates written next to the payload (build.py derives these names
 # from the payload path). They are not fixtures and must not be committed.

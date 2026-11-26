@@ -230,10 +230,12 @@ pub fn init_runtime(config: &RuntimeConfig) {
     }
     if config.enable_sw_attestation {
         let engine = std::sync::Arc::new(sw_attestation::AttestationEngine::new());
-        engine.register_critical_region(
-            &INTEGRITY_MAGIC as *const _ as *const u8,
-            std::mem::size_of::<u64>(),
-        );
+        unsafe {
+            engine.register_critical_region(
+                &INTEGRITY_MAGIC as *const _ as *const u8,
+                std::mem::size_of::<u64>(),
+            );
+        }
         engine.start();
         eprintln!("sw_attestation: attestation engine started");
     }
@@ -269,9 +271,16 @@ pub fn init_runtime(config: &RuntimeConfig) {
             eprintln!("TEE init failed (fallback): {}", e);
         }
         if config.enable_sw_attestation {
-            let measurement = tee_system.get_measurement();
+            let _measurement = tee_system.get_measurement();
             let engine = std::sync::Arc::new(sw_attestation::AttestationEngine::new());
-            engine.register_critical_region(&measurement as *const _ as *const u8, 32);
+            // The returned measurement is a local array. Watch static storage,
+            // not a pointer that would dangle after this block returns.
+            unsafe {
+                engine.register_critical_region(
+                    &INTEGRITY_MAGIC as *const _ as *const u8,
+                    std::mem::size_of::<u64>(),
+                );
+            }
             engine.start();
             eprintln!("sw_attestation: TEE-integrated attestation engine started");
         }

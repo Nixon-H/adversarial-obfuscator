@@ -24,7 +24,10 @@ def generate_manifest(
         "build_seed": build_seed,
         "encryption": {
             "algorithm": "aes-256-ctr",
-            "key_derivation": "sha256(seed + block_index)",
+            "key_derivation": (
+                "aes-256(seed) over the block counter, two 16-byte outputs "
+                "concatenated (matches runtime/src/decrypt.rs derive_block_key)"
+            ),
         },
         "integrity": {
             "algorithm": "crc32",

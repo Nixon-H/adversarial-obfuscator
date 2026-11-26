@@ -120,6 +120,7 @@ def test_replay_is_rejected():
     registry.register("f", lambda x: x + 1)
     nonce = "abc"
     body = json.dumps({
+        "version": 1,
         "function": "f", "args": [1], "nonce": nonce, "timestamp": 1000.0,
         "signature": sign_request(SECRET, "f", [1], nonce, 1000.0),
     }).encode()
@@ -134,6 +135,7 @@ def test_server_executes_the_implementation():
     registry.register("pricing_engine", lambda units, tier: units * 3)
     nonce = "n2"
     body = json.dumps({
+        "version": 1,
         "function": "pricing_engine", "args": [10, "gold"], "nonce": nonce,
         "timestamp": 1000.0,
         "signature": sign_request(SECRET, "pricing_engine", [10, "gold"],
@@ -215,3 +217,118 @@ def test_stub_source_has_no_body_leak():
     assert "SECRET_COEFFICIENT" not in stub
     assert "call_remote" in stub
     compile(stub, "<stub>", "exec")
+
+
+def test_stub_forwards_kwargs_to_call_remote():
+    """Regression: the emitted stub accepted **kwargs but dropped them."""
+    _client, remote = split_module(SOURCE)
+    stub = stub_source(remote[0])
+    assert "kwargs=kwargs" in stub, stub
+    compile(stub, "<stub>", "exec")
+
+
+def test_sign_request_binds_kwargs():
+    """Altering kwargs must invalidate the signature."""
+    sig = sign_request(SECRET, "f", [1], "n", 1000.0, {"rate": 0.5})
+    verify_request(SECRET, "f", [1], "n", 1000.0, sig, {"rate": 0.5}, now=1000.0)
+    with pytest_raises(RemoteError):
+        verify_request(SECRET, "f", [1], "n", 1000.0, sig, {"rate": 0.9}, now=1000.0)
+    # Omitting kwargs signs the canonical empty object.
+    sig2 = sign_request(SECRET, "f", [1], "n", 1000.0)
+    verify_request(SECRET, "f", [1], "n", 1000.0, sig2, now=1000.0)
+
+
+def test_protocol_v1_cross_language_vectors():
+    """Fixed vectors also appear in relay/src/remote.rs's Rust tests."""
+    vectors = [
+        (
+            [1, -0.0, "é", True, None, {"b": 2, "a": 1.5}],
+            {"rate": 0.5, "label": "x"},
+            "nonce",
+            1000.0,
+            "b2adc43bf63eb2bfeb87e9b5b509f636b2de11ea36189d23893c7a1be44c030f",
+        ),
+        (
+            [],
+            {},
+            "n",
+            0.0,
+            "382e67120a57399c948f27624de9082070d2b80b3e847fcfa421b5b26fb2a396",
+        ),
+        (
+            [-9223372036854775808, 18446744073709551615],
+            {"z": 1},
+            "abc",
+            1.25,
+            "0297cce9a44e6d8da81abbed561dc5ae941c1da98a6b0148df740ec2aa2d59fe",
+        ),
+    ]
+    for args, kwargs, nonce, timestamp, expected in vectors:
+        assert sign_request(SECRET, "f", args, nonce, timestamp, kwargs) == expected
+
+
+def test_protocol_distinguishes_integer_and_float_and_rejects_nonfinite():
+    assert sign_request(SECRET, "f", [1], "n", 1.0) != sign_request(
+        SECRET, "f", [1.0], "n", 1.0)
+    with pytest_raises(RemoteError):
+        sign_request(SECRET, "f", [float("nan")], "n", 1.0)
+    with pytest_raises(RemoteError):
+        sign_request(SECRET, "f", [1], "n", float("inf"))
+
+
+def test_registry_verifies_and_dispatches_kwargs():
+    registry = RemoteRegistry(SECRET)
+    registry.register("add_tax", lambda amount, rate=0.2: amount * (1 + rate))
+    kwargs = {"rate": 0.5}
+    body = json.dumps({
+        "version": 1,
+        "function": "add_tax",
+        "args": [100],
+        "kwargs": kwargs,
+        "nonce": "kwargs-nonce",
+        "timestamp": 1000.0,
+        "signature": sign_request(
+            SECRET, "add_tax", [100], "kwargs-nonce", 1000.0, kwargs),
+    }).encode()
+    assert json.loads(registry.handle(body, now=1000.0)) == {"result": 150.0}
+
+    tampered = json.loads(body)
+    tampered["kwargs"] = {"rate": 0.9}
+    out = json.loads(registry.handle(json.dumps(tampered).encode(), now=1000.0))
+    assert "signature" in out.get("error", "")
+
+
+def test_bundle_main_invokes_impl_with_kwargs(tmp_path):
+    """The operator bundle's __main__ must pass kwargs to the implementation."""
+    import json as _json
+    import subprocess as _sp
+    import sys as _sys
+    import time as _time
+    src = (
+        "from obfuscator.remote_exec import remote\n\n"
+        "@remote\n"
+        "def add_tax(amount, rate=0.2):\n"
+        "    return amount * (1 + rate)\n"
+    )
+    _client, funcs = split_module(src)
+    bundle = tmp_path / "bundle.py"
+    write_remote_bundle(funcs, str(bundle))
+    env = dict(os.environ, PYTHONPATH=os.getcwd(), **{SECRET_ENV: SECRET.hex()})
+    req = {
+        "version": 1,
+        "function": "add_tax",
+        "args": [100],
+        "kwargs": {"rate": 0.5},
+        "nonce": "bundle-nonce",
+        "timestamp": _time.time(),
+    }
+    req["signature"] = sign_request(
+        SECRET, "add_tax", [100], "bundle-nonce", req["timestamp"], req["kwargs"])
+    out = _sp.run([_sys.executable, str(bundle)], input=_json.dumps(req),
+                  capture_output=True, text=True, env=env, timeout=10)
+    assert _json.loads(out.stdout) == {"result": 150.0}, out.stderr
+
+    req["kwargs"] = {"rate": 0.9}
+    out = _sp.run([_sys.executable, str(bundle)], input=_json.dumps(req),
+                  capture_output=True, text=True, env=env, timeout=10)
+    assert "signature" in _json.loads(out.stdout).get("error", ""), out.stderr

@@ -143,6 +143,42 @@ def _block_predecessors(blocks: list[dict]) -> dict:
 
 
 _PHI_RE = re.compile(r'^(\s*)(%[\w.]+)\s*=\s*phi\s+(\S+)\s+(.*)$')
+_SSA_DEF_RE = re.compile(r'^\s*(%[A-Za-z0-9_.$]+)\s*=\s*(.*)$')
+_SSA_USE_RE = re.compile(r'%[A-Za-z0-9_.$]+')
+
+
+def _has_cross_block_ssa_uses(blocks: list[dict]) -> bool:
+    """Whether flattening would add a dispatcher edge to a value use.
+
+    Values defined outside their use block currently rely on the original CFG
+    for dominance.  A dispatcher can enter the use block without passing the
+    definition block, violating SSA.  Entry allocas are exempt because FLA
+    lifts them into its dominating preamble; every other cross-block use is
+    left unflattened rather than emitting invalid IR.
+    """
+    definitions: dict[str, str] = {}
+    uses: dict[str, set[str]] = {}
+    for block in blocks:
+        block_name = block["name"]
+        for line in block.get("lines", []):
+            stripped = line.strip()
+            if not stripped or stripped.startswith(";"):
+                continue
+            match = _SSA_DEF_RE.match(line)
+            if match:
+                result, rhs = match.groups()
+                if not re.match(r'^alloca\b', rhs.strip()):
+                    definitions[result] = block_name
+                for name in set(_SSA_USE_RE.findall(rhs)):
+                    uses.setdefault(name, set()).add(block_name)
+            else:
+                for name in set(_SSA_USE_RE.findall(line)):
+                    uses.setdefault(name, set()).add(block_name)
+    return any(
+        definitions[name] not in use_blocks
+        for name, use_blocks in uses.items()
+        if name in definitions
+    )
 
 
 def _repair_phis(blocks: list[dict]) -> None:
@@ -310,8 +346,9 @@ def apply_fla(llvm_ir: str) -> str:
         # changes them.  Rebuilding them is an SSA-construction
         # problem, so such a function is left alone -- the pass must
         # not produce a module that does not verify.
-        if any(_PHI_RE.match(l.strip()) for b in blocks
-               for l in b.get("lines", [])):
+        if (any(_PHI_RE.match(l.strip()) for b in blocks
+                for l in b.get("lines", []))
+                or _has_cross_block_ssa_uses(blocks)):
             result_bodies.append(f"{func_header}\n" + "\n".join(body_lines) + "\n}")
             continue
 
@@ -409,10 +446,12 @@ def apply_fla(llvm_ir: str) -> str:
                 old_num = m.group(1)
                 new_name = f'%alloca_{old_num}'
                 renumbered.append(re.sub(r'^(\s*)%\d+\s*=', rf'\1{new_name} = ', line))
-                old_ref = f'%{old_num}'
+                # Plain str.replace('%17', ...) also rewrote %170, %1700,
+                # etc. into %alloca_170, corrupting unrelated value names.
+                old_ref = re.compile(rf'%({re.escape(old_num)})(?![\w.])')
                 for other_block in blocks:
                     other_block["lines"] = [
-                        l.replace(old_ref, new_name) for l in other_block["lines"]
+                        old_ref.sub(new_name, l) for l in other_block["lines"]
                     ]
             else:
                 renumbered.append(line)
@@ -556,12 +595,26 @@ def apply_replay_poison(llvm_ir: str, num_dead_cases: int = 4) -> str:
                 new_blocks.append(block)
                 continue
 
-            for j in range(num_dead_cases):
+            # hash() is salted per process, so duplicate/dead switch cases
+            # changed between builds. Derive the base from a stable digest and
+            # skip any value already present in this switch.
+            used_cases = {int(v) for v in re.findall(
+                r'i32\s+(-?\d+)', sw_match.group(1))}
+            base = 1000 + (int.from_bytes(
+                hashlib.blake2b(func_name.encode(), digest_size=4).digest(), "big"
+            ) % 100000)
+            next_case = base
+            while next_case in used_cases:
+                next_case += 1
+
+            for _ in range(num_dead_cases):
                 dead_label = _get_new_label("rddead")
                 _get_new_var('re')
                 _get_new_var('rc')
 
-                insert_line = f"    i32 {j + 1000 + hash(func_name) % 1000}, label %{dead_label}"
+                case_value = next_case
+                next_case += 1
+                insert_line = f"    i32 {case_value}, label %{dead_label}"
                 lines.insert(-1, insert_line)
 
                 eb = _get_new_var("eb")

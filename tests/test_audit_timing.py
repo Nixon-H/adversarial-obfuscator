@@ -124,13 +124,12 @@ def test_canary_blocked_by_foreign_raising_hook_kills_137():
         "        raise RuntimeError('blocked')",
         "    return _orig_audit(ev, *a)",
         "_s.audit = _blocked",
-        "assert _nx_audit_verify() == 'canary-blocked' or True",
+        "_nx_audit_verify()",
         "print('MARKER')",
     ])
-    # The monkeypatched audit either kills (137) or, if timing of the
-    # patch vs baseline ordering differs, still prints MARKER — but the
-    # real foreign-hook case is covered by the subprocess test below.
-    assert proc.returncode in (0, 137), (proc.returncode, proc.stdout, proc.stderr[-2000:])
+    # A blocked canary must fail closed before MARKER can be printed.
+    assert proc.returncode == 137, (proc.returncode, proc.stdout, proc.stderr[-2000:])
+    assert "MARKER" not in proc.stdout
 
 
 def test_foreign_raising_hook_preinstalled_kills_137():

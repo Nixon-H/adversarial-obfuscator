@@ -24,7 +24,19 @@ import tempfile
 
 ART = sys.argv[1] if len(sys.argv) > 1 else None
 if not ART or not os.path.exists(ART):
-    raise SystemExit("usage: selfcheck_bypass.py <artefact>")
+    raise SystemExit("usage: selfcheck_bypass.py <artefact> [licence]")
+
+
+def licence_path():
+    """Operator-supplied licence, never a machine-specific absolute path.
+
+    This probe used to copy any request to a hardcoded
+    /home/nixon/scratch/.../acme.licence, which silently made the probe do
+    nothing on any other machine (and leaked one developer's layout).
+    """
+    if len(sys.argv) > 2:
+        return sys.argv[2]
+    return os.environ.get("NIXON_BENCH_LICENCE") or None
 
 
 def run(path, work):
@@ -72,9 +84,9 @@ for name, src in variants.items():
     p = os.path.join(d, "a.py")
     with open(p, "w", encoding="utf-8", errors="surrogateescape") as fh:
         fh.write(src)
-    shutil.copy2("/home/nixon/scratch/bench-max/acme.licence",
-                 os.path.join(d, "acme.licence")) if os.path.exists(
-        "/home/nixon/scratch/bench-max/acme.licence") else None
+    licence = licence_path()
+    if licence and os.path.exists(licence):
+        shutil.copy2(licence, os.path.join(d, "acme.licence"))
     rc, out = run(p, d)
     survived = rc == 0
     # did the payload run? look for any payload-ish marker

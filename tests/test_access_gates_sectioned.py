@@ -125,7 +125,7 @@ def test_one_shot_cleanup_deletes_the_target(tmp_path):
     end = src.find("    pass\n", src.find("_nx_os_atexit.register", start))
     assert end > start
     block = src[start:end + len("    pass\n")]
-    target = tmp_path / "victim.py"
+    target = tmp_path / "artifact.py"
     target.write_text("secret-bytes\n", encoding="utf-8")
     ns = {"__name__": "__main__"}
     import sys
@@ -133,10 +133,67 @@ def test_one_shot_cleanup_deletes_the_target(tmp_path):
     sys.argv = [str(target)]
     try:
         exec(compile(block, "<oneshot>", "exec"), ns)
+        token = ns["_NX_ONE_SHOT_TOK"].decode("ascii")
+        target.write_text("prefix\n" + token + "\nsuffix\n", encoding="utf-8")
         ns["_nx_one_shot_cleanup"]()
     finally:
         sys.argv = old_argv
     assert not target.exists(), "one-shot did not delete the artefact"
+
+
+def test_one_shot_refuses_env_controlled_victim_without_artifact_marker(tmp_path):
+    """NX_ORIGIN must not become an arbitrary file-deletion primitive."""
+    src = _emit(one_shot=True)
+    start = src.find("try:\n    import atexit as _nx_os_atexit")
+    end = src.find("    pass\n", src.find("_nx_os_atexit.register", start))
+    block = src[start:end + len("    pass\n")]
+    artifact = tmp_path / "artifact.py"
+    victim = tmp_path / "victim.txt"
+    victim.write_text("do-not-delete\n", encoding="utf-8")
+    ns = {"__name__": "__main__"}
+    import os
+    import sys
+    old_argv = sys.argv[:]
+    old_origin = os.environ.get("NX_ORIGIN")
+    sys.argv = [str(artifact)]
+    os.environ["NX_ORIGIN"] = str(victim)
+    try:
+        exec(compile(block, "<oneshot>", "exec"), ns)
+        token = ns["_NX_ONE_SHOT_TOK"].decode("ascii")
+        artifact.write_text("artifact\n" + token + "\n", encoding="utf-8")
+        ns["_nx_one_shot_cleanup"]()
+    finally:
+        sys.argv = old_argv
+        if old_origin is None:
+            os.environ.pop("NX_ORIGIN", None)
+        else:
+            os.environ["NX_ORIGIN"] = old_origin
+    assert not artifact.exists(), "marked artefact was not removed"
+    assert victim.read_text(encoding="utf-8") == "do-not-delete\n"
+
+
+def test_one_shot_refuses_symlink_target(tmp_path):
+    """A symlink must not redirect the overwrite into another file."""
+    src = _emit(one_shot=True)
+    start = src.find("try:\n    import atexit as _nx_os_atexit")
+    end = src.find("    pass\n", src.find("_nx_os_atexit.register", start))
+    block = src[start:end + len("    pass\n")]
+    real = tmp_path / "real.py"
+    link = tmp_path / "link.py"
+    ns = {"__name__": "__main__"}
+    import sys
+    old_argv = sys.argv[:]
+    sys.argv = [str(link)]
+    try:
+        exec(compile(block, "<oneshot>", "exec"), ns)
+        token = ns["_NX_ONE_SHOT_TOK"].decode("ascii")
+        real.write_text("artifact\n" + token + "\n", encoding="utf-8")
+        link.symlink_to(real)
+        ns["_nx_one_shot_cleanup"]()
+    finally:
+        sys.argv = old_argv
+    assert real.exists(), "symlink redirection erased the underlying file"
+    assert link.exists(), "the symlink itself should not be unlinked as an artefact"
 
 
 # --- trial (shape) ----------------------------------------------------------
@@ -146,3 +203,14 @@ def test_trial_gate_result_is_enforced():
     assert "_NX_TRIAL_GATE" in src
     assert 'if _NX_TRIAL_GATE != "ok":' in src
     assert '_nx_kill("trial-" + str(_NX_TRIAL_GATE))' in src
+
+
+def test_packed_one_shot_paths_require_the_build_identity_marker():
+    """The packed loader family must enforce the same victim-file constraint."""
+    import os
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    source = open(os.path.join(root, "obfuscator", "core", "sources.py"),
+                  encoding="utf-8").read()
+    assert source.count('_BUILD_ID.encode("ascii")') >= 2
+    assert source.count('O_NOFOLLOW') >= 2
+    assert 'if origin: targets.add(origin)\n                for t in targets:\n                    if _nixon_オペレーション운영.path.exists(t)' not in source

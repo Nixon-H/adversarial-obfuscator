@@ -161,3 +161,11 @@ def test_dropping_the_list_defeats_revocation():
     -- do not delete the test.
     """
     assert verify(_token(3), KEY.public_key()).licence_id == "L1"
+
+
+def test_verify_wires_revocation_high_water_mark():
+    """licensing.verify must expose the rollback guard, not leave it dead."""
+    older = _revocation(issued_at=1000)
+    with pytest.raises(LicenceError, match="rolled-back"):
+        verify(_token(3, licence_id="L9", nonce="n9"), KEY.public_key(),
+               revocation_list=older, previous_revocation_issued_at=2000)

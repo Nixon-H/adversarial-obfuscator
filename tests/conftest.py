@@ -71,3 +71,52 @@ def ir_func():
     func = IrFunction("test_func", IrType.i32())
     func.new_block("entry")
     return func
+
+
+# ── Per-test timeout safety net ─────────────────────────────────────────────
+# A hung test (e.g. an unbounded multiprocessing join/get in a child) must
+# fail the test, not stall the whole suite. SIGALRM only works in the main
+# thread on Unix; NIXON_TEST_TIMEOUT overrides the default (seconds).
+import signal
+import threading
+
+_NIXON_TEST_TIMEOUT = int(os.environ.get("NIXON_TEST_TIMEOUT", "600"))
+
+
+def _nixon_timeout_for(item):
+    """Per-test budget: test-local marker wins over the session default.
+
+    Some integration tests legitimately build and execute several
+    artifacts; a single global ceiling sized for unit tests would abort
+    them mid-build and report a product failure that is really a harness
+    limit.  Mark those tests with ``nixon_timeout(seconds)``.
+    """
+    marker = item.get_closest_marker("nixon_timeout")
+    if marker is not None:
+        seconds = marker.args[0] if marker.args else marker.kwargs.get("seconds")
+        if isinstance(seconds, (int, float)) and seconds > 0:
+            return float(seconds)
+    return float(_NIXON_TEST_TIMEOUT)
+
+
+def _nixon_test_alarm_factory(timeout):
+    def _nixon_test_alarm(signum, frame):
+        raise TimeoutError(
+            f"test exceeded the {timeout:g}s per-test timeout "
+            "(set NIXON_TEST_TIMEOUT to raise it, or mark the test with "
+            "nixon_timeout)")
+    return _nixon_test_alarm
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_protocol(item, nextitem):
+    if threading.current_thread() is threading.main_thread() and hasattr(signal, "SIGALRM"):
+        timeout = _nixon_timeout_for(item)
+        old_handler = signal.signal(signal.SIGALRM, _nixon_test_alarm_factory(timeout))
+        signal.setitimer(signal.ITIMER_REAL, timeout)
+        try:
+            return (yield)
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, old_handler)
+    return (yield)

@@ -1,21 +1,13 @@
 """Regression tests for the second-round adversarial findings.
 
-Every test here asserts the CORRECT behaviour, not the current behaviour. Six of
-them cover defects that are NOT yet fixed, so they are marked
-``xfail(strict=True)``: they execute on every gate run, report as `xfailed`, and
-the moment the defect is fixed the test XPASSes and a strict xfail turns that
-into a FAILURE demanding the marker be removed. A defect can therefore never be
-fixed silently, and none of these can rot unnoticed.
+Every test here asserts the correct behaviour. AI-CRYPTO-004 was fixed by
+operator-keyed decoy derivation; the remaining protocol/parser findings are
+covered directly rather than hidden behind permanent xfail markers.
 
 The one finding that is only a documentation error (AI-CRYPTO-005) was fixed in
-the same pass, so its test now PASSES and is not xfailed.
-
-Honest note on the earlier reasoning: this module first argued against xfail on
-the grounds that "a strict xfail that nobody runs is the same as no test". That
-objection does not apply here -- the file is inside tests/, so the derived shard
-gate assigns and executes it every run, which the aggregate proves (7 xfailed
-appear in the shard output). The objection was right in general and wrong for
-this file.
+the same pass, so its test now passes. AI-CRYPTO-004 is fixed by operator-keyed
+decoy derivation and its regression test now passes directly. No test in this
+module remains xfailed.
 
 Finding -> test:
   AI-CRYPTO-004  test_decoy_key_is_not_derivable_from_the_artefact
@@ -50,44 +42,41 @@ sys.path.insert(0, ROOT)
 
 # ── AI-CRYPTO-004: decoy key derivable from the artefact ──────────────────
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="AI-CRYPTO-004 open: the decoy key is derivable from the emitted "
-           "artefact (sha256 of _NX_SECTION_PACK) and confirmable against "
-           "_NX_HONEY_HINT, so the bait is identifiable")
 def test_decoy_key_is_not_derivable_from_the_artefact():
     """The decoy's key must not be recoverable from published values.
 
-    The shipped path derives the decoy key from sha256(_section_pack_val) and
-    publishes _section_pack_val verbatim as _NX_SECTION_PACK, then publishes
-    the decoy hint as _NX_HONEY_HINT. An analyst who reads the file can
-    therefore do exactly this:
-
-        bid = sha256(pack_text.encode()).digest()[:16].hex()
-        key = decoy_key(bid)                  # honeypayload.decoy_key
-        assert sha256(key).hexdigest()[:16] == emitted_hint
-
-    The assertion below is the security property: that derivation must NOT
-    reproduce the emitted hint. It does today, so this test fails.
+    AI-CRYPTO-004 is fixed by keying decoy-key derivation with operator-held
+    secret material.  This test preserves the original attack: derive the old
+    key solely from the emitted section pack and show that it no longer matches
+    the decoy pack's key hint.  The operator-secret derivation is checked too,
+    proving the test is exercising the real replacement rather than merely a
+    broken decoy build.
     """
     from obfuscator.honeypayload import build_honey_pack, decoy_key
     from obfuscator.section_split import pack_json
 
+    operator_secret = "test-only-honey-secret"
     real_js, _real_key = pack_json(b"REAL" * 40, sections=2)
     pack_text = base64.b85encode(real_js).decode("ascii")   # == _NX_SECTION_PACK
 
     seed = hashlib.sha256(str(pack_text).encode("utf-8")).digest()
-    hp = build_honey_pack(seed, seed[:16].hex())
-    emitted_hint = hp["key_hint"]                            # == _NX_HONEY_HINT
+    build_id = seed[:16].hex()
+    hp = build_honey_pack(seed, build_id, operator_secret=operator_secret)
+    emitted_hint = hp["key_hint"]
 
-    analyst_build_id = hashlib.sha256(pack_text.encode("utf-8")).digest()[:16].hex()
-    analyst_key = decoy_key(analyst_build_id)
+    analyst_key = hashlib.sha256(
+        b"nx-honey-decoy:" + build_id.encode("utf-8")).digest()
     analyst_hint = hashlib.sha256(analyst_key).hexdigest()[:16]
-
     assert analyst_hint != emitted_hint, (
-        "the decoy key is derivable from the emitted artefact: an analyst who "
-        "computes sha256(_NX_SECTION_PACK) obtains the decoy key and confirms "
-        "it against _NX_HONEY_HINT, which identifies the real payload")
+        "the old artefact-public decoy-key derivation still reproduces the "
+        "emitted key hint")
+
+    operator_hint = hashlib.sha256(
+        decoy_key(build_id, operator_secret)).hexdigest()[:16]
+    assert operator_hint == emitted_hint, (
+        "precondition: the operator-secret key must actually seal this pack")
+    assert operator_secret not in hp["pack_b85"]
+    assert operator_secret not in hp["source"]
 
 
 # ── AI-CRYPTO-005: documented pack_id size ────────────────────────────────
@@ -122,11 +111,6 @@ def test_documents_state_the_true_pack_id_size():
 
 # ── AI-PROTO-006: replay ledger fails open when it cannot persist ─────────
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="AI-PROTO-006 open: ReplayLedger._store swallows OSError and "
-           "check_and_record ignores its result, so an unwritable ledger "
-           "accepts every replay with no error")
 def test_unwritable_ledger_fails_closed(tmp_path):
     """A ledger that cannot be written must not silently accept replays."""
     from obfuscator.licence_replay import ReplayLedger
@@ -140,19 +124,14 @@ def test_unwritable_ledger_fails_closed(tmp_path):
     first = ledger.check_and_record("identity-x")
     second = ledger.check_and_record("identity-x")
 
-    assert first is True, "the first presentation of a fresh token must pass"
-    assert second is False, (
-        "a ledger that cannot persist accepted a replay: the second "
-        "presentation of the same token returned True, so replay protection "
-        "is absent on unwritable media and the caller is told nothing")
+    assert first is False, (
+        "a ledger that cannot persist must fail closed on the first use; "
+        "accepting it would run with replay enforcement disarmed")
+    assert second is False, "an unwritable ledger must keep failing closed"
 
 
 # ── AI-PROTO-008: rollback ignores write_mark() failure ───────────────────
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="AI-PROTO-008 open: check_rollback discards write_mark's False, so "
-           "an unarmed anti-rollback mark accepts every protection level")
 def test_rollback_refuses_when_the_mark_cannot_be_written(tmp_path):
     """An unarmed anti-rollback mark is a failed check, not a silent pass."""
     from obfuscator.rollback import MARK_NAME, check_rollback, write_mark
@@ -162,25 +141,21 @@ def test_rollback_refuses_when_the_mark_cannot_be_written(tmp_path):
     mark = tmp_path / MARK_NAME
 
     key = b"\x77" * 32
-    # Prove the mark cannot be armed here, then assert check_rollback says so.
-    tmp_path.chmod(0o555)
-    try:
-        assert write_mark(str(mark), key, 5, "app.py") is False, (
-            "precondition: the mark must be unwritable for this test")
-        with pytest.raises(Exception):
-            check_rollback(str(artefact), 5, key)
-    finally:
-        tmp_path.chmod(0o755)
+    # A directory occupying the mark pathname makes the final os.replace fail
+    # even when the suite runs as root (where chmod(0555) is still writable).
+    mark.mkdir()
+    assert write_mark(str(mark), key, 5, "app.py") is False, (
+        "precondition: the mark must be unwritable for this test")
+    with pytest.raises(RuntimeError, match="mark could not be written"):
+        check_rollback(str(artefact), 5, key)
 
-    assert not mark.exists()
+    assert mark.is_dir()
+    assert not list(tmp_path.glob(".nx-rb-*")), (
+        "a failed atomic mark write must not leave temporary mark files behind")
 
 
 # ── AI-PROTO-009: revocation rollback guard must be reachable ─────────────
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="AI-PROTO-009 open: licensing.verify calls check_revoked without "
-           "previous_issued_at, so the rolled-back-list guard can never fire")
 def test_revocation_rollback_guard_is_wired():
     """licensing.verify must pass a high-water mark, or the guard is dead."""
     import inspect
@@ -188,24 +163,16 @@ def test_revocation_rollback_guard_is_wired():
     from obfuscator import licensing
 
     source = inspect.getsource(licensing.verify)
-    call = [ln.strip() for ln in source.splitlines()
-            if "check_revoked(" in ln and "import" not in ln]
-    assert call, "licensing.verify no longer calls check_revoked at all"
-    joined = " ".join(call)
-    assert "previous_issued_at" in joined, (
-        "licensing.verify calls check_revoked without previous_issued_at, so "
-        "the argument defaults to 0 and 'issued < previous_issued_at' can "
-        "never be true: an old signed revocation list un-revokes a licence. "
-        "Call was: %s" % joined)
+    assert "check_revoked(" in source, (
+        "licensing.verify no longer calls check_revoked at all")
+    assert "previous_issued_at=previous_revocation_issued_at" in source, (
+        "licensing.verify calls check_revoked without the caller-supplied "
+        "high-water mark, so the argument defaults to 0 and the rollback "
+        "guard can never fire")
 
 
 # ── AI-PARSE-010: legacy manifest fingerprint forgery ─────────────────────
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="AI-PARSE-010 open: without a top-level signed_key_fingerprint the "
-           "nested copy is unauthenticated, so a genuine artefact can be "
-           "re-attributed to another key and still verify ok: True")
 def test_legacy_manifest_fingerprint_cannot_be_forged(tmp_path):
     """A manifest with no top-level fingerprint must not be re-attributable."""
     from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -253,11 +220,6 @@ def test_legacy_manifest_fingerprint_cannot_be_forged(tmp_path):
 
 # ── AI-PARSE-011: stream_join contract ────────────────────────────────────
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="AI-PARSE-011 open: stream_join raises TypeError for non-dict packs, "
-           "None sections and numeric-string framing fields while its docstring "
-           "promises ValueError")
 def test_stream_join_raises_valuederror_for_every_malformed_class():
     """The docstring promises ValueError; TypeError escapes for 4 classes."""
     from obfuscator.section_split import pack_json, stream_join

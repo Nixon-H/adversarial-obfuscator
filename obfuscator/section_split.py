@@ -292,17 +292,23 @@ def stream_join(pack: dict, key: bytes) -> bytearray:
     total-length mismatch, or key_hint mismatch. Caller MUST wipe the
     returned buffer after use.
     """
-    sections = pack["sections"]
-    # FRAMING BOUNDS FIRST (malformed-input fuzz finding): a negative or
-    # non-integer count/total crashed the state digest with an uncaught
-    # OverflowError instead of a structured refusal. Bounds precede every
-    # other check.
+    if not isinstance(pack, dict):
+        raise ValueError("section pack must be an object")
+    sections = pack.get("sections")
+    if not isinstance(sections, list):
+        raise ValueError("section pack sections must be a list")
+    # FRAMING BOUNDS FIRST (malformed-input fuzz finding): a negative,
+    # non-integral, or stringly-typed count/total must be a structured
+    # refusal, not an uncaught type error or an accidental int() coercion.
+    # Bounds precede every other check.
     try:
-        _declared_count = int(pack["count"])
-        _declared_total = int(pack["total"])
+        if type(pack["count"]) is not int or type(pack["total"]) is not int:
+            raise ValueError("section pack framing values must be integers")
+        _declared_count = pack["count"]
+        _declared_total = pack["total"]
         _declared_count.to_bytes(4, "big")
         _declared_total.to_bytes(8, "big")
-    except (TypeError, ValueError, OverflowError):
+    except (KeyError, TypeError, ValueError, OverflowError):
         raise ValueError("section pack framing values are not sane lengths")
     if _declared_count < 0 or _declared_total < 0:
         raise ValueError("section pack framing values must be non-negative")
@@ -310,6 +316,8 @@ def stream_join(pack: dict, key: bytes) -> bytearray:
     # digests each index as a 4-byte unsigned value, so a negative index
     # crashed it with an uncaught OverflowError instead of refusing.
     for _sec in sections:
+        if not isinstance(_sec, dict):
+            raise ValueError("section entries must be objects")
         try:
             _si = int(_sec["i"])
         except (KeyError, TypeError, ValueError):

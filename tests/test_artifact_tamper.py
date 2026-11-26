@@ -71,12 +71,14 @@ def artifact(tmp_path_factory):
     return _build(str(work))
 
 
+@pytest.mark.nixon_timeout(1200)
 def test_the_untampered_artifact_runs(artifact):
     run = _run(artifact)
     assert run.returncode == 0, run.stderr[-2000:]
     assert "PAYLOAD-RAN" in run.stdout
 
 
+@pytest.mark.nixon_timeout(1200)
 def test_a_tampered_artifact_does_not_look_successful(tmp_path, artifact):
     """A flipped byte must not look like a clean run.
 

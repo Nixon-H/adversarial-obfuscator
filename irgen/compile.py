@@ -270,7 +270,13 @@ class IrInstruction:
             return r
         if self.opcode == 'call':
             ret_t = self.result_type if self.result_type else self.ty
-            r = f"{self.result.name} = call" if self.result else "call"
+            # A void call has no value to assign: `%0 = call void @f()` is
+            # invalid LLVM IR. The IR generators emit void calls for init
+            # stubs, so this has to render without a result name.
+            if getattr(ret_t, 'kind', None) == 'void' or str(ret_t) == 'void':
+                r = "call"
+            else:
+                r = f"{self.result.name} = call" if self.result else "call"
             r += f" {ret_t} @{self.func_name}"
             # The parentheses are always present: without them a call
             # with no arguments ("call i32 @globals") is not a call

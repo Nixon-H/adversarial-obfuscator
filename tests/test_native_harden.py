@@ -164,6 +164,36 @@ def test_authenticode_is_reported_only_when_the_directory_has_bytes():
     signed = nh.verify_pe_bytes(_pe(PE_HARDENED, security_size=0x200))
     assert unsigned["authenticode"] is False
     assert signed["authenticode"] is True
+    assert signed["authenticode_verified"] is False
+    assert signed["authenticode_reason"]
+
+
+def test_authenticode_failure_schema_is_stable_for_malformed_pe():
+    required = {"kind", "valid", "authenticode", "authenticode_verified",
+                "authenticode_reason", "cfg_guard_flags",
+                "cfg_instrumented", "cfg_function_table", "cet_compat",
+                "sections", "opt_size"}
+    malformed = bytearray(_pe(PE_HARDENED))
+    e_lfanew = struct.unpack_from("<I", malformed, 0x3C)[0]
+    opt = e_lfanew + 4 + 20
+    struct.pack_into("<I", malformed, opt + 108, 0xFFFFFFFF)
+    for blob in (b"", b"MZ", bytes(malformed)):
+        report = nh.verify_pe_bytes(blob)
+        assert required <= set(report)
+        assert report["authenticode_verified"] is False
+        assert isinstance(report["authenticode_reason"], str)
+
+
+def test_native_harden_does_not_trust_a_bare_ok_flag(monkeypatch):
+    """A positive result must include evidence from the real CMS verifier."""
+    from obfuscator import authenticode_verify
+
+    monkeypatch.setattr(authenticode_verify, "verify_pe_signature",
+                        lambda _data: {"ok": True})
+    report = nh.verify_pe_bytes(_pe(PE_HARDENED, security_size=0x200))
+    assert report["authenticode"] is True
+    assert report["authenticode_verified"] is False
+    assert report["authenticode_reason"]
 
 
 def test_a_debug_directory_is_reported_and_is_not_a_failure():
@@ -861,6 +891,10 @@ def test_guard_flag_bit_names_match_the_authoritative_parser(tmp_path):
     for bit, expected in canonical.items():
         data = _probe(bit)
         report = nh.verify_pe_bytes(data)
+        # The module's own report must carry exactly the probed flag bit...
+        assert report.get("cfg_guard_flags") == bit, (
+            "verify_pe_bytes reported cfg_guard_flags=0x%X for a probe built "
+            "with bit 0x%X (%s)" % (report.get("cfg_guard_flags", -1), bit, expected))
         # Each claim must land on the bit the canonical table says it is:
         # asserted by construction here and cross-checked against llvm in
         # test_the_real_farm_pyd_names_its_guard_bits.

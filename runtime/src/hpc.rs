@@ -46,9 +46,11 @@ pub fn read_pmc(counter_idx: u32) -> Result<u64, String> {
     };
     match perf_event_open(0, config) {
         Ok(fd) => {
-            let val = perf_read_counter(fd)?;
+            // Close the perf fd on every path: `?` here used to return before
+            // close() on a read error, leaking one descriptor per failed read.
+            let val = perf_read_counter(fd);
             unsafe { libc::close(fd); }
-            Ok(val)
+            val
         }
         Err(e) => Err(format!("cannot read PMC {}: {}", counter_idx, e)),
     }

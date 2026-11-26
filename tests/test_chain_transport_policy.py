@@ -105,4 +105,4 @@ def test_https_is_always_accepted():
 def test_a_bad_contract_address_is_still_refused():
     with pytest.raises(ValueError) as exc:
         chain_owner_of("http://127.0.0.1:8545", "0xdeadbeef", 1)
-    assert "20-byte address" in str(exc.value)
+    assert "20-byte hex address" in str(exc.value)

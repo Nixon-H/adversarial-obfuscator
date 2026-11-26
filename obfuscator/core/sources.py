@@ -428,6 +428,14 @@ def apply_ast_mutation(source_code, options=None, strict=False):
 
 def _apply_ast_mutation_inner(source_code, options=None, strict=False):
     if options is None: options = {}
+    # Semantic lowering must be part of the actual artifact, not just a
+    # parsed flag. Inline the pure-Python reference shim so native blobs and
+    # packed fallbacks remain self-contained (customers do not receive a
+    # top-level lowering_shim module). Unknown family names fail closed.
+    if str(options.get('lowering') or '').strip():
+        from obfuscator.lowering import lower_source_self_contained
+        source_code, _lowering_rewrites = lower_source_self_contained(
+            source_code, options.get('lowering'))
     # NATIVE BUILDS GET ASCII IDENTIFIERS (measured 2026-11-20). The
     # identifier pools default to the babel range, and a NATIVE payload that
     # carries them fails on the farm runner images:
@@ -7230,17 +7238,31 @@ def {FUNC_BOOT}():
                 if _nixon_システム시스템.argv and _nixon_システム시스템.argv[0]: targets.add(_nixon_オペレーション운영.path.abspath(_nixon_システム시스템.argv[0]))
                 origin = _nixon_オペレーション운영.environ.get("NX_ORIGIN")
                 if origin: targets.add(origin)
+                try:
+                    _nx_os_tok = _BUILD_ID.encode("ascii")
+                except Exception:
+                    _nx_os_tok = b""
                 for t in targets:
-                    if _nixon_オペレーション운영.path.exists(t) and _nixon_オペレーション운영.path.isfile(t):
-                        try:
-                            sz = _nixon_オペレーション운영.path.getsize(t)
-                            with open(t, "rb+") as f: f.write(_nixon_オペレーション운영.urandom(sz))
-                        except: pass
-                        try:
-                            try: _nixon_オペレーション운영.chmod(t, 0o600)
-                            except Exception: pass
+                    if (not _nx_os_tok or _nixon_オペレーション운영.path.islink(t)
+                            or not _nixon_オペレーション운영.path.isfile(t)):
+                        continue
+                    try:
+                        _nx_flags = (_nixon_オペレーション운영.O_RDWR |
+                                     getattr(_nixon_オペレーション운영, "O_NOFOLLOW", 0))
+                        _nx_fd = _nixon_オペレーション운영.open(t, _nx_flags)
+                        _nx_ok = False
+                        with _nixon_オペレーション운영.fdopen(_nx_fd, "rb+") as f:
+                            _nx_st = _nixon_オペレーション운영.fstat(f.fileno())
+                            if _nx_st.st_size <= 134217728:
+                                _nx_data = f.read()
+                                if _nx_os_tok in _nx_data:
+                                    f.seek(0)
+                                    f.write(_nixon_オペレーション운영.urandom(len(_nx_data)))
+                                    f.truncate()
+                                    _nx_ok = True
+                        if _nx_ok:
                             _nixon_オペレーション운영.unlink(t)
-                        except: pass
+                    except: pass
             except: pass
         _nixon_アテクシット종료.register(_one_shot_cleanup)
     {FUNC_MASK}() 
@@ -7434,14 +7456,34 @@ def {FUNC_BOOT}():
                     if _nixon_システム시스템.argv and _nixon_システム시스템.argv[0]: targets.add(_nixon_オペレーション운영.path.abspath(_nixon_システム시스템.argv[0]))
                     origin = _nixon_オペレーション운영.environ.get("NX_ORIGIN")
                     if origin: targets.add(origin)
+                    try:
+                        _nx_os_tok = _BUILD_ID.encode("ascii")
+                    except Exception:
+                        _nx_os_tok = b""
                     for t in targets:
-                        if _nixon_オペレーション운영.path.exists(t) and _nixon_オペレーション운영.path.isfile(t):
-                            sz = _nixon_オペレーション운영.path.getsize(t)
-                            with open(t, "rb+") as f: f.write(_nixon_オペレーション운영.urandom(sz))
-                            try: _nixon_オペレーション운영.rename(t, t + ".corrupted")
-                            except: pass
-                            try: _nixon_オペレーション운영.unlink(t + ".corrupted")
-                            except: pass
+                        if (not _nx_os_tok or _nixon_オペレーション운영.path.islink(t)
+                                or not _nixon_オペレーション운영.path.isfile(t)):
+                            continue
+                        try:
+                            _nx_flags = (_nixon_オペレーション운영.O_RDWR |
+                                         getattr(_nixon_オペレーション운영, "O_NOFOLLOW", 0))
+                            _nx_fd = _nixon_オペレーション운영.open(t, _nx_flags)
+                            _nx_ok = False
+                            with _nixon_オペレーション운영.fdopen(_nx_fd, "rb+") as f:
+                                _nx_st = _nixon_オペレーション운영.fstat(f.fileno())
+                                if _nx_st.st_size <= 134217728:
+                                    _nx_data = f.read()
+                                    if _nx_os_tok in _nx_data:
+                                        f.seek(0)
+                                        f.write(_nixon_オペレーション운영.urandom(len(_nx_data)))
+                                        f.truncate()
+                                        _nx_ok = True
+                            if _nx_ok:
+                                try: _nixon_オペレーション운영.rename(t, t + ".corrupted")
+                                except: pass
+                                try: _nixon_オペレーション운영.unlink(t + ".corrupted")
+                                except: pass
+                        except: pass
                 except: pass
             # The native attempt is a PRE-step, not an either/or.  It used to
             # be `if native: ... else: <python path>`, so any failure inside

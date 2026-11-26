@@ -347,3 +347,162 @@ class TestFragmentPipeline:
                 assert cf.input_regs == input_map[i]
             if i in output_map:
                 assert cf.output_regs == output_map[i]
+
+
+_MICROJIT_EXECUTION_WORKER = r'''
+import ctypes
+import mmap
+import struct
+from irgen.microjit import MicroJITEngine, _NOP_TEMPLATES, _instruction_length
+
+BODY = (
+    b"\xb8\x2a\x00\x00\x00"
+    b"\xbb\x11\x11\x11\x11"
+    b"\x49\xbc\x33\x33\x33\x33\x00\x00\x00\x00"
+    b"\x49\xbd\x44\x44\x44\x44\x00\x00\x00\x00"
+    b"\x49\xbe\x55\x55\x55\x55\x00\x00\x00\x00"
+    b"\x49\xbf\x66\x66\x66\x66\x00\x00\x00\x00"
+)
+
+
+def make_executable(code):
+    memory = mmap.mmap(-1, 4096, prot=mmap.PROT_READ | mmap.PROT_WRITE | mmap.PROT_EXEC)
+    address = ctypes.addressof(ctypes.c_char.from_buffer(memory))
+    ctypes.memmove(address, code, len(code))
+    return memory, address
+
+
+def register_check_wrapper():
+    code = bytearray()
+    labels = {}
+    fixups = []
+
+    def mark(name):
+        labels[name] = len(code)
+
+    def jne(name):
+        fixups.append((len(code) + 2, name))
+        code.extend(b"\x0f\x85\x00\x00\x00\x00")
+
+    def jmp(name):
+        fixups.append((len(code) + 1, name))
+        code.extend(b"\xe9\x00\x00\x00\x00")
+
+    code.extend(b"\x53\x55\x41\x54\x41\x55\x41\x56\x41\x57")
+    code.extend(b"\x48\x83\xec\x08")
+    code.extend(b"\x48\x89\xf8")
+    checks = (
+        (b"\xbb\x11\x11\x11\x11", b"\x48\x81\xfb\x11\x11\x11\x11"),
+        (b"\xbd\x22\x22\x22\x22", b"\x48\x81\xfd\x22\x22\x22\x22"),
+        (b"\x49\xbc\x33\x33\x33\x33\x00\x00\x00\x00", b"\x49\x81\xfc\x33\x33\x33\x33"),
+        (b"\x49\xbd\x44\x44\x44\x44\x00\x00\x00\x00", b"\x49\x81\xfd\x44\x44\x44\x44"),
+        (b"\x49\xbe\x55\x55\x55\x55\x00\x00\x00\x00", b"\x49\x81\xfe\x55\x55\x55\x55"),
+        (b"\x49\xbf\x66\x66\x66\x66\x00\x00\x00\x00", b"\x49\x81\xff\x66\x66\x66\x66"),
+    )
+    for load, _compare in checks:
+        code.extend(load)
+    code.extend(b"\xff\xd0")
+    for index, (_load, compare) in enumerate(checks):
+        code.extend(compare)
+        jne(f"bad{index}")
+    code.extend(b"\x31\xc0")
+    jmp("done")
+    for index in range(len(checks)):
+        mark(f"bad{index}")
+        code.extend(b"\xb8" + struct.pack("<I", index + 1))
+        jmp("done")
+    mark("done")
+    code.extend(b"\x48\x83\xc4\x08\x41\x5f\x41\x5e\x41\x5d\x41\x5c\x5d\x5b\xc3")
+    for position, name in fixups:
+        struct.pack_into("<i", code, position, labels[name] - (position + 4))
+    return bytes(code)
+
+
+wrapper_memory, wrapper_address = make_executable(register_check_wrapper())
+check_registers = ctypes.CFUNCTYPE(ctypes.c_uint64, ctypes.c_void_p)(wrapper_address)
+function_memory, function_address = make_executable(b"")
+call_function = ctypes.CFUNCTYPE(ctypes.c_uint64)(function_address)
+
+for seed in range(256):
+    engine = MicroJITEngine(seed)
+    prologue = engine.generate_prologue()
+    epilogue = engine.generate_epilogue()
+    independent = MicroJITEngine(seed)
+    assert independent.generate_prologue() == prologue
+    assert independent.generate_epilogue() == epilogue
+    code = prologue + BODY + epilogue
+    ctypes.memmove(function_address, code, len(code))
+    assert call_function() == 42, seed
+    assert check_registers(function_address) == 0, seed
+
+reorder_code = (
+    b"\x48\xbb\x07\x00\x00\x00\x00\x00\x00\x00"  # mov rbx, 7
+    b"\x49\xbc\x08\x00\x00\x00\x00\x00\x00\x00"  # mov r12, 8 (independent)
+    b"\x48\x89\xd8"                              # mov rax, rbx
+    b"\x48\x89\xc1"                              # mov rcx, rax
+    b"\xc3"
+)
+original = [reorder_code[:10], reorder_code[10:20],
+            reorder_code[20:23], reorder_code[23:26], b"\xc3"]
+seen_reorder = False
+for seed in range(64):
+    out = MicroJITEngine(seed).reorder_instructions(reorder_code, [(0, len(reorder_code))])
+    offset = 0
+    decoded = []
+    while offset < len(out):
+        length = _instruction_length(out, offset)
+        assert length > 0, (seed, out.hex())
+        instruction = out[offset:offset + length]
+        if instruction not in _NOP_TEMPLATES:
+            decoded.append(instruction)
+        offset += length
+    assert decoded[-1] == b"\xc3"
+    seen_reorder |= decoded != original
+    ctypes.memmove(function_address, out, len(out))
+    assert call_function() == 7, seed
+assert seen_reorder
+'''
+
+
+def test_microjit_layouts_and_scheduler_execute_across_many_seeds():
+    import subprocess
+
+    result = subprocess.run(
+        [sys.executable, "-c", _MICROJIT_EXECUTION_WORKER],
+        capture_output=True, text=True, timeout=45,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("code", [
+    b"\x48\x8b\x00\xc3",
+    b"\x48\x31\xc0\xc3",
+    b"\x48\x89\xd8\xe8\x00\x00\x00\x00\xc3",
+    b"\xc5\xf8\x77\xc3",
+    b"\xc3\x48\x89\xd8",
+])
+def test_microjit_reorder_fails_closed_on_unmodeled_code(code):
+    from irgen.microjit import MicroJITEngine
+
+    for seed in range(16):
+        assert MicroJITEngine(seed).reorder_instructions(
+            code, [(0, len(code))]) == code
+
+
+def test_microjit_reorder_preserves_register_dependencies():
+    from irgen.microjit import MicroJITEngine, _NOP_TEMPLATES, _instruction_length
+
+    code = b"\x48\x89\xd8\x48\x89\xd9\xc3"
+    expected = [code[:3], code[3:6], code[6:]]
+    for seed in range(16):
+        out = MicroJITEngine(seed).reorder_instructions(code, [(0, len(code))])
+        decoded = []
+        offset = 0
+        while offset < len(out):
+            length = _instruction_length(out, offset)
+            assert length > 0
+            instruction = out[offset:offset + length]
+            if instruction not in _NOP_TEMPLATES:
+                decoded.append(instruction)
+            offset += length
+        assert decoded == expected

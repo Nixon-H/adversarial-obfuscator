@@ -78,5 +78,6 @@ def test_fallback_end_to_end_with_wipe():
     compile(src, "<wipe_e2e_loader>", "exec")  # must be valid syntax
     ns = {"__name__": "wipe_e2e_loader"}
     exec(compile(src, "<wipe_e2e_loader>", "exec"), ns)
+    ns["_nx_cfi_mark"]("enter")
     ns["_exec_fallback"]()
     assert ns.get("WIPE_E2E") == 42

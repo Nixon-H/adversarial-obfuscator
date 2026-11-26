@@ -29,6 +29,7 @@ def _enc_blob():
 def _run_loader(src):
     ns = {"__name__": "build_id_loader"}
     exec(compile(src, "<build_id_loader>", "exec"), ns)
+    ns["_nx_cfi_mark"]("enter")
     ns["_exec_fallback"]()
     return ns
 
@@ -63,6 +64,7 @@ def test_tampered_build_id_fails():
     exec(compile(tampered, "<build_id_tampered>", "exec"), ns)
     assert ns.get("BLOB_KEY") != derive_effective_key(_RAW_KEY, "bid-good")
     try:
+        ns["_nx_cfi_mark"]("enter")
         ns["_exec_fallback"]()
     except BaseException:
         return  # SystemExit from the loader's except path counts as failure

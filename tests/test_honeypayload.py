@@ -5,8 +5,9 @@ pinned here rather than assumed:
 
 * the decoy is a *complete, runnable* program (not a stub);
 * it is self-consistent -- running it prints sensible output;
-* its key is derived from the build id only, never from the licence, so
-  recovering it teaches nothing about the real key chain;
+* its key is keyed by operator-held build secret material, never by the
+  licence or artefact-public values, so recovering it teaches nothing about
+  the real key chain;
 * it is sealed with the same envelope shape as the real payload, so the two
   are indistinguishable by inspection;
 * a decoy that fails the plausibility gate is not emitted at all.
@@ -22,6 +23,8 @@ sys.path.insert(0, ROOT)
 from obfuscator.honeypayload import (  # noqa: E402
     build_honey_pack, decoy_is_plausible, decoy_key, generate_decoy,
 )
+
+OPERATOR_SECRET = "test-only-honey-secret"
 
 
 def test_decoy_is_a_complete_runnable_program():
@@ -53,17 +56,19 @@ def test_decoy_output_is_self_consistent():
 
 
 def test_decoy_key_is_build_bound_not_licence_bound():
-    """The decoy key must not depend on any licence material."""
-    a = decoy_key("build-1")
-    b = decoy_key("build-1")
-    c = decoy_key("build-2")
+    """The decoy key must not depend on any licence or artefact material."""
+    a = decoy_key("build-1", OPERATOR_SECRET)
+    b = decoy_key("build-1", OPERATOR_SECRET)
+    c = decoy_key("build-2", OPERATOR_SECRET)
+    d = decoy_key("build-1", OPERATOR_SECRET + "-other")
     assert a == b, "the decoy key must be deterministic per build"
     assert a != c, "different builds must get different decoy keys"
+    assert a != d, "different operator secrets must get different decoy keys"
     assert len(a) == 32
 
 
 def test_decoy_pack_has_the_same_shape_as_the_real_pack():
-    pack = build_honey_pack(b"seed-c", "build-x")
+    pack = build_honey_pack(b"seed-c", "build-x", operator_secret=OPERATOR_SECRET)
     assert set(pack) == {"pack_b85", "key_hint", "source"}
     raw = base64.b85decode(pack["pack_b85"])
     import json
@@ -76,11 +81,11 @@ def test_decoy_pack_decrypts_to_the_decoy_source():
     """An analyst who breaks it must get the decoy, not garbage."""
     from obfuscator.section_split import stream_join
 
-    pack = build_honey_pack(b"seed-d", "build-y")
+    pack = build_honey_pack(b"seed-d", "build-y", operator_secret=OPERATOR_SECRET)
     raw = base64.b85decode(pack["pack_b85"])
     import json
     parsed = json.loads(raw)
-    joined = stream_join(parsed, decoy_key("build-y"))
+    joined = stream_join(parsed, decoy_key("build-y", OPERATOR_SECRET))
     # First byte is the compression envelope id.
     assert joined[0] == 0x00
     source = zlib.decompress(bytes(joined[1:])).decode("utf-8")

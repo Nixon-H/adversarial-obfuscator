@@ -2,6 +2,8 @@ import multiprocessing
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from scripts.distributed.multi_binary import MultiBinaryDistributor
@@ -17,6 +19,19 @@ from scripts.distributed.recovery_prevention import ExecutionRecoveryPreventer
 # ===========================================================================
 # Item 110: Multi-Binary Fragment Distribution — multiprocessing test
 # ===========================================================================
+
+def _cleanup_processes(processes, queues):
+    for process in processes:
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=5)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=5)
+    for queue in queues:
+        queue.close()
+        queue.join_thread()
+
 
 def _binary_holder_process(binary: bytes, result_queue: multiprocessing.Queue):
     MultiBinaryDistributor()
@@ -40,19 +55,32 @@ class TestMultiBinaryIntegration:
         ctx = multiprocessing.get_context("spawn")
         queues = []
         processes = []
-        for i, binary in enumerate(binaries):
-            q = ctx.Queue()
-            p = ctx.Process(target=_binary_holder_process, args=(binary, q))
-            p.start()
-            processes.append(p)
-            queues.append(q)
+        try:
+            for i, binary in enumerate(binaries):
+                q = ctx.Queue()
+                p = ctx.Process(target=_binary_holder_process, args=(binary, q))
+                p.start()
+                processes.append(p)
+                queues.append(q)
 
-        for p in processes:
-            p.join()
+            # Bounded waits: an unbounded join/get is what hung the full suite
+            # (a spawn child that dies leaves q.get() blocking forever).
+            for p in processes:
+                p.join(timeout=60)
+                if p.is_alive():
+                    pytest.fail("worker process did not exit within 60s")
+                assert p.exitcode == 0, f"worker exited {p.exitcode}"
 
-        collected_binaries = [q.get() for q in queues]
-        reconstructed = mbd.reconstruct(collected_binaries[:3])
-        assert reconstructed == fragments
+            collected_binaries = []
+            for q in queues:
+                try:
+                    collected_binaries.append(q.get(timeout=30))
+                except Exception:
+                    pytest.fail("worker put no result on its queue within 30s")
+            reconstructed = mbd.reconstruct(collected_binaries[:3])
+            assert reconstructed == fragments
+        finally:
+            _cleanup_processes(processes, queues)
 
     def test_distribute_to_processes(self):
         mbd = MultiBinaryDistributor()
@@ -116,36 +144,52 @@ class TestCrossProcessIntegration:
         # child), and Python 3.14 changes the default on Linux.
         ctx = multiprocessing.get_context("spawn")
         result_queue = ctx.Queue()
-
+        p = None
+        shm = None
+        result_shm = None
         shm_name = cpb._shm_name("integration_test")
-        data_size = len(fragment_data) + 8
-        shm = SharedMemory(name=shm_name, create=True, size=data_size)
-        struct.pack_into(">Q", shm.buf, 0, len(fragment_data))
-        shm.buf[8:8 + len(fragment_data)] = fragment_data
-        shm.close()
-
-        p = ctx.Process(
-            target=_fragment_holder_process,
-            args=(shm_name, 0, fragment_data, pid_val, cpb.shared_secret, result_queue),
-        )
-        p.start()
-        result = result_queue.get(timeout=5)
-        assert result is True
-
-        result_shm = SharedMemory(name=f"{shm_name}_result")
-        stored_len = struct.unpack(">Q", result_shm.buf[:8])[0]
-        combined = bytes(result_shm.buf[8:8 + stored_len])
-        result_shm.close()
-        result_shm.unlink()
-
         try:
-            shm_cleanup = SharedMemory(name=shm_name)
-            shm_cleanup.close()
-            shm_cleanup.unlink()
-        except FileNotFoundError:
-            pass
+            data_size = len(fragment_data) + 8
+            shm = SharedMemory(name=shm_name, create=True, size=data_size)
+            struct.pack_into(">Q", shm.buf, 0, len(fragment_data))
+            shm.buf[8:8 + len(fragment_data)] = fragment_data
+            shm.close()
+            shm = None
 
-        assert len(combined) == len(fragment_data) * 2
+            p = ctx.Process(
+                target=_fragment_holder_process,
+                args=(shm_name, 0, fragment_data, pid_val, cpb.shared_secret, result_queue),
+            )
+            p.start()
+            result = result_queue.get(timeout=30)
+            assert result is True
+            p.join(timeout=10)
+            assert not p.is_alive(), "child did not exit after publishing its result"
+            assert p.exitcode == 0, f"child exited {p.exitcode}"
+
+            result_shm = SharedMemory(name=f"{shm_name}_result")
+            stored_len = struct.unpack(">Q", result_shm.buf[:8])[0]
+            combined = bytes(result_shm.buf[8:8 + stored_len])
+            assert len(combined) == len(fragment_data) * 2
+        finally:
+            if p is not None and p.is_alive():
+                p.terminate()
+                p.join(timeout=5)
+            if p is not None and p.is_alive():
+                p.kill()
+                p.join(timeout=5)
+            result_queue.close()
+            result_queue.join_thread()
+            for segment in (result_shm, shm):
+                if segment is not None:
+                    segment.close()
+            for name in (f"{shm_name}_result", shm_name):
+                try:
+                    segment = SharedMemory(name=name)
+                    segment.close()
+                    segment.unlink()
+                except FileNotFoundError:
+                    pass
 
 
 # ===========================================================================

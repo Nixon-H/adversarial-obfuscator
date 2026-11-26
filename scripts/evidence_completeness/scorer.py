@@ -177,8 +177,8 @@ class EvidenceCompletenessScorer:
         Outputs:
         True if the directory should be skipped.
         """
-        skip = {".git", ".svn", "__pycache__", "node_modules", ".venv", "venv", ".tox", ".pytest_cache", ".eggs", "eggs", "dist", "build", "relay", ".agents", ".claude", "archive", "target", ".mypy_cache", ".pytest_cache", "fixtures", "test_data"}
-        return dir_name in skip or dir_name.startswith(".")
+        skip = {".git", ".svn", "__pycache__", "node_modules", ".venv", "venv", ".tox", ".pytest_cache", ".eggs", "eggs", "dist", "build", "builds", "relay", ".agents", ".claude", "archive", "target", ".mypy_cache", ".pytest_cache", "fixtures", "test_data", "tmp", "baseline", "originals", "secrets", "secrets_aborted_geo2", "secrets_geo_candidate", "ABSOLUTE_MAXIMUM_RAW_RESULTS", "ci-artifacts", "artifacts", "results", "workspaces"}
+        return dir_name in skip or dir_name.startswith(".") or dir_name.endswith("-venv")
 
     def _scan_directory_for_claims(self) -> list[tuple[str, int, str]]:
         """
@@ -440,7 +440,7 @@ class EvidenceCompletenessScorer:
         for tf in all_test_files:
             try:
                 with open(tf, encoding="utf-8", errors="ignore") as fh:
-                    test_contents[tf] = fh.read()
+                    test_contents[tf] = fh.read().lower()
             except OSError:
                 pass
 
@@ -448,31 +448,37 @@ class EvidenceCompletenessScorer:
         for bf in all_bench_files:
             try:
                 with open(bf, encoding="utf-8", errors="ignore") as fh:
-                    bench_contents[bf] = fh.read()
+                    bench_contents[bf] = fh.read().lower()
             except OSError:
                 pass
 
         trace_contents = {}
         for trf in all_trace_files:
+            if _is_too_large(trf):
+                continue
             try:
                 with open(trf, encoding="utf-8", errors="ignore") as fh:
-                    trace_contents[trf] = fh.read()
+                    trace_contents[trf] = fh.read().lower()
             except OSError:
                 pass
 
         audit_contents = {}
         for af in all_audit_files:
+            if _is_too_large(af):
+                continue
             try:
                 with open(af, encoding="utf-8", errors="ignore") as fh:
-                    audit_contents[af] = fh.read()
+                    audit_contents[af] = fh.read().lower()
             except OSError:
                 pass
 
         source_contents = {}
         for sf in all_py_files:
+            if _is_too_large(sf):
+                continue
             try:
                 with open(sf, encoding="utf-8", errors="ignore") as fh:
-                    source_contents[sf] = fh.read()
+                    source_contents[sf] = fh.read().lower()
             except OSError:
                 pass
 
@@ -481,44 +487,55 @@ class EvidenceCompletenessScorer:
             if text in seen_claims:
                 continue
             seen_claims.add(text)
-            keywords = self._get_keywords(text)
+            text_l = text.lower()
+            keywords = [kw.lower() for kw in self._get_keywords(text)]
+            search_keywords = keywords or [text_l]
 
             src_files = []
             for sf, sc in source_contents.items():
-                if text.lower() in sc.lower():
+                if text_l in sc:
                     for kw in ["def ", "class ", "impl ", "fn ", "function "]:
                         if kw in sc:
                             src_files.append(os.path.relpath(sf, self.root_dir))
                             break
+                if len(src_files) >= 5:
+                    break
 
             if not keywords:
                 logger.warning("Claim '%s' produced no keywords — falling back to raw claim text for matching (may inflate scores)", text[:80])
 
             test_files = []
             for tf, tc in test_contents.items():
-                for kw in keywords or [text]:
-                    if kw.lower() in tc.lower():
+                for kw in search_keywords:
+                    if kw in tc:
                         test_files.append(os.path.relpath(tf, self.root_dir))
                         break
+                if len(test_files) >= 5:
+                    break
 
             bench_files = []
             for bf, bc in bench_contents.items():
-                for kw in keywords or [text]:
-                    if kw.lower() in bc.lower():
+                for kw in search_keywords:
+                    if kw in bc:
                         bench_files.append(os.path.relpath(bf, self.root_dir))
                         break
+                if len(bench_files) >= 5:
+                    break
 
             trace_files = []
             for trf, trc in trace_contents.items():
-                for kw in keywords or [text]:
-                    if kw.lower() in trc.lower():
+                for kw in search_keywords:
+                    if kw in trc:
                         trace_files.append(os.path.relpath(trf, self.root_dir))
                         break
+                if len(trace_files) >= 5:
+                    break
 
             audit_files = []
             for af, ac in audit_contents.items():
-                if text.lower() in ac.lower():
+                if text_l in ac:
                     audit_files.append(os.path.relpath(af, self.root_dir))
+                if len(audit_files) >= 5:
                     break
 
             evidence = ClaimEvidence(

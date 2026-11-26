@@ -12,9 +12,6 @@ import pytest
 
 from obfuscator.kernel_gen import build_kernel, cythonize_kernel, derive_symbols, emit_native_import, render_pyx
 
-TMP = "/tmp/nxk_tests"
-
-
 def test_derive_deterministic_and_unique():
     m1, o1 = derive_symbols(b"seed-A")
     m2, o2 = derive_symbols(b"seed-A")
@@ -43,11 +40,12 @@ def test_emit_native_import():
     assert emit_native_import("_nxk_x", []) == ""
 
 
-def _build(mod_seed, ops=("len", "sorted", "print", "fuse")):
-    os.makedirs(TMP, exist_ok=True)
-    pyx, mod, omap = build_kernel(TMP, mod_seed, ops=ops)
+def _build(mod_seed, workdir, ops=("len", "sorted", "print", "fuse")):
+    workdir = str(workdir)
+    os.makedirs(workdir, exist_ok=True)
+    pyx, mod, omap = build_kernel(workdir, mod_seed, ops=ops)
     assert os.path.isfile(pyx)
-    so, msg = cythonize_kernel(pyx, TMP)
+    so, msg = cythonize_kernel(pyx, workdir)
     return so, msg, mod, omap
 
 
@@ -63,8 +61,8 @@ def _load(mod, path):
     return m
 
 
-def test_build_import_parity():
-    so, msg, mod, omap = _build(b"parity-seed")
+def test_build_import_parity(tmp_path):
+    so, msg, mod, omap = _build(b"parity-seed", tmp_path)
     if so is None:
         pytest.skip(f"toolchain missing: {msg}")
     m = _load(mod, so)
@@ -74,9 +72,9 @@ def test_build_import_parity():
     assert m._nxk_sorted([3, 1, 2]) == shim._nxk_sorted([3, 1, 2]) == [1, 2, 3]
 
 
-def test_per_build_uniqueness():
-    so1, msg1, mod1, map1 = _build(b"seed-1")
-    so2, msg2, mod2, map2 = _build(b"seed-2")
+def test_per_build_uniqueness(tmp_path):
+    so1, msg1, mod1, map1 = _build(b"seed-1", tmp_path / "one")
+    so2, msg2, mod2, map2 = _build(b"seed-2", tmp_path / "two")
     if so1 is None or so2 is None:
         pytest.skip(f"toolchain missing: {msg1} / {msg2}")
     # Different module names AND different impl symbols, same public names.
@@ -85,8 +83,8 @@ def test_per_build_uniqueness():
     assert set(map1.values()).isdisjoint(set(map2.values()))
 
 
-def test_fusion_native():
-    so, msg, mod, omap = _build(b"fusion-seed", ops=("fuse", "len"))
+def test_fusion_native(tmp_path):
+    so, msg, mod, omap = _build(b"fusion-seed", tmp_path, ops=("fuse", "len"))
     if so is None:
         pytest.skip(f"toolchain missing: {msg}")
     m = _load(mod, so)
@@ -95,6 +93,6 @@ def test_fusion_native():
     assert calls == [1, 2] and out is None
 
 
-def test_graceful_skip_missing_source():
-    so, msg = cythonize_kernel("/nonexistent_kernel_xyz.pyx", TMP)
+def test_graceful_skip_missing_source(tmp_path):
+    so, msg = cythonize_kernel("/nonexistent_kernel_xyz.pyx", str(tmp_path))
     assert so is None and "missing" in msg

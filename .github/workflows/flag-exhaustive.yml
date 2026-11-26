@@ -1,10 +1,10 @@
 name: Flags x all platforms x all Pythons (manual + release)
 
-# The full cross product: every one of the 274 ladder flags, isolated, on every
+# The full cross product: every catalogue flag (30 today), isolated, on every
 # OS and every supported interpreter.
 #
-# 14 shards x 20 flags x 3 OSes x 5 Pythons = 210 jobs, 4,110 isolated builds.
-# Kept at 210 jobs rather than 4,110 by running 20 flags sequentially per job --
+# 3 shards x 10 flags x 3 OSes x 5 Pythons = 45 jobs, all 30 catalogue flags.
+# Kept at 45 jobs by running 10 flags sequentially per job --
 # GitHub caps a matrix at 256 jobs.
 #
 # This is the release gate. It must be green before a release is considered
@@ -27,10 +27,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        shard: [0, 1, 2]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # pinned immutable; original actions/checkout@v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
       - name: Install builder dependencies
@@ -46,17 +46,17 @@ jobs:
         run: |
           python scripts/ci/requirements_without.py numpy "$RUNNER_TEMP/req-no-numpy.txt"
           pip install --require-hashes -r "$RUNNER_TEMP/req-no-numpy.txt"
-      - name: Build and run 20 flags for this OS and interpreter
+      - name: Build and run 10 flags for this OS and interpreter
         env:
           NX_PAYLOAD: ${{ github.workspace }}/tests/fixtures/portable/constructs_source.py
           NX_OPT_LEVEL: "3"
           NX_BUILD_TIMEOUT: "1800"
           PYTHONHASHSEED: "0"
           NX_BUILD_SEED: "12345"
-        run: python scripts/ci/isolate_flags.py --start $(( ${{ matrix.shard }} * 20 )) --count 20
+        run: python scripts/ci/isolate_flags.py --start $(( ${{ matrix.shard }} * 10 )) --count 10
       - name: Keep the failing artefact
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pinned immutable; original actions/upload-artifact@v4
         with:
           name: failing-${{ matrix.os }}-py${{ matrix.python }}-shard-${{ matrix.shard }}
           path: |

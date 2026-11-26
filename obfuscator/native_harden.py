@@ -479,7 +479,9 @@ def verify_pe_bytes(data):
     out = {"kind": "pe", "valid": False, "dll_characteristics": None,
            "aslr": False, "high_entropy_va": False, "dep": False,
            "cfg": False, "cfg_data": False, "authenticode": False,
+           "authenticode_verified": False, "authenticode_reason": "not checked",
            "debug_directory": False, "load_config_size": 0,
+           "sections": 0, "opt_size": 0,
            # Load-config-derived keys are present from the start so the
            # report's SHAPE never depends on what the object turned out to
            # contain. A caller iterating the report must not get KeyError for
@@ -489,9 +491,8 @@ def verify_pe_bytes(data):
            "guard_export_suppression_info": False,
            "guard_longjump_table": False,
            "guard_eh_continuation_table": False,
-           "dll_characteristics": None, "cet_compat": False,
+           "cet_compat": False,
            "ex_dllcharacteristics": 0, "terminal_server_aware": False,
-           "debug_directory": False,
            "dll_guard_cf": False}
     if not data or data[:2] != b"MZ":
         return out
@@ -540,8 +541,15 @@ def verify_pe_bytes(data):
                     from obfuscator.authenticode_verify import (
                         verify_pe_signature)
                     _sig = verify_pe_signature(data)
-                    out["authenticode_verified"] = bool(_sig.get("ok"))
-                    out["authenticode_reason"] = _sig.get("reason", "")
+                    verified = (
+                        _sig.get("ok") is True
+                        and _sig.get("message_digest_matches") is True
+                        and _sig.get("signer_signature_verified") is True
+                        and bool(_sig.get("cms_backend"))
+                    )
+                    out["authenticode_verified"] = verified
+                    out["authenticode_reason"] = _sig.get("reason", "") or (
+                        "CMS verifier did not return required evidence")
                 except Exception as _sig_exc:
                     out["authenticode_verified"] = False
                     out["authenticode_reason"] = (
@@ -647,11 +655,10 @@ def verify_pe_bytes(data):
         out.setdefault("dll_guard_cf", False)
         out["sections"] = num_sections
         out["opt_size"] = opt_size
-    except (struct.error, IndexError):
-        return {"kind": "pe", "valid": False, "dll_characteristics": None,
-                "aslr": False, "high_entropy_va": False, "dep": False,
-                "cfg": False, "cfg_data": False, "authenticode": False,
-                "debug_directory": False, "load_config_size": 0}
+    except (struct.error, IndexError) as exc:
+        out["valid"] = False
+        out["error"] = "PE parse failed: %s" % (str(exc)[:120],)
+        return out
     return out
 
 

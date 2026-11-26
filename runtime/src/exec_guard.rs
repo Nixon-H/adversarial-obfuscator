@@ -1,16 +1,14 @@
+use crate::memguard::{checked_page_size, checked_range_end, round_up_to_page};
 use crate::platform::PagePerm;
 use std::ptr;
 
 pub struct ExecGuard {
     ptr: *mut u8,
     len: usize,
+    aligned_len: usize,
     original_prot: PagePerm,
     alloc_ptr: *mut u8,
     alloc_len: usize,
-}
-
-fn page_size() -> usize {
-    crate::platform::page_size()
 }
 
 impl ExecGuard {
@@ -18,10 +16,14 @@ impl ExecGuard {
         if size == 0 {
             return Err("size must be non-zero".to_string());
         }
-        let ps = page_size();
+        let ps = checked_page_size()?;
         let guard = ps;
-        let aligned_size = (size + ps - 1) & !(ps - 1);
-        let total = guard + aligned_size + guard;
+        let aligned_size =
+            round_up_to_page(size, ps).ok_or_else(|| "ExecGuard size overflow".to_string())?;
+        let total = guard
+            .checked_add(aligned_size)
+            .and_then(|n| n.checked_add(guard))
+            .ok_or_else(|| "ExecGuard allocation size overflow".to_string())?;
 
         let alloc_ptr = crate::platform::alloc_pages(total);
         if alloc_ptr.is_null() {
@@ -46,6 +48,7 @@ impl ExecGuard {
         Ok(ExecGuard {
             ptr,
             len: size,
+            aligned_len: aligned_size,
             original_prot: PagePerm::ReadWrite,
             alloc_ptr,
             alloc_len: total,
@@ -53,9 +56,7 @@ impl ExecGuard {
     }
 
     pub fn prepare_execution(&mut self) -> Result<(), String> {
-        let ps = page_size();
-        let aligned_size = (self.len + ps - 1) & !(ps - 1);
-        let result = crate::platform::protect_pages(self.ptr, aligned_size, PagePerm::ReadExec);
+        let result = crate::platform::protect_pages(self.ptr, self.aligned_len, PagePerm::ReadExec);
         if result.is_err() {
             return Err("mprotect to R-X failed".to_string());
         }
@@ -64,15 +65,13 @@ impl ExecGuard {
     }
 
     pub fn complete_execution(&mut self) {
-        let ps = page_size();
-        let aligned_size = (self.len + ps - 1) & !(ps - 1);
-
-        let result1 = crate::platform::protect_pages(self.ptr, aligned_size, PagePerm::ReadWrite);
+        let result1 =
+            crate::platform::protect_pages(self.ptr, self.aligned_len, PagePerm::ReadWrite);
         if result1.is_err() {
             // Without write access the buffer cannot be scrubbed, but it must
             // not be left executable-and-dirty either: revoke exec so the
             // failure path degrades to inaccessible, not to R-X residue.
-            let _ = crate::platform::protect_pages(self.ptr, aligned_size, PagePerm::None);
+            let _ = crate::platform::protect_pages(self.ptr, self.aligned_len, PagePerm::None);
             self.original_prot = PagePerm::None;
             return;
         }
@@ -82,7 +81,7 @@ impl ExecGuard {
             ptr::write_bytes(self.ptr, 0u8, self.len);
         }
 
-        let _ = crate::platform::protect_pages(self.ptr, aligned_size, PagePerm::None);
+        let _ = crate::platform::protect_pages(self.ptr, self.aligned_len, PagePerm::None);
         self.original_prot = PagePerm::None;
     }
 
@@ -117,23 +116,20 @@ impl ExecGuard {
             return false;
         }
         let p = ptr as usize;
-        let in_primary = expected_len > 0
-            && p >= expected_base
-            && p.wrapping_sub(expected_base) < expected_len;
-        let in_fallback = fallback_len > 0
-            && p >= fallback_base
-            && p.wrapping_sub(fallback_base) < fallback_len;
+        let in_primary = p >= expected_base
+            && checked_range_end(expected_base, expected_len).is_some_and(|end| p < end);
+        let in_fallback = p >= fallback_base
+            && checked_range_end(fallback_base, fallback_len).is_some_and(|end| p < end);
         in_primary || in_fallback
     }
 }
 
 impl Drop for ExecGuard {
     fn drop(&mut self) {
-        let ps = page_size();
-        let aligned_size = (self.len + ps - 1) & !(ps - 1);
-        let _ = crate::platform::protect_pages(self.ptr, aligned_size, PagePerm::ReadWrite);
-        unsafe {
-            ptr::write_bytes(self.ptr, 0u8, self.len);
+        if crate::platform::protect_pages(self.ptr, self.aligned_len, PagePerm::ReadWrite).is_ok() {
+            unsafe {
+                ptr::write_bytes(self.ptr, 0u8, self.len);
+            }
         }
         crate::platform::free_pages(self.alloc_ptr, self.alloc_len);
     }
@@ -172,7 +168,11 @@ mod tests {
         regions
     }
 
-    fn count_prot_none_regions(regions: &[(usize, usize, String)], alloc_start: usize, alloc_end: usize) -> usize {
+    fn count_prot_none_regions(
+        regions: &[(usize, usize, String)],
+        alloc_start: usize,
+        alloc_end: usize,
+    ) -> usize {
         regions
             .iter()
             .filter(|(start, end, perms)| {
@@ -205,16 +205,19 @@ mod tests {
     #[test]
     fn test_permission_toggling() {
         let mut guard = ExecGuard::new(64).expect("allocation should succeed");
-        guard.prepare_execution().expect("prepare_execution should succeed");
-        let ps = page_size();
-        let aligned_size = (guard.len + ps - 1) & !(ps - 1);
+        guard
+            .prepare_execution()
+            .expect("prepare_execution should succeed");
         let data_start = guard.ptr as usize;
-        let data_end = data_start + aligned_size;
+        let data_end = data_start + guard.aligned_len;
         let regions = read_proc_maps();
         let exec_region = regions.iter().find(|(start, end, perms)| {
             *start <= data_start && data_end <= *end && perms.starts_with("r-x")
         });
-        assert!(exec_region.is_some(), "should have an R-X region after prepare_execution");
+        assert!(
+            exec_region.is_some(),
+            "should have an R-X region after prepare_execution"
+        );
         guard.complete_execution();
     }
 
@@ -258,6 +261,18 @@ mod tests {
     }
 
     #[test]
+    fn test_new_rejects_size_overflow() {
+        assert!(ExecGuard::new(usize::MAX).is_err());
+    }
+
+    #[test]
+    fn test_verify_fn_pointer_rejects_overflowing_ranges() {
+        let p = usize::MAX as *const u8;
+        assert!(!ExecGuard::verify_fn_pointer(p, usize::MAX, 2, 0, 0));
+        assert!(!ExecGuard::verify_fn_pointer(p, 1, usize::MAX, 0, 0));
+    }
+
+    #[test]
     fn test_verify_fn_pointer_ranges() {
         let base = 0x1_0000_0000usize;
         let len = 0x2_0000usize;
@@ -269,12 +284,30 @@ mod tests {
         assert!(ExecGuard::verify_fn_pointer(at_end, base, len, 0, 0));
         assert!(!ExecGuard::verify_fn_pointer(outside, base, len, 0, 0));
         assert!(!ExecGuard::verify_fn_pointer(below, base, len, 0, 0));
-        assert!(!ExecGuard::verify_fn_pointer(std::ptr::null(), base, len, 0, 0));
+        assert!(!ExecGuard::verify_fn_pointer(
+            std::ptr::null(),
+            base,
+            len,
+            0,
+            0
+        ));
         // Fallback range accepts, primary still enforced.
         let fb = 0x2_0000_0000usize;
         let fblen = 0x1000usize;
-        assert!(ExecGuard::verify_fn_pointer((fb + 8) as *const u8, base, len, fb, fblen));
-        assert!(!ExecGuard::verify_fn_pointer((fb + fblen + 8) as *const u8, base, len, fb, fblen));
+        assert!(ExecGuard::verify_fn_pointer(
+            (fb + 8) as *const u8,
+            base,
+            len,
+            fb,
+            fblen
+        ));
+        assert!(!ExecGuard::verify_fn_pointer(
+            (fb + fblen + 8) as *const u8,
+            base,
+            len,
+            fb,
+            fblen
+        ));
         // Zero-length ranges accept nothing.
         assert!(!ExecGuard::verify_fn_pointer(inside, 0, 0, 0, 0));
     }

@@ -189,6 +189,10 @@ def test_digest_matches_bla_bit_for_bit():
         "}\n"
         "console.log(acc >>> 0);\n"
     )
+    import shutil
+    if shutil.which("node") is None:
+        import pytest
+        pytest.skip("node is not installed")
     got = int(subprocess.run(["node", "-e", js], capture_output=True, text=True,
                              check=True).stdout.strip())
     assert got == expected, "digest port diverges from BLA: %d != %d" % (got, expected)

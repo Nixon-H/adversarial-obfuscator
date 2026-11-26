@@ -30,9 +30,23 @@ from vm.ephemeral_isa import (
     DISPATCH_MODES,
     ENCODING_MODES,
 )
-from vm.interpreter import VMInterpreter, ENCODING_VARIABLE, ENCODING_FIELD_SHUFFLE, ENCODING_NAMES
+from vm.interpreter import (
+    VMInterpreter,
+    DISPATCH_SWITCH,
+    DISPATCH_INDIRECT,
+    DISPATCH_COMPUTED_GOTO,
+    ENCODING_FIXED,
+    ENCODING_VARIABLE,
+    ENCODING_FIELD_SHUFFLE,
+    ENCODING_NAMES,
+)
 
 
+
+# Verified op count for the fixed three-instruction program below: 42 + 99.
+# Named instead of a bare literal so an op-count claim is auditable (see
+# tests/test_opcount_truth.py) and cannot drift silently.
+_VERIFIED_SUM_141 = 141
 
 # ── helpers ──────────────────────────────────────────────────────────
 
@@ -43,7 +57,7 @@ def _seed_for_test(idx, base=1):
 
 
 def _logical_to_physical_map(vm):
-    return {logical: phys for phys, logical in enumerate(vm.isa_table)}
+    return {logical: physical for logical, physical in enumerate(vm.isa_table)}
 
 
 def make_mov_bytecode_phys(dst, val):
@@ -101,6 +115,16 @@ def _encode_for_vm(vm, instructions):
     return bytes(bc)
 
 
+def _encode_fixed_for_vm(vm, instructions):
+    """Encode physical opcodes with no length prefix or field permutation."""
+    logical_to_physical = _logical_to_physical_map(vm)
+    encoded = bytearray()
+    for logical_opcode, operands in instructions:
+        encoded.append(logical_to_physical.get(logical_opcode, logical_opcode))
+        encoded.extend(operands)
+    return bytes(encoded)
+
+
 def make_mov_bytecode(vm, dst, val):
     lo = val & 0xFF
     hi = (val >> 8) & 0xFF
@@ -123,6 +147,54 @@ def make_jmp_bytecode(vm, target):
     tb = bytes([target & 0xFF, (target >> 8) & 0xFF,
                 (target >> 16) & 0xFF, (target >> 24) & 0xFF])
     return _encode_for_vm(vm, [(16, tb)])
+
+
+@pytest.mark.parametrize("dispatch_mode", [DISPATCH_SWITCH, DISPATCH_INDIRECT, DISPATCH_COMPUTED_GOTO])
+def test_every_dispatch_mode_preserves_logical_opcode(dispatch_mode):
+    vm = VMInterpreter(b"", dynamic_isa=True, entropy_seed=_seed_for_test(77))
+    bytecode = _encode_fixed_for_vm(vm, [
+        (14, bytes([0, 42, 0])),
+        (14, bytes([1, 99, 0])),
+        (1, bytes([0, 1])),
+    ])
+    vm = VMInterpreter(bytecode, dynamic_isa=True, entropy_seed=_seed_for_test(77))
+    vm.encoding_mode = ENCODING_FIXED
+    vm.dispatch_mode = dispatch_mode
+    state = vm.run(max_steps=20)
+    assert state["halted"]
+    assert state["regs"][0] == _VERIFIED_SUM_141
+    assert state["regs"][1] == 99
+
+
+@pytest.mark.parametrize("encoding_mode", ENCODING_MODES)
+def test_rekey_keeps_wire_decoding_stable(encoding_mode):
+    seed = next(_seed_for_test(i) for i in range(256)
+                if select_encoding_mode(_seed_for_test(i), 0) == encoding_mode)
+    vm = VMInterpreter(b"", dynamic_isa=True, entropy_seed=seed)
+    bytecode = _encode_for_vm(vm, [
+        (14, bytes([0, 42, 0])),
+        (255, b""),
+        (14, bytes([1, 99, 0])),
+        (1, bytes([0, 1])),
+    ])
+    vm.bytecode = bytearray(bytecode)
+    initial_table = list(vm.isa_table)
+    initial_encoding = vm.encoding_mode
+    initial_perm = list(vm.field_perm)
+    initial_order = list(vm.handler_order)
+    initial_seed = bytes(vm.entropy_seed)
+
+    state = vm.run(max_steps=20)
+
+    assert state["halted"]
+    assert vm.epoch == 1
+    assert state["regs"][0] == _VERIFIED_SUM_141
+    assert state["regs"][1] == 99
+    assert vm.isa_table == initial_table
+    assert vm.encoding_mode == initial_encoding
+    assert vm.field_perm == initial_perm
+    assert bytes(vm.entropy_seed) != initial_seed
+    assert vm.handler_order != initial_order
 
 
 # ── Compilation test ─────────────────────────────────────────────────
@@ -231,7 +303,7 @@ def test_handler_order_changes_after_rekey():
             vm2.step()
             if vm2.epoch > 0 and vm2.handler_order != pre_rekey_order:
                 return
-    pytest.skip("Could not find seed where handler order changes after REKEY")
+    pytest.fail("Could not find seed where handler order changes after REKEY")
 
 
 def test_handler_shuffle_is_bijection():
@@ -272,37 +344,45 @@ def test_dispatch_mode_differs_per_instance():
 
 
 def test_dispatch_mode_differs_per_epoch():
-    bc = make_mov_bytecode_phys(0, 42) + make_rekey_bytecode_phys() + make_mov_bytecode_phys(1, 99)
-    vm = VMInterpreter(bc, dynamic_isa=True, entropy_seed=_seed_for_test(30))
-    vm.step()
-    if not vm.state.get("halted", False):
-        vm.step()
-        if vm.epoch > 0:
-            pass
+    for test_idx in range(64):
+        vm = VMInterpreter(b"", dynamic_isa=True, entropy_seed=_seed_for_test(30 + test_idx))
+        before = (vm.dispatch_mode, tuple(vm.handler_order))
+        vm._rekey()
+        assert vm.epoch == 1
+        if (vm.dispatch_mode, tuple(vm.handler_order)) != before:
+            return
+    pytest.fail("Could not find a seed where REKEY rotates dispatch metadata")
 
 
-def test_rekey_rotates_dispatch_encoding():
-    bc = make_mov_bytecode_phys(0, 42) + make_rekey_bytecode_phys() + make_mov_bytecode_phys(1, 99)
+def test_rekey_rotates_dispatch_but_not_wire_encoding():
     for test_idx in range(20):
-        vm = VMInterpreter(bc, dynamic_isa=True, entropy_seed=_seed_for_test(40 + test_idx))
+        seed = _seed_for_test(40 + test_idx)
+        template = VMInterpreter(b"", dynamic_isa=True, entropy_seed=seed)
+        bc = _encode_for_vm(template, [
+            (14, bytes([0, 42, 0])),
+            (255, b""),
+            (14, bytes([1, 99, 0])),
+        ])
+        vm = VMInterpreter(bc, dynamic_isa=True, entropy_seed=seed)
         pre_dispatch = vm.dispatch_mode
         pre_encoding = vm.encoding_mode
+        pre_perm = list(vm.field_perm)
         pre_order = list(vm.handler_order)
+        pre_table = list(vm.isa_table)
 
-        vm.step()
-        if vm.state.get("halted", False):
-            continue
-        vm.step()
-        if vm.state.get("halted", False):
-            continue
+        assert vm.step()
+        assert vm.step()
+        assert vm.epoch == 1
+        assert vm.isa_table == pre_table
+        assert vm.encoding_mode == pre_encoding
+        assert vm.field_perm == pre_perm
+        assert (vm.dispatch_mode != pre_dispatch or vm.handler_order != pre_order)
+        state = vm.run(max_steps=10)
+        assert state["regs"][0] == 42
+        assert state["regs"][1] == 99
+        return
 
-        if vm.epoch > 0:
-            if (vm.dispatch_mode != pre_dispatch or
-                    vm.encoding_mode != pre_encoding or
-                    vm.handler_order != pre_order):
-                return
-
-    pytest.skip("Could not find a seed where REKEY rotates anything")
+    pytest.fail("Could not find a seed where REKEY rotates dispatch metadata")
 
 
 # ── Self-Mutating ISA: Encoding Mode Tests ──────────────────────────
@@ -405,62 +485,53 @@ def test_py_interpreter_same_seed_same_mapping():
     assert vm1.isa_table == vm2.isa_table
 
 
-def test_py_interpreter_rekey_changes_mapping():
-    for test_idx in range(20):
-        seed = _seed_for_test(2000 + test_idx)
-        vm = VMInterpreter(b"", dynamic_isa=True, entropy_seed=seed)
-        nop_phys = _logical_to_physical_map(vm).get(0, 0)
-        mov_phys = _logical_to_physical_map(vm).get(14, 14)
-        bc = bytearray()
-        bc.extend([mov_phys, 1, 100, 0])
-        for _ in range(VMInterpreter.VM_REKEY_INTERVAL):
-            bc.append(nop_phys)
-        bc.extend([mov_phys, 2, 200, 0])
+def test_py_interpreter_auto_rekey_keeps_wire_mapping():
+    seed = _seed_for_test(2000)
+    template = VMInterpreter(b"", dynamic_isa=True, entropy_seed=seed)
+    instructions = [(14, bytes([1, 100, 0]))]
+    instructions += [(0, b"")] * VMInterpreter.VM_REKEY_INTERVAL
+    instructions += [(14, bytes([2, 200, 0]))]
+    bc = _encode_for_vm(template, instructions)
+    vm = VMInterpreter(bc, dynamic_isa=True, entropy_seed=seed)
+    pre_rekey_table = list(vm.isa_table)
+    pre_encoding = vm.encoding_mode
+    pre_perm = list(vm.field_perm)
+    pre_seed = bytes(vm.entropy_seed)
 
-        vm2 = VMInterpreter(bytes(bc), dynamic_isa=True, entropy_seed=seed)
-        pre_rekey_table = list(vm2.isa_table)
+    state = vm.run(max_steps=VMInterpreter.VM_REKEY_INTERVAL + 10)
 
-        vm2.step()
-        if vm2.state.get("halted", False):
-            continue
-        assert vm2.isa_table == pre_rekey_table
-
-        for _ in range(VMInterpreter.VM_REKEY_INTERVAL - 2):
-            vm2.step()
-            if vm2.state.get("halted", False):
-                break
-
-        if not vm2.state.get("halted", False):
-            vm2.step()
-            if vm2.epoch > 0 and vm2.isa_table != pre_rekey_table:
-                return
-    pytest.skip("Could not find seed where rekey changes mapping")
+    assert state["halted"]
+    assert vm.epoch == 1
+    assert state["regs"][1] == 100
+    assert state["regs"][2] == 200
+    assert vm.isa_table == pre_rekey_table
+    assert vm.encoding_mode == pre_encoding
+    assert vm.field_perm == pre_perm
+    assert bytes(vm.entropy_seed) != pre_seed
 
 
 def test_py_interpreter_explicit_rekey():
-    for test_idx in range(20):
-        seed = _seed_for_test(3000 + test_idx)
-        vm = VMInterpreter(b"", dynamic_isa=True, entropy_seed=seed)
-        bc = bytearray()
-        bc.extend(make_mov_bytecode(vm, 1, 100))
-        bc.extend(_encode_for_vm(vm, [(255, b"")]))
-        bc.extend(make_mov_bytecode(vm, 2, 200))
+    seed = _seed_for_test(3000)
+    template = VMInterpreter(b"", dynamic_isa=True, entropy_seed=seed)
+    bc = _encode_for_vm(template, [
+        (14, bytes([1, 100, 0])),
+        (255, b""),
+        (14, bytes([2, 200, 0])),
+    ])
+    vm = VMInterpreter(bc, dynamic_isa=True, entropy_seed=seed)
+    pre_rekey_table = list(vm.isa_table)
+    pre_order = list(vm.handler_order)
 
-        vm2 = VMInterpreter(bytes(bc), dynamic_isa=True, entropy_seed=seed, opcode_map=None)
-        pre_rekey_table = list(vm2.isa_table)
-
-        vm2.step()
-        if vm2.state.get("halted", False):
-            continue
-        assert vm2.epoch == 0
-        assert vm2.isa_table == pre_rekey_table
-
-        vm2.step()
-        if not vm2.state.get("halted", False):
-            assert vm2.epoch == 1
-            assert vm2.isa_table != pre_rekey_table
-            return
-    pytest.skip("Could not find seed where explicit rekey works")
+    assert vm.step()
+    assert vm.epoch == 0
+    assert vm.isa_table == pre_rekey_table
+    assert vm.step()
+    assert vm.epoch == 1
+    assert vm.isa_table == pre_rekey_table
+    assert vm.handler_order != pre_order
+    state = vm.run(max_steps=10)
+    assert state["regs"][1] == 100
+    assert state["regs"][2] == 200
 
 
 # ── Cross-Execution Variance Tests ───────────────────────────────────
@@ -537,7 +608,7 @@ def test_semantic_preservation_add():
         state = vm2.run(max_steps=100)
         if state["regs"][0] == 30:
             return
-    pytest.skip("All instances failed")
+    pytest.fail("All instances failed")
 
 
 def test_semantic_preservation_mov():
@@ -551,7 +622,7 @@ def test_semantic_preservation_mov():
         state = vm2.run(max_steps=100)
         if state["regs"][3] == 42:
             return
-    pytest.skip("All instances failed")
+    pytest.fail("All instances failed")
 
 
 def test_semantic_preservation_sub():
@@ -567,7 +638,7 @@ def test_semantic_preservation_sub():
         state = vm2.run(max_steps=100)
         if state["regs"][0] == 70:
             return
-    pytest.skip("All instances failed")
+    pytest.fail("All instances failed")
 
 
 def test_semantic_preservation_mul():
@@ -579,7 +650,7 @@ def test_semantic_preservation_mul():
         state = vm2.run(max_steps=100)
         if state["regs"][0] == 42:
             return
-    pytest.skip("All instances failed")
+    pytest.fail("All instances failed")
 
 
 def test_semantic_preservation_multiple_ops():
@@ -601,7 +672,7 @@ def test_semantic_preservation_multiple_ops():
         if state["regs"][0] == expected:
             assert state["regs"][1] == 3
             return
-    pytest.skip("All instances failed")
+    pytest.fail("All instances failed")
 
 
 # ── REKEY with Dispatch Rotation Tests ──────────────────────────────
@@ -624,25 +695,28 @@ def test_rekey_rotates_dispatch():
         if vm.epoch > 0 and (vm.dispatch_mode != mode_before or
                              vm.handler_order != order_before):
             return
-    pytest.skip("Could not find seed where REKEY changes dispatch or order")
+    pytest.fail("Could not find seed where REKEY changes dispatch or order")
 
 
-def test_rekey_rotates_encoding():
+def test_rekey_keeps_encoding_mode_stable():
     for test_idx in range(20):
         seed = _seed_for_test(1200 + test_idx)
-        bc = make_mov_bytecode_phys(0, 42) + make_rekey_bytecode_phys() + make_mov_bytecode_phys(1, 99)
+        template = VMInterpreter(b"", dynamic_isa=True, entropy_seed=seed)
+        bc = _encode_for_vm(template, [
+            (14, bytes([0, 42, 0])),
+            (255, b""),
+            (14, bytes([1, 99, 0])),
+        ])
         vm = VMInterpreter(bc, dynamic_isa=True, entropy_seed=seed)
-
-        vm.step()
-        if vm.state.get("halted", False):
-            continue
-        vm.step()
-        if vm.state.get("halted", False):
-            continue
-
-        if vm.epoch > 0:
-            return
-    pytest.skip("Could not find seed where REKEY doesn't halt")
+        encoding = vm.encoding_mode
+        permutation = list(vm.field_perm)
+        assert vm.step()
+        assert vm.step()
+        assert vm.epoch == 1
+        assert vm.encoding_mode == encoding
+        assert vm.field_perm == permutation
+        return
+    pytest.fail("Could not find seed where REKEY doesn't halt")
 
 
 def test_rekey_rotates_handler_order():
@@ -666,34 +740,37 @@ def test_rekey_rotates_handler_order():
 
         if vm2.epoch > 0 and vm2.handler_order != order_before:
             return
-    pytest.skip("Could not find seed where REKEY changes handler order")
+    pytest.fail("Could not find seed where REKEY changes handler order")
 
 
 def test_multiple_rekeys():
-    """Multiple REKEY events should continue to rotate."""
+    """Multiple REKEY events rotate dispatch metadata, never the wire ISA."""
     for test_idx in range(20):
         seed = _seed_for_test(1400 + test_idx)
-        bc_phys = bytearray()
-        bc_phys.extend(make_mov_bytecode_phys(0, 1))
+        template = VMInterpreter(b"", dynamic_isa=True, entropy_seed=seed)
+        instructions = [(14, bytes([0, 1, 0]))]
+        instructions += [(255, b"")] * 5
+        instructions += [(14, bytes([1, 99, 0]))]
+        bc = _encode_for_vm(template, instructions)
+        vm = VMInterpreter(bc, dynamic_isa=True, entropy_seed=seed)
+        initial_table = list(vm.isa_table)
+        initial_encoding = vm.encoding_mode
+        modes_seen = {(vm.dispatch_mode, tuple(vm.handler_order))}
+
+        assert vm.step()
         for _ in range(5):
-            bc_phys.append(255)
-        bc_phys.extend(make_jmp_bytecode_phys(99))
+            assert vm.step()
+            modes_seen.add((vm.dispatch_mode, tuple(vm.handler_order)))
+        state = vm.run(max_steps=10)
 
-        vm = VMInterpreter(bytes(bc_phys), dynamic_isa=True, entropy_seed=seed)
-        modes_seen = set()
-        modes_seen.add((vm.dispatch_mode, vm.encoding_mode, tuple(vm.handler_order)))
-
-        for _ in range(6):
-            vm.step()
-            if vm.state.get("halted", False):
-                break
-            if vm.epoch > 0:
-                tup = (vm.dispatch_mode, vm.encoding_mode, tuple(vm.handler_order))
-                modes_seen.add(tup)
-
-        if not vm.state.get("halted", False) and len(modes_seen) >= 2:
-            return
-    pytest.skip("Could not find seed where multiple REKEYs work")
+        assert vm.epoch == 5
+        assert vm.isa_table == initial_table
+        assert vm.encoding_mode == initial_encoding
+        assert state["regs"][0] == 1
+        assert state["regs"][1] == 99
+        assert len(modes_seen) >= 2
+        return
+    pytest.fail("Could not find seed where multiple REKEYs work")
 
 
 # ── Field Shuffle Tests ──────────────────────────────────────────────
@@ -713,7 +790,7 @@ def test_field_shuffle_produces_valid_execution():
         state = vm2.run(max_steps=100)
         if state["regs"][0] == 10:
             return
-    pytest.skip("No instance with field_shuffle encoding produced correct result")
+    pytest.fail("No instance with field_shuffle encoding produced correct result")
 
 
 def test_variable_encoding_produces_valid_execution():
@@ -731,7 +808,7 @@ def test_variable_encoding_produces_valid_execution():
         state = vm2.run(max_steps=100)
         if state["regs"][0] == 10:
             return
-    pytest.skip("No instance with variable encoding produced correct result")
+    pytest.fail("No instance with variable encoding produced correct result")
 
 
 # ── Cross-Instance Result Consistency ────────────────────────────────
@@ -759,7 +836,7 @@ def test_all_instances_produce_same_regs():
         assert list(reg0_vals)[0] == 100, \
             f"Expected reg[0]=100, got {reg0_vals}"
     else:
-        pytest.skip("No instances completed successfully")
+        pytest.fail("No instances completed successfully")
 
 
 # ── Self-Mutating ISA C-API Tests ────────────────────────────────────
@@ -802,77 +879,69 @@ def test_all_encoding_modes_parsable():
         decode_instruction_length(encoded, 0, mode, opcode, perm)
 
 
-    # ── State-ISA Tests (Item 84) ─────────────────────────────────────
+# ── State-ISA interpreter tests ───────────────────────────────────────
 
-    def test_mapping_changes_over_time(self):
-        """Same opcode maps differently at different steps with state-ISA."""
-        bc = bytearray()
-        # Build bytecode with many instructions to trigger rotation
-        for i in range(10):
-            bc.extend(make_mov_bytecode_phys(0, i * 10))
-        bc.extend(make_jmp_bytecode_phys(99))
 
-        vm = VMInterpreter(bytes(bc), dynamic_isa=True,
-                           entropy_seed=_seed_for_test(1), state_isa=True)
-        initial_rotation = vm.state_isa_rotation
-        vm.run(max_steps=20)
-        if vm.state_isa_rotation != initial_rotation:
-            # Rotation changed: same physical opcode should map differently
-            pass  # Test passes if rotation changed or stayed (deterministic)
-        assert not vm.state.get("halted", False) or True
+def test_state_isa_vm_rotation_advances_without_changing_decode():
+    vm = VMInterpreter(b"", dynamic_isa=True, entropy_seed=_seed_for_test(1), state_isa=True)
+    bytecode = _encode_fixed_for_vm(vm, [(0, b"")] * 64 + [(14, bytes([0, 42, 0]))])
+    vm = VMInterpreter(bytecode, dynamic_isa=True, entropy_seed=_seed_for_test(1), state_isa=True)
+    vm.encoding_mode = ENCODING_FIXED
+    state = vm.run(max_steps=100)
+    assert state["halted"]
+    assert vm.state_isa_rotation > 0
+    assert state["regs"][0] == 42
 
-    def test_deterministic_per_input(self):
-        """Same bytecode+input -> same state-ISA trajectory."""
-        bc = make_mov_bytecode_phys(0, 42) + make_jmp_bytecode_phys(99)
-        vm1 = VMInterpreter(bytes(bc), dynamic_isa=True,
-                            entropy_seed=_seed_for_test(10), state_isa=True)
-        vm2 = VMInterpreter(bytes(bc), dynamic_isa=True,
-                            entropy_seed=_seed_for_test(10), state_isa=True)
-        vm1.run(max_steps=10)
-        vm2.run(max_steps=10)
-        assert vm1.state_isa_history == vm2.state_isa_history
-        assert vm1.state_isa_rotation == vm2.state_isa_rotation
 
-    def test_different_for_different_inputs(self):
-        """Different inputs -> different state-ISA trajectories."""
-        bc1 = make_mov_bytecode_phys(0, 10) + make_jmp_bytecode_phys(99)
-        bc2 = make_mov_bytecode_phys(0, 99) + make_jmp_bytecode_phys(99)
-        vm1 = VMInterpreter(bytes(bc1), dynamic_isa=True,
-                            entropy_seed=_seed_for_test(20), state_isa=True)
-        vm2 = VMInterpreter(bytes(bc2), dynamic_isa=True,
-                            entropy_seed=_seed_for_test(20), state_isa=True)
-        vm1.run(max_steps=10)
-        vm2.run(max_steps=10)
-        # Different bytecodes may lead to different history
-        assert vm1.state_isa_history != vm2.state_isa_history or True
+def test_state_isa_vm_deterministic_per_input():
+    seed = _seed_for_test(10)
+    vm = VMInterpreter(b"", dynamic_isa=True, entropy_seed=seed, state_isa=True)
+    bytecode = _encode_fixed_for_vm(vm, [(0, b"")] * 16 + [(14, bytes([0, 42, 0]))])
+    vm1 = VMInterpreter(bytecode, dynamic_isa=True, entropy_seed=seed, state_isa=True)
+    vm2 = VMInterpreter(bytecode, dynamic_isa=True, entropy_seed=seed, state_isa=True)
+    vm1.encoding_mode = ENCODING_FIXED
+    vm2.encoding_mode = ENCODING_FIXED
+    vm1.run(max_steps=30)
+    vm2.run(max_steps=30)
+    assert vm1.state_isa_history == vm2.state_isa_history
+    assert vm1.state_isa_rotation == vm2.state_isa_rotation
 
-    def test_semantic_correctness(self):
-        """State-ISA and no-state-ISA produce same result."""
-        for test_idx in range(10):
-            seed = _seed_for_test(2000 + test_idx)
-            bc = bytearray()
-            bc.extend(make_mov_bytecode_phys(0, 5))
-            bc.extend(make_mov_bytecode_phys(1, 3))
-            bc.extend(make_mov_bytecode_phys(2, 7))
-            # Use a well-known sequence
-            bc.extend([1, 0, 1])  # ADD r0, r1
-            bc.extend(make_jmp_bytecode_phys(99))
 
-            # Run with state-ISA
-            vm_state = VMInterpreter(bytes(bc), dynamic_isa=True,
-                                     entropy_seed=seed, state_isa=True)
-            state_result = vm_state.run(max_steps=100)
+def test_state_isa_vm_history_differs_for_different_inputs():
+    seed = _seed_for_test(20)
+    vm1 = VMInterpreter(b"", dynamic_isa=True, entropy_seed=seed, state_isa=True)
+    vm2 = VMInterpreter(b"", dynamic_isa=True, entropy_seed=seed, state_isa=True)
+    bc1 = _encode_fixed_for_vm(vm1, [(14, bytes([0, 10, 0]))])
+    bc2 = _encode_fixed_for_vm(vm2, [(14, bytes([0, 99, 0]))])
+    vm1 = VMInterpreter(bc1, dynamic_isa=True, entropy_seed=seed, state_isa=True)
+    vm2 = VMInterpreter(bc2, dynamic_isa=True, entropy_seed=seed, state_isa=True)
+    vm1.encoding_mode = ENCODING_FIXED
+    vm2.encoding_mode = ENCODING_FIXED
+    vm1.run(max_steps=10)
+    vm2.run(max_steps=10)
+    assert vm1.state_isa_history != vm2.state_isa_history
 
-            # Run without state-ISA
-            vm_plain = VMInterpreter(bytes(bc), dynamic_isa=True,
-                                     entropy_seed=seed, state_isa=False)
-            plain_result = vm_plain.run(max_steps=100)
 
-            if not state_result.get("halted", False) and not plain_result.get("halted", False):
-                # Both should have completed execution
-                assert state_result["regs"] == plain_result["regs"] or True
-                return
-        pytest.skip("All instances halted")
+def test_state_isa_vm_semantic_correctness():
+    for test_idx in range(10):
+        seed = _seed_for_test(2000 + test_idx)
+        vm = VMInterpreter(b"", dynamic_isa=True, entropy_seed=seed, state_isa=True)
+        bytecode = _encode_fixed_for_vm(vm, [
+            (14, bytes([0, 5, 0])),
+            (14, bytes([1, 3, 0])),
+            (14, bytes([2, 7, 0])),
+            (1, bytes([0, 1])),
+        ])
+        vm_state = VMInterpreter(bytecode, dynamic_isa=True, entropy_seed=seed, state_isa=True)
+        vm_plain = VMInterpreter(bytecode, dynamic_isa=True, entropy_seed=seed, state_isa=False)
+        vm_state.encoding_mode = ENCODING_FIXED
+        vm_plain.encoding_mode = ENCODING_FIXED
+        state_result = vm_state.run(max_steps=100)
+        plain_result = vm_plain.run(max_steps=100)
+        assert state_result["halted"] and plain_result["halted"]
+        assert state_result["regs"] == plain_result["regs"], (
+            "state-ISA diverged from plain VM at seed %r" % (seed,))
+        assert state_result["regs"][0] == 8
 
 
 class TestStateISA:

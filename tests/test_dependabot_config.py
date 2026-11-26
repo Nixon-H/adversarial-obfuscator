@@ -13,7 +13,6 @@ config until an advisory goes unreported.
 """
 import os
 
-import pytest
 import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

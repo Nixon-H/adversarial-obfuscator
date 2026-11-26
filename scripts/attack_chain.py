@@ -14,7 +14,6 @@ Run: python3 -I attack_chain.py <artefact> [marker]
 """
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -312,7 +311,6 @@ def main():
             import base64 as _b64
 
             attacker = Ed25519PrivateKey.generate()
-            attacker_pub = attacker.public_key().public_bytes_raw()
             # 1. tamper, 2. re-stamp CK+HMAC so those layers agree
             stage, _ = _flip_pack_byte(base)
             stage, _ = restamp_all(stage)

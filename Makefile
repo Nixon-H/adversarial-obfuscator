@@ -24,7 +24,7 @@ WB_O       := $(BUILD_DIR)/wb.so
 PY_COMPILE := $(BUILD_DIR)/py_compile.so
 RELAY_BIN  := $(BUILD_DIR)/orbital-relay
 
-.PHONY: all core wb py_compile relay relay-win relay-linux-arm relay-all relay-cross relay-cross-prereqs clean strip install-deps lint test irgen llvmgen encrypt all-shadow stub stub-check stub-win-driver vm-stub-so vm-stub-win
+.PHONY: all core wb py_compile relay relay-win relay-linux-arm relay-all relay-cross relay-cross-prereqs clean strip install-deps lint lint-upgrade lock lock-verify e2e audit-commit lint-clean test irgen llvmgen encrypt all-shadow core-cpp native-test simd-vm-c
 
 all: core wb py_compile relay
 
@@ -51,8 +51,16 @@ $(PY_COMPILE): $(SRC) $(WB_SRC)
 	$(CXX) $(CXXFLAGS) -DCORE_HAVE_PYTHON_H -DCOMPILE_ONLY -o $@ $(SRC) $(WB_SRC) $(PYINCLUDES) $(PYLDFLAGS)
 	-strip $@
 
-irgen: $(BUILD_DIR) core
-	python3 -m irgen build/obfuscated.py -o build/program.ir
+# The IR stage consumes the obfuscated payload produced by scripts/build.py
+# (build/<stem>_obfuscated.py). There is no checked-in build/obfuscated.py, so
+# produce it here instead of reading a file no rule creates.
+OBF_PAYLOAD := $(BUILD_DIR)/hello_obfuscated.py
+
+$(OBF_PAYLOAD): $(BUILD_DIR) scripts/build.py examples/hello.py config/default.json $(wildcard obfuscator/*.py obfuscator/core/*.py)
+	python3 scripts/build.py --payload examples/hello.py --skip irgen llvmgen encrypt relay extras
+
+irgen: $(BUILD_DIR) core $(OBF_PAYLOAD)
+	python3 -m irgen $(OBF_PAYLOAD) -o build/program.ir
 
 llvmgen: $(BUILD_DIR) irgen
 	python3 -m llvmgen build/program.ir -o build/program.o -O bcf fla sub
@@ -96,7 +104,7 @@ relay-cross-prereqs:
 relay-win: $(BUILD_DIR)
 	@echo "[*] Cross-compiling relay for Windows x86_64..."
 	cd $(RELAY_DIR) && rustup target add x86_64-pc-windows-gnu 2>/dev/null || true
-	cd $(RELAY_DIR) && cargo build --release --target x86_64-pc-windows-gnu
+	cd $(RELAY_DIR) && CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc cargo build --release --target x86_64-pc-windows-gnu
 	cp $(RELAY_DIR)/target/x86_64-pc-windows-gnu/release/orbital-relay.exe $(BUILD_DIR)/orbital-relay-win.exe
 	-strip $(BUILD_DIR)/orbital-relay-win.exe
 	@echo "[+] relay-win done: $(BUILD_DIR)/orbital-relay-win.exe"
@@ -107,7 +115,7 @@ relay-linux-arm: $(BUILD_DIR)
 	if ! command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then \
 		echo "[!] WARNING: aarch64-linux-gnu-gcc not found — link may fail"; \
 	fi
-	cd $(RELAY_DIR) && cargo build --release --target aarch64-unknown-linux-gnu
+	cd $(RELAY_DIR) && CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc cargo build --release --target aarch64-unknown-linux-gnu
 	cp $(RELAY_DIR)/target/aarch64-unknown-linux-gnu/release/orbital-relay $(BUILD_DIR)/orbital-relay-linux-arm
 	-strip $(BUILD_DIR)/orbital-relay-linux-arm
 	@echo "[+] relay-linux-arm done: $(BUILD_DIR)/orbital-relay-linux-arm"
@@ -139,7 +147,16 @@ core-cpp:
 # fragment_migration.c.  None of them was in the shipped artefact; the
 # ones with live behaviour have Python or Rust implementations that are
 # wired.  native-test now only builds what the product actually uses.
-native-test: core-cpp simd-vm-c
+native-test: core-cpp simd-vm-c abi-test
+
+.PHONY: abi-test
+abi-test:
+	@echo "  CXX+RUN native/core_abi_test.cpp"
+	@mkdir -p $(BUILD_DIR)
+	g++ -std=c++17 -O1 -g -Wall -Wextra -Werror \
+		native/core_abi_test.cpp $(SRC) $(WB_SRC) \
+		-o $(BUILD_DIR)/core_abi_test
+	$(BUILD_DIR)/core_abi_test
 
 .PHONY: simd-vm-c
 simd-vm-c:
@@ -158,7 +175,12 @@ strip:
 	-strip $(BUILD_DIR)/*.so 2>/dev/null
 
 install-deps:
-	pip3 install -r requirements.txt
+	# PEP 668 (Ubuntu >= 23.04 / Debian >= 12): a plain `pip3 install` into the
+	# system environment is refused with EXTERNALLY-MANAGED. Fall back to
+	# --break-system-packages only when the plain install fails, so hosts
+	# without PEP 668 keep working unchanged. --ignore-installed avoids
+	# uninstalling distro-managed packages whose RECORD files are missing.
+	pip3 install -r requirements.txt || pip3 install --break-system-packages --ignore-installed -r requirements.txt
 
 lint:
 	ruff check --no-cache .
@@ -208,6 +230,6 @@ lint-clean:
 	python3 scripts/lint/clean_unused_locals.py obfuscator/ scripts/ tests/ irgen/ vm/ llvmgen/ encrypt/ *.py --apply
 
 test:
-	python3 -m pytest tests/ -v
+	PYTHONDONTWRITEBYTECODE=1 NIXON_TEST_TIMEOUT=60 python3 scripts/run_pytest.py tests/ -q -p no:cacheprovider
 	cd runtime && cargo test
 	cd relay && cargo test

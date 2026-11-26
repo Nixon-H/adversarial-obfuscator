@@ -138,9 +138,16 @@ def _nx_prov_msg():
     """The signed content: this file, minus the provenance slot lines."""
     with open(__file__, "rb") as _f:
         _lines = _f.read().splitlines(keepends=True)
-    return b"".join(
-        _l for _l in _lines
-        if b"_NX_PROV_SIG" not in _l and b"_NX_PROV_PK" not in _l)
+    def _nx_slot_line(_l):
+        _s = _l.rstrip()
+        _sig_mark = b"_NX_PROV_SIG" + b" = "
+        _pk_mark = b"_NX_PROV_PK" + b" = "
+        if not (_s.startswith(_sig_mark) or _s.startswith(_pk_mark)):
+            return False
+        _v = _s.split(b" = ", 1)[1]
+        return (len(_v) >= 2 and _v.startswith(b'"')
+                and _v.endswith(b'"') and b'"' not in _v[1:-1])
+    return b"".join(_l for _l in _lines if not _nx_slot_line(_l))
 
 # UNSIGNED IS NOT TAMPERED. A build with no signing key emits empty slots; that
 # artefact has no provenance to verify and must still RUN. Failing it here would
@@ -238,6 +245,23 @@ PK_PLACEHOLDER = ""
 EXCLUDE_MARKERS = (b"_NX_PROV_SIG", b"_NX_PROV_PK")
 
 
+def _is_provenance_slot_line(line):
+    """True only for the exact `NAME = "value"` slot assignment.
+
+    The old substring test excluded any line that merely *mentioned* the slot
+    names, including live executable lines; appending code to one of those
+    lines left the signed bytes unchanged (measured loader bypass).
+    """
+    text = line.rstrip()
+    sig_mark = b"_NX_PROV_SIG" + b" = "
+    pk_mark = b"_NX_PROV_PK" + b" = "
+    if not (text.startswith(sig_mark) or text.startswith(pk_mark)):
+        return False
+    value = text.split(b" = ", 1)[1]
+    return (len(value) >= 2 and value.startswith(b'"')
+            and value.endswith(b'"') and b'"' not in value[1:-1])
+
+
 def signed_content(artefact_bytes):
     """The byte stream a signature covers.
 
@@ -248,7 +272,7 @@ def signed_content(artefact_bytes):
     """
     lines = bytes(artefact_bytes).splitlines(keepends=True)
     return b"".join(line for line in lines
-                    if not any(marker in line for marker in EXCLUDE_MARKERS))
+                    if not _is_provenance_slot_line(line))
 
 
 

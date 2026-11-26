@@ -10,7 +10,6 @@ no network, no CLI, no artefact build.
 """
 import json
 
-import pytest
 
 from pydeobsbench import ai_probe
 

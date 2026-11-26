@@ -65,6 +65,7 @@ import tempfile
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
+import scripts.common as _scripts_common
 from scripts.common import ROOT, BUILD_DIR, DEFAULT_CONFIG
 from obfuscator.version import version_string
 from scripts.common import atomic_write, log, run  # noqa: F401 (this line binds a name used by an embedded template)
@@ -72,6 +73,7 @@ from scripts.config_schema import ConfigError
 
 from scripts.binding.crypto_binding import CryptoFragmentBinder, Fragment
 from scripts.metrics import ResilienceMetrics
+from scripts.benchmark.score_control import control_permitted
 
 from scripts.validation.smt_validator import SMTValidator  # noqa: F401 (this line binds a name used by an embedded template)
 
@@ -660,6 +662,7 @@ def main():
     - Exits with code 0 on success, 1 on failure.
     """
     os.environ.setdefault("NIXON_LOG_REDIRECT", "0")
+    _scripts_common.ERROR_COUNT = 0
     parser = argparse.ArgumentParser(
         description="Nixon Build Pipeline — Shadow Compiler Multi-Stage Architecture",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1316,12 +1319,16 @@ in config/default.json.
                 reclassified = classifier.classify_from_source(_protected)
                 log("ADAPTIVE", f"Re-classified {len(reclassified)} functions after protection")
 
-                from obfuscator.adaptive_rewriter import AdaptiveRewriter
-                _rewriter = AdaptiveRewriter()
-                _rewritten = _rewriter.rewrite(_profile, _protected)
-                with open(_adapt_path, 'w', encoding='utf-8') as f:
-                    f.write(_rewritten)
-                log("ADAPTIVE", f"Applied {len(_profile.recommended_actions)} adaptive rewrites")
+                _control_ok, _control_reason = control_permitted(_bench_results)
+                if not _control_ok:
+                    log("SKIP", f"Adaptive rewrite disabled: {_control_reason}")
+                else:
+                    from obfuscator.adaptive_rewriter import AdaptiveRewriter
+                    _rewriter = AdaptiveRewriter()
+                    _rewritten = _rewriter.rewrite(_profile, _protected)
+                    with open(_adapt_path, 'w', encoding='utf-8') as f:
+                        f.write(_rewritten)
+                    log("ADAPTIVE", f"Applied {len(_profile.recommended_actions)} adaptive rewrites ({_control_reason})")
 
                 opts.payload = _adapt_path
             except Exception as ae:
@@ -2065,7 +2072,12 @@ in config/default.json.
         try:
             from irgen.oram import generate_oram_config
             vars_list = oram_cfg.get("protected_variables", [])
-            oram_config = generate_oram_config(vars_list, oram_cfg.get("num_blocks", 256))
+            # Use the build seed so --seed builds stay reproducible; the old
+            # committed constant made the position map public.
+            oram_seed = _stage_seed(opts)
+            oram_config = generate_oram_config(
+                vars_list, oram_cfg.get("num_blocks", 256),
+                seed=oram_seed.to_bytes(8, "big"))
             oram_config_path = os.path.join(BUILD_DIR, "oram_config.json")
             atomic_write(oram_config_path, json.dumps(oram_config, indent=2))
             log("ORAM", f"ORAM config written to {oram_config_path} ({oram_config['num_blocks']} blocks)")
@@ -2507,6 +2519,7 @@ in config/default.json.
             subprocess.run(
                 ["gcc", "-c", "-O2"] + _simd_cflags + ["-o", simd_obj, simd_src],
                 check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=300,
             )
             log("SIMD_VM", f"Compiled SIMD-VM to {simd_obj}")
             # Also compile and run a test binary to verify
@@ -2517,6 +2530,7 @@ in config/default.json.
                     ["gcc", "-O2"] + _simd_cflags
                     + ["-o", simd_test_bin, simd_test_src, simd_src, "-lm"],
                     check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=300,
                 )
                 log("SIMD_VM", f"SIMD-VM test binary: {simd_test_bin}")
                 # A timeout, so a wedged test binary fails instead of hanging the
@@ -3483,11 +3497,15 @@ in config/default.json.
                         log("ADAPTIVE", f"Enhanced with {len(historical_actions)} historical recommendations")
                     _analyzer.save_history(_profile, _feedback_history_path)
 
-                    _rewriter = AdaptiveRewriter()
-                    _adapted_code = _rewriter.rewrite(_profile, _adapted_code)
-                    with open(prot_source, "w", encoding='utf-8') as f:
-                        f.write(_adapted_code)
-                    log("ADAPTIVE", f"Applied {len(_profile.recommended_actions)} adaptive protections based on real benchmark feedback")
+                    _control_ok, _control_reason = control_permitted(_results)
+                    if not _control_ok:
+                        log("SKIP", f"Adaptive adversarial rewrite disabled: {_control_reason}")
+                    else:
+                        _rewriter = AdaptiveRewriter()
+                        _adapted_code = _rewriter.rewrite(_profile, _adapted_code)
+                        with open(prot_source, "w", encoding='utf-8') as f:
+                            f.write(_adapted_code)
+                        log("ADAPTIVE", f"Applied {len(_profile.recommended_actions)} adaptive protections based on benchmark feedback ({_control_reason})")
         except Exception as e:
             log("ERROR", f"Adaptive rewriting failed: {e}")
     else:
@@ -4501,6 +4519,9 @@ in config/default.json.
     else:
         log("SKIP", "Self-critique not enabled (use --self-critique)")
 
+    if _scripts_common.ERROR_COUNT:
+        log("ERROR", f"Pipeline incomplete: {_scripts_common.ERROR_COUNT} phase error(s); refusing successful exit")
+        sys.exit(1)
     log("DONE", "Pipeline complete")
     log("DONE", f"Build artifacts: {BUILD_DIR}/")
     log("DONE", "Run: build/orbital-relay --help")

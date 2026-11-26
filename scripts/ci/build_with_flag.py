@@ -1,8 +1,8 @@
 """Build with scripts/build.py, then run the artefact and compare to its source.
 
-build_on_platform.py drives `ai-obf build`, whose flag set is small. The 273
-flags the protection ladder is made of belong to scripts/build.py, so isolating
-an individual transform needs this path instead.
+build_on_platform.py drives `ai-obf build`, whose flag set is small. The live
+scripts/build.py catalogue currently has 30 entries (18 isolatable, 12
+excluded), so isolating an individual transform needs this path instead.
 
 NX_EXTRA_FLAGS carries the flags to apply; NX_PAYLOAD the payload.
 """
@@ -38,8 +38,7 @@ def main():
     cmd = [sys.executable, "scripts/build.py", "--payload", SOURCE,
            "-o", os.path.join(ROOT, "build", stem + "_ci.py"), "--force-output",
            "--opt-level", LEVEL,
-           "--skip-irgen", "--skip-llvmgen", "--skip-encrypt", "--skip-relay",
-           "--skip-extras"] + EXTRA
+           "--skip", "irgen", "llvmgen", "encrypt", "relay", "extras"] + EXTRA
     built = run(cmd)
     if built.returncode != 0:
         print("FAIL: builder exited %d" % built.returncode)

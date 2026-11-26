@@ -112,14 +112,13 @@ class TestAttackSurfaceEnumerator:
         files = e._find_rs_files()
         assert isinstance(files, list)
 
-    def test_read_lines(self):
+    def test_read_lines(self, tmp_path):
         e = AttackSurfaceEnumerator()
-        tmp_file = "/tmp/_test_lines.py"
+        tmp_file = str(tmp_path / "_test_lines.py")
         with open(tmp_file, "w") as f:
             f.write("line1\nline2\nline3\n")
         lines = e._read_lines(tmp_file)
         assert len(lines) == 3
-        os.remove(tmp_file)
 
     def test_read_lines_nonexistent(self):
         e = AttackSurfaceEnumerator()

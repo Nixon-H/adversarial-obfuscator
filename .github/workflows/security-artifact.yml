@@ -66,8 +66,8 @@ jobs:
       matrix:
         python-version: ["3.11", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # pinned immutable; original actions/checkout@v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
@@ -84,7 +84,7 @@ jobs:
           printf 'print("CI_ARTIFACT_OK")\n' > "$RUNNER_TEMP/ci_probe_payload.py"
           timeout 300 python3 scripts/build.py \
             --payload "$RUNNER_TEMP/ci_probe_payload.py" \
-            --skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras
+            --skip irgen llvmgen encrypt relay extras
           test -f build/ci_probe_payload_obfuscated.py
 
       - name: Run artifact, assert expected output
@@ -133,18 +133,17 @@ jobs:
 
       - name: pip-audit clean (hard gate)
         run: |
-          # VERSION-PINNED (finding AI-SC-003). Was `pip install pip-audit`
-          # unpinned, so the auditor could change between runs and silently
-          # alter what this gate reports. Full --require-hashes is not applied
-          # to the auditor: it is a verification tool, never a build input, and
-          # its dependency tree changes too often to lock usefully. The BUILD
-          # dependencies are hash-locked above.
-          pip install pip-audit==2.10.1
+          # HASH-PINNED (AI-SC-003 remainder closed). The auditor is a
+          # verification tool rather than a build input, but an unverified
+          # auditor is still supply-chain attack surface: a substituted package
+          # could suppress or misreport advisories. requirements-pip-audit.lock
+          # pins pip-audit 2.10.1 and its transitive dependencies by SHA-256.
+          pip install --require-hashes -r requirements-pip-audit.lock
           pip-audit -r requirements.txt --desc
 
       - name: Upload artifact + probe evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pinned immutable; original actions/upload-artifact@v4
         with:
           name: security-artifact-py${{ matrix.python-version }}
           path: |

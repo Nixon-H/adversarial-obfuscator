@@ -11,8 +11,9 @@
 //!
 //! Security properties, each mirrored by a test:
 //!
-//! * **HMAC over the canonical request** -- function name, canonical args,
-//!   nonce and timestamp.  A tampered argument invalidates the signature.
+//! * **HMAC over the canonical request** -- protocol version, function name,
+//!   typed canonical args/kwargs, nonce and binary64 timestamp. A tampered
+//!   argument or keyword invalidates the signature.
 //! * **Freshness** -- a request older than `MAX_SKEW_SECS` is rejected.
 //! * **Replay rejection** -- a nonce is accepted once and remembered for
 //!   twice the skew window.
@@ -26,24 +27,28 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
 /// Requests older than this are rejected (seconds).
 pub const MAX_SKEW_SECS: f64 = 300.0;
+/// Versioned, language-neutral remote signing protocol.
+pub const REMOTE_PROTOCOL_VERSION: u16 = 1;
 
 /// A registered implementation.
-pub type Handler = Arc<dyn Fn(&[serde_json::Value]) -> Result<serde_json::Value, String>
-    + Send
-    + Sync>;
+pub type Handler =
+    Arc<dyn Fn(&[serde_json::Value]) -> Result<serde_json::Value, String> + Send + Sync>;
 
 /// One request as it arrives on the wire.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct RemoteRequest {
+    pub version: u16,
     pub function: String,
     #[serde(default)]
     pub args: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub kwargs: serde_json::Map<String, serde_json::Value>,
     pub nonce: String,
     pub timestamp: f64,
     pub signature: String,
@@ -60,38 +65,68 @@ pub struct RemoteResponse {
 
 impl RemoteResponse {
     pub fn ok(value: serde_json::Value) -> Self {
-        Self { result: Some(value), error: None }
+        Self {
+            result: Some(value),
+            error: None,
+        }
     }
 
     pub fn err(message: impl Into<String>) -> Self {
-        Self { result: None, error: Some(message.into()) }
+        Self {
+            result: None,
+            error: Some(message.into()),
+        }
     }
 }
 
-/// Canonical JSON: sorted keys, no whitespace.  Must match the Python side
-/// (`obfuscator.remote_exec._canonical`) byte for byte.
+fn utf8_hex(value: &str) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(value.len() * 2);
+    for byte in value.as_bytes() {
+        out.push(DIGITS[(byte >> 4) as usize] as char);
+        out.push(DIGITS[(byte & 0x0f) as usize] as char);
+    }
+    out
+}
+
+/// Language-neutral v1 canonical form. The typed representation avoids
+/// Python/Rust differences in JSON escaping and shortest-float formatting.
 fn canonical(value: &serde_json::Value) -> String {
     match value {
-        serde_json::Value::Object(map) => {
-            let mut keys: Vec<&String> = map.keys().collect();
-            keys.sort();
-            let parts: Vec<String> = keys
-                .into_iter()
-                .map(|k| {
-                    format!(
-                        "{}:{}",
-                        serde_json::to_string(k).unwrap_or_default(),
-                        canonical(&map[k])
-                    )
-                })
-                .collect();
-            format!("{{{}}}", parts.join(","))
+        serde_json::Value::Null => "[\"n\"]".to_string(),
+        serde_json::Value::Bool(value) => {
+            format!("[\"b\",\"{}\"]", if *value { "1" } else { "0" })
+        }
+        serde_json::Value::Number(number) => {
+            if number.is_i64() || number.is_u64() {
+                format!("[\"i\",\"{}\"]", number)
+            } else {
+                let bits = number.as_f64().unwrap_or(0.0).to_bits();
+                format!("[\"f\",\"{bits:016x}\"]")
+            }
+        }
+        serde_json::Value::String(value) => {
+            format!("[\"s\",\"{}\"]", utf8_hex(value))
         }
         serde_json::Value::Array(items) => {
             let parts: Vec<String> = items.iter().map(canonical).collect();
-            format!("[{}]", parts.join(","))
+            format!("[\"a\",[{}]]", parts.join(","))
         }
-        other => serde_json::to_string(other).unwrap_or_default(),
+        serde_json::Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+            let parts: Vec<String> = keys
+                .into_iter()
+                .map(|key| {
+                    format!(
+                        "[{},{}]",
+                        canonical(&serde_json::Value::String(key.clone())),
+                        canonical(&map[key])
+                    )
+                })
+                .collect();
+            format!("[\"o\",[{}]]", parts.join(","))
+        }
     }
 }
 
@@ -104,26 +139,20 @@ pub fn sign_request(
     secret: &[u8],
     function: &str,
     args: &[serde_json::Value],
+    kwargs: &serde_json::Map<String, serde_json::Value>,
     nonce: &str,
     timestamp: f64,
 ) -> String {
+    let canonical_timestamp = format!("[\"f\",\"{:016x}\"]", timestamp.to_bits());
     let material = format!(
-        "{}\n{}\n{}\n{}",
-        function,
+        "nixon-remote-v1\n{}\n{}\n{}\n{}\n{}",
+        canonical(&serde_json::Value::String(function.to_string())),
         canonical(&serde_json::Value::Array(args.to_vec())),
-        nonce,
-        format_f64(timestamp)
+        canonical(&serde_json::Value::Object(kwargs.clone())),
+        canonical(&serde_json::Value::String(nonce.to_string())),
+        canonical_timestamp,
     );
     hex(&hmac_sha256(secret, material.as_bytes()))
-}
-
-/// Format a float the way Python's `repr(float)` does for our values.
-fn format_f64(value: f64) -> String {
-    if value.fract() == 0.0 && value.abs() < 1e16 {
-        format!("{:.1}", value)
-    } else {
-        format!("{}", value)
-    }
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -137,16 +166,14 @@ fn hex(bytes: &[u8]) -> String {
 // ── SHA-256 (FIPS 180-4) ────────────────────────────────────────────────
 
 const K: [u32; 64] = [
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
-    0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
-    0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
-    0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-    0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
-    0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
-    0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
-    0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
-    0xc67178f2,
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ];
 
 pub fn sha256(data: &[u8]) -> [u8; 32] {
@@ -291,10 +318,7 @@ impl RemoteService {
 
     pub fn register<F>(&mut self, name: &str, handler: F)
     where
-        F: Fn(&[serde_json::Value]) -> Result<serde_json::Value, String>
-            + Send
-            + Sync
-            + 'static,
+        F: Fn(&[serde_json::Value]) -> Result<serde_json::Value, String> + Send + Sync + 'static,
     {
         self.handlers.insert(name.to_string(), Arc::new(handler));
     }
@@ -302,13 +326,20 @@ impl RemoteService {
     /// Verify and dispatch one request.  Never panics; every failure is an
     /// error response.
     pub fn handle(&self, request: &RemoteRequest, now: f64) -> RemoteResponse {
-        if (now - request.timestamp).abs() > MAX_SKEW_SECS {
+        if request.version != REMOTE_PROTOCOL_VERSION {
+            return RemoteResponse::err("unsupported remote protocol version");
+        }
+        if !now.is_finite()
+            || !request.timestamp.is_finite()
+            || (now - request.timestamp).abs() > MAX_SKEW_SECS
+        {
             return RemoteResponse::err("remote request expired");
         }
         let expected = sign_request(
             &self.secret,
             &request.function,
             &request.args,
+            &request.kwargs,
             &request.nonce,
             request.timestamp,
         );
@@ -339,10 +370,9 @@ impl RemoteService {
             // exists only on the service side.
             None => match &self.worker_bundle {
                 Some(bundle) => self.forward_to_worker(bundle, request),
-                None => RemoteResponse::err(format!(
-                    "unknown remote function '{}'",
-                    request.function
-                )),
+                None => {
+                    RemoteResponse::err(format!("unknown remote function '{}'", request.function))
+                }
             },
         }
     }
@@ -352,55 +382,33 @@ impl RemoteService {
     /// The bundle is executed as `python3 <bundle> --call <function>` with
     /// the request on stdin; it writes a JSON response to stdout.  A
     /// non-zero exit or invalid JSON is an error response, never a panic.
-    fn forward_to_worker(
-        &self,
-        bundle: &str,
-        request: &RemoteRequest,
-    ) -> RemoteResponse {
-        use std::process::Stdio;
-        let payload = serde_json::to_string(&serde_json::json!({
-            "function": request.function,
-            "args": request.args,
-            "nonce": request.nonce,
-            "timestamp": request.timestamp,
-            "signature": request.signature,
-        }))
-        .unwrap_or_default();
-        let python = std::env::var("NIXON_REMOTE_PYTHON")
-            .unwrap_or_else(|_| "python3".to_string());
-        let child = std::process::Command::new(python)
-            .arg(bundle)
-            .arg("--call")
-            .arg(&request.function)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn();
-        let mut child = match child {
-            Ok(child) => child,
-            Err(err) => {
-                return RemoteResponse::err(format!("worker spawn failed: {}", err))
-            }
+    fn forward_to_worker(&self, bundle: &str, request: &RemoteRequest) -> RemoteResponse {
+        let payload = serde_json::to_string(request).unwrap_or_default();
+        let python = std::env::var("NIXON_REMOTE_PYTHON").unwrap_or_else(|_| "python3".to_string());
+        let output = match run_worker(
+            &python,
+            &[bundle, "--call", &request.function],
+            payload.as_bytes(),
+            WORKER_DEADLINE,
+            MAX_WORKER_STDOUT,
+            MAX_WORKER_STDERR,
+        ) {
+            Ok(output) => output,
+            Err(message) => return RemoteResponse::err(message),
         };
-        if let Some(stdin) = child.stdin.as_mut() {
-            let _ = stdin.write_all(payload.as_bytes());
-        }
-        match child.wait_with_output() {
-            Ok(output) if output.status.success() => {
-                match serde_json::from_slice::<RemoteResponse>(&output.stdout) {
-                    Ok(response) => response,
-                    Err(err) => RemoteResponse::err(format!(
-                        "worker response was not JSON: {}",
-                        err
-                    )),
-                }
-            }
-            Ok(output) => RemoteResponse::err(format!(
+        if !output.status.success() {
+            return RemoteResponse::err(format!(
                 "worker exited with {}: {}",
                 output.status,
-                String::from_utf8_lossy(&output.stderr).chars().take(200).collect::<String>()
-            )),
-            Err(err) => RemoteResponse::err(format!("worker failed: {}", err)),
+                String::from_utf8_lossy(&output.stderr)
+                    .chars()
+                    .take(200)
+                    .collect::<String>()
+            ));
+        }
+        match serde_json::from_slice::<RemoteResponse>(&output.stdout) {
+            Ok(response) => response,
+            Err(err) => RemoteResponse::err(format!("worker response was not JSON: {}", err)),
         }
     }
 
@@ -413,81 +421,417 @@ impl RemoteService {
     }
 }
 
+const WORKER_DEADLINE: Duration = Duration::from_secs(10);
+const MAX_WORKER_STDOUT: usize = 1 << 20;
+const MAX_WORKER_STDERR: usize = 64 << 10;
+
+#[derive(Debug)]
+struct WorkerOutput {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    status: std::process::ExitStatus,
+}
+
+fn read_worker_pipe(mut pipe: impl Read, limit: usize) -> std::io::Result<(Vec<u8>, bool)> {
+    let mut output = Vec::new();
+    let mut buffer = [0u8; 8192];
+    let mut overflow = false;
+    loop {
+        match pipe.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(count) => {
+                let room = limit.saturating_sub(output.len());
+                let keep = room.min(count);
+                output.extend_from_slice(&buffer[..keep]);
+                if keep < count {
+                    overflow = true;
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok((output, overflow))
+}
+
+/// Run a worker with concurrent stdin/stdout/stderr I/O, a hard deadline and
+/// bounded captured output. On timeout the direct child is killed and reaped.
+fn run_worker(
+    program: &str,
+    args: &[&str],
+    payload: &[u8],
+    deadline: Duration,
+    stdout_limit: usize,
+    stderr_limit: usize,
+) -> Result<WorkerOutput, String> {
+    use std::process::{Command, Stdio};
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("worker spawn failed: {error}"))?;
+    let stdin = child.stdin.take().ok_or("worker stdin unavailable")?;
+    let stdout = child.stdout.take().ok_or("worker stdout unavailable")?;
+    let stderr = child.stderr.take().ok_or("worker stderr unavailable")?;
+
+    let writer_payload = payload.to_vec();
+    let writer = std::thread::spawn(move || -> std::io::Result<()> {
+        let mut stdin = stdin;
+        std::io::Write::write_all(&mut stdin, &writer_payload)
+    });
+    let stdout_reader = std::thread::spawn(move || read_worker_pipe(stdout, stdout_limit));
+    let stderr_reader = std::thread::spawn(move || read_worker_pipe(stderr, stderr_limit));
+
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if started.elapsed() >= deadline {
+                    let _ = child.kill();
+                    match child.wait() {
+                        Ok(_) => {}
+                        Err(error) => return Err(format!("worker reap failed: {error}")),
+                    }
+                    let _ = writer.join();
+                    let _ = stdout_reader.join();
+                    let _ = stderr_reader.join();
+                    return Err("worker deadline exceeded".to_string());
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("worker wait failed: {error}"));
+            }
+        }
+    };
+
+    let writer_result = writer
+        .join()
+        .map_err(|_| "worker writer thread failed".to_string())?;
+    writer_result.map_err(|error| format!("worker stdin failed: {error}"))?;
+    let (stdout, stdout_overflow) = stdout_reader
+        .join()
+        .map_err(|_| "worker stdout thread failed".to_string())?
+        .map_err(|error| format!("worker stdout failed: {error}"))?;
+    let (stderr, _) = stderr_reader
+        .join()
+        .map_err(|_| "worker stderr thread failed".to_string())?
+        .map_err(|error| format!("worker stderr failed: {error}"))?;
+    if stdout_overflow {
+        return Err(format!(
+            "worker stdout limit exceeded ({stdout_limit} bytes)"
+        ));
+    }
+    Ok(WorkerOutput {
+        stdout,
+        stderr,
+        status,
+    })
+}
+
 /// Read the shared secret from the environment.  Never from a file in the
 /// repo and never from argv: the same rule the Python side follows.
 pub fn secret_from_env() -> Result<Vec<u8>, String> {
     let raw = std::env::var("NIXON_REMOTE_SECRET")
         .map_err(|_| "NIXON_REMOTE_SECRET is not set".to_string())?;
     let raw = raw.trim();
-    if raw.len() != 64 {
-        return Err("NIXON_REMOTE_SECRET must be 64 hex characters".to_string());
+    let bytes = raw.as_bytes();
+    if bytes.len() != 64 || !bytes.iter().all(u8::is_ascii_hexdigit) {
+        return Err("NIXON_REMOTE_SECRET must be 64 ASCII hex characters".to_string());
     }
     let mut out = Vec::with_capacity(32);
-    for i in (0..raw.len()).step_by(2) {
-        let byte = u8::from_str_radix(&raw[i..i + 2], 16)
-            .map_err(|_| "NIXON_REMOTE_SECRET must be hex".to_string())?;
-        out.push(byte);
+    for pair in bytes.chunks_exact(2) {
+        let high = hex_nibble(pair[0]).ok_or("NIXON_REMOTE_SECRET must be hex")?;
+        let low = hex_nibble(pair[1]).ok_or("NIXON_REMOTE_SECRET must be hex")?;
+        out.push((high << 4) | low);
     }
     Ok(out)
 }
 
-/// Serve one HTTP/1.1 request from `stream` and write the response.
-pub fn serve_one(service: &RemoteService, mut stream: TcpStream) -> std::io::Result<()> {
-    let mut reader = BufReader::new(stream.try_clone()?);
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)?;
-    let mut content_length = 0usize;
-    loop {
-        let mut header = String::new();
-        if reader.read_line(&mut header)? == 0 {
-            break;
-        }
-        let trimmed = header.trim_end();
-        if trimmed.is_empty() {
-            break;
-        }
-        if let Some(value) = trimmed
-            .to_ascii_lowercase()
-            .strip_prefix("content-length:")
-            .map(|v| v.trim().to_string())
-        {
-            content_length = value.parse().unwrap_or(0);
-        }
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
-    if !request_line.starts_with("POST ") {
-        let body = b"{\"error\":\"method not allowed\"}";
-        write_response(&mut stream, 405, body)?;
+}
+
+/// Max bytes accepted for the request line or any single header line.
+const MAX_LINE: usize = 8 * 1024;
+/// Max aggregate request-line + header bytes.
+const MAX_HEADER_BYTES: usize = 16 * 1024;
+/// Max number of header fields.
+const MAX_HEADERS: usize = 64;
+/// Max accepted Content-Length (1 MiB).
+const MAX_BODY: usize = 1 << 20;
+/// Absolute time allowed to receive one request, including a dribbling body.
+const REQUEST_DEADLINE: Duration = Duration::from_secs(30);
+/// Maximum time a response write may block.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Debug)]
+enum RequestError {
+    Http(u16, &'static str),
+    Io(std::io::Error),
+}
+
+impl From<std::io::Error> for RequestError {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+fn remaining(deadline: Instant) -> Result<Duration, RequestError> {
+    let now = Instant::now();
+    if now >= deadline {
+        Err(RequestError::Http(408, "request deadline exceeded"))
+    } else {
+        Ok(deadline.saturating_duration_since(now))
+    }
+}
+
+fn read_http_line(
+    reader: &mut BufReader<TcpStream>,
+    buffer: &mut Vec<u8>,
+    deadline: Instant,
+    total: &mut usize,
+) -> Result<Option<usize>, RequestError> {
+    reader
+        .get_mut()
+        .set_read_timeout(Some(remaining(deadline)?))
+        .map_err(RequestError::Io)?;
+    buffer.clear();
+    let count = reader
+        .by_ref()
+        .take(MAX_LINE as u64 + 1)
+        .read_until(b'\n', buffer)
+        .map_err(|error| {
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+            ) {
+                RequestError::Http(408, "request deadline exceeded")
+            } else {
+                RequestError::Io(error)
+            }
+        })?;
+    if count == 0 {
+        return Ok(None);
+    }
+    *total = total.saturating_add(count);
+    if count > MAX_LINE || *total > MAX_HEADER_BYTES {
+        return Err(RequestError::Http(431, "request headers too large"));
+    }
+    if !buffer.ends_with(b"\r\n") {
+        return Err(RequestError::Http(400, "malformed HTTP line"));
+    }
+    Ok(Some(count))
+}
+
+fn valid_header_name(name: &[u8]) -> bool {
+    !name.is_empty()
+        && name.iter().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(
+                    byte,
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
+                )
+        })
+}
+
+fn parse_request_line(line: &[u8]) -> Result<(), RequestError> {
+    let text =
+        std::str::from_utf8(line).map_err(|_| RequestError::Http(400, "invalid request line"))?;
+    let mut parts = text[..text.len() - 2].split(' ');
+    let method = parts.next().unwrap_or("");
+    let target = parts.next().unwrap_or("");
+    let version = parts.next().unwrap_or("");
+    if method.is_empty()
+        || target.is_empty()
+        || version != "HTTP/1.1"
+        || parts.next().is_some()
+        || !text.is_ascii()
+    {
+        return Err(RequestError::Http(400, "invalid request line"));
+    }
+    if method != "POST" {
+        return Err(RequestError::Http(405, "method not allowed"));
+    }
+    Ok(())
+}
+
+fn serve_one_inner(
+    service: &RemoteService,
+    mut stream: TcpStream,
+    deadline: Instant,
+) -> Result<(), RequestError> {
+    stream
+        .set_write_timeout(Some(WRITE_TIMEOUT))
+        .map_err(RequestError::Io)?;
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut total = 0usize;
+    let mut line = Vec::new();
+    if read_http_line(&mut reader, &mut line, deadline, &mut total)?.is_none() {
         return Ok(());
     }
-    let mut body = vec![0u8; content_length.min(1 << 20)];
-    reader.read_exact(&mut body)?;
+    parse_request_line(&line)?;
+
+    let mut content_length = None;
+    let mut header_count = 0usize;
+    loop {
+        if read_http_line(&mut reader, &mut line, deadline, &mut total)?.is_none() {
+            return Err(RequestError::Http(400, "truncated headers"));
+        }
+        if line == b"\r\n" {
+            break;
+        }
+        header_count += 1;
+        if header_count > MAX_HEADERS {
+            return Err(RequestError::Http(431, "too many headers"));
+        }
+        let text = std::str::from_utf8(&line[..line.len() - 2])
+            .map_err(|_| RequestError::Http(400, "invalid header"))?;
+        let (name, value) = text
+            .split_once(':')
+            .ok_or(RequestError::Http(400, "malformed header"))?;
+        if !valid_header_name(name.as_bytes())
+            || value
+                .bytes()
+                .any(|byte| byte < 0x20 && byte != b'\t' || byte == 0x7f)
+        {
+            return Err(RequestError::Http(400, "malformed header"));
+        }
+        let value = value.trim_matches(|ch| ch == ' ' || ch == '\t');
+        if name.eq_ignore_ascii_case("transfer-encoding") {
+            return Err(RequestError::Http(
+                400,
+                "transfer-encoding is not supported",
+            ));
+        }
+        if name.eq_ignore_ascii_case("content-length") {
+            if content_length.is_some() {
+                return Err(RequestError::Http(400, "duplicate content-length"));
+            }
+            if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(RequestError::Http(400, "invalid content-length"));
+            }
+            let parsed = value
+                .parse::<usize>()
+                .map_err(|_| RequestError::Http(400, "invalid content-length"))?;
+            if parsed > MAX_BODY {
+                return Err(RequestError::Http(413, "content length too large"));
+            }
+            content_length = Some(parsed);
+        }
+    }
+    let content_length =
+        content_length.ok_or(RequestError::Http(411, "content-length required"))?;
+    reader
+        .get_mut()
+        .set_read_timeout(Some(remaining(deadline)?))
+        .map_err(RequestError::Io)?;
+    let mut body = vec![0u8; content_length];
+    reader
+        .read_exact(&mut body)
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock => {
+                RequestError::Http(408, "request deadline exceeded")
+            }
+            std::io::ErrorKind::UnexpectedEof => RequestError::Http(400, "truncated body"),
+            _ => RequestError::Io(error),
+        })?;
+    remaining(deadline)?;
     let response = service.handle_body(&body, now_secs());
     let payload = serde_json::to_vec(&response).unwrap_or_else(|_| b"{}".to_vec());
-    write_response(&mut stream, 200, &payload)
+    write_response(&mut stream, 200, &payload)?;
+    Ok(())
+}
+
+/// Serve one HTTP/1.1 request from `stream` and write the response.
+pub fn serve_one(service: &RemoteService, stream: TcpStream) -> std::io::Result<()> {
+    serve_one_with_deadline(service, stream, REQUEST_DEADLINE)
+}
+
+fn serve_one_with_deadline(
+    service: &RemoteService,
+    stream: TcpStream,
+    duration: Duration,
+) -> std::io::Result<()> {
+    let mut stream = stream;
+    match serve_one_inner(service, stream.try_clone()?, Instant::now() + duration) {
+        Ok(()) => Ok(()),
+        Err(RequestError::Http(status, message)) => {
+            // A timed read leaves the duplicated socket nonblocking on Unix.
+            // Restore blocking mode before the bounded response write.
+            stream.set_nonblocking(false)?;
+            write_response(
+                &mut stream,
+                status,
+                format!("{{\"error\":\"{message}\"}}").as_bytes(),
+            )
+        }
+        Err(RequestError::Io(error)) => Err(error),
+    }
 }
 
 fn write_response(stream: &mut TcpStream, status: u16, body: &[u8]) -> std::io::Result<()> {
-    let reason = if status == 200 { "OK" } else { "Method Not Allowed" };
+    stream
+        .set_write_timeout(Some(WRITE_TIMEOUT))
+        .map_err(|error| {
+            std::io::Error::new(error.kind(), format!("set write timeout: {error}"))
+        })?;
+    let reason = match status {
+        200 => "OK",
+        400 => "Bad Request",
+        405 => "Method Not Allowed",
+        408 => "Request Timeout",
+        411 => "Length Required",
+        413 => "Content Too Large",
+        431 => "Request Header Fields Too Large",
+        503 => "Service Unavailable",
+        _ => "Error",
+    };
     let head = format!(
         "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         status,
         reason,
         body.len()
     );
-    stream.write_all(head.as_bytes())?;
-    stream.write_all(body)?;
-    stream.flush()
+    stream.write_all(head.as_bytes()).map_err(|error| {
+        std::io::Error::new(error.kind(), format!("write response head: {error}"))
+    })?;
+    stream.write_all(body).map_err(|error| {
+        std::io::Error::new(error.kind(), format!("write response body: {error}"))
+    })?;
+    stream
+        .flush()
+        .map_err(|error| std::io::Error::new(error.kind(), format!("flush response: {error}")))
 }
 
 /// Bind and serve until the process is stopped.
 ///
 /// Refuses a non-loopback address unless `allow_remote` is set: the endpoint
 /// speaks plain HTTP, so exposing it on a network would leak the arguments.
-pub fn serve(
-    service: Arc<RemoteService>,
-    addr: &str,
-    allow_remote: bool,
-) -> Result<(), String> {
+pub fn serve(service: Arc<RemoteService>, addr: &str, allow_remote: bool) -> Result<(), String> {
     let socket: SocketAddr = addr
         .parse()
         .map_err(|_| format!("invalid bind address '{}'", addr))?;
@@ -501,15 +845,47 @@ pub fn serve(
         );
     }
     let listener = TcpListener::bind(socket).map_err(|e| format!("bind failed: {}", e))?;
+    // Bound the number of concurrent connection threads: an unbounded
+    // thread-per-connection accept loop is a trivial resource-exhaustion
+    // vector. At the cap, answer 503 immediately instead of spawning.
+    const MAX_CONNECTIONS: usize = 64;
+    let live = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     for incoming in listener.incoming() {
         match incoming {
-            Ok(stream) => {
+            Ok(mut stream) => {
                 let svc = Arc::clone(&service);
-                std::thread::spawn(move || {
-                    let _ = serve_one(&svc, stream);
-                });
+                let live = Arc::clone(&live);
+                if live.fetch_add(1, std::sync::atomic::Ordering::AcqRel) >= MAX_CONNECTIONS {
+                    live.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+                    let mut s = stream;
+                    let _ = write_response(&mut s, 503, b"{\"error\":\"too many connections\"}");
+                    continue;
+                }
+                let worker_stream = match stream.try_clone() {
+                    Ok(worker_stream) => worker_stream,
+                    Err(_) => {
+                        live.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+                        continue;
+                    }
+                };
+                let connection_live = Arc::clone(&live);
+                let spawned = std::thread::Builder::new()
+                    .name("remote-http".to_string())
+                    .spawn(move || {
+                        let _ = serve_one(&svc, worker_stream);
+                        connection_live.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+                    });
+                if spawned.is_err() {
+                    live.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+                    eprintln!("remote: failed to spawn connection thread");
+                    let _ =
+                        write_response(&mut stream, 503, b"{\"error\":\"too many connections\"}");
+                }
             }
-            Err(_) => continue,
+            Err(_) => {
+                // Don't busy-spin on a persistent accept error.
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
         }
     }
     Ok(())
@@ -530,14 +906,28 @@ mod tests {
         svc
     }
 
-    fn signed(svc: &RemoteService, function: &str, args: Vec<serde_json::Value>,
-              nonce: &str, ts: f64) -> RemoteRequest {
+    fn signed(
+        svc: &RemoteService,
+        function: &str,
+        args: Vec<serde_json::Value>,
+        nonce: &str,
+        ts: f64,
+    ) -> RemoteRequest {
         RemoteRequest {
+            version: REMOTE_PROTOCOL_VERSION,
             function: function.to_string(),
             args: args.clone(),
+            kwargs: serde_json::Map::new(),
             nonce: nonce.to_string(),
             timestamp: ts,
-            signature: sign_request(&svc.secret, function, &args, nonce, ts),
+            signature: sign_request(
+                &svc.secret,
+                function,
+                &args,
+                &serde_json::Map::new(),
+                nonce,
+                ts,
+            ),
         }
     }
 
@@ -631,5 +1021,317 @@ mod tests {
         let a = json!({"b": 1, "a": [2, 3]});
         let b = json!({"a": [2, 3], "b": 1});
         assert_eq!(canonical(&a), canonical(&b));
+    }
+
+    #[test]
+    fn protocol_v1_cross_language_vectors() {
+        // Fixed vectors also appear in tests/test_remote_exec.py.
+        let vectors = [
+            (
+                json!([1, -0.0, "é", true, null, {"b": 2, "a": 1.5}]),
+                json!({"rate": 0.5, "label": "x"}),
+                "nonce",
+                1000.0,
+                "b2adc43bf63eb2bfeb87e9b5b509f636b2de11ea36189d23893c7a1be44c030f",
+            ),
+            (
+                json!([]),
+                json!({}),
+                "n",
+                0.0,
+                "382e67120a57399c948f27624de9082070d2b80b3e847fcfa421b5b26fb2a396",
+            ),
+            (
+                json!([-9223372036854775808i64, 18446744073709551615u64]),
+                json!({"z": 1}),
+                "abc",
+                1.25,
+                "0297cce9a44e6d8da81abbed561dc5ae941c1da98a6b0148df740ec2aa2d59fe",
+            ),
+        ];
+        let mut svc = RemoteService::new(vec![0x11; 32]);
+        svc.register("f", |args| Ok(json!(args)));
+        for (args, kwargs, nonce, timestamp, signature) in vectors {
+            let body = json!({
+                "version": 1,
+                "function": "f",
+                "args": args,
+                "kwargs": kwargs,
+                "nonce": nonce,
+                "timestamp": timestamp,
+                "signature": signature,
+            });
+            let response = svc.handle_body(&serde_json::to_vec(&body).unwrap(), timestamp);
+            assert_eq!(response.result, Some(args), "{:?}", response.error);
+        }
+    }
+
+    #[test]
+    fn unsupported_protocol_version_is_rejected() {
+        let svc = service();
+        let body = json!({
+            "version": 2,
+            "function": "add",
+            "args": [1, 2],
+            "kwargs": {},
+            "nonce": "version-nonce",
+            "timestamp": 1000.0,
+            "signature": "00",
+        });
+        let response = svc.handle_body(&serde_json::to_vec(&body).unwrap(), 1000.0);
+        assert!(response.error.unwrap().contains("version"));
+    }
+
+    #[test]
+    fn non_ascii_remote_secret_is_an_error_not_a_panic() {
+        const KEY: &str = "NIXON_REMOTE_SECRET";
+        let old = std::env::var_os(KEY);
+        std::env::set_var(KEY, "é".repeat(64));
+        let result = std::panic::catch_unwind(secret_from_env);
+        match old {
+            Some(value) => std::env::set_var(KEY, value),
+            None => std::env::remove_var(KEY),
+        }
+        assert!(result.is_ok(), "secret parsing panicked");
+        assert!(result.unwrap().is_err());
+    }
+
+    fn serve_one_pair(request: &[u8]) -> Vec<u8> {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let req = request.to_vec();
+        let client = std::thread::spawn(move || {
+            let mut s = std::net::TcpStream::connect(addr).unwrap();
+            let _ = s.write_all(&req);
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                match s.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(count) => buf.extend_from_slice(&chunk[..count]),
+                    Err(_) => break,
+                }
+            }
+            buf
+        });
+        let (stream, _) = listener.accept().unwrap();
+        let svc = service();
+        serve_one(&svc, stream).unwrap();
+        client.join().unwrap()
+    }
+
+    #[test]
+    fn oversize_header_is_rejected_with_431() {
+        let mut req = b"POST / HTTP/1.1\r\nX-Big: ".to_vec();
+        req.extend(std::iter::repeat_n(b'A', 9 * 1024));
+        req.extend_from_slice(b"\r\n\r\n");
+        let resp = serve_one_pair(&req);
+        let head = String::from_utf8_lossy(&resp);
+        assert!(head.starts_with("HTTP/1.1 431"), "{}", &head[..60]);
+    }
+
+    #[test]
+    fn oversize_content_length_is_rejected_with_413() {
+        let req = b"POST / HTTP/1.1\r\nContent-Length: 99999999\r\n\r\n";
+        let resp = serve_one_pair(req);
+        let head = String::from_utf8_lossy(&resp);
+        assert!(head.starts_with("HTTP/1.1 413"), "{}", &head[..60]);
+    }
+
+    #[test]
+    fn response_writes_have_a_timeout() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = std::net::TcpStream::connect(addr).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        write_response(&mut server, 200, b"{}").unwrap();
+        assert_eq!(server.write_timeout().unwrap(), Some(WRITE_TIMEOUT));
+        drop(client);
+    }
+
+    #[test]
+    fn duplicate_content_length_is_rejected() {
+        let req = b"POST / HTTP/1.1\r\nContent-Length: 0\r\nContent-Length: 0\r\n\r\n";
+        let resp = serve_one_pair(req);
+        assert!(String::from_utf8_lossy(&resp).starts_with("HTTP/1.1 400"));
+    }
+
+    #[test]
+    fn transfer_encoding_is_rejected() {
+        let req = b"POST / HTTP/1.1\r\nContent-Length: 0\r\nTransfer-Encoding: chunked\r\n\r\n";
+        let resp = serve_one_pair(req);
+        assert!(String::from_utf8_lossy(&resp).starts_with("HTTP/1.1 400"));
+    }
+
+    #[test]
+    fn aggregate_header_cap_is_enforced() {
+        let mut req = b"POST / HTTP/1.1\r\n".to_vec();
+        for i in 0..100 {
+            req.extend_from_slice(format!("X-{i}: {}\r\n", "a".repeat(200)).as_bytes());
+        }
+        req.extend_from_slice(b"Content-Length: 0\r\n\r\n");
+        let resp = serve_one_pair(&req);
+        assert!(String::from_utf8_lossy(&resp).starts_with("HTTP/1.1 431"));
+    }
+
+    #[test]
+    fn worker_drains_stdout_while_stdin_is_being_written() {
+        let script = "import sys; sys.stdout.buffer.write(b'x' * 262144); sys.stdout.flush(); sys.stdin.buffer.read(); sys.stdout.buffer.write(b'ok')";
+        let output = run_worker(
+            "python3",
+            &["-c", script],
+            &vec![b'y'; 262144],
+            std::time::Duration::from_secs(3),
+            1024 * 1024,
+            64 * 1024,
+        );
+        assert!(output.is_ok());
+        assert_eq!(
+            output.unwrap().stdout,
+            b"x".repeat(262144)
+                .into_iter()
+                .chain(b"ok".iter().copied())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn worker_forwarding_preserves_kwargs_and_rechecks_signature() {
+        use std::path::PathBuf;
+
+        struct Scratch(PathBuf);
+        impl Drop for Scratch {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let base = if std::path::Path::new("/tmp/opencode").is_dir() {
+            PathBuf::from("/tmp/opencode")
+        } else {
+            std::env::temp_dir()
+        };
+        let path = base.join(format!("hungerg-worker-kwargs-{}.py", std::process::id()));
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repository root");
+        let script = format!(
+            r#"
+import sys
+sys.path.insert(0, {root:?})
+from obfuscator.remote_exec import RemoteRegistry
+registry = RemoteRegistry(bytes.fromhex("11" * 32))
+def add_tax(amount, rate=0.2):
+    return amount * (1 + rate)
+registry.register("add_tax", add_tax)
+sys.stdout.buffer.write(registry.handle(sys.stdin.buffer.read()))
+"#,
+            root = root
+        );
+        std::fs::write(&path, script).unwrap();
+        let _scratch = Scratch(path.clone());
+        let secret = vec![0x11; 32];
+        let svc = RemoteService::new(secret.clone())
+            .with_worker_bundle(path.to_string_lossy().into_owned());
+        let args = vec![json!(100)];
+        let kwargs = serde_json::Map::from_iter([("rate".to_string(), json!(0.5))]);
+        let timestamp = now_secs();
+        let request = RemoteRequest {
+            version: REMOTE_PROTOCOL_VERSION,
+            function: "add_tax".to_string(),
+            args,
+            kwargs,
+            nonce: "worker-kwargs-nonce".to_string(),
+            timestamp,
+            signature: String::new(),
+        };
+        let request = RemoteRequest {
+            signature: sign_request(
+                &secret,
+                &request.function,
+                &request.args,
+                &request.kwargs,
+                &request.nonce,
+                request.timestamp,
+            ),
+            ..request
+        };
+        let response = svc.handle(&request, timestamp);
+        assert_eq!(response.result, Some(json!(150.0)), "{:?}", response.error);
+    }
+
+    #[test]
+    fn worker_deadline_kills_and_reaps_child() {
+        let script = "import time; time.sleep(10)";
+        let start = std::time::Instant::now();
+        let result = run_worker(
+            "python3",
+            &["-c", script],
+            b"",
+            std::time::Duration::from_millis(150),
+            1024,
+            1024,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("deadline"));
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    #[test]
+    fn worker_output_is_capped() {
+        let script = "import sys; sys.stdout.buffer.write(b'x' * 4096)";
+        let result = run_worker(
+            "python3",
+            &["-c", script],
+            b"",
+            std::time::Duration::from_secs(2),
+            1024,
+            1024,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("stdout limit"));
+    }
+
+    #[test]
+    fn slow_peer_does_not_hold_thread_forever() {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = std::thread::spawn(move || {
+            let mut s = std::net::TcpStream::connect(addr).unwrap();
+            s.write_all(b"POST / HTTP/1.1\r\n").unwrap(); // then stall
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            drop(s);
+        });
+        let (stream, _) = listener.accept().unwrap();
+        let svc = service();
+        let start = std::time::Instant::now();
+        // read timeout is 30s; we only assert serve_one returns *eventually*
+        // on EOF, not that it hangs. Use a short manual check instead:
+        let _ = serve_one(&svc, stream);
+        assert!(start.elapsed() < std::time::Duration::from_secs(35));
+        client.join().unwrap();
+    }
+
+    #[test]
+    fn absolute_deadline_rejects_a_dribbling_peer() {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = std::thread::spawn(move || {
+            let mut s = std::net::TcpStream::connect(addr).unwrap();
+            let _ = s.write_all(b"POST / HTTP/1.1\r\n");
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            let _ = s.write_all(b"Content-Length: 0\r\n\r\n");
+            let mut response = Vec::new();
+            let _ = s.read_to_end(&mut response);
+            response
+        });
+        let (stream, _) = listener.accept().unwrap();
+        let start = std::time::Instant::now();
+        serve_one_with_deadline(&service(), stream, std::time::Duration::from_millis(100)).unwrap();
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
+        let response = client.join().unwrap();
+        assert!(String::from_utf8_lossy(&response).starts_with("HTTP/1.1 408"));
     }
 }

@@ -110,6 +110,87 @@ def test_every_pass_assembles(pass_name, lowered, tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("llc") is None, reason="llc not installed")
+def test_fla_skips_cross_block_ssa_values():
+    """A dispatcher edge destroys the entry block's dominance of %value."""
+    ir = (
+        "define i32 @f(i32 %x) {\n"
+        "entry:\n"
+        "  %value = add i32 %x, 1\n"
+        "  %cond = icmp eq i32 %x, 0\n"
+        "  br i1 %cond, label %yes, label %no\n"
+        "yes:\n"
+        "  ret i32 %value\n"
+        "no:\n"
+        "  ret i32 0\n"
+        "}\n"
+    )
+    assert P.apply_fla(ir).strip() == ir.strip()
+
+
+@pytest.mark.skipif(shutil.which("llvm-as") is None or shutil.which("llc") is None
+                    or shutil.which("clang") is None,
+                    reason="LLVM assembly/execution tools not installed")
+def test_fla_cross_block_ssa_skip_and_safe_execution(tmp_path):
+    unsafe = (
+        "define i32 @unsafe(i32 %x) {\n"
+        "entry:\n"
+        "  %value = add i32 %x, 1\n"
+        "  %cond = icmp eq i32 %x, 0\n"
+        "  br i1 %cond, label %yes, label %no\n"
+        "yes:\n"
+        "  ret i32 %value\n"
+        "no:\n"
+        "  ret i32 0\n"
+        "}\n"
+    )
+    safe = unsafe + (
+        "define i32 @pick(i32 %x) {\n"
+        "entry:\n"
+        "  %cond = icmp eq i32 %x, 0\n"
+        "  br i1 %cond, label %yes, label %no\n"
+        "yes:\n"
+        "  ret i32 10\n"
+        "no:\n"
+        "  ret i32 20\n"
+        "}\n"
+        "define i32 @main() {\n"
+        "entry:\n"
+        "  %a = call i32 @unsafe(i32 0)\n"
+        "  %b = call i32 @unsafe(i32 1)\n"
+        "  %c = call i32 @pick(i32 0)\n"
+        "  %d = call i32 @pick(i32 1)\n"
+        "  %ca = icmp eq i32 %a, 1\n"
+        "  %cb = icmp eq i32 %b, 0\n"
+        "  %cc = icmp eq i32 %c, 10\n"
+        "  %cd = icmp eq i32 %d, 20\n"
+        "  %ab = and i1 %ca, %cb\n"
+        "  %cdboth = and i1 %cc, %cd\n"
+        "  %both = and i1 %ab, %cdboth\n"
+        "  %bad = xor i1 %both, true\n"
+        "  %code = zext i1 %bad to i32\n"
+        "  ret i32 %code\n"
+        "}\n"
+    )
+    out = P.apply_fla(safe)
+    # The unsafe function is preserved verbatim; the safe helper is flattened.
+    assert unsafe in out
+    assert "dispatcher_" in out
+
+    ll = tmp_path / "fla.ll"
+    bc = tmp_path / "fla.bc"
+    obj = tmp_path / "fla.o"
+    exe = tmp_path / "fla"
+    ll.write_text(out)
+    subprocess.run(["llvm-as", str(ll), "-o", str(bc)], check=True,
+                   capture_output=True, text=True, timeout=20)
+    subprocess.run(["llc", "-filetype=obj", str(bc), "-o", str(obj)], check=True,
+                   capture_output=True, text=True, timeout=20)
+    subprocess.run(["clang", str(obj), "-o", str(exe)], check=True,
+                   capture_output=True, text=True, timeout=20)
+    result = subprocess.run([str(exe)], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+
+
 def test_default_build_pass_chain_assembles(lowered, tmp_path):
     """The chain the build actually runs must assemble as a whole."""
     chain = ["bcf", "fla", "sub", "replay", "speculative"]

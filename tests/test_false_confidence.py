@@ -200,8 +200,8 @@ class TestDetector:
     def test_scan_non_python_files_ignored(self, tmpdir):
         _make_file(tmpdir, "data.txt", "TODO: implement\n")
         detector = FalseConfidenceDetector(str(tmpdir))
-        detector.scan_all()
-        assert True
+        result = detector.scan_all()
+        assert result.total_count == 0
 
     def test_generate_report_string(self, tmpdir):
         _make_file(tmpdir, "bug.py", "# TODO: fix\n")

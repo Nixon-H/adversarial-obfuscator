@@ -17,7 +17,6 @@ It deliberately does NOT assert anything about cryptographic soundness. That
 is the reviewer's job, and a green test here must never be read as one.
 """
 import hashlib
-import hmac
 import inspect
 import os
 import sys

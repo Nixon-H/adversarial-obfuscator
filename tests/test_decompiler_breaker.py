@@ -86,11 +86,10 @@ def test_pipeline_flag_wiring():
     out_on, _ = apply_ast_mutation(src, {"break_decompiler": True})
     out_off, _ = apply_ast_mutation(src, {"break_decompiler": False})
     # Default ON path available through pipeline defaults too.
-    from obfuscator.core.pipeline import ObfuscationTransformer
-    t = ObfuscationTransformer()
-    assert "break_decompiler" in (
-        __import__("inspect").signature(t.transform).parameters or {"x": 1}
-    ) or True
+    # Default-ON path: no options dict at all must still emit the breaker.
+    from obfuscator.core.pipeline import apply_ast_mutation as _aam
+    out_default, _ = _aam(src)
+    assert "2 ** 32" in out_default or "2**32" in out_default or "4294967296" in out_default
     # ON output should contain breaker markers; OFF should not.
     # (ast.unparse renders pow as '2 ** 32'.)
     assert "2 ** 32" in out_on or "2**32" in out_on or "4294967296" in out_on

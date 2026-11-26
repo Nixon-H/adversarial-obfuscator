@@ -41,7 +41,10 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import struct
+import subprocess
+import tempfile
 
 #: PE security directory index.
 SECURITY_DIRECTORY_INDEX = 4
@@ -53,8 +56,15 @@ WIN_CERT_TYPE_PKCS_SIGNED_DATA = 0x0002
 #: The SpcIndirectDataContent OID used by Authenticode for PE images.
 SPC_INDIRECT_DATA_OID = "1.3.6.1.4.1.311.2.1.4"
 
-#: Digest algorithm identifiers, as Authenticode expects them.
+#: CMS/PKCS#7 object identifiers needed by the Authenticode profile.
+CMS_SIGNED_DATA_OID = "1.2.840.113549.1.7.2"
+CMS_DATA_OID = "1.2.840.113549.1.7.1"
 OID_SHA256 = "2.16.840.1.101.3.4.2.1"
+OID_CONTENT_TYPE = "1.2.840.113549.1.9.3"
+OID_MESSAGE_DIGEST = "1.2.840.113549.1.9.4"
+
+#: Every CMS subprocess is bounded; verification must fail closed on timeout.
+OPENSSL_CMS_TIMEOUT = 30
 
 #: Offset of the checksum field in both PE32 and PE32+ optional headers.
 PE_CHECKSUM_OFFSET = 64
@@ -64,11 +74,27 @@ class AuthenticodeError(Exception):
     """A signing request that cannot be honoured."""
 
 
+def _openssl_path():
+    """Return the real OpenSSL CMS backend, or None (never a fake fallback)."""
+    return shutil.which("openssl")
+
+
+def _openssl_environment():
+    """Do not let ambient OpenSSL config/provider variables redirect the CMS."""
+    env = os.environ.copy()
+    for name in ("OPENSSL_CONF", "OPENSSL_CONF_INCLUDE", "OPENSSL_MODULES",
+                 "OPENSSL_ENGINES"):
+        env.pop(name, None)
+    return env
+
+
 def available():
-    """Is the signing machinery importable? The CERTIFICATE is the operator's."""
+    """Whether real CMS signing is available; absence is a hard refusal."""
+    if _openssl_path() is None:
+        return False
     try:
-        from cryptography.hazmat.primitives.serialization import pkcs7  # noqa: F401
         from cryptography import x509  # noqa: F401
+        from cryptography.hazmat.primitives import serialization  # noqa: F401
         return True
     except Exception:
         return False
@@ -84,36 +110,36 @@ def _load_key_and_cert(cert_path, key_path, password=None):
     with open(cert_path, "rb") as handle:
         blob = handle.read()
     try:
-        cert = x509.load_pem_x509_certificate(blob)
-        chain = [cert]
+        chain = x509.load_pem_x509_certificates(blob)
     except ValueError:
-        cert = x509.load_der_x509_certificate(blob)
-        chain = [cert]
-    return key, cert, chain
+        chain = [x509.load_der_x509_certificate(blob)]
+    if not chain:
+        raise AuthenticodeError("certificate file contains no certificate")
+    return key, chain[0], chain
 
 
-def pe_digest(data):
-    """The digest Authenticode signs: the image with three regions SKIPPED.
+def _pe_layout(data):
+    """Validate PE bounds and return the fields used by signing/verification.
 
-    From the Authenticode specification: hash the file omitting
-
-      * the optional-header ``CheckSum`` field (4 bytes),
-      * the security directory entry itself (8 bytes), and
-      * the certificate table it points at.
-
-    SKIPPED, not zeroed. The distinction matters at the tail: the certificate
-    table is appended to the end of the file, so zeroing it would hash 1360
-    bytes of padding that the original image did not have, and the two digests
-    would never match. Measured exactly that (2048 vs 3408 bytes of input).
+    The security directory is a FILE OFFSET, unlike the other data directories.
+    Its complete table, the optional header, the declared directory array and
+    the section table are all checked before any field is trusted.
     """
-    if data[:2] != b"MZ":
-        raise AuthenticodeError("not a PE image (no MZ header)")
+    if len(data) < 64 or data[:2] != b"MZ":
+        raise AuthenticodeError("not a PE image (no complete MZ header)")
     e_lfanew = struct.unpack_from("<I", data, 0x3C)[0]
-    if bytes(data[e_lfanew:e_lfanew + 4]) != b"PE\0\0":
+    if e_lfanew < 64 or e_lfanew + 24 > len(data):
+        raise AuthenticodeError("PE signature/COFF header is out of bounds")
+    if data[e_lfanew:e_lfanew + 4] != b"PE\0\0":
         raise AuthenticodeError("not a PE image (no PE signature)")
+
     coff = e_lfanew + 4
+    num_sections = struct.unpack_from("<H", data, coff + 2)[0]
     opt_size = struct.unpack_from("<H", data, coff + 16)[0]
     opt = coff + 20
+    opt_end = opt + opt_size
+    if opt_size < 68 or opt_end > len(data):
+        raise AuthenticodeError("truncated optional header")
     magic = struct.unpack_from("<H", data, opt)[0]
     if magic == 0x20B:
         num_dirs_off, dirs_off = opt + 108, opt + 112
@@ -121,34 +147,74 @@ def pe_digest(data):
         num_dirs_off, dirs_off = opt + 92, opt + 96
     else:
         raise AuthenticodeError("unknown optional-header magic 0x%x" % (magic,))
+    if num_dirs_off + 4 > opt_end:
+        raise AuthenticodeError("optional header omits NumberOfRvaAndSizes")
 
     num_dirs = struct.unpack_from("<I", data, num_dirs_off)[0]
-    if num_dirs <= SECURITY_DIRECTORY_INDEX:
-        raise AuthenticodeError(
-            "image declares %d data directories; index %d is required for a "
-            "signature" % (num_dirs, SECURITY_DIRECTORY_INDEX))
-    sec_entry = dirs_off + SECURITY_DIRECTORY_INDEX * 8
-    cert_offset, cert_size = struct.unpack_from("<II", data, sec_entry)
+    if dirs_off + num_dirs * 8 > opt_end:
+        raise AuthenticodeError("data directory table exceeds optional header")
+    section_table = opt_end
+    if num_sections * 40 > len(data) - section_table:
+        raise AuthenticodeError("section table exceeds file bounds")
 
-    checksum_off = opt + PE_CHECKSUM_OFFSET
-    # Skip regions in file order; they must not overlap, which the spec
-    # guarantees because the certificate table lives past the sections.
-    skips = [(checksum_off, checksum_off + 4),
-             (sec_entry, sec_entry + 8)]
-    if cert_offset and cert_size:
-        skips.append((cert_offset, cert_offset + cert_size))
+    sec_entry = None
+    cert_offset = cert_size = 0
+    if num_dirs > SECURITY_DIRECTORY_INDEX:
+        sec_entry = dirs_off + SECURITY_DIRECTORY_INDEX * 8
+        cert_offset, cert_size = struct.unpack_from("<II", data, sec_entry)
+    if bool(cert_offset) != bool(cert_size):
+        raise AuthenticodeError("incomplete security directory entry")
+    if cert_offset or cert_size:
+        if cert_offset % 8 or cert_size % 8:
+            raise AuthenticodeError("certificate table is not 8-byte aligned")
+        if cert_offset < section_table + num_sections * 40:
+            raise AuthenticodeError("certificate table overlaps PE headers")
+        if cert_offset > len(data) or cert_size > len(data) - cert_offset:
+            raise AuthenticodeError(
+                "certificate table (%d+%d) overruns the file (%d bytes)"
+                % (cert_offset, cert_size, len(data)))
+        if cert_offset + cert_size != len(data):
+            raise AuthenticodeError("certificate table is not at end of file")
+
+    return {"e_lfanew": e_lfanew, "coff": coff, "opt": opt,
+            "opt_size": opt_size, "opt_end": opt_end, "magic": magic,
+            "num_dirs": num_dirs, "num_dirs_off": num_dirs_off,
+            "dirs_off": dirs_off, "sec_entry": sec_entry,
+            "cert_offset": cert_offset, "cert_size": cert_size,
+            "checksum_off": opt + PE_CHECKSUM_OFFSET,
+            "header_end": section_table + num_sections * 40}
+
+
+def pe_digest(data):
+    """The Authenticode SHA-256 digest, with exactly three regions skipped.
+
+    The optional-header checksum, security-directory entry and certificate
+    table are omitted rather than zeroed. All PE and certificate-table bounds
+    are validated first so malformed input cannot become a digest claim.
+    """
+    layout = _pe_layout(data)
+    skips = [(layout["checksum_off"], layout["checksum_off"] + 4)]
+    if layout["sec_entry"] is not None:
+        skips.append((layout["sec_entry"], layout["sec_entry"] + 8))
+    # The certificate table is outside the hashed range entirely; adding it as
+    # a skip region made its end exceed hash_end after signing.
     skips.sort()
+    hash_end = layout["cert_offset"] or len(data)
 
     digest = hashlib.sha256()
     cursor = 0
     for start, end in skips:
-        if start < cursor or end > len(data):
+        if start < cursor or end > hash_end:
             raise AuthenticodeError(
-                "malformed skip region 0x%x-0x%x (file is 0x%x bytes)"
-                % (start, end, len(data)))
+                "malformed skip region 0x%x-0x%x (hash end is 0x%x bytes)"
+                % (start, end, hash_end))
         digest.update(data[cursor:start])
         cursor = end
-    digest.update(data[cursor:])
+    digest.update(data[cursor:hash_end])
+    # Authenticode hashes an unsigned PE through its 8-byte alignment padding.
+    # A signed PE already contains that padding immediately before WIN_CERT.
+    if not layout["cert_offset"] and hash_end % 8:
+        digest.update(b"\x00" * (8 - hash_end % 8))
     return digest.digest()
 
 
@@ -199,11 +265,18 @@ def _spc_indirect_data(digest, file_digest_oid=OID_SHA256):
             data          SpcAttributeTypeAndOptionalValue,  -- SpcPeImageData
             messageDigest DigestInfo }
     """
-    # SpcPeImageData with an empty file reference: flags 0, zero-length
-    # moniker. Modern Windows does not require the legacy file name.
+    # SpcPeImageData ::= SEQUENCE { flags BIT STRING,
+    #                               file [0] EXPLICIT SpcLink OPTIONAL }
+    # SpcLink.file is [2] EXPLICIT SpcString; its Unicode choice is [0]
+    # IMPLICIT BMPSTRING. Authenticode tools use the legacy <<<Obsolete>>>>
+    # marker when no page hashes are supplied. The flags BIT STRING has bit 0
+    # set (seven unused bits, final byte 0x80).
+    obsolete = "<<<Obsolete>>>".encode("utf-16-be")
+    spc_string = _der(0x80, obsolete)
+    spc_link = _der(0xA2, spc_string)
     spc_pe_image_data = _der_seq(
-        _der(0x03, b"\x00"),                      # BIT STRING, no bits set
-        _der_seq(_der(0x0C, b"")),                # empty UTF8String moniker
+        _der(0x03, b"\x07\x80"),
+        _der(0xA0, spc_link),
     )
     data = _der_seq(_der_oid(SPC_INDIRECT_DATA_OID),
                     _der(0xA0, spc_pe_image_data))   # [0] EXPLICIT
@@ -215,90 +288,108 @@ def _spc_indirect_data(digest, file_digest_oid=OID_SHA256):
 
 
 def sign_pe(data, cert_path, key_path, password=None, description=""):
-    """Return Authenticode-signed PE bytes.
+    """Return an Authenticode-signed PE using the real OpenSSL CMS backend.
 
-    Raises :class:`AuthenticodeError` when the inputs cannot produce a valid
-    signature, rather than returning something unsigned that looks signed.
+    ``description`` is retained for API compatibility. The CMS encapsulated
+    content type is always ``spcIndirectData``; generic ``pkcs7-data`` is not
+    accepted as an Authenticode substitute. Existing certificate tables are
+    refused because this module implements one signer, not nested signatures.
     """
+    del description
+    layout = _pe_layout(data)
+    if layout["sec_entry"] is None:
+        raise AuthenticodeError(
+            "optional header declares %d data directories; cannot hold the "
+            "security directory (index %d)"
+            % (layout["num_dirs"], SECURITY_DIRECTORY_INDEX))
+    if layout["cert_offset"] or layout["cert_size"]:
+        raise AuthenticodeError(
+            "image already carries a certificate table; multiple signatures "
+            "are not supported")
     if not available():
         raise AuthenticodeError(
-            "cryptography is required for Authenticode signing")
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.serialization import pkcs7
+            "OpenSSL CMS and cryptography are required for Authenticode signing")
 
-    key, cert, chain = _load_key_and_cert(cert_path, key_path, password)
+    try:
+        _key, cert, chain = _load_key_and_cert(cert_path, key_path, password)
+    except AuthenticodeError:
+        raise
+    except Exception as exc:
+        raise AuthenticodeError(
+            "could not load signing certificate/key (%s)" % type(exc).__name__) from exc
+
+    from cryptography.hazmat.primitives import serialization
+
     digest = pe_digest(data)
     indirect = _spc_indirect_data(digest)
+    try:
+        with tempfile.TemporaryDirectory(prefix="nixon-authenticode-") as tmp:
+            content_path = os.path.join(tmp, "indirect.der")
+            signer_path = os.path.join(tmp, "signer.pem")
+            signature_path = os.path.join(tmp, "signature.der")
+            with open(content_path, "wb") as handle:
+                handle.write(indirect)
+            with open(signer_path, "wb") as handle:
+                handle.write(cert.public_bytes(serialization.Encoding.PEM))
 
-    from cryptography.hazmat.primitives import hashes
+            # `-no_signing_time` is rejected by OpenSSL 3.0 (Ubuntu 24.04).
+            # The signingTime attribute is not part of the Authenticode
+            # digest contract, so omitting the flag works across versions.
+            cmd = [_openssl_path(), "cms", "-sign", "-binary", "-nodetach",
+                   "-nosmimecap", "-md", "sha256",
+                   "-econtent_type", SPC_INDIRECT_DATA_OID,
+                   "-in", content_path, "-signer", signer_path,
+                   "-inkey", key_path, "-outform", "DER", "-out", signature_path]
+            if len(chain) > 1:
+                chain_path = os.path.join(tmp, "chain.pem")
+                with open(chain_path, "wb") as handle:
+                    for extra in chain[1:]:
+                        handle.write(extra.public_bytes(serialization.Encoding.PEM))
+                        handle.write(b"\n")
+                cmd.extend(["-certfile", chain_path])
+            if password:
+                cmd.extend(["-passin", "stdin"])
+            try:
+                result = subprocess.run(
+                    cmd, input=password.encode() if password else None,
+                    stdin=None if password else subprocess.DEVNULL,
+                    capture_output=True, timeout=OPENSSL_CMS_TIMEOUT,
+                    env=_openssl_environment(), check=False)
+            except subprocess.TimeoutExpired as exc:
+                raise AuthenticodeError("OpenSSL CMS signing timed out") from exc
+            except OSError as exc:
+                raise AuthenticodeError(
+                    "OpenSSL CMS signing backend unavailable (%s)"
+                    % type(exc).__name__) from exc
+            if result.returncode != 0:
+                detail = result.stderr.decode("utf-8", "replace").strip()[-240:]
+                raise AuthenticodeError(
+                    "OpenSSL CMS signing failed%s"
+                    % (": " + detail if detail else ""))
+            with open(signature_path, "rb") as handle:
+                signature = handle.read()
+    except OSError as exc:
+        raise AuthenticodeError(
+            "could not create CMS signing files (%s)" % type(exc).__name__) from exc
 
-    builder = pkcs7.PKCS7SignatureBuilder().set_data(indirect)
-    # hash_algorithm takes a hashes.HashAlgorithm INSTANCE, not the
-    # PKCS7HashTypes enum -- the enum is a typing alias and has no members at
-    # runtime (measured: AttributeError: SHA256).
-    builder = builder.add_signer(cert, key, hashes.SHA256())
-    for extra in chain[1:]:
-        builder = builder.add_certificate(extra)
-    # Authenticode's PKCS#7 blob is DER. Options are passed to sign() -- the
-    # builder has no add_option method (measured: AttributeError).
-    #
-    # EMBEDDED, NOT DETACHED (measured 2026-11-20 -- this was WRONG before).
-    # Authenticode requires the SIGNED CONTENT to BE the SpcIndirectDataContent
-    # blob, embedded in the SignedData. The previous form passed
-    # DetachedSignature, which makes the indirect data the detached content:
-    # only its SHA-256 lands in the messageDigest attribute and the blob
-    # itself is never written. Measured on a real signed PE: the emitted file
-    # contained the spcIndirectData OID as a contentType VALUE but no
-    # SpcIndirectDataContent at all, and the image digest appeared nowhere in
-    # it. Windows would not recognise such a file as Authenticode-signed.
-    #
-    # With the content embedded, cryptography emits the correct structure:
-    #   1.2.840.113549.1.7.2 (signedData)
-    #     contentType attribute = 1.3.6.1.4.1.311.2.1.4 (spcIndirectData)
-    #     content = the SpcIndirectDataContent DER (which carries the image
-    #               digest in its digest OCTET STRING)
-    # and the SpcIndirectData OID therefore appears inside the blob, which is
-    # what a Windows verifier looks for. Measured: spc_oid True,
-    # indirect-data-embedded True, length 1,581 vs 1,499 detached.
-    signature = builder.sign(serialization.Encoding.DER,
-                             [pkcs7.PKCS7Options.Binary])
+    if not signature or signature[:1] != b"\x30":
+        raise AuthenticodeError("OpenSSL CMS returned no DER SignedData")
 
-    # WIN_CERTIFICATE: dwLength, wRevision, wCertificateType, then the blob,
-    # padded to 8 bytes.
-    body = signature
-    pad = (8 - (len(body) % 8)) % 8
-    total = 8 + len(body) + pad
+    # WIN_CERTIFICATE: dwLength, revision, type, DER, then 8-byte padding.
+    pad = (8 - len(signature) % 8) % 8
+    total = 8 + len(signature) + pad
     win_cert = struct.pack("<IHH", total, WIN_CERT_REVISION_2_0,
-                           WIN_CERT_TYPE_PKCS_SIGNED_DATA) + body + (b"\x00" * pad)
+                           WIN_CERT_TYPE_PKCS_SIGNED_DATA) + signature + b"\x00" * pad
 
     out = bytearray(data)
-    e_lfanew = struct.unpack_from("<I", out, 0x3C)[0]
-    coff = e_lfanew + 4
-    opt = coff + 20
-    magic = struct.unpack_from("<H", out, opt)[0]
-    num_dirs_off = opt + (108 if magic == 0x20B else 92)
-    dirs_off = opt + (112 if magic == 0x20B else 96)
-    sec_entry = dirs_off + SECURITY_DIRECTORY_INDEX * 8
-
-    # The certificate table is appended at the end of the file, 8-byte aligned.
     cert_offset = len(out)
-    if cert_offset % 8:
-        cert_offset += 8 - (cert_offset % 8)
-        out.extend(b"\x00" * (cert_offset - len(out)))
+    out.extend(b"\x00" * ((8 - cert_offset % 8) % 8))
     out.extend(win_cert)
-
-    # Only NOW write the directory entry: the digest was computed with it zero,
-    # and adding it must not change what was signed.
-    struct.pack_into("<II", out, sec_entry, cert_offset, len(win_cert))
-    # DO NOT touch SizeOfImage. Authenticode excludes exactly three regions --
-    # the checksum, this directory entry, and the certificate table -- and
-    # SizeOfImage is not one of them. Measured: writing it made the digest of
-    # the signed file differ from the digest that was signed, which is a
-    # signature no verifier would accept. Verified: after removing that write,
-    # normalising (zeroing the three excluded regions) makes the original and
-    # signed images byte-identical.
-    struct.pack_into("<I", out, opt + PE_CHECKSUM_OFFSET,
-                     _pe_checksum(bytes(out), opt + PE_CHECKSUM_OFFSET))
+    struct.pack_into("<II", out, layout["sec_entry"], cert_offset, len(win_cert))
+    struct.pack_into("<I", out, layout["checksum_off"],
+                     _pe_checksum(bytes(out), layout["checksum_off"]))
+    if pe_digest(out) != digest:
+        raise AuthenticodeError("internal error: signing changed the PE digest")
     return bytes(out)
 
 

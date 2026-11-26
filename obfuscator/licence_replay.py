@@ -39,6 +39,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 import tempfile
 import time
 
@@ -60,40 +61,124 @@ def token_identity(payload: dict) -> str:
 
 
 class ReplayLedger:
-    """A tiny on-disk record of token identities already presented.
+    """A small SQLite-backed record of token identities already presented.
 
-    Deliberately simple: a JSON object of identity -> first-seen timestamp,
-    written atomically, pruned on every write. Not a database, and not
-    tamper-proof -- see the module docstring.
+    The replay check must be atomic across processes. The original JSON
+    load-modify-write ledger was correct for a single caller but had a wide
+    check-and-record race: concurrent presenters could all read an empty
+    ledger before any wrote, and every one was accepted. SQLite's
+    ``BEGIN IMMEDIATE`` transaction serializes the read and write halves of
+    the check, so exactly one presenter can claim an identity inside the
+    acceptance window.
+
+    Storage failure is fail-closed: if the ledger cannot be opened or
+    written, ``check_and_record`` returns False. This is deliberately
+    availability-affecting; silently continuing without replay state would
+    disable the control entirely.
     """
 
     def __init__(self, path=None, window_s=DEFAULT_WINDOW_S):
         self.path = path or os.path.join(
             tempfile.gettempdir(), ".nx-licence-seen.json")
         self.window_s = int(window_s)
+        self._legacy_migrated = False
 
     # -- storage ---------------------------------------------------------
-    def _load(self):
+    def _is_sqlite_file(self):
+        try:
+            with open(self.path, "rb") as fh:
+                return fh.read(16) == b"SQLite format 3\x00"
+        except OSError:
+            return False
+
+    def _migrate_legacy_json(self):
+        """Import a pre-SQLite JSON ledger once, preserving it as a backup.
+
+        First-use is multiprocess-racy: ``sqlite3.connect`` itself creates a
+        zero-byte file before the SQLite header is written. Treating that
+        transient empty file as a legacy JSON ledger made concurrent creators
+        rename it underneath one another (measured as intermittent
+        FileNotFoundError/disk-I/O initialization failures). Only a non-empty,
+        non-SQLite file is a migration candidate, and a rename lost to another
+        process is benign.
+        """
+        if self._legacy_migrated or not os.path.exists(self.path):
+            return
+        try:
+            if os.path.getsize(self.path) == 0:
+                return
+        except OSError:
+            return
+        if self._is_sqlite_file():
+            self._legacy_migrated = True
+            return
+        try:
+            with open(self.path, "rb") as fh:
+                if fh.read(1) != b"{":
+                    # Either a partially initialised SQLite file or foreign
+                    # data. Neither is a legacy JSON ledger; fail closed in
+                    # the latter case rather than renaming live SQLite state.
+                    return
+        except OSError:
+            return
         try:
             with open(self.path, encoding="utf-8") as fh:
-                data = json.load(fh)
-            if isinstance(data, dict):
-                return {str(k): float(v) for k, v in data.items()}
+                raw = json.load(fh)
+            if not isinstance(raw, dict):
+                raw = {}
+            data = {str(k): float(v) for k, v in raw.items()}
         except (OSError, ValueError, TypeError):
-            pass
-        return {}
+            data = {}
+        backup = self.path + ".legacy-json"
+        try:
+            os.replace(self.path, backup)
+        except FileNotFoundError:
+            # Another process won the migration/create race. Its ledger is the
+            # authoritative one now; the loser simply connects to it.
+            return
+        self._legacy_migrated = True
+        if data:
+            try:
+                with self._connect() as conn:
+                    conn.executemany(
+                        "INSERT OR REPLACE INTO seen(identity, first_seen) VALUES (?, ?)",
+                        sorted(data.items()))
+            except sqlite3.Error:
+                # The next operation will fail closed; the preserved backup is
+                # intentionally left untouched for operators to inspect.
+                pass
+
+    def _connect(self):
+        directory = os.path.dirname(os.path.abspath(self.path)) or "."
+        os.makedirs(directory, exist_ok=True)
+        if os.path.isdir(self.path):
+            raise sqlite3.OperationalError("replay ledger path is a directory")
+        self._migrate_legacy_json()
+        conn = sqlite3.connect(self.path, timeout=10.0, isolation_level=None)
+        conn.execute("PRAGMA busy_timeout=10000")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS seen("
+            "identity TEXT PRIMARY KEY, first_seen REAL NOT NULL)")
+        return conn
+
+    def _load(self):
+        try:
+            with self._connect() as conn:
+                return {str(k): float(v) for k, v in
+                        conn.execute("SELECT identity, first_seen FROM seen")}
+        except (sqlite3.Error, OSError):
+            return {}
 
     def _store(self, data):
-        # Atomic replace so a crash mid-write cannot truncate the ledger into
-        # something that silently forgets everything (which would be a replay
-        # hole rather than a durability problem).
-        directory = os.path.dirname(os.path.abspath(self.path)) or "."
         try:
-            fd, tmp = tempfile.mkstemp(dir=directory, prefix=".nx-seen-")
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(data, fh, sort_keys=True)
-            os.replace(tmp, self.path)
-        except OSError:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("DELETE FROM seen")
+                conn.executemany(
+                    "INSERT INTO seen(identity, first_seen) VALUES (?, ?)",
+                    sorted((str(k), float(v)) for k, v in data.items()))
+                conn.execute("COMMIT")
+        except (sqlite3.Error, OSError):
             pass
 
     def _prune(self, data, now):
@@ -107,20 +192,53 @@ class ReplayLedger:
 
     def record(self, identity, now=None):
         moment = now if now is not None else time.time()
-        data = self._prune(self._load(), moment)
-        data[identity] = moment
-        self._store(data)
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO seen(identity, first_seen) VALUES (?, ?)",
+                    (str(identity), float(moment)))
+        except (sqlite3.Error, OSError):
+            pass
 
     def check_and_record(self, identity, now=None):
-        """Return True if this identity is fresh; record it and return False
-        if it was already seen inside the window."""
+        """Atomically claim ``identity`` inside the replay window.
+
+        Returns True only for the first presenter inside the window. Any
+        storage error returns False: replay enforcement must fail closed
+        rather than silently disappear on unwritable media.
+        """
         moment = now if now is not None else time.time()
-        data = self._prune(self._load(), moment)
-        if identity in data:
+        cutoff = float(moment) - self.window_s
+        conn = None
+        try:
+            conn = self._connect()
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT first_seen FROM seen WHERE identity = ?",
+                (str(identity),)).fetchone()
+            if row is not None and float(row[0]) >= cutoff:
+                conn.execute("ROLLBACK")
+                return False
+            conn.execute(
+                "INSERT OR REPLACE INTO seen(identity, first_seen) VALUES (?, ?)",
+                (str(identity), float(moment)))
+            conn.execute(
+                "DELETE FROM seen WHERE first_seen < ?", (cutoff,))
+            conn.execute("COMMIT")
+            return True
+        except (sqlite3.Error, OSError, ValueError, TypeError):
+            try:
+                if conn is not None:
+                    conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
             return False
-        data[identity] = moment
-        self._store(data)
-        return True
+        finally:
+            try:
+                if conn is not None:
+                    conn.close()
+            except sqlite3.Error:
+                pass
 
 
 def check_key_version(token_version, expected_version) -> None:

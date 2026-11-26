@@ -43,6 +43,7 @@ class TestAttackReplayBenchmarks:
         import shutil
         shutil.rmtree(tmpdir, ignore_errors=True)
 
+    @pytest.mark.nixon_timeout(600)
     def test_bench_capture_time(self, benchmark):
         from scripts.attack_replay.capture import AttackCaptureStore
         tmpdir = tempfile.mkdtemp()

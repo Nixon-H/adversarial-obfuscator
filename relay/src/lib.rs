@@ -10,4 +10,6 @@ pub mod remote;
 #[cfg(feature = "attestation")]
 pub mod attestation;
 
-pub mod config_embed;
+pub mod config_embed {
+    include!(concat!(env!("OUT_DIR"), "/config_embed.rs"));
+}

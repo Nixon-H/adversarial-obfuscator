@@ -22,6 +22,7 @@ kernel with the receiver prepended (``s.split(",")`` becomes
 from __future__ import annotations
 
 import ast
+import os
 
 FAMILIES: dict[str, dict] = {
     # Default ON (V10 default set)
@@ -322,3 +323,45 @@ def emit_shim_import(active) -> str:
     if not names:
         return ""
     return "from lowering_shim import " + ", ".join(names) + "\n"
+
+
+def lower_source_self_contained(source: str, families) -> tuple[str, int]:
+    """Rewrite covered call sites and inline the reference shim.
+
+    The normal ``emit_shim_import`` form requires a ``lowering_shim`` module
+    at runtime. Protected artifacts are expected to be self-contained and do
+    not ship that top-level module, so pipeline builds must inline the shim
+    instead. Future imports in the payload remain before the inserted shim
+    body; the shim's own future import is not needed at runtime.
+    """
+    lowered, rewrites = lower_source(source, families)
+    if not rewrites:
+        return lowered, rewrites
+    tree = ast.parse(lowered)
+    tree.body = [
+        node for node in tree.body
+        if not (isinstance(node, ast.ImportFrom) and node.module == "lowering_shim")
+    ]
+    shim_path = os.path.join(os.path.dirname(__file__), "lowering_shim.py")
+    with open(shim_path, "r", encoding="utf-8") as fh:
+        shim_tree = ast.parse(fh.read())
+    shim_nodes = []
+    for node in shim_tree.body:
+        if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)):
+            continue
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+            continue
+        shim_nodes.append(node)
+    insert_at = 0
+    if (tree.body and isinstance(tree.body[0], ast.Expr)
+            and isinstance(tree.body[0].value, ast.Constant)
+            and isinstance(tree.body[0].value.value, str)):
+        insert_at = 1
+    while (insert_at < len(tree.body)
+           and isinstance(tree.body[insert_at], ast.ImportFrom)
+           and tree.body[insert_at].module == "__future__"):
+        insert_at += 1
+    tree.body[insert_at:insert_at] = shim_nodes
+    ast.fix_missing_locations(tree)
+    return ast.unparse(tree), rewrites

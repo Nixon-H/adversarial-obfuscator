@@ -76,7 +76,7 @@ def test_snippet_returns_clean_without_exiting():
     src = emit_loader_snippet(threshold=50.0)
     ns = {}
     exec(compile(src, "<t>", "exec"), ns)
-    assert "NIXON_KOD" not in os.environ or os.environ.get("NIXON_KOD") == "0" or True
+    assert "NIXON_KOD" not in os.environ or os.environ.get("NIXON_KOD") == "0"
     old = os.environ.get("NIXON_KOD")
     os.environ["NIXON_KOD"] = "0"
     try:

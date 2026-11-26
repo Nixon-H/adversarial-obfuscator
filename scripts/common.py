@@ -104,6 +104,9 @@ def atomic_write(path, data, mode="w"):
         raise
 
 
+ERROR_COUNT = 0
+
+
 def log(phase, msg):
     """
     log
@@ -120,6 +123,9 @@ def log(phase, msg):
     Outputs:
     - None. Prints to stdout.
     """
+    global ERROR_COUNT
+    if phase == "ERROR":
+        ERROR_COUNT += 1
     ts = time.strftime("%H:%M:%S")
     print(f"[{ts}] [{phase:>12}] {msg}")
 

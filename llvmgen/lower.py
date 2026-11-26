@@ -13,7 +13,7 @@ NIXON_TYPE_MAP = {
 }
 
 BINARY_OPS = {
-    "add", "sub", "mul", "div", "udiv", "sdiv", "urem", "srem",
+    "add", "sub", "mul", "div", "mod", "udiv", "sdiv", "urem", "srem",
     "and", "or", "xor", "shl", "lshr", "ashr",
     # The project's own IR uses "shr" for a logical right shift; the
     # LLVM spelling is "lshr".  Without this the instruction was
@@ -490,7 +490,9 @@ class NixonIRParser:
             rhs = parts[3].rstrip(",") if len(parts) > 3 else ""
             if result:
                 var_types[result] = vtype
-            return {"result": result, "opcode": "srem", "type": vtype,
+            # Keep the IR's own opcode: "mod" is Python's floored remainder,
+            # not LLVM's truncating srem.  _emit_instruction adjusts it.
+            return {"result": result, "opcode": "mod", "type": vtype,
                     "operands": [lhs, rhs]}
 
         if opcode == "icmp":
@@ -725,9 +727,11 @@ def _emit_instruction(instr: dict) -> str:
         t = instr["type"]
         # Python >> is arithmetic on signed ints; lshr is logical and
         # differs for every negative value.
-        # Python // floors toward -inf; sdiv truncates toward zero, so a
-        # plain sdiv is wrong for mixed-sign operands.  Emit the
-        # adjustment sequence below.
+        # Python // floors toward -inf and % follows the divisor's sign; LLVM's
+        # sdiv/srem truncate toward zero and srem follows the dividend's sign.
+        # The VM implements the Python semantics, so emit the adjustment
+        # sequences below: a bare sdiv/srem would make native and VM disagree
+        # for every mixed-sign operand.
         if opcode == "div" and t in ("i32", "i64"):
             res = instr.get("result")
             if not res:
@@ -750,6 +754,26 @@ def _emit_instruction(instr: dict) -> str:
                 f"  {fix} = and i1 {rz}, {diff}",
                 f"  {q1} = sub {t} {q}, 1",
                 f"{result_prefix}select i1 {fix}, {t} {q1}, {t} {q}",
+            ])
+        if opcode == "mod" and t in ("i32", "i64"):
+            res = instr.get("result")
+            if not res:
+                return f"  srem {t} {lhs}, {rhs}"
+            base = res.lstrip("%")
+            if base.isdigit():
+                base = "_nx_mod_" + base
+            r = f"%{base}_r"
+            nz, rn, bn = f"%{base}_nz", f"%{base}_rn", f"%{base}_bn"
+            diff, fix, adj = f"%{base}_diff", f"%{base}_fix", f"%{base}_adj"
+            return "\n".join([
+                f"  {r} = srem {t} {lhs}, {rhs}",
+                f"  {nz} = icmp ne {t} {r}, 0",
+                f"  {rn} = icmp slt {t} {r}, 0",
+                f"  {bn} = icmp slt {t} {rhs}, 0",
+                f"  {diff} = icmp ne i1 {rn}, {bn}",
+                f"  {fix} = and i1 {nz}, {diff}",
+                f"  {adj} = add {t} {r}, {rhs}",
+                f"{result_prefix}select i1 {fix}, {t} {adj}, {t} {r}",
             ])
         op = {"shr": "ashr"}.get(opcode, opcode)
         # Floating-point arithmetic uses LLVM's f-prefixed opcodes

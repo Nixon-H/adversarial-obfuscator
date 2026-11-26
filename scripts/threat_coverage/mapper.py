@@ -193,12 +193,51 @@ VERIFICATION_KEYWORDS: dict[str, list[str]] = {
 }
 
 
+def _scan_tree_for_keywords(root: str, dirname: str,
+                            keyword_map: dict[str, list[str]],
+                            *, test_files_only: bool = False) -> dict[str, set[str]]:
+    """Scan ``root/dirname`` once and bucket files by matching keyword set.
+
+    The mapper used to re-read every file once per threat (ten passes per
+    scan, thirty passes for a full coverage build).  In a container with
+    generated evidence present that pushed the release-gate probe past its
+    60-second budget even though the scan itself is simple.  Reading each
+    file once preserves the same keyword semantics without the repeated I/O.
+    """
+    base = os.path.join(root, dirname)
+    results: dict[str, set[str]] = {key: set() for key in keyword_map}
+    if not os.path.isdir(base):
+        return results
+    compiled = {
+        key: [re.compile(kw, re.IGNORECASE) for kw in keywords]
+        for key, keywords in keyword_map.items()
+    }
+    for root_dir, _dirs, files in os.walk(base):
+        for filename in files:
+            if not filename.endswith(".py"):
+                continue
+            if test_files_only and not (
+                    filename.startswith("test_") or filename.startswith("bench_")):
+                continue
+            fpath = os.path.join(root_dir, filename)
+            rel = os.path.relpath(fpath, root)
+            try:
+                with open(fpath, "r", errors="ignore") as fh:
+                    content = fh.read()
+            except OSError:
+                continue
+            for key, patterns in compiled.items():
+                if any(pattern.search(content) for pattern in patterns):
+                    results[key].add(rel)
+    return results
+
+
 class ThreatCoverageMapper:
     """
     ThreatCoverageMapper
 
     Purpose:
-    Maps codebase features, metrics, and test verifications to a formal
+    Maps codebase features, metrics, and pytest test verifications to a formal
     threat taxonomy, producing a coverage matrix.
 
     Lifecycle:
@@ -225,28 +264,8 @@ class ThreatCoverageMapper:
         Outputs:
         None (populates self._features_cache)
         """
-        scripts_dir = os.path.join(self.root, "scripts")
-        if not os.path.isdir(scripts_dir):
-            return
-        python_files: list[str] = []
-        for root_dir, _dirs, files in os.walk(scripts_dir):
-            for f in files:
-                if f.endswith(".py"):
-                    python_files.append(os.path.join(root_dir, f))
-        for threat_key, keywords in FEATURE_KEYWORDS.items():
-            matches: set[str] = set()
-            for fpath in python_files:
-                rel = os.path.relpath(fpath, self.root)
-                try:
-                    with open(fpath, "r", errors="ignore") as f:
-                        content = f.read()
-                except OSError:
-                    continue
-                for kw in keywords:
-                    if re.search(kw, content, re.IGNORECASE):
-                        matches.add(rel)
-                        break
-            self._features_cache[threat_key] = matches
+        self._features_cache = _scan_tree_for_keywords(
+            self.root, "scripts", FEATURE_KEYWORDS)
 
     def scan_for_metrics(self) -> None:
         """
@@ -262,36 +281,17 @@ class ThreatCoverageMapper:
         Outputs:
         None (populates self._metrics_cache)
         """
-        scripts_dir = os.path.join(self.root, "scripts")
-        if not os.path.isdir(scripts_dir):
-            return
-        python_files: list[str] = []
-        for root_dir, _dirs, files in os.walk(scripts_dir):
-            for f in files:
-                if f.endswith(".py"):
-                    python_files.append(os.path.join(root_dir, f))
-        for threat_key, keywords in METRIC_KEYWORDS.items():
-            matches: set[str] = set()
-            for fpath in python_files:
-                rel = os.path.relpath(fpath, self.root)
-                try:
-                    with open(fpath, "r", errors="ignore") as f:
-                        content = f.read()
-                except OSError:
-                    continue
-                for kw in keywords:
-                    if re.search(kw, content, re.IGNORECASE):
-                        matches.add(rel)
-                        break
-            self._metrics_cache[threat_key] = matches
+        self._metrics_cache = _scan_tree_for_keywords(
+            self.root, "scripts", METRIC_KEYWORDS)
 
     def scan_for_verifications(self) -> None:
         """
         scan_for_verifications
 
         Purpose:
-        Scans all test files for verification keywords matching each threat
-        category.
+        Scans pytest-collected ``test_*.py``/``bench_*.py`` files for verification keywords
+        matching each threat category. Generated fixture artefacts are not
+        verification evidence and are deliberately not scanned.
 
         Inputs:
         None
@@ -299,28 +299,8 @@ class ThreatCoverageMapper:
         Outputs:
         None (populates self._verifications_cache)
         """
-        tests_dir = os.path.join(self.root, "tests")
-        if not os.path.isdir(tests_dir):
-            return
-        test_files: list[str] = []
-        for root_dir, _dirs, files in os.walk(tests_dir):
-            for f in files:
-                if f.endswith(".py"):
-                    test_files.append(os.path.join(root_dir, f))
-        for threat_key, keywords in VERIFICATION_KEYWORDS.items():
-            matches: set[str] = set()
-            for fpath in test_files:
-                rel = os.path.relpath(fpath, self.root)
-                try:
-                    with open(fpath, "r", errors="ignore") as f:
-                        content = f.read()
-                except OSError:
-                    continue
-                for kw in keywords:
-                    if re.search(kw, content, re.IGNORECASE):
-                        matches.add(rel)
-                        break
-            self._verifications_cache[threat_key] = matches
+        self._verifications_cache = _scan_tree_for_keywords(
+            self.root, "tests", VERIFICATION_KEYWORDS, test_files_only=True)
 
     def build_coverage(self) -> list[CoverageEntry]:
         """

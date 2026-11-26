@@ -73,8 +73,11 @@ from .vm_isa import VMOpcode, VM_PROPERTIES
 # this module's namespace by the test suite, so the name must be bound
 # here even though the module does not call it.
 from .vm_isa import _phase2_enabled  # noqa: F401
-from .ephemeral_isa import (select_dispatch_mode, select_encoding_mode,
-                            generate_field_permutation, shuffle_handler_order)
+
+# Per-process build secret used when the config seed is null (see
+# _derive_build_secret). Module-level so every VMInterpreter in this process
+# agrees, as the C/Python interpreter-agreement tests require.
+_PROCESS_BUILD_SECRET = None
 
 
 def secure_zero(data):
@@ -173,7 +176,9 @@ class VMInterpreter:
         self.encoding_mode = ENCODING_FIXED
         self.field_perm = list(range(16))
         self.handler_order = list(self.handlers.keys())
+        self.handler_slots = {opcode: slot for slot, opcode in enumerate(self.handler_order)}
         self.dispatch_table = dict(self.handlers)
+        self.computed_goto_table = {i: i for i in range(len(self.handlers))}
         self.shuffle_buf = bytearray()
         self.shuffle_pos = 0
         self.shuffle_active = False
@@ -188,7 +193,8 @@ class VMInterpreter:
             self.entropy_seed = bytearray(seed)
             isa_table = runtime_derive_isa(bytes(self.entropy_seed))
             self.isa_table = isa_table
-            self.inverse_map = {phys: logical for phys, logical in enumerate(isa_table)}
+            self.inverse_map = {physical: logical
+                                for logical, physical in enumerate(isa_table)}
 
             self._init_mutating_isa(bytes(self.entropy_seed))
         else:
@@ -207,20 +213,41 @@ class VMInterpreter:
         observing one rekey can determine the mode for that epoch but
         not for future epochs.
         """
-        from .ephemeral_isa import (select_dispatch_mode, select_encoding_mode,
-                                   generate_field_permutation, shuffle_handler_order)
-        dm = select_dispatch_mode(seed, self.epoch)
+        from .ephemeral_isa import (select_encoding_mode,
+                                   generate_field_permutation)
         em = select_encoding_mode(seed, self.epoch)
-        self.dispatch_mode = DISPATCH_NAMES.index(dm)
         self.encoding_mode = ENCODING_NAMES.index(em)
         self.field_perm = generate_field_permutation(seed + struct.pack('<I', self.epoch), 16)
+        self._rotate_dispatch_metadata(seed)
 
+    def _dispatch_offset(self) -> int:
+        """Return a seeded slot offset; it never changes opcode decoding."""
+        data = (bytes(self.entropy_seed) + struct.pack('<I', self.epoch)
+                + bytes([self.state_isa_rotation & 0xFF]))
+        return hashlib.sha256(data).digest()[0]
+
+    def _rebuild_computed_goto_table(self) -> None:
+        """Build a seeded slot-to-logical table with exact inverse slots."""
+        count = len(self.handler_order)
+        self.handler_slots = {opcode: slot for slot, opcode in enumerate(self.handler_order)}
+        self.computed_goto_table = {}
+        offset = self._dispatch_offset()
+        for slot, opcode in enumerate(self.handler_order):
+            # Unit stride plus a seeded rotation is always a bijection,
+            # regardless of the current handler count.
+            target_slot = (slot + offset) % count
+            self.computed_goto_table[target_slot] = opcode
+
+    def _rotate_dispatch_metadata(self, seed: bytes) -> None:
+        """Rotate semantically neutral dispatch metadata from ``seed``."""
+        from .ephemeral_isa import select_dispatch_mode, shuffle_handler_order
+        dm = select_dispatch_mode(seed, self.epoch)
+        self.dispatch_mode = DISPATCH_NAMES.index(dm)
         handler_list = sorted(self.handlers.items())
         shuffled = shuffle_handler_order(seed + struct.pack('<I', self.epoch), handler_list)
-        self.handler_order = [k for k, v in shuffled]
-        self.dispatch_table = {}
-        for opcode, fn in shuffled:
-            self.dispatch_table[opcode] = fn
+        self.handler_order = [opcode for opcode, _fn in shuffled]
+        self.dispatch_table = {opcode: fn for opcode, fn in shuffled}
+        self._rebuild_computed_goto_table()
 
     def _build_inverse_map(self) -> dict[int, int]:
         """
@@ -248,7 +275,20 @@ class VMInterpreter:
         a high-entropy seed at build time.
         """
         cfg = _load_config()
-        seed_str = cfg.get("shadow_compiler", {}).get("seed") if "shadow_compiler" in cfg else "nixon-vm-default"
+        seed_str = cfg.get("shadow_compiler", {}).get("seed") if "shadow_compiler" in cfg else None
+        if seed_str is None:
+            # A null config seed used to hash the literal string "None" --
+            # a publicly computable constant. Use a per-process random secret
+            # (consistent within the process, so C/Python interpreter agreement
+            # tests still hold) unless NIXON_VM_SEED pins it.
+            env_seed = os.environ.get("NIXON_VM_SEED", "").strip()
+            if env_seed:
+                return hashlib.blake2b(env_seed.encode(), digest_size=32).digest()
+            global _PROCESS_BUILD_SECRET
+            if _PROCESS_BUILD_SECRET is None:
+                _PROCESS_BUILD_SECRET = hashlib.blake2b(
+                    os.urandom(32), digest_size=32).digest()
+            return _PROCESS_BUILD_SECRET
         return hashlib.blake2b(str(seed_str).encode(), digest_size=32).digest()
 
     def _init_handlers(self) -> dict[int, Callable]:
@@ -294,28 +334,19 @@ class VMInterpreter:
             VMOpcode.ENC_MUL: self._handle_enc_mul,
             VMOpcode.FUSED_LOAD_ADD_STORE: self._handle_fused_load_add_store,
             VMOpcode.FUSED_CMP_JMP: self._handle_fused_cmp_jmp,
+            VMOpcode.CMP: self._handle_cmp,
         }
 
     def _resolve_handler(self, opcode: int) -> Callable:
-        """
-        Resolve a handler for an opcode using build-aware selection.
+        """Resolve the logical opcode's handler through the indirect table.
 
-        Computes BLAKE2b(vm_state_hash + opcode + build_secret) and
-        selects a handler from the shuffled handler list based on
-        the hash output.
-
-        Security note: This adds an additional layer of indirection
-        that changes with VM state. Even with a known opcode map,
-        an attacker cannot predict which handler will execute without
-        knowing the VM state and build secret.
+        Handler selection is intentionally semantics-preserving: indirection
+        may change table layout, but it must never select a different opcode.
         """
-        h = hashlib.blake2b(
-            str(self._vm_state_hash()).encode() + struct.pack('<I', opcode) + self.build_secret,
-            digest_size=32,
-        ).digest()
-        handler_idx = struct.unpack('<I', h[:4])[0] % len(self.handlers)
-        logical = list(self.handlers.keys())[handler_idx]
-        return self.handlers[logical]
+        handler = self.dispatch_table.get(opcode) or self.handlers.get(opcode)
+        if handler is None:
+            raise KeyError(f"unsupported VM opcode {opcode}")
+        return handler
 
     def _vm_state_hash(self) -> int:
         """
@@ -402,7 +433,11 @@ class VMInterpreter:
         flags = 0
         if result == 0:
             flags |= self.FLAG_ZERO
-        if result & 0x8000000000000000:
+        # Compiled IR values are width-masked by the compiler. For i32 values
+        # (both operands fit in 32 bits), the sign bit is bit 31; otherwise the
+        # VM's native 64-bit sign bit applies.
+        sign_bit = 1 << 31 if max(a, b) <= 0xFFFFFFFF else 1 << 63
+        if result & sign_bit:
             flags |= self.FLAG_SIGN
         self._set_reg(self.REG_FLAGS, flags)
 
@@ -440,31 +475,58 @@ class VMInterpreter:
         self._set_reg(dst, result)
         self._set_flags(result)
 
+    @staticmethod
+    def _signed_operand(value: int, bits: int) -> int:
+        sign = 1 << (bits - 1)
+        return value - (1 << bits) if value & sign else value
+
+    def _operand_bits(self, a: int, b: int) -> int:
+        return 32 if max(a, b) <= 0xFFFFFFFF else 64
+
     def _handle_div(self):
-        """DIV dst, src: dst = dst / src. Halts on division by zero."""
+        """DIV dst, src: signed width-aware division, flooring toward -inf.
+
+        Python's ``//`` floors, so the VM must too: the IR is compiled from
+        Python and the obfuscated artefact has to compute what the original
+        did.  C/LLVM truncate toward zero, which differs for every mixed-sign
+        operand (``-7 // 2`` is -4 here, -3 under truncation).
+        """
         dst = self._read_reg()
         src = self._read_reg()
         a = self._reg(dst)
         b = self._reg(src)
-        if b == 0:
+        bits = self._operand_bits(a, b)
+        mask = (1 << bits) - 1
+        sa = self._signed_operand(a & mask, bits)
+        sb = self._signed_operand(b & mask, bits)
+        if sb == 0:
             self.state["halted"] = True
             return
-        result = (a // b) & 0xFFFFFFFFFFFFFFFF
+        result = (sa // sb) & mask
         self._set_reg(dst, result)
-        self._set_flags(result)
+        self._set_flags(result, a, b)
 
     def _handle_mod(self):
-        """MOD dst, src: dst = dst % src. Halts on division by zero."""
+        """MOD dst, src: signed width-aware remainder with the divisor's sign.
+
+        Python's ``%`` follows the divisor (``-7 % 2 == 1``), not the dividend
+        as C/LLVM ``srem`` does; the VM mirrors Python so obfuscated code keeps
+        the original result.
+        """
         dst = self._read_reg()
         src = self._read_reg()
         a = self._reg(dst)
         b = self._reg(src)
-        if b == 0:
+        bits = self._operand_bits(a, b)
+        mask = (1 << bits) - 1
+        sa = self._signed_operand(a & mask, bits)
+        sb = self._signed_operand(b & mask, bits)
+        if sb == 0:
             self.state["halted"] = True
             return
-        result = (a % b) & 0xFFFFFFFFFFFFFFFF
+        result = (sa % sb) & mask
         self._set_reg(dst, result)
-        self._set_flags(result)
+        self._set_flags(result, a, b)
 
     def _handle_and(self):
         """AND dst, src: dst = dst & src. Sets flags."""
@@ -507,13 +569,17 @@ class VMInterpreter:
         self._set_flags(result)
 
     def _handle_shr(self):
-        """SHR dst, src: dst = dst >> (src & 63). Sets flags."""
+        """SHR dst, src: signed width-aware arithmetic right shift."""
         dst = self._read_reg()
         src = self._read_reg()
-        shift = self._reg(src) & 63
-        result = (self._reg(dst) >> shift) & 0xFFFFFFFFFFFFFFFF
+        a = self._reg(dst)
+        b = self._reg(src)
+        bits = self._operand_bits(a, b)
+        mask = (1 << bits) - 1
+        shift = b & 63
+        result = (self._signed_operand(a & mask, bits) >> shift) & mask
         self._set_reg(dst, result)
-        self._set_flags(result)
+        self._set_flags(result, a, b)
 
     def _handle_load(self):
         """
@@ -763,6 +829,26 @@ class VMInterpreter:
         else:
             self.state["halted"] = True
 
+    def _handle_cmp(self):
+        """CMP dst, lhs, rhs, predicate: direct width-aware signed comparison."""
+        dst = self._read_reg()
+        lhs_reg = self._read_reg()
+        rhs_reg = self._read_reg()
+        predicate = self._read_byte()
+        a = self._reg(lhs_reg)
+        b = self._reg(rhs_reg)
+        bits = self._operand_bits(a, b)
+        mask = (1 << bits) - 1
+        sa = self._signed_operand(a & mask, bits)
+        sb = self._signed_operand(b & mask, bits)
+        predicates = {
+            0: sa == sb, 1: sa != sb, 2: sa < sb,
+            3: sa <= sb, 4: sa > sb, 5: sa >= sb,
+        }
+        result = 1 if predicates.get(predicate, False) else 0
+        self._set_reg(dst, result)
+        self._set_flags(result, a, b)
+
     def _handle_fused_cmp_jmp(self):
         """
         FUSED_CMP_JMP cond_reg, true_target, false_target:
@@ -798,36 +884,17 @@ class VMInterpreter:
         an attacker from precomputing the post-rekey ISA without
         executing the exact same path.
 
-        After rekey:
-        - epoch increments.
-        - A new ISA table is derived (runtime_derive_isa).
-        - The inverse map is rebuilt.
-        - Dispatch mode, encoding mode, and field permutation are
-          re-selected.
-        - Handler order is re-shuffled.
+        After rekey the entropy seed, epoch, dispatch mode, handler order and
+        computed-dispatch slots rotate.  The opcode map, inverse map, encoding
+        mode and field permutation remain unchanged because the bytecode suffix
+        is not rewritten; changing any of those would silently alter decoding.
         """
-        from .ephemeral_isa import vm_rekey_seed, runtime_derive_isa
+        from .ephemeral_isa import vm_rekey_seed
         new_seed = vm_rekey_seed(bytes(self.entropy_seed), self.epoch, self.bb_hash)
         self.entropy_seed = bytearray(new_seed)
         self.epoch += 1
         self.steps_until_rekey = self.VM_REKEY_INTERVAL
-        isa_table = runtime_derive_isa(bytes(self.entropy_seed))
-        self.isa_table = isa_table
-        self.inverse_map = {phys: logical for phys, logical in enumerate(isa_table)}
-
-        seed = bytes(self.entropy_seed)
-        dm = select_dispatch_mode(seed, self.epoch)
-        em = select_encoding_mode(seed, self.epoch)
-        self.dispatch_mode = DISPATCH_NAMES.index(dm)
-        self.encoding_mode = ENCODING_NAMES.index(em)
-        self.field_perm = generate_field_permutation(seed + struct.pack('<I', self.epoch), 16)
-
-        handler_list = sorted(self.handlers.items())
-        shuffled = shuffle_handler_order(seed + struct.pack('<I', self.epoch), handler_list)
-        self.handler_order = [k for k, v in shuffled]
-        self.dispatch_table = {}
-        for opcode, fn in shuffled:
-            self.dispatch_table[opcode] = fn
+        self._rotate_dispatch_metadata(bytes(self.entropy_seed))
 
     def _update_state_isa(self, instruction_id: int):
         """
@@ -838,8 +905,8 @@ class VMInterpreter:
         hash value to a threshold (0x10000000 + hash[4:8]).
 
         When the threshold is exceeded, the state_isa_rotation is
-        incremented, which changes how physical opcodes map to
-        logical opcodes.
+        incremented and computed-dispatch metadata is rebuilt.  The
+        physical-to-logical decode map is deliberately unchanged.
 
         Security note: The threshold is dynamic (depends on the
         current hash), making the rotation timing unpredictable.
@@ -854,11 +921,11 @@ class VMInterpreter:
         import struct
         data = struct.pack(f"<{len(self.state_isa_history)}B", *self.state_isa_history)
         state_hash = hashlib.sha256(data).digest()
-        state_val = struct.unpack("<Q", state_hash[:8])[0]
-
+        state_val = struct.unpack("<I", state_hash[:4])[0]
         threshold = 0x10000000 + struct.unpack("<I", state_hash[4:8])[0]
         if state_val > threshold:
             self.state_isa_rotation = (self.state_isa_rotation + 1) & 0xFF
+            self._rebuild_computed_goto_table()
 
     def _prepare_field_shuffle(self, logical_opcode: int):
         """
@@ -901,14 +968,15 @@ class VMInterpreter:
         1. For variable encoding: read the instruction length prefix.
         2. Read the raw opcode byte.
         3. Check for REKEY opcode (255) or auto-rekey.
-        4. For state ISA: update state history and apply rotation.
-        5. Look up logical opcode via inverse_map.
-        6. For field shuffle encoding: read and unshuffle operands.
-        7. Dispatch to handler based on dispatch_mode:
+        4. Look up the logical opcode via the stable inverse_map.
+        5. For field shuffle encoding: read and unshuffle operands.
+        6. Dispatch to the same logical handler in every mode:
            - DISPATCH_SWITCH: direct lookup in handlers dict.
            - DISPATCH_INDIRECT: lookup in shuffled dispatch_table.
-           - DISPATCH_COMPUTED_GOTO: compute handler index from
-             (opcode * 7 + epoch) % num_handlers.
+           - DISPATCH_COMPUTED_GOTO: seeded slot lookup that ends at the
+             same logical opcode.
+        7. After execution, fold the consumed instruction bytes into the
+           state-ISA history and rotate only dispatch metadata.
         8. For variable encoding: pad/skip to declared instruction length.
 
         Fixed ISA mode (dynamic_isa=False):
@@ -939,12 +1007,7 @@ class VMInterpreter:
             if self.steps_until_rekey <= 0:
                 self._rekey()
 
-            if self.state_isa:
-                self._update_state_isa(raw_opcode)
-                rotated = (raw_opcode + self.state_isa_rotation) & 0xFF
-                logical_opcode = self.inverse_map.get(rotated, rotated)
-            else:
-                logical_opcode = self.inverse_map.get(raw_opcode, raw_opcode)
+            logical_opcode = self.inverse_map.get(raw_opcode, raw_opcode)
 
             if self.encoding_mode == ENCODING_FIELD_SHUFFLE:
                 self._prepare_field_shuffle(logical_opcode)
@@ -955,9 +1018,13 @@ class VMInterpreter:
             elif self.dispatch_mode == DISPATCH_INDIRECT:
                 handler = self.dispatch_table.get(logical_opcode)
             elif self.dispatch_mode == DISPATCH_COMPUTED_GOTO:
-                idx = (logical_opcode * 7 + self.epoch) % len(self.handlers)
-                dispatched_op = list(self.handlers.keys())[idx]
-                handler = self.handlers.get(dispatched_op)
+                slot = self.handler_slots.get(logical_opcode)
+                if slot is None:
+                    handler = None
+                else:
+                    idx = (slot + self._dispatch_offset()) % len(self.handler_order)
+                    dispatched_op = self.computed_goto_table[idx]
+                    handler = self.handlers.get(dispatched_op) if dispatched_op == logical_opcode else None
 
             if handler is None:
                 self.state["halted"] = True
@@ -973,6 +1040,16 @@ class VMInterpreter:
                     self.state["regs"][self.REG_PC] = instr_start + self.variable_instr_len
                 elif consumed > self.variable_instr_len:
                     self.state["halted"] = True
+
+            if self.state_isa and not self.state["halted"]:
+                from .ephemeral_isa import OPCODE_OPERAND_BYTES
+                if self.encoding_mode == ENCODING_VARIABLE:
+                    instr_end = instr_start + self.variable_instr_len
+                else:
+                    instr_end = instr_start + 1 + OPCODE_OPERAND_BYTES.get(logical_opcode, 0)
+                instruction_bytes = bytes(self.bytecode[instr_start:instr_end])
+                instruction_id = hashlib.sha256(instruction_bytes).digest()[0]
+                self._update_state_isa(instruction_id)
         else:
             raw_opcode = self._read_byte()
 

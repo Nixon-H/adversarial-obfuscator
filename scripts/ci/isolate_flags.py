@@ -45,8 +45,8 @@ def try_flag(entry, src_out):
     out = os.path.join(ROOT, "build", "%s_iso.py" % stem)
     cmd = [sys.executable, "scripts/build.py", "--payload", SOURCE,
            "-o", out, "--force-output", "--opt-level", LEVEL,
-           "--skip-irgen", "--skip-llvmgen", "--skip-encrypt", "--skip-relay",
-           "--skip-extras"] + (["--seed", SEED] if SEED else []) + entry["argv"]
+           "--skip", "irgen", "llvmgen", "encrypt", "relay", "extras"] \
+           + (["--seed", SEED] if SEED else []) + entry["argv"]
     built = run(cmd, ROOT, BUILD_TIMEOUT)
     if built is None:
         # --code-genome alone exceeds 13 minutes. A slow build is not a broken

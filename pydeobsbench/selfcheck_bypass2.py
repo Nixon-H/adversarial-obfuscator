@@ -24,6 +24,9 @@ import sys
 import tempfile
 
 ART = sys.argv[1]
+# Operator-supplied licence path, not a machine-specific absolute path.
+LIC = (sys.argv[2] if len(sys.argv) > 2
+       else os.environ.get("NIXON_BENCH_LICENCE"))
 base = open(ART, encoding="utf-8", errors="surrogateescape").read()
 
 
@@ -40,8 +43,6 @@ def run(src_text, label, licence=None):
     out = proc.stdout + proc.stderr
     return proc.returncode, out
 
-
-LIC = "/home/nixon/scratch/bench-max/acme.licence"
 
 print("=== C: control (unpatched) ===")
 rc, out = run(base, "ctl", LIC)

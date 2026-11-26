@@ -14,7 +14,7 @@ here. This file is the single source of truth for the VM's instruction
 encoding scheme.
 
 Security Relevance:
-- Defines the 35-opcode ISA including encrypted operations (ENC_LOAD,
+- Defines the 36-opcode ISA including encrypted operations (ENC_LOAD,
   ENC_STORE, ENC_ADD, ENC_MUL) and fused operations (FUSED_LOAD_ADD_STORE,
   FUSED_CMP_JMP) that reduce the attacker's ability to distinguish
   individual operations.
@@ -99,7 +99,7 @@ _OPERAND_WIDTH = {
 
 class VMOpcode:
     """
-    Opcode constants for the 35-instruction VM ISA.
+    Opcode constants for the 36-instruction VM ISA.
 
     The opcode assignments here are the LOGICAL opcodes. The
     ephemeral ISA generator (ephemeral_isa.py) may shuffle these
@@ -145,6 +145,7 @@ class VMOpcode:
     ENC_MUL = 32
     FUSED_LOAD_ADD_STORE = 33
     FUSED_CMP_JMP = 34
+    CMP = 35
 
     LOGICAL_NAMES = {
         0: "NOP", 1: "ADD", 2: "SUB", 3: "MUL", 4: "DIV", 5: "MOD",
@@ -154,7 +155,7 @@ class VMOpcode:
         21: "JGE", 22: "JLE", 23: "CALL", 24: "RET",
         25: "PUSH", 26: "POP", 27: "ENTER", 28: "LEAVE",
         29: "ENC_LOAD", 30: "ENC_STORE", 31: "ENC_ADD", 32: "ENC_MUL",
-        33: "FUSED_LOAD_ADD_STORE", 34: "FUSED_CMP_JMP",
+        33: "FUSED_LOAD_ADD_STORE", 34: "FUSED_CMP_JMP", 35: "CMP",
     }
 
 

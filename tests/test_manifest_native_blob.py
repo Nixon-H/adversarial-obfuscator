@@ -27,12 +27,11 @@ import json
 import os
 import sys
 
-import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from obfuscator.build_manifest import (  # noqa: E402
-    MANIFEST_SUFFIX, build_manifest, sign_manifest, verify_manifest,
+    verify_manifest,
     write_manifest,
 )
 
@@ -232,7 +231,6 @@ def test_precedence_matrix_rows(tmp_path, monkeypatch):
     accepted it because the explicit argument won over the pin.
     """
     from obfuscator.build_manifest import MANIFEST_PIN_ENV
-    from obfuscator.licensing import private_key_from_hex
     from cryptography.hazmat.primitives.asymmetric.ed25519 import (
         Ed25519PrivateKey)
     from cryptography.hazmat.primitives import serialization
@@ -310,7 +308,6 @@ def test_without_release_policy_the_explicit_key_still_works(
     """The documented pre-policy contract for existing callers: explicit
     key first, pin next. This is the compatibility behaviour, NOT the
     release-mode authority."""
-    from obfuscator.build_manifest import MANIFEST_PIN_ENV
     from cryptography.hazmat.primitives.asymmetric.ed25519 import (
         Ed25519PrivateKey)
     publisher = Ed25519PrivateKey.generate()

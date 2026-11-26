@@ -17,10 +17,8 @@ including tamper+restamp, which the HMAC layer caught.
 """
 import hashlib
 import os
-import re
 import sys
 
-import pytest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO, "scripts"))

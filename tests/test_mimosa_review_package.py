@@ -30,7 +30,6 @@ import ast
 import os
 import sys
 
-import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -47,6 +46,9 @@ PIPELINE = os.path.join(REPO, "obfuscator", "core", "pipeline.py")
 _SINK = "url" + "open("
 #: What the same call looks like when aliased inside an emitted template.
 _ALIASED = ".request" + ".url" + "open"
+# pipeline.py's live clients now go through the guarded, address-pinned
+# transport; sources.py's emitted templates still use the raw call.
+_GUARDED = "checked" + "_urlopen("
 
 
 def _read(path):
@@ -117,7 +119,7 @@ def test_sources_request_sites_are_inside_emitted_templates():
     """
     spans = _template_spans(SOURCES)
     assert spans, "sources.py no longer contains emitted template strings"
-    cited = [2141, 2774, 2835, 2853, 2921, 3142, 3158]
+    cited = [2149, 2782, 2843, 2861, 2929, 3150, 3166]
     for line in cited:
         text = _line(SOURCES, line)
         assert _SINK in text or _ALIASED in text, (
@@ -134,7 +136,7 @@ def test_pipeline_request_sites_are_live_code_not_templates():
     spans = _template_spans(PIPELINE)
     with open(PIPELINE, encoding="utf-8") as fh:
         lines = fh.read().splitlines()
-    sinks = [i + 1 for i, ln in enumerate(lines) if _ALIASED in ln]
+    sinks = [i + 1 for i, ln in enumerate(lines) if _GUARDED in ln]
     assert len(sinks) >= 4, (
         "expected the four live outbound clients, found %d" % (len(sinks),))
     for line in sinks:
@@ -149,7 +151,7 @@ def test_the_checked_url_guard_is_still_in_place():
     source = _read(PIPELINE)
     assert "def checked_url(" in source
     guards = [ln for ln in source.splitlines()
-              if "checked_url(" in ln and "def " not in ln]
+              if _GUARDED in ln and "def " not in ln]
     assert len(guards) >= 4, (
         "the package says all four outbound sites are guarded; found %d calls"
         % (len(guards),))

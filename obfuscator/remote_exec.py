@@ -15,9 +15,10 @@ Design (each point is a test):
 * **Fail closed.**  If the service is unreachable, the stub raises rather
   than returning a plausible default.  A silent wrong answer is worse than a
   refusal.
-* **Authenticated and replay-resistant.**  Requests carry an HMAC over
-  (function name, canonical args, nonce, timestamp); the server rejects a
-  stale timestamp or a reused nonce.
+* **Authenticated and replay-resistant.**  Protocol-v1 requests carry an
+  HMAC over (function name, typed canonical args, typed canonical kwargs,
+  nonce, binary64 timestamp); the server rejects a stale timestamp or a
+  reused nonce.
 * **Explicit opt-in per function.**  Nothing is remote unless marked, so the
   default build is unchanged.
 
@@ -30,7 +31,9 @@ import ast
 import hashlib
 import hmac
 import json
+import math
 import os
+import struct
 import time
 import urllib.request
 from dataclasses import dataclass
@@ -42,6 +45,9 @@ SECRET_ENV = "NIXON_REMOTE_SECRET"
 URL_ENV = "NIXON_REMOTE_URL"
 #: Requests older than this are rejected (seconds).
 MAX_SKEW = 300.0
+#: Wire/signing protocol version. Version 1 uses the typed canonical form
+#: below, so Python and Rust agree on integers, binary64 values and strings.
+REMOTE_PROTOCOL_VERSION = 1
 
 
 class RemoteError(RuntimeError):
@@ -50,37 +56,93 @@ class RemoteError(RuntimeError):
 
 # ── client side ──────────────────────────────────────────────────────────
 
+def _utf8_hex(value: str) -> str:
+    return value.encode("utf-8").hex()
+
+
 def _canonical(value) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"),
-                      default=repr)
+    """Encode a JSON value in the language-neutral v1 canonical form.
+
+    The representation is deliberately typed: integers and floats never
+    collide, strings/object keys are UTF-8 hex (avoiding JSON escaping
+    differences), and floats are their exact big-endian IEEE-754 bits.
+    """
+    if value is None:
+        return '["n"]'
+    if isinstance(value, bool):
+        return '["b","1"]' if value else '["b","0"]'
+    if isinstance(value, int):
+        if value < -(1 << 63) or value > (1 << 64) - 1:
+            raise RemoteError("remote protocol integer out of range")
+        return '["i","%s"]' % value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise RemoteError("remote protocol numbers must be finite")
+        return '["f","%s"]' % struct.pack(">d", value).hex()
+    if isinstance(value, str):
+        return '["s","%s"]' % _utf8_hex(value)
+    if isinstance(value, (list, tuple)):
+        return '["a",[%s]]' % ",".join(_canonical(item) for item in value)
+    if isinstance(value, dict):
+        if not all(isinstance(key, str) for key in value):
+            raise RemoteError("remote protocol object keys must be strings")
+        parts = []
+        for key in sorted(value, key=lambda item: item.encode("utf-8")):
+            parts.append("[%s,%s]" % (_canonical(key), _canonical(value[key])))
+        return '["o",[%s]]' % ",".join(parts)
+    raise RemoteError("remote protocol value is not JSON-compatible")
 
 
 def sign_request(secret: bytes, function: str, args: list,
-                 nonce: str, timestamp: float) -> str:
-    """HMAC over the canonical request.  Deterministic and testable."""
+                 nonce: str, timestamp: float,
+                 kwargs: Optional[dict] = None) -> str:
+    """HMAC over the versioned canonical request.
+
+    ``kwargs`` is part of the signed material: a request that drops or
+    alters keyword arguments must fail verification.
+    """
+    if not isinstance(function, str) or not isinstance(nonce, str):
+        raise RemoteError("remote function and nonce must be strings")
+    if kwargs is not None and not isinstance(kwargs, dict):
+        raise RemoteError("remote kwargs must be an object")
+    try:
+        timestamp = float(timestamp)
+    except (TypeError, ValueError) as exc:
+        raise RemoteError("remote timestamp must be a finite number") from exc
+    if not math.isfinite(timestamp):
+        raise RemoteError("remote timestamp must be a finite number")
     material = "\n".join([
-        str(function),
+        "nixon-remote-v1",
+        _canonical(function),
         _canonical(list(args)),
-        str(nonce),
-        repr(float(timestamp)),
+        _canonical(dict(kwargs or {})),
+        _canonical(nonce),
+        _canonical(timestamp),
     ]).encode("utf-8")
     return hmac.new(bytes(secret), material, hashlib.sha256).hexdigest()
 
 
 def verify_request(secret: bytes, function: str, args: list, nonce: str,
                    timestamp: float, signature: str,
+                   kwargs: Optional[dict] = None,
                    *, now: Optional[float] = None,
                    max_skew: float = MAX_SKEW) -> None:
     """Raise RemoteError unless the request is authentic and fresh."""
     current = time.time() if now is None else float(now)
-    if abs(current - float(timestamp)) > max_skew:
+    timestamp = float(timestamp)
+    if not math.isfinite(current) or not math.isfinite(timestamp):
         raise RemoteError("remote request expired")
-    expected = sign_request(secret, function, args, nonce, timestamp)
-    if not hmac.compare_digest(expected, str(signature)):
+    if abs(current - timestamp) > max_skew:
+        raise RemoteError("remote request expired")
+    expected = sign_request(secret, function, args, nonce, timestamp, kwargs)
+    if (not isinstance(signature, str) or len(signature) != 64
+            or any(ch not in "0123456789abcdef" for ch in signature)):
+        raise RemoteError("remote request signature mismatch")
+    if not hmac.compare_digest(expected, signature):
         raise RemoteError("remote request signature mismatch")
 
 
-def call_remote(function: str, args: list, *,
+def call_remote(function: str, args: list, kwargs: Optional[dict] = None, *,
                 url: Optional[str] = None,
                 secret: Optional[bytes] = None,
                 timeout: float = 10.0,
@@ -107,14 +169,17 @@ def call_remote(function: str, args: list, *,
         raw_secret = bytes.fromhex(env)
     nonce = os.urandom(16).hex()
     timestamp = time.time()
+    kwargs = dict(kwargs or {})
     body = json.dumps({
+        "version": REMOTE_PROTOCOL_VERSION,
         "function": function,
         "args": list(args),
+        "kwargs": kwargs,
         "nonce": nonce,
         "timestamp": timestamp,
         "signature": sign_request(raw_secret, function, list(args),
-                                  nonce, timestamp),
-    }).encode("utf-8")
+                                  nonce, timestamp, kwargs),
+    }, allow_nan=False, separators=(",", ":")).encode("utf-8")
 
     if opener is not None:
         payload = opener(url, body)
@@ -162,21 +227,35 @@ class RemoteRegistry:
         current = time.time() if now is None else float(now)
         try:
             doc = json.loads(body.decode("utf-8"))
+            if not isinstance(doc, dict):
+                raise RemoteError("bad request: expected a JSON object")
+            if doc.get("version") != REMOTE_PROTOCOL_VERSION:
+                raise RemoteError("unsupported remote protocol version")
             function = doc["function"]
             args = doc.get("args", [])
-            nonce = str(doc["nonce"])
-            timestamp = float(doc["timestamp"])
-            signature = str(doc["signature"])
+            kwargs = doc.get("kwargs", {})
+            nonce = doc["nonce"]
+            timestamp = doc["timestamp"]
+            signature = doc["signature"]
+            if not isinstance(function, str) or not isinstance(nonce, str):
+                raise RemoteError("bad request: function and nonce must be strings")
+            if not isinstance(args, list) or not isinstance(kwargs, dict):
+                raise RemoteError("bad request: args must be an array and kwargs an object")
+            if (not isinstance(timestamp, (int, float))
+                    or isinstance(timestamp, bool)):
+                raise RemoteError("bad request: timestamp must be a number")
+            if not isinstance(signature, str):
+                raise RemoteError("bad request: signature must be a string")
             verify_request(self._secret, function, args, nonce, timestamp,
-                           signature, now=current)
+                           signature, kwargs, now=current)
             self._prune(current)
             if nonce in self._seen_nonces:
                 raise RemoteError("remote request replayed")
             self._seen_nonces[nonce] = current
             if function not in self._functions:
                 raise RemoteError("unknown remote function %r" % (function,))
-            result = self._functions[function](*args)
-            return json.dumps({"result": result}).encode("utf-8")
+            result = self._functions[function](*args, **kwargs)
+            return json.dumps({"result": result}, allow_nan=False).encode("utf-8")
         except RemoteError as exc:
             return json.dumps({"error": str(exc)}).encode("utf-8")
         except Exception as exc:
@@ -244,7 +323,7 @@ def stub_source(func: ExtractedFunction) -> str:
         "def %s(*args, **kwargs):\n"
         '    """Executed on the operator\'s service; not present in this build."""\n'
         "    from obfuscator.remote_exec import call_remote\n"
-        "    return call_remote(%r, list(args))\n"
+        "    return call_remote(%r, list(args), kwargs=kwargs)\n"
         % (func.name, func.name))
 
 
@@ -302,19 +381,12 @@ def write_remote_bundle(remote: list, path: str) -> None:
     parts.append('''
 if __name__ == "__main__":
     import sys
-    _req = json.loads(sys.stdin.read() or "{}")
     _registry = build_registry()
-    _fn = _req.get("function", "")
-    _args = _req.get("args", [])
-    try:
-        _impl = _registry._functions.get(_fn)
-        if _impl is None:
-            _out = {"error": "unknown remote function %r" % (_fn,)}
-        else:
-            _out = {"result": _impl(*_args)}
-    except Exception as _exc:
-        _out = {"error": str(_exc)}
-    sys.stdout.write(json.dumps(_out))
+    # Use the same verification and kwargs-aware dispatch as the reference
+    # registry. The Rust relay authenticates first, but the bundle remains
+    # safe when invoked directly.
+    _out = _registry.handle(sys.stdin.buffer.read())
+    sys.stdout.buffer.write(_out)
 ''')
     with open(path, "w", encoding="utf-8") as handle:
         handle.write("".join(parts))

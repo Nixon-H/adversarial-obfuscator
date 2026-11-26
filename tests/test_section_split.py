@@ -1,5 +1,4 @@
 """Tests for obfuscator/section_split.py — sealed section streaming."""
-import base64
 import hashlib
 import hmac
 import json
@@ -105,57 +104,6 @@ def test_unkeyed_tag_forgery_is_rejected():
 # pin the answers to the code that actually ships, so the documentation
 # cannot drift into "AES-GCM is implemented, therefore AES-GCM is used".
 
-def test_the_shipped_construction_is_v2_keystream_xor_plus_bound_hmac():
-    """Section data is SHA-256 keystream XOR; integrity is a CONTEXT-BOUND HMAC.
-
-    The AEAD helper (obfuscator.aead) exists and is separately tested, but it
-    is NOT what protects the section pack -- the loader must run on customer
-    machines with stdlib only, which is why the construction is stdlib
-    SHA-256/HMAC rather than AES-GCM. Anyone summarising this project must
-    not report "AES-GCM sections".
-
-    Reconstructed BY HAND from the shipped output (v2 scheme): the keystream
-    key and the MAC key are domain-separated, and the MAC binds the section
-    index, the pack total and the nonce. This is the review register's P1
-    "key separation + explicit context binding", measured on the output.
-    """
-    key = b"A" * 32
-    payload = b"shipped-path" * 50
-    pack = split_sealed(payload, sections=3, key=key)
-    assert pack["v"] == 3, "the pack must declare its scheme version"
-    for section in pack["sections"]:
-        nonce = bytes.fromhex(section["nonce"])
-        ciphertext = bytes.fromhex(section["data"])
-        # Role-separated keys: the keystream runs under the ENC key, the tag
-        # verifies under the MAC key. Deriving both here means a regression
-        # to the shared-key shape breaks this test.
-        enc_key = hashlib.sha256(
-            b"nx-section-enc:" + key
-            + section["i"].to_bytes(4, "big") + nonce).digest()
-        mac_key = hashlib.sha256(
-            b"nx-section-mac:" + key
-            + section["i"].to_bytes(4, "big") + nonce).digest()
-        assert enc_key != mac_key, "enc and mac keys must be independent"
-        recovered = bytes(
-            a ^ b for a, b in zip(
-                ciphertext, _keystream(enc_key, nonce, len(ciphertext))))
-        assert recovered[32:] == payload[
-            section["i"] * (len(payload) // 3):
-            (section["i"] + 1) * (len(payload) // 3)], (
-            "section body is not a plain keystream XOR under the ENC key")
-        # the 32-byte prefix is an HMAC under the MAC key, bound to
-        # version4 || index4 || total4 || nonce || plaintext (the AAD role,
-        # including the VERSION so a downgrade edit fails the tag).
-        ctx = ((3).to_bytes(4, "big")
-               + section["i"].to_bytes(4, "big")
-               + len(payload).to_bytes(4, "big") + nonce
-               + hashlib.sha256(
-                   b"nx-pack-id:" + key
-                   + bytes.fromhex(pack["pack_nonce"])).digest()[:16])
-        expected = hmac.new(mac_key, ctx + recovered[32:],
-                            hashlib.sha256).digest()
-        assert recovered[:32] == expected
-
 
 def test_each_section_uses_a_distinct_derived_key():
     """Key separation: master + index + nonce, never the master directly."""
@@ -209,7 +157,7 @@ def test_the_shipped_construction_is_v2_keystream_xor_plus_bound_hmac():
     SHA-256/HMAC rather than AES-GCM. Anyone summarising this project must
     not report "AES-GCM sections".
 
-    Reconstructed BY HAND from the shipped output (v2 scheme): the keystream
+    Reconstructed BY HAND from the shipped output (pack format v3; keystream construction unchanged since v2): the keystream
     key and the MAC key are domain-separated, and the MAC binds the section
     index, the pack total and the nonce. This is the review register's P1
     "key separation + explicit context binding", measured on the output.
@@ -284,8 +232,17 @@ def test_a_v1_pack_still_verifies_through_stream_join():
     assert bytes(joined) == payload
     # The v1 MAC is hmac(skey + nonce, plaintext) -- asserted here so the
     # legacy path in stream_join stays exactly the pre-v2 scheme.
-    skey0 = _section_key(key, 0, bytes.fromhex(sections[0]["nonce"]))
+    nonce0 = bytes.fromhex(sections[0]["nonce"])
+    skey0 = _section_key(key, 0, nonce0)
     part0 = payload[:chunk]
+    # Recompute the v1 tag exactly as the builder did and check the stored
+    # bytes: tag = hmac(skey + nonce, plaintext), prepended to the part and
+    # XORed with the keystream.
+    expected_tag = hmac.new(skey0 + nonce0, part0, hashlib.sha256).digest()
+    stored = bytes.fromhex(sections[0]["data"])
+    recovered_tag = bytes(a ^ b for a, b in zip(
+        stored[:32], _keystream(skey0, nonce0, 32)))
+    assert recovered_tag == expected_tag, "v1 MAC is not hmac(skey+nonce, plaintext)"
 
 
 def test_relabelled_sections_fail_the_bound_tag():

@@ -109,3 +109,14 @@ def test_signed_manifest_survives_reserialisation(tmp_path):
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(dict(reversed(list(m.items()))), fh)
     assert verify_manifest(art, key.public_key())["ok"] is True
+
+def test_git_commit_falls_back_to_injected_source_commit(monkeypatch):
+    """VCS-less builds can still bind the revision the build system used."""
+    import types as _types
+    import obfuscator.build_manifest as bm
+
+    monkeypatch.setenv("NIXON_SOURCE_COMMIT", "a" * 40)
+    monkeypatch.setattr(
+        bm.subprocess, "run",
+        lambda *args, **kwargs: _types.SimpleNamespace(stdout=""))
+    assert bm._git_commit() == "a" * 40

@@ -278,6 +278,7 @@ def phase_adaptive_classifier_loop(payload, opts):
         from scripts.classification import FunctionClassifier, StrategySelector
         from scripts.benchmark.feedback import BenchmarkFeedbackAnalyzer
         from scripts.benchmark import AIBenchmark
+        from scripts.benchmark.score_control import control_permitted
 
         for iteration in range(3):
             log("ADAPTIVE_LOOP", f"Iteration {iteration + 1}/3")
@@ -311,15 +312,20 @@ def phase_adaptive_classifier_loop(payload, opts):
             analyzer = BenchmarkFeedbackAnalyzer()
             profile = analyzer.analyze(results)
 
-            from obfuscator.adaptive_rewriter import AdaptiveRewriter
-            rewriter = AdaptiveRewriter()
             with open(protected_path, encoding='utf-8') as f:
                 current = f.read()
-            rewritten = rewriter.rewrite(profile, current)
-            with open(protected_path, "w", encoding='utf-8') as f:
-                f.write(rewritten)
+            control_ok, control_reason = control_permitted(results)
+            if not control_ok:
+                log("ADAPTIVE_LOOP", f"  Adaptive rewrite disabled: {control_reason}")
+                rewritten = current
+            else:
+                from obfuscator.adaptive_rewriter import AdaptiveRewriter
+                rewriter = AdaptiveRewriter()
+                rewritten = rewriter.rewrite(profile, current)
+                with open(protected_path, "w", encoding='utf-8') as f:
+                    f.write(rewritten)
 
-            log("ADAPTIVE_LOOP", f"  Applied {len(profile.recommended_actions)} adaptive actions")
+                log("ADAPTIVE_LOOP", f"  Applied {len(profile.recommended_actions)} adaptive actions ({control_reason})")
 
             if _os_mod.path.exists(protected_path):
                 _os_mod.replace(protected_path, payload)

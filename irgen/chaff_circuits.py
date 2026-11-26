@@ -652,11 +652,12 @@ class ChaffCircuitGenerator:
     def wrap_verify_function(self, original_func_name: str,
                              chaff_funcs: List[str]) -> str:
         """
-        Generate a wrapper function that routes correct input to real
-        circuit and incorrect input to chaff.
+        Generate a wrapper function around the real circuit.
 
-        Uses an opaque predicate (always true) with an MBA expression
-        to hide the routing decision.
+        Uses an opaque predicate (always true) with an MBA expression:
+        the real circuit is always invoked. Input-dependent routing
+        (correct input -> real, anything else -> chaff) is done by
+        obfuscate_verification, which knows the expected input.
         """
         num_chaff = len(chaff_funcs)
 
@@ -692,7 +693,6 @@ class ChaffCircuitGenerator:
         cannot distinguish real from chaff.
         """
         num_chaff = len(chaff_funcs)
-        exp_low = expected_input & 0xFFFFFFFF
 
         lines = [f"# Obfuscated chaff wrapper for {original_func_name}", ""]
         lines.append(f"__chaff_pool_{original_func_name} = [")
@@ -702,18 +702,16 @@ class ChaffCircuitGenerator:
         lines.append("")
 
         lines.append(f"def verify_obf_{original_func_name}(input):")
-        lines.append("    # MBA expression: obfuscated comparison with expected_input")
-        lines.append(f"    _mba_a = (input ^ {exp_low}) + 0x9E3779B9")
-        lines.append("    _mba_b = (_mba_a * 0x6C078965) & 0xFFFFFFFF")
-        lines.append("    _mba_c = _mba_b ^ 0x5DEECE66D")
-        lines.append("    # Opaque predicate: always follows the 'else' branch for real input")
-        lines.append(f"    _opq1 = (_mba_c & 0xFF) == ({exp_low & 0xFF} & 0xFF)")
-        lines.append(f"    _opq2 = ((_mba_c >> 8) & 0xFF) == (({exp_low} >> 8) & 0xFF)")
-        lines.append("    if _opq1 and _opq2:")
+        lines.append("    # Compare Python's full-width integer difference before reducing it for MBA.")
+        lines.append("    # Masking the XOR/difference to 32 bits made high-bit aliases route to the real circuit.")
+        lines.append(f"    _diff = input - ({expected_input})")
+        lines.append("    _mba_c = (_diff * 0x6C078965) & 0xFFFFFFFFFFFFFFFF")
+        lines.append("    _opq = int(_diff != 0)")
+        lines.append("    if _opq == 0:")
         lines.append(f"        return {original_func_name}(input)")
         lines.append("    else:")
         lines.append("        # MBA hash for chaff index selection")
-        lines.append("        _h1 = (input * 0x6C078965 + 0x5DEECE66D) & 0x7FFFFFFF")
+        lines.append("        _h1 = (_mba_c + 0x5DEECE66D) & 0x7FFFFFFF")
         lines.append("        _h2 = (_h1 ^ (_h1 >> 13)) * 0x9E3779B9")
         lines.append(f"        _idx = (_h2 ^ (_h2 >> 15)) % {num_chaff}")
         lines.append(f"        return __chaff_pool_{original_func_name}[_idx](input)")
@@ -746,16 +744,16 @@ def generate_chaff_pipeline(
 
     generator = ChaffCircuitGenerator(seed, num_chaff)
     result_functions = []
-    chaff_pool: dict[str, list[str]] = {}
+    chaff_pool: dict[str, list] = {}
 
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name in target_functions:
             chaff_funcs = []
-            template_names = list(_OPCODE_REMAP.keys())
+            template_names = list(_OPCODE_REMAP.keys())[:max(1, num_chaff)]
             for tname in template_names:
                 chaff_ast = generator._transform_ast_func(node, node.name, tname)
                 chaff_src = ast.unparse(chaff_ast)
-                chaff_funcs.append(chaff_src)
+                chaff_funcs.append((chaff_ast.name, chaff_src))
             chaff_pool[node.name] = chaff_funcs
             result_functions.append(node)
         else:
@@ -763,7 +761,13 @@ def generate_chaff_pipeline(
 
     wrapper_parts = [source]
     for fname, cfuncs in chaff_pool.items():
-        wrapper = generator.wrap_verify_function(fname, cfuncs)
+        # cfuncs are (name, source) pairs: each chaff variant is emitted as a
+        # top-level def, and the pool holds the function NAMES. (Emitting the
+        # def source inside the list literal produced a SyntaxError.)
+        for _cname, csrc in cfuncs:
+            wrapper_parts.append(csrc)
+        names = [cname for cname, _csrc in cfuncs]
+        wrapper = generator.wrap_verify_function(fname, names)
         wrapper_parts.append(wrapper)
 
     return "\n\n".join(wrapper_parts)

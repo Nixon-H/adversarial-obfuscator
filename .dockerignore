@@ -1,0 +1,19 @@
+# Keep the build context to sources the image actually needs.
+.git
+.mimosa
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+build/
+ci-artifacts/
+audit/
+**/target/
+*.log
+.benchmarks/
+re-bench/
+mistral.md
+tests/fixtures/portable/*stego.py
+tests/fixtures/portable/*Stego.py
+docs/research/ai-layer-bench-*/[a-z]*.py

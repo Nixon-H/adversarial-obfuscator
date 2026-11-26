@@ -5,7 +5,9 @@ emits JSON: one entry per flag with the argv that isolates it, or a reason it
 cannot be isolated in CI.
 
 The point is coverage that can be counted. "Some flags are tested" is not a
-number; 274 flags, each with a verdict, is.
+number. The live catalogue currently contains 30 flags: 18 safely isolatable
+entries and 12 explicit exclusions; the counts are always derived, never
+hard-coded into workflow coverage claims.
 """
 import ast
 import json

@@ -17,7 +17,6 @@ import hashlib
 import os
 import sys
 
-import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -92,10 +91,11 @@ def test_the_shipped_derivation_cannot_collide():
     the severity must be raised.
     """
     def shipped_ids(section_pack_val):
+        from obfuscator.honeypayload import decoy_key
+
         seed = hashlib.sha256(section_pack_val.encode("utf-8")).digest()
         build_id = seed[:16].hex()
-        key = hashlib.sha256(
-            b"nx-honey-decoy:" + build_id.encode("utf-8")).digest()
+        key = decoy_key(build_id, "test-only-honey-secret")
         return seed, build_id, key
 
     pairs = [shipped_ids("pack-%d" % i)[1:] for i in range(5)]
