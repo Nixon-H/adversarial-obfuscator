@@ -29,8 +29,8 @@ def load_redactions():
     """
     root=Path('/home/nixon/Projects/adversarial-obfuscator/re-bench/secrets')
     out=[]
-    for variant in ('absolute','absolute-native-only'):
-        sec=root/variant/'cipher'
+    for sec in sorted(root.glob('*/cipher')):
+        variant=sec.parent.name
         try:
             lic_text=(sec/'runtime.licence').read_text().strip()
             out.append((lic_text.encode(),b'<redacted-runtime-licence>'))

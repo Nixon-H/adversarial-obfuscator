@@ -531,3 +531,38 @@ def test_platform_github_without_a_token_refuses_to_build():
     assert "fall back to bytecode (local blob still embedded)" not in body, (
         "the warn-and-continue path is back; that is what shipped a "
         "single-OS artefact under a platform=github request")
+
+
+def test_platform_github_farm_failure_refuses_single_os_cloud_artifact():
+    """A token-existing farm failure must fail as loudly as a missing token.
+
+    Benchmark evidence 2026-11-26: the farm upload returned HTTP 400, the
+    warning said other OSes would fall back to bytecode, and the build still
+    produced rc=0 artifacts whose windows/darwin blob slots were empty. That
+    is a local artifact mislabeled as a cloud artifact. The explicit cloud
+    path must be fail-closed for upload failure, missing run id, and missing
+    farm repository alike.
+    """
+    src = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "obfuscator", "core", "pipeline.py"),
+        encoding="utf-8").read()
+    assert '"platform=github requested but the Cython farm "' in src
+    assert 'run returned no id; refusing to ship' in src
+    assert 'repository was unavailable; refusing to ship' in src
+    assert 'build failed: {_farm_exc}; refusing to ship' in src
+    assert 'other OSes fall back to bytecode' not in src[src.find("if _farm_platform == 'github'"):src.find('with UI.Task("Hybrid Loader"')]
+
+
+
+def test_platform_github_singleton_repo_uses_os_held_lock():
+    """Measured race 2026-11-26: concurrent local builders uploaded different
+    payloads into the same farm repo while matrix jobs were starting, producing
+    a runner/controller payload hash mismatch. The singleton repo must be
+    serialized by an OS-held lock rather than trusting callers to coordinate."""
+    src = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "obfuscator", "core", "pipeline.py"),
+        encoding="utf-8").read()
+    assert '_farm_repo_lock = _acquire_farm_repo_lock()' in src
+    assert 'fcntl.flock(fh.fileno(), fcntl.LOCK_EX)' in src
+    assert '_release_farm_repo_lock(_farm_repo_lock)' in src
+    assert 'two different machines sharing one GitHub account' in src
