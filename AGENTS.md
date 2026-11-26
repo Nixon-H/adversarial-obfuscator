@@ -5,8 +5,8 @@
 - Focused pytest runs should use the fast local pytest installation and a writable temp directory:
   `TMPDIR=/home/nixon/absmax-tmp /home/nixon/.local/bin/pytest -q <tests> --tb=short -p no:cacheprovider`
 - The full test tree is large. Use bounded partitions instead of a single serial run:
-  `TMPDIR=/home/nixon/absmax-tmp TEST_PARTITION_PYTEST_RUNNER=/home/nixon/absmax-tmp/run_pytest.py python3 scripts/run_test_partitions.py --timeout 1800 --test-timeout 120 --out-dir <output-dir>`
-- `scripts/run_pytest.py` is the spawn-safe pytest entry point used by the partition runner. It is untracked local test infrastructure and disappeared once during a long run; copy it to `/home/nixon/absmax-tmp/run_pytest.py` and set `TEST_PARTITION_PYTEST_RUNNER` for multi-partition runs.
+  `TMPDIR=/home/nixon/absmax-tmp TEST_PARTITION_PYTEST_RUNNER=/home/nixon/absmax-runner/run_pytest.py python3 scripts/run_test_partitions.py --timeout 1800 --test-timeout 120 --out-dir <output-dir>`
+- `scripts/run_pytest.py` is the spawn-safe pytest entry point used by the partition runner. It is tracked test infrastructure; if a long-running environment loses the working-tree file, copy it to `/home/nixon/absmax-runner/run_pytest.py` outside the pytest temporary root and set `TEST_PARTITION_PYTEST_RUNNER` for multi-partition runs.
 
 ## ABSOLUTE MAXIMUM benchmark evidence
 
