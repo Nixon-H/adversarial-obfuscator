@@ -96,3 +96,69 @@ def test_corrupt_mark_degrades_to_zero(artefact):
     mark = rb.check_rollback(artefact, 3, KEY)["mark"]
     rb.write_mark(mark, KEY, 3, "payload_protected.py")
     assert rb.read_mark(mark) == 3
+
+
+def test_emitted_rollback_snippet_enforces_the_high_water_mark(tmp_path):
+    artefact = tmp_path / "payload_protected.py"
+    artefact.write_text("print('x')\n", encoding="utf-8")
+    key_hex = (b"k" * 32).hex()
+
+    def loaded(level):
+        snippet = rb.emit_rollback_snippet(level, key_hex)
+        ns = {"__file__": str(artefact)}
+        exec(compile(snippet, str(artefact), "exec"), ns)
+        return ns
+
+    first = loaded(5)
+    assert first["_nx_rollback_gate"]() == "ok"
+    assert (tmp_path / rb.MARK_NAME).exists()
+
+    downgrade = loaded(4)
+    assert downgrade["_nx_rollback_gate"]() == "refused"
+
+    upgrade = loaded(6)
+    assert upgrade["_nx_rollback_gate"]() == "ok"
+    assert rb.read_mark(str(tmp_path / rb.MARK_NAME), key=bytes.fromhex(key_hex),
+                        artefact_name=artefact.name) == 6
+
+
+def test_emitted_rollback_snippet_rejects_invalid_build_inputs(tmp_path):
+    for level, key in ((-1, "00" * 32), ("5", "00" * 32), (5, ""), (5, "not-hex")):
+        with pytest.raises(ValueError):
+            rb.emit_rollback_snippet(level, key)
+
+
+def test_pipeline_wires_one_protection_level_into_loader_and_manifest():
+    source = open("obfuscator/core/pipeline.py", encoding="utf-8").read()
+    assert "args._protection_level = _rb_level" in source
+    assert "protection_level=_rb_level" in source
+    assert "protection_level=getattr(args, \"_protection_level\", None)" in source
+    assert source.index("protection_level=_rb_level") < source.index(
+        "protection_level=getattr(args, \"_protection_level\", None)")
+
+
+def test_generated_loader_enforces_rollback_before_payload(tmp_path):
+    import subprocess
+    import sys
+    from obfuscator.core.pipeline import generate_hybrid_loader_script
+
+    artefact = tmp_path / "payload_protected.py"
+    env = dict(os.environ, NIXON_LOG_REDIRECT="0", NIXON_LADDER_DEBUG="1")
+
+    def write_and_run(level):
+        src, _blobs, _fallback = generate_hybrid_loader_script(
+            {}, b"print('RB_PAYLOAD_OK')", "11" * 32,
+            build_id="rollback-test", protection_level=level,
+            self_check=False)
+        artefact.write_text(src, encoding="utf-8")
+        return subprocess.run([sys.executable, str(artefact)],
+                              capture_output=True, text=True, timeout=30,
+                              env=env)
+
+    first = write_and_run(20)
+    assert first.returncode == 0, first.stderr[-500:]
+    assert (tmp_path / rb.MARK_NAME).exists()
+
+    downgrade = write_and_run(10)
+    assert downgrade.returncode == 137
+    assert "rollback-refused" in downgrade.stderr

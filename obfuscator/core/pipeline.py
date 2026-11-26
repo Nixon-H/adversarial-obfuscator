@@ -2355,7 +2355,8 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
                                    allowed_regions=None,
                                    blocked_regions=None,
                                    seal_salt=None,
-                                   licence_token_hash=""):
+                                   licence_token_hash="",
+                                   protection_level=None):
     # Phase-4 wiring: all new kwargs default to current behavior (no change
     # when absent). vm/secure-temp snippets are always appended (report-only,
     # safe); hostguard only when requested (changes exec semantics).
@@ -2746,6 +2747,24 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         # above funnels into; shipping without it turns armed gates into
         # runtime NameErrors.
         raise SystemExit("kill-ladder emission failed: %s" % (_kl_exc,))
+    # Runtime anti-rollback is emitted only for real pipeline builds that
+    # supply a monotonic protection level. Direct generator use in tests keeps
+    # its previous deterministic shape when no level is supplied.
+    if protection_level is not None:
+        try:
+            from obfuscator.rollback import emit_rollback_snippet as _rb_emit
+            _phase4_suffix += _rb_emit(int(protection_level), str(key_hex)) + "\n"
+            _phase4_suffix += (
+                "_NX_ROLLBACK_GATE = _nx_rollback_gate()\n"
+                "if _NX_ROLLBACK_GATE == \"refused\":\n"
+                "    _nx_kill(\"rollback-refused\")\n"
+                "elif _NX_ROLLBACK_GATE != \"ok\":\n"
+                "    _nx_kill(\"rollback-mark-unwritable\")\n"
+            )
+        except SystemExit:
+            raise
+        except Exception as _rb_exc:
+            raise SystemExit("rollback gate emission failed: %s" % (_rb_exc,))
     # AUDIT GAPS #52/#75: MAC-bound trial deadline + clock-rollback gate.
     # Additive: only when trial_seconds is set; None/0 keeps current
     # behavior (plain _NX_TRIAL_SECONDS marker, no gate). The gate is a
@@ -5732,8 +5751,12 @@ def build_project(args):
                                 except SystemExit:
                                     raise
                                 except Exception as _ra_exc:
-                                    UI.warn("farm attestation check skipped: %s"
+                                    UI.warn("farm attestation verification error: %s"
                                             % (_ra_exc,))
+                                    raise SystemExit(
+                                        "farm runner attestation could not be "
+                                        "verified; unverified farm output is refused"
+                                    ) from _ra_exc
                                 _fat = find_native_blobs(source)
                                 for _os_name, _b64 in _fat.items():
                                     # local blob wins for the current OS
@@ -5941,6 +5964,16 @@ def build_project(args):
             # `native_blob: {bytes: 0}` for a deliverable carrying a 212 KB
             # .so -- it had no path to hash and no other input.
             args._native_blob_dict = {k: v for k, v in blobs.items() if v}
+            # Client-side anti-rollback needs a monotonic ordering input. No
+            # trustworthy operator-controlled release counter exists yet, so
+            # production builds use the build UNIX timestamp. This is not a
+            # claim of server-authoritative rollback protection; it orders
+            # artifacts for the local high-water mark without adding another
+            # undocumented operator environment variable.
+            _rb_level = getattr(args, '_protection_level', None)
+            if not isinstance(_rb_level, int) or _rb_level < 0:
+                _rb_level = int(time.time())
+                args._protection_level = _rb_level
             hybrid_loader_src, real_blobs_dict, real_fallback_str = generate_hybrid_loader_script(
                 blobs, real_fallback_enc, blob_key_hex, native_only=is_native_only,
                 hwid=_w_hwid, trial_seconds=_w_trial_seconds,
@@ -5965,6 +5998,7 @@ def build_project(args):
                 licence_bound=_licence_bound,
                 licence_env_only=_licence_env_only,
                 licence_chain=_licence_chain_enabled,
+                protection_level=_rb_level,
                 strict_detections=bool(getattr(args, 'strict_detections', True)),
             )
             if getattr(args, 'section_split', False):
@@ -8659,6 +8693,7 @@ def main():
                             "diversified": "sha256(repro + urandom + machine)",
                         },
                         build_id=str(getattr(args, "_build_id", "") or ""),
+                        protection_level=getattr(args, "_protection_level", None),
                         # §7: the environment that produced this artefact,
                         # including any drift from requirements.lock. Recorded
                         # in the SIGNED manifest so "which Cython built this"
