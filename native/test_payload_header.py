@@ -77,7 +77,7 @@ class PayloadHeaderRegression(unittest.TestCase):
         )
 
     def test_generator_emits_self_contained_header(self):
-        with tempfile.TemporaryDirectory(prefix="ao-payload-", dir="/tmp/opencode") as tmp:
+        with tempfile.TemporaryDirectory(prefix="ao-payload-") as tmp:
             tmp_path = Path(tmp)
             payload = tmp_path / "payload.py"
             output = tmp_path / "payload.h"
@@ -118,7 +118,7 @@ class PayloadHeaderRegression(unittest.TestCase):
             )
 
     def test_generator_windows_allocator_include_is_self_contained(self):
-        with tempfile.TemporaryDirectory(prefix="ao-payload-win-", dir="/tmp/opencode") as tmp:
+        with tempfile.TemporaryDirectory(prefix="ao-payload-win-") as tmp:
             tmp_path = Path(tmp)
             payload = tmp_path / "payload.py"
             output = tmp_path / "payload.h"
