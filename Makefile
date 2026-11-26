@@ -230,6 +230,6 @@ lint-clean:
 	python3 scripts/lint/clean_unused_locals.py obfuscator/ scripts/ tests/ irgen/ vm/ llvmgen/ encrypt/ *.py --apply
 
 test:
-	PYTHONDONTWRITEBYTECODE=1 NIXON_TEST_TIMEOUT=60 python3 scripts/run_pytest.py tests/ -q -p no:cacheprovider
+	PYTHONDONTWRITEBYTECODE=1 NIXON_TEST_TIMEOUT=$(or $(NIXON_TEST_TIMEOUT),60) python3 scripts/run_pytest.py tests/ -q -p no:cacheprovider
 	cd runtime && cargo test
 	cd relay && cargo test

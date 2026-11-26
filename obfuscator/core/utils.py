@@ -1135,12 +1135,10 @@ class GitHubBuildFarm:
     def delete_repo(self):
         """Delete the build repo. Returns True when it is gone (or absent).
 
-        --public advertises "Nukes repo after build" and nothing implemented
-        it: the flag was parsed and never read, so every cloud build left a
-        repo holding the payload source behind.  That is a supply-chain
-        finding, not a cosmetic one -- the source is the thing the protection
-        exists to withhold, and the farm's copy survives after the artefact is
-        downloaded.
+        The disposable farm repository contains the uploaded payload source.
+        Cloud builds therefore delete it by default after use; retention is an
+        explicit debugging opt-in rather than the normal confidentiality
+        boundary.
         """
         import requests
         url = f"{self.base_url}/repos/{self.username}/{self.repo_name}"

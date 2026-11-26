@@ -1,9 +1,12 @@
 # CLI Flag Audit
 
 **Generated:** 2026-11-10 from the live parsers (`scripts/build.py` and
-`obfuscator/core/pipeline.py`). **Status:** current inventory; regenerate after
-adding flags. **Audited:** 2026-11-12 every flag was re-verified against its
-code path (see "Implementation audit" below).
+`obfuscator/core/pipeline.py`). **Status:** historical inventory; the current
+machine-checked parser surface is [`CLI.md`](CLI.md). The 2026-11-27 farm-repo
+cleanup change added `--keep-farm-repo` and made `--public` a deprecated legacy
+alias because disposable farm repositories are deleted by default. **Audited:**
+2026-11-12 every flag was re-verified against its code path (see
+"Implementation audit" below).
 
 `Parser` says which entry point accepts the option. `both` means both do, but
 not necessarily with the same behaviour; see the cross-pipeline table in

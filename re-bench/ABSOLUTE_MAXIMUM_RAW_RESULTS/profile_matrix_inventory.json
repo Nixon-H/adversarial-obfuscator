@@ -1,0 +1,164 @@
+{
+  "generated": 1795721896.2523324,
+  "variants": {
+    "maximum-packed": {
+      "artifact_exists": true,
+      "secrets_exist": true,
+      "sha256": "77768b84dff54e4aace072db248d4a94e08c9e6ed3b9a2a31f4406a84856b778",
+      "size": 1522930,
+      "build_rc": 0,
+      "selected_form": "recursive-packed-sidecar",
+      "status": "BUILT_AND_RUNTIME_CONTROLLED"
+    },
+    "maximum-local": {
+      "artifact_exists": true,
+      "secrets_exist": true,
+      "sha256": "118ae2ed15e617926ad050ddbfebaced6bd4d4b59644772257f74dbbb285a396",
+      "size": 1040271,
+      "build_rc": 0,
+      "selected_form": "dist-universal",
+      "status": "BUILT_AND_RUNTIME_CONTROLLED"
+    },
+    "maximum-cloud": {
+      "artifact_exists": true,
+      "secrets_exist": true,
+      "sha256": "f9c5256d796c57fccc81e0eff0064b5743a1768e2dc203dfa3fc91651965a395",
+      "size": 1327566,
+      "build_rc": 0,
+      "selected_form": "dist-universal",
+      "status": "BUILT_AND_RUNTIME_CONTROLLED",
+      "cloud_validation": "cloud-final4 validated: manifest hash agreement, windows/linux/darwin native blobs present, positive runtime control passed, missing-secret control failed closed, 3/3 runner attestations valid"
+    },
+    "absolute": {
+      "artifact_exists": true,
+      "secrets_exist": true,
+      "sha256": "5382e72af5cce267fa2ec0379b6c3910b0bc33f7ac645a5ad2c88bc011ce0fbe",
+      "size": 1794213,
+      "build_rc": 0,
+      "selected_form": "dist-universal",
+      "status": "BUILT_AND_RUNTIME_CONTROLLED"
+    },
+    "absolute-cloud": {
+      "artifact_exists": true,
+      "secrets_exist": true,
+      "sha256": "9bfdadef9414f9f79b0529f16bfa9591423f6f93bc53a5f9dbea83e1e6330dc0",
+      "size": 4416391,
+      "build_rc": 0,
+      "selected_form": "dist-universal",
+      "status": "BUILT_AND_RUNTIME_CONTROLLED",
+      "cloud_validation": "cloud-final4 validated: manifest hash agreement, windows/linux/darwin native blobs present, positive runtime control passed, missing-secret control failed closed, 3/3 runner attestations valid"
+    },
+    "absolute-native-only": {
+      "artifact_exists": true,
+      "secrets_exist": true,
+      "sha256": "28630cc945e883151761b4752db1d9a7e59a7dbb29bc9e93b381e75ba2898032",
+      "size": 1117774,
+      "build_rc": 0,
+      "selected_form": "dist-universal",
+      "status": "BUILT_AND_RUNTIME_CONTROLLED"
+    }
+  },
+  "runtime_controls": {
+    "absolute": {
+      "with_secrets": {
+        "rc": 0,
+        "stdout_sha256": "d9d34b5c820045756b0bd7eb21a72540e6575744efd01a3dd307a72df1f0c623",
+        "stdout_len": 40,
+        "stderr_tail_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_len": 0
+      },
+      "without_secrets": {
+        "rc": 137,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_len": 0,
+        "stderr_tail_sha256": "b7393eada766ee6e67bf0910a166e24d4ce9dc8e507fdda012044bfd238014df",
+        "stderr_len": 106
+      }
+    },
+    "absolute-native-only": {
+      "with_secrets": {
+        "rc": 0,
+        "stdout_sha256": "d9d34b5c820045756b0bd7eb21a72540e6575744efd01a3dd307a72df1f0c623",
+        "stdout_len": 40,
+        "stderr_tail_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_len": 0
+      },
+      "without_secrets": {
+        "rc": 137,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_len": 0,
+        "stderr_tail_sha256": "b7393eada766ee6e67bf0910a166e24d4ce9dc8e507fdda012044bfd238014df",
+        "stderr_len": 106
+      }
+    },
+    "maximum-local": {
+      "with_secrets": {
+        "rc": 0,
+        "stdout_sha256": "d9d34b5c820045756b0bd7eb21a72540e6575744efd01a3dd307a72df1f0c623",
+        "stdout_len": 40,
+        "stderr_tail_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_len": 0
+      },
+      "without_secrets": {
+        "rc": 137,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_len": 0,
+        "stderr_tail_sha256": "b7393eada766ee6e67bf0910a166e24d4ce9dc8e507fdda012044bfd238014df",
+        "stderr_len": 106
+      }
+    },
+    "maximum-packed": {
+      "with_secrets": {
+        "rc": 0,
+        "stdout_sha256": "d9d34b5c820045756b0bd7eb21a72540e6575744efd01a3dd307a72df1f0c623",
+        "stdout_len": 40,
+        "stderr_tail_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_len": 0
+      },
+      "without_secrets": {
+        "rc": 137,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_len": 0,
+        "stderr_tail_sha256": "b7393eada766ee6e67bf0910a166e24d4ce9dc8e507fdda012044bfd238014df",
+        "stderr_len": 106
+      }
+    }
+  },
+  "cloud_credential_state": {
+    "github_token_present": false,
+    "cf_token_present": false
+  },
+  "matrix_dimensions": {
+    "key": [
+      "legitimate-runtime-secrets",
+      "source-assisted-runtime-secrets"
+    ],
+    "no_key": [
+      "runtime-secrets-withheld",
+      "source-assisted-secrets-withheld"
+    ],
+    "source": [
+      "source-assisted-runtime-secrets",
+      "source-assisted-secrets-withheld"
+    ],
+    "no_source": [
+      "legitimate-runtime-secrets",
+      "runtime-secrets-withheld"
+    ]
+  },
+  "inventory_correction_2026_11_27": {
+    "authoritative_cloud_artifacts": "maximum-cloud f9c5256d796c57fccc81e0eff0064b5743a1768e2dc203dfa3fc91651965a395; absolute-cloud 9bfdadef9414f9f79b0529f16bfa9591423f6f93bc53a5f9dbea83e1e6330dc0",
+    "supersedes": "earlier degraded single-OS cloud artifact hashes 654a997c... and 05a04af1... are historical invalid evidence and are not benchmark artifact identities",
+    "deepseek_final": {
+      "lane": "opencode-go/deepseek-v4.1-flash",
+      "planned_cells": 114,
+      "valid_active_records": 114,
+      "invalid_active_records": 0,
+      "attempts_per_cell": 1,
+      "classification": "broad diagnostic evidence only; five-valid-attempt statistical completion not claimed",
+      "aggregate": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/deepseek_benchmark_aggregate.json",
+      "cache_summary": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/opencode_go_cache_summary.json",
+      "final_report": "re-bench/ABSOLUTE_MAXIMUM_DEEPSEEK_FINAL_REPORT_20261126.md"
+    }
+  }
+}

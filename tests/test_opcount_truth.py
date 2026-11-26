@@ -141,6 +141,12 @@ def test_no_bare_141_claim_in_code():
                  # artefact literals can contain these digits by coincidence and
                  # are not implementation claims.
                  "re-bench",
+                 # docs/research holds generated experiment corpora (for example
+                 # full_source.py dumps of obfuscated artefacts). Their random
+                 # constants can contain 141 by coincidence; they are not
+                 # claim-bearing source. This must be skipped by path because
+                 # container builds have no .git for _is_ignored() to consult.
+                 "research",
                  }
     skip_files = {"test_opcount_truth.py", "test_multi_func.py",
                   "test_lowering_parity_141.py",

@@ -1,0 +1,822 @@
+{
+  "schema": "absolute-maximum-build-manifest/4",
+  "generated_at": "2026-11-26T01:19:49Z",
+  "repository": "/home/nixon/Projects/adversarial-obfuscator",
+  "commit": "b571b18a79b76ee351f307ced793c6e66c7f22ce",
+  "working_tree": "extensive pre-existing modifications; see final audit git status excerpt",
+  "platform": {
+    "system": "Linux",
+    "release": "7.2.11+deb13-amd64",
+    "machine": "x86_64",
+    "python": "3.13.5 (main, Aug 10 2026, 12:06:59) [GCC 14.2.0]"
+  },
+  "dependency_lock": {
+    "path": "requirements.lock",
+    "sha256": "ec429dd371daf43bc8076090c00caea2c5ac1a110fd65d0145733d59aa4c82a6",
+    "strict_mode": "enforced with NIXON_REQUIRE_DEP_LOCK=1 using re-bench/build-venv/bin/python",
+    "build_python": "re-bench/build-venv/bin/python",
+    "build_python_sha256": "889c603f0d17cb54060951bcf4c4f9b8c9ebd9e52b392c70209bbb9755d797d9",
+    "locked_versions": {
+      "cython": "3.0.12",
+      "requests": "2.33.0",
+      "certifi": "2026.11.20",
+      "charset-normalizer": "3.5.3",
+      "idna": "3.20",
+      "urllib3": "2.8.0",
+      "cryptography": "50.0.0",
+      "setuptools": "84.2.1"
+    }
+  },
+  "target": "cipher",
+  "variants": {
+    "absolute-native-only": {
+      "variant": "absolute-native-only",
+      "target": "cipher",
+      "returncode": 0,
+      "elapsed_seconds": 19.626168187001895,
+      "artifact_source_path": "/home/nixon/Projects/adversarial-obfuscator/re-bench/builds/absolute-native-only/cipher/dist-staging/cipher-1795634879/cipher_protected.py",
+      "artifact_copy": "/home/nixon/Projects/adversarial-obfuscator/re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/builds/absolute-native-only/cipher/artifact.py",
+      "artifact_sha256": "28630cc945e883151761b4752db1d9a7e59a7dbb29bc9e93b381e75ba2898032",
+      "artifact_size": 1117774,
+      "host_fingerprint_sha256": "ad18bae9e72fad3ea4674eda7fc1eb86cc8c26669da7e7ab1288ee2b1fd87005",
+      "static_hwid_sha256": "28f48faf9b03945a242741012a0674dc8b509fb3d6e60ad5e3c5c37812214ae2",
+      "expire_date": "2027-01-10",
+      "licence": {
+        "sha256": "485866ffa8b701cd5573c725672b321059c63a097de23e70ffd8b825ed876edc",
+        "key_version": 1,
+        "chain": {
+          "contract": "0x51a240271AB8AB9f9a21C82d9a85396b704E164d",
+          "token_id": "1",
+          "rpc": "http://127.0.0.1:8545",
+          "chain_id": "131277322940537"
+        },
+        "owner_sha256": "fbd7e871893b421ba1595fade8d71bd31eec4ab5cb7f146d325b25da23cfdcca"
+      },
+      "public_keys": {
+        "licence_verify_pub_sha256": "bcab09ae8edaa719dd89e0ae0f7fe5cad5836459f343b0faa51ea80b4fdadf27"
+      },
+      "build_stdout_sha256": "c9a02e75b8756473b2e7faa5977c916e8754b324e45a46475919c309d2f811b5",
+      "build_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtime_summary": {
+        "valid_runtime_secrets": {
+          "rc": 0,
+          "timeout": false,
+          "stdout_tail": "SEALED 8771940273853809a401795ec7699cdc\n",
+          "stderr_tail": ""
+        },
+        "missing_licence": {
+          "rc": 78,
+          "timeout": false,
+          "stdout_tail": "",
+          "stderr_tail": "_LICENCE or place licence.json beside the artefact\n[FATAL] native-only artefact: the embedded blobs could not be loaded and no Python fallback exists (exit 78)\n"
+        },
+        "missing_seal_shard": {
+          "rc": 78,
+          "timeout": false,
+          "stdout_tail": "",
+          "stderr_tail": "[FATAL] native-only artefact: the embedded blobs could not be loaded and no Python fallback exists (exit 78)\n"
+        },
+        "missing_all_runtime_secrets": {
+          "rc": 78,
+          "timeout": false,
+          "stdout_tail": "",
+          "stderr_tail": "_LICENCE or place licence.json beside the artefact\n[FATAL] native-only artefact: the embedded blobs could not be loaded and no Python fallback exists (exit 78)\n"
+        },
+        "tampered_one_byte": {
+          "rc": 137,
+          "timeout": false,
+          "stdout_tail": "",
+          "stderr_tail": "Self-check error: merkle expected=5ce7c7b78b2032fe got=c77eb57c87134dad lines=2971\n"
+        },
+        "forged_licence_payload": {
+          "rc": 1,
+          "timeout": false,
+          "stdout_tail": "",
+          "stderr_tail": "licence token does not match the pinned token\n"
+        },
+        "wrong_licence_token": {
+          "rc": 1,
+          "timeout": false,
+          "stdout_tail": "",
+          "stderr_tail": "licence token does not match the pinned token\n"
+        }
+      },
+      "strict_dependency_lock": true,
+      "pre_strict_artifact_sha256": "ea12cad5001f55c25828d564a0e0f3136a84c873ec6bc3cf8449a666774d1e74",
+      "pre_strict_artifact_size": 390790,
+      "extracted_native_final": {
+        "platform": "linux",
+        "path": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/native_final_lowering/absolute-native-only/linux.so",
+        "size": 739360,
+        "sha256": "ebd1f04def3f422a27dcaa7e9d223432454f270bd8af28371cdf9323a3a71515",
+        "magic_hex": "7f454c4602010100",
+        "valid_elf": true
+      },
+      "ghidra_final_native_lowering": {
+        "function_count": 566,
+        "nx_apply_protections": "001a3eb0",
+        "PyInit_payload": "00106980",
+        "prctl_probe": true,
+        "setrlimit_probe": true,
+        "sigaction_probe": true,
+        "mlock_probe": false,
+        "probe_sha256": "9b087ef4b76294b2e77fadcdc2e1a152818665d4cf9e9ab8f15c989a5afdeae8"
+      },
+      "dynamic_final_native_lowering": {
+        "valid_rc": 0,
+        "mlock_calls": 1,
+        "prctl_calls": 22,
+        "prlimit64_calls": 23,
+        "rt_sigaction_calls": 204,
+        "pr_set_dumpable_observed": true,
+        "connect_calls_refined": 2,
+        "inet_or_inet6_connections": 0,
+        "secret_values_in_trace": false,
+        "refined_secret_values_in_trace": false,
+        "median_ms": 422.719,
+        "overhead_x": 28.97,
+        "times_ms": [
+          434.139,
+          422.103,
+          415.1,
+          429.789,
+          420.947,
+          428.576,
+          422.719
+        ]
+      },
+      "direct_import_boundary": {
+        "direct_import_rc": 0,
+        "stdout_tail": "SEALED 8771940273853809a401795ec7699cdc\n",
+        "stderr_tail": "",
+        "requires_only_nx_seal_shard_observed": true
+      },
+      "lowering_forwarded_to_native": true,
+      "static_elf_inventory_final": {
+        "evidence_path": "ABSOLUTE_MAXIMUM_RAW_RESULTS/native_final_lowering/elf_inspection.json",
+        "file": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/native_final_lowering/absolute-native-only/linux.so: ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=247c5d63389bae0b340a20c04291f65717770b67, stripped",
+        "string_markers": {
+          "_nxk_len": true,
+          "lowering_shim": false,
+          "nxk": true,
+          "nx_apply_protections": true,
+          "PyInit_payload": true
+        },
+        "string_count": 5382,
+        "dynsym_excerpt": "                 U __assert_fail@GLIBC_2.2.5\n                 U bcmp@GLIBC_2.2.5\n                 w __cxa_finalize@GLIBC_2.2.5\n                 U _exit@GLIBC_2.2.5\n                 w __gmon_start__\n                 w _ITM_deregisterTMCloneTable\n                 w _ITM_registerTMCloneTable\n                 U memcpy@GLIBC_2.14\n00000000000a3eb0 T nx_apply_protections\n                 U prctl@GLIBC_2.2.5\n                 U PyArg_UnpackTuple\n                 U PyAsyncGen_Type\n                 U PyBaseObject_Type\n                 U PyBool_Type\n                 U PyByteArray_Type\n                 U PyBytes_FromStringAndSize\n                 U PyBytes_Type\n                 U PyCFunction_Type\n                 U PyCMethod_New\n                 U PyCode_NewEmpty\n                 U PyCoro_Type\n                 U _Py_Dealloc\n                 U PyDescr_IsData\n                 U PyDict_Copy\n                 U PyDict_GetItem\n                 U PyDict_GetItemString\n                 U PyDict_GetItemWithError\n                 U PyDict_New\n                 U PyDict_Next\n                 U PyDict_SetItem\n                 U PyDict_SetItemString\n                 U PyDict_Size\n                 U PyDict_Type\n                 U Py_EnterRecursiveCall\n                 U PyErr_Clear"
+      }
+    },
+    "absolute": {
+      "variant": "absolute",
+      "target": "cipher",
+      "returncode": 0,
+      "elapsed_seconds": 48.57512212800066,
+      "artifact_source_path": "/home/nixon/Projects/adversarial-obfuscator/re-bench/builds/absolute/cipher/dist-staging/cipher-1795634859/cipher_protected.py",
+      "artifact_copy": "/home/nixon/Projects/adversarial-obfuscator/re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/builds/absolute/cipher/artifact.py",
+      "artifact_sha256": "5382e72af5cce267fa2ec0379b6c3910b0bc33f7ac645a5ad2c88bc011ce0fbe",
+      "artifact_size": 1794213,
+      "host_fingerprint_sha256": "ad18bae9e72fad3ea4674eda7fc1eb86cc8c26669da7e7ab1288ee2b1fd87005",
+      "static_hwid_sha256": "28f48faf9b03945a242741012a0674dc8b509fb3d6e60ad5e3c5c37812214ae2",
+      "expire_date": "2027-01-10",
+      "licence": {
+        "sha256": "a9349166e21f5852027b25154e6e957db6e2fdb882625b82597a78f3f465a9c0",
+        "key_version": 1,
+        "chain": {
+          "contract": "0x51a240271AB8AB9f9a21C82d9a85396b704E164d",
+          "token_id": "1",
+          "rpc": "http://127.0.0.1:8545",
+          "chain_id": "131277322940537"
+        },
+        "owner_sha256": "fbd7e871893b421ba1595fade8d71bd31eec4ab5cb7f146d325b25da23cfdcca"
+      },
+      "public_keys": {
+        "licence_verify_pub_sha256": "a1469cce804a06b69711d637a61a357bb188bf6451e28d341fe69fed0272c8dc"
+      },
+      "build_stdout_sha256": "98000613a74d8919b4d8340eea059714298b83454e74067895649722dd227a7f",
+      "build_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "runtime_summary": {
+        "valid_runtime_secrets": {
+          "rc": 0,
+          "timeout": false,
+          "stdout_tail": "SEALED 8771940273853809a401795ec7699cdc\n",
+          "stderr_tail": ""
+        },
+        "missing_licence": {
+          "rc": 137,
+          "timeout": false,
+          "stdout_tail": "",
+          "stderr_tail": "token required: set NIXON_LICENCE or place licence.json beside the artefact\nlicence token required: set NIXON_LICENCE or place licence.json beside the artefact\n"
+        },
+        "missing_seal_shard": {
+          "rc": 79,
+          "timeout": false,
+          "stdout_tail": "",
+          "stderr_tail": "[FATAL] artefact ran no payload: this build embedded payload material, but neither the native blob nor the Python fallback executed it (exit 79)\n"
+        },
+        "missing_all_runtime_secrets": {
+          "rc": 137,
+          "timeout": false,
+          "stdout_tail": "",
+          "stderr_tail": "token required: set NIXON_LICENCE or place licence.json beside the artefact\nlicence token required: set NIXON_LICENCE or place licence.json beside the artefact\n"
+        },
+        "tampered_one_byte": {
+          "rc": 137,
+          "timeout": false,
+          "stdout_tail": "",
+          "stderr_tail": "Self-check error: merkle expected=333be7d86592f09a got=175453d0188a9fe5 lines=3496\n"
+        },
+        "forged_licence_payload": {
+          "rc": 1,
+          "timeout": false,
+          "stdout_tail": "",
+          "stderr_tail": "licence token does not match the pinned token\n"
+        },
+        "wrong_licence_token": {
+          "rc": 1,
+          "timeout": false,
+          "stdout_tail": "",
+          "stderr_tail": "licence token does not match the pinned token\n"
+        }
+      },
+      "strict_dependency_lock": true,
+      "pre_strict_artifact_sha256": "ed7694c8aa44ec5da5c53f70a55ebca57d7e51ceaa57da1b99cb9bb14bbd8e39",
+      "pre_strict_artifact_size": 1018597,
+      "extracted_native_final": {
+        "platform": "linux",
+        "path": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/native_final_lowering/absolute/linux.so",
+        "size": 731160,
+        "sha256": "4b0b297aefb138c78944eb59adf90ac681fd5708cab9413bfa434a771dfa5cf6",
+        "magic_hex": "7f454c4602010100",
+        "valid_elf": true
+      },
+      "ghidra_final_native_lowering": {
+        "function_count": 565,
+        "nx_apply_protections": "001a2100",
+        "PyInit_payload": "00106990",
+        "prctl_probe": true,
+        "setrlimit_probe": true,
+        "sigaction_probe": true,
+        "mlock_probe": false,
+        "probe_sha256": "a7f10a295734da8e6666b674cd20ef9fd77392d8cd85a81403cc3e48ca3e9e47"
+      },
+      "dynamic_final_native_lowering": {
+        "valid_rc": 0,
+        "mlock_calls": 1,
+        "prctl_calls": 24,
+        "prlimit64_calls": 36,
+        "rt_sigaction_calls": 206,
+        "pr_set_dumpable_observed": true,
+        "connect_calls_refined": 2,
+        "inet_or_inet6_connections": 0,
+        "secret_values_in_trace": false,
+        "refined_secret_values_in_trace": false,
+        "median_ms": 537.666,
+        "overhead_x": 36.85,
+        "times_ms": [
+          568.159,
+          482.242,
+          539.561,
+          561.237,
+          537.666,
+          535.338,
+          500.278
+        ]
+      },
+      "direct_import_boundary": {
+        "direct_import_rc": 0,
+        "stdout_tail": "SEALED 8771940273853809a401795ec7699cdc\n",
+        "stderr_tail": "",
+        "requires_only_nx_seal_shard_observed": true
+      },
+      "lowering_forwarded_to_native": true,
+      "static_elf_inventory_final": {
+        "evidence_path": "ABSOLUTE_MAXIMUM_RAW_RESULTS/native_final_lowering/elf_inspection.json",
+        "file": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/native_final_lowering/absolute/linux.so: ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=ebe1a1873db1290ee1816896d65a061798f8a829, stripped",
+        "string_markers": {
+          "_nxk_len": true,
+          "lowering_shim": false,
+          "nxk": true,
+          "nx_apply_protections": true,
+          "PyInit_payload": true
+        },
+        "string_count": 5245,
+        "dynsym_excerpt": "                 U __assert_fail@GLIBC_2.2.5\n                 U bcmp@GLIBC_2.2.5\n                 w __cxa_finalize@GLIBC_2.2.5\n                 U _exit@GLIBC_2.2.5\n                 w __gmon_start__\n                 w _ITM_deregisterTMCloneTable\n                 w _ITM_registerTMCloneTable\n                 U memcpy@GLIBC_2.14\n00000000000a2100 T nx_apply_protections\n                 U prctl@GLIBC_2.2.5\n                 U PyArg_UnpackTuple\n                 U PyAsyncGen_Type\n                 U PyBaseObject_Type\n                 U PyBool_Type\n                 U PyByteArray_Type\n                 U PyBytes_FromStringAndSize\n                 U PyBytes_Type\n                 U PyCFunction_Type\n                 U PyCMethod_New\n                 U PyCode_NewEmpty\n                 U PyCoro_Type\n                 U _Py_Dealloc\n                 U PyDescr_IsData\n                 U PyDict_Copy\n                 U PyDict_GetItem\n                 U PyDict_GetItemString\n                 U PyDict_GetItemWithError\n                 U PyDict_New\n                 U PyDict_Next\n                 U PyDict_SetItem\n                 U PyDict_SetItemString\n                 U PyDict_Size\n                 U PyDict_Type\n                 U Py_EnterRecursiveCall\n                 U PyErr_Clear"
+      }
+    }
+  },
+  "native_extraction": {
+    "absolute-native-only": {
+      "platform": "linux",
+      "path": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/native_final_lowering/absolute-native-only/linux.so",
+      "size": 739360,
+      "sha256": "ebd1f04def3f422a27dcaa7e9d223432454f270bd8af28371cdf9323a3a71515",
+      "magic_hex": "7f454c4602010100",
+      "valid_elf": true
+    },
+    "absolute": {
+      "platform": "linux",
+      "path": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/native_final_lowering/absolute/linux.so",
+      "size": 731160,
+      "sha256": "4b0b297aefb138c78944eb59adf90ac681fd5708cab9413bfa434a771dfa5cf6",
+      "magic_hex": "7f454c4602010100",
+      "valid_elf": true
+    }
+  },
+  "evm": {
+    "chain_id": 131277322940537,
+    "chain_id_hex": "0x776562337079",
+    "note": "py-evm/eth-tester local EVM; chain id is backend-native, not forced to 31337",
+    "accounts": {
+      "deployer": "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf",
+      "customer": "0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF",
+      "attacker": "0x6813Eb9362372EEF6200f3b1dbC3f819671cBA69"
+    },
+    "test_contract": "0xF2E246BB76DF876Cef8b38ae84130F4F55De395b",
+    "runtime_contract": "0x51a240271AB8AB9f9a21C82d9a85396b704E164d",
+    "token_id": 1,
+    "customer": "0x2B5AD5c4795c026514f8317c7a215E218DcCD6cF",
+    "rpc_url": "http://127.0.0.1:8545",
+    "contract_tests": [
+      {
+        "name": "ownerOf_unminted_reverts",
+        "ok": true,
+        "detail": "TransactionFailed: token does not exist"
+      },
+      {
+        "name": "mint_by_non_owner_reverts",
+        "ok": true,
+        "detail": "receipt_status=0"
+      },
+      {
+        "name": "mint_by_owner_succeeds",
+        "ok": true,
+        "detail": "gas_used=71192"
+      },
+      {
+        "name": "ownerOf_minted_returns_customer",
+        "ok": true,
+        "detail": "0x2b5ad5c4795c026514f8317c7a215e218dccd6cf"
+      },
+      {
+        "name": "double_mint_reverts",
+        "ok": true,
+        "detail": "receipt_status=0"
+      },
+      {
+        "name": "burn_by_non_holder_reverts",
+        "ok": true,
+        "detail": "receipt_status=0"
+      },
+      {
+        "name": "runtime_instance_ownerOf1_customer",
+        "ok": true,
+        "detail": "0x2b5ad5c4795c026514f8317c7a215e218dccd6cf"
+      },
+      {
+        "name": "burn_then_ownerOf_reverts",
+        "ok": true,
+        "detail": "TransactionFailed: token does not exist"
+      }
+    ],
+    "deploy": {
+      "gas_used": 841252,
+      "runtime_gas_used": 841252,
+      "mint_gas_used": 71192
+    },
+    "compiled_contract": "<stdin>:LicenceERC721",
+    "compiler": "0.8.20",
+    "read_only_unix_proxy": {
+      "tool": "re-bench/tools/evm_readonly_unix_proxy.py",
+      "socket": "/home/nixon/absmax-tokenharbor-proxy/evm.sock",
+      "validation": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/evm/evm_readonly_unix_proxy_validation.json",
+      "owner_state_validation": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/evm/evm_owner_state_after_readonly_proxy.json",
+      "boundary": "enforces read-only JSON-RPC methods at the Unix socket itself so direct socket access cannot bypass the in-sandbox bridge filter",
+      "runtime_smoke": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/evm/per_model_endpoint_runtime_smoke.json"
+    }
+  },
+  "secret_policy": " licence/private/provenance/seal values stored only under re-bench/secrets with 0700 directories and 0600 files; this manifest contains hashes, paths, and env names only",
+  "post_fix_crypto": {
+    "envelope": "NXS1 nonce-based SHA-256 counter-mode stream envelope",
+    "final_validation": "ABSOLUTE_MAXIMUM_RAW_RESULTS/native_final_lowering/old_attack_validation.json",
+    "old_repeating_xor_attack_reconstructs_final_plaintext": false,
+    "legacy_loader_support": "retained only for backwards compatibility with old artifacts",
+    "exact_artifact_validation": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/crypto_validation/prefix_postfix_exact_artifact_known_plaintext.json",
+    "artifact_only_prefix_recovery_result": "valid marker-bearing ELF recovered without runtime secrets from both preserved pre-fix artifacts; final NXS1 plaintexts not reconstructed by the same procedure"
+  },
+  "pre_strict_dependency_lock_artifacts": {
+    "absolute-native-only": {
+      "artifact_sha256": "ea12cad5001f55c25828d564a0e0f3136a84c873ec6bc3cf8449a666774d1e74",
+      "artifact_size": 390790
+    },
+    "absolute": {
+      "artifact_sha256": "ed7694c8aa44ec5da5c53f70a55ebca57d7e51ceaa57da1b99cb9bb14bbd8e39",
+      "artifact_size": 1018597
+    }
+  },
+  "strict_runtime_performance": {
+    "unprotected": {
+      "runs": 20,
+      "median_ms": 13.622985003166832,
+      "min_ms": 13.265891000628471,
+      "max_ms": 14.425989997107536
+    },
+    "absolute-native-only": {
+      "runs": 15,
+      "failures": [],
+      "median_ms": 176.48684300365858,
+      "min_ms": 174.22701499890536,
+      "max_ms": 229.323369996564,
+      "overhead_vs_unprotected": 12.955078711650348
+    },
+    "absolute": {
+      "runs": 15,
+      "failures": [],
+      "median_ms": 192.2362199984491,
+      "min_ms": 189.64422099816147,
+      "max_ms": 200.4928620008286,
+      "overhead_vs_unprotected": 14.111167262810712
+    }
+  },
+  "final_native_lowering_runtime_performance": {
+    "unprotected": {
+      "rc": 0,
+      "stdout_tail": "SEALED 8771940273853809a401795ec7699cdc\n",
+      "times_ms": [
+        17.28,
+        14.385,
+        14.212,
+        14.592,
+        14.652,
+        14.279,
+        16.153
+      ],
+      "median_ms": 14.592
+    },
+    "absolute-native-only": {
+      "times_ms": [
+        434.139,
+        422.103,
+        415.1,
+        429.789,
+        420.947,
+        428.576,
+        422.719
+      ],
+      "median_ms": 422.719,
+      "overhead_x": 28.97
+    },
+    "absolute": {
+      "times_ms": [
+        568.159,
+        482.242,
+        539.561,
+        561.237,
+        537.666,
+        535.338,
+        500.278
+      ],
+      "median_ms": 537.666,
+      "overhead_x": 36.85
+    }
+  },
+  "final_artifact_note": "Authoritative artifacts are the post-native-lowering-wiring-fix strict dependency-lock builds. Earlier post-lowering/native-unwired, pre-lowering, pre-fix, and mixed-version evidence is archival only.",
+  "benchmark": {
+    "status": "superseded_historical_incomplete_hy4_tokenharbor_lanes",
+    "authorised_continuation_model": "opencode/hy4-flash-free",
+    "model_separation": "TokenHarbor and OpenCode Hy4 records are separate model lanes and are never combined as one model result",
+    "evidence_boundary": "corrected before authoritative scoring: secrets-withheld scenarios do not receive pre-extracted native plaintext or precomputed Ghidra reports",
+    "matrix": "160 planned initial jobs per model lane design: 2 variants x 16 scenarios x 5 attempts; supplementation uses unused attempt numbers and preserves invalid evidence",
+    "current_strict_reconciliation": {
+      "completed_records": 450,
+      "strict_structurally_valid": 6,
+      "groups_total_including_model_lanes": 64,
+      "groups_meeting_five_strict_valid": 0,
+      "model_counts": {
+        "opencode/hy4-flash-free": {
+          "records": 118,
+          "strict_valid": 5,
+          "failure_categories": {
+            "valid": 5,
+            "tool-call-limit-exceeded": 28,
+            "static-scenario-execution-policy-violation": 2,
+            "provider-free-usage-limit": 78,
+            "harness-blocked-before-workspace": 2,
+            "nonzero-missing-malformed-answer-or-isolation": 1,
+            "timeout": 2
+          }
+        },
+        "tokenharbor/deepseek-v4.1-flash-1017": {
+          "records": 332,
+          "strict_valid": 1,
+          "failure_categories": {
+            "tool-call-limit-exceeded": 57,
+            "provider-quota-exhausted": 176,
+            "timeout": 7,
+            "harness-bridge-syntax-error": 90,
+            "static-scenario-execution-policy-violation": 1,
+            "valid": 1
+          }
+        }
+      }
+    },
+    "tokenharbor_historical_pre_am027": {
+      "model": "tokenharbor/deepseek-v4.1-flash-1017",
+      "records_before_later_quota_evidence": 290,
+      "pre_correction_structurally_valid": 58,
+      "scope": "historical scoring before AM-027 strict enforcement of the pre-registered 20-tool-call limit; not current valid benchmark performance",
+      "current_strict_valid": 1,
+      "current_records": 332,
+      "provider_status": "plan_allowance_exhausted/HTTP 402 at last direct probe; no reset timestamp exposed"
+    },
+    "hy4_continuation": {
+      "authorised_model": "opencode/hy4-flash-free",
+      "status": "active_watchdog_in_provider_free_limit_cooldown",
+      "checkpoint": {
+        "records": 118,
+        "strict_structurally_valid": 5,
+        "groups_with_any_strict_valid": "5/32",
+        "groups_meeting_five_strict_valid": "0/32",
+        "strict_valid_results": [
+          {
+            "variant": "absolute",
+            "scenario": "ghidra-dynamic",
+            "attempt": 1,
+            "score": 63,
+            "hidden_secret": false,
+            "solution_all_passed": false,
+            "payload_plaintext_recovered": false
+          },
+          {
+            "variant": "absolute",
+            "scenario": "ghidra-static",
+            "attempt": 1,
+            "score": 60,
+            "hidden_secret": false,
+            "solution_all_passed": false,
+            "payload_plaintext_recovered": false
+          },
+          {
+            "variant": "absolute",
+            "scenario": "legitimate-runtime-secrets",
+            "attempt": 4,
+            "score": 78,
+            "hidden_secret": true,
+            "solution_all_passed": true,
+            "payload_plaintext_recovered": true
+          },
+          {
+            "variant": "absolute-native-only",
+            "scenario": "binary-only-external",
+            "attempt": 1,
+            "score": 60,
+            "hidden_secret": false,
+            "solution_all_passed": false,
+            "payload_plaintext_recovered": false
+          },
+          {
+            "variant": "absolute-native-only",
+            "scenario": "ghidra-dynamic",
+            "attempt": 1,
+            "score": 63,
+            "hidden_secret": false,
+            "solution_all_passed": false,
+            "payload_plaintext_recovered": false
+          }
+        ],
+        "security_relevant_overlimit_note": "absolute-native-only/legitimate-runtime-secrets attempt2 scored 81 and passed hidden vectors but used 30 tool invocations; preserved as over-limit customer-machine attacker evidence, not strict valid evidence"
+      },
+      "watchdog_pid_at_checkpoint": 2069396,
+      "status_file": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/ai_benchmark/orchestrator/resume_post_status_opencode_hy4-flash-free.json",
+      "confidentiality_lane": {
+        "type": "host-side TLS-terminating redacting mitmproxy plus Unix-socket relays inside network-isolated sandboxes",
+        "allowlist": [
+          "opencode.ai",
+          "models.opencode.ai"
+        ],
+        "validation": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/ai_benchmark/orchestrator/opencode_mitm_validation.json",
+        "incident": "AM-025 pre-containment opaque-TLS legitimate-runtime smoke treated as provider-exposed and invalid",
+        "interpretation": "redacted-remote-context boundary; not directly comparable to an unredacted lane"
+      },
+      "interpretation": "strict valid legitimate-runtime hidden-vector success reinforces AM-001 customer-machine attacker boundary; matrix incomplete, no finished resistance claim"
+    },
+    "targeted_prefix_ai_comparison": "not run: zero pre-fix rows because authorised lanes were quota/free-limit blocked; missing evidence, not resistance; mechanical exact-artifact validation completed",
+    "post_processing_checkpoint": {
+      "copied_artifacts_checked": 448,
+      "copied_artifact_mismatches": 0,
+      "copied_artifact_errors": 0,
+      "skipped_fail_closed_no_workspace": 2,
+      "credential_redaction_files_scanned": 10283,
+      "credential_redaction_files_changed": 0,
+      "secret_scan_files_scanned": 4886,
+      "secret_scan_exact_match_files": 541,
+      "secret_scan_non_hwid_credential_hits": 0,
+      "secret_scan_interpretation": "all exact matches were licence-hwid host-binding metadata, mostly inside byte-identical artifact copies; no exact key_material/nonce/full-licence/seal-shard/honey-secret/customer-mask/effective-native-key hit remained",
+      "valid_payload_plaintext_or_semantic_recovery": "1/6 strict valid attempts",
+      "valid_payload_elf_recovered_excluding_supplied": "0/6 strict valid attempts",
+      "valid_raw_payload_elf_hits_including_supplied": "1/6 strict valid attempts, scenario-supplied legitimate-runtime evidence only"
+    },
+    "final_completion_report": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/ai_benchmark/final_completion_report.json",
+    "score_summary": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/ai_benchmark/score_summary.json",
+    "final_tables": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/ai_benchmark/final_benchmark_tables.md",
+    "final_verification_summary": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/final_verification_summary.json",
+    "manifest_update_note": "benchmark fields updated after AM-027 strict rescoring and manual post-processing; artifact hashes and build identity unchanged; matrix still incomplete",
+    "historical_status_preservation_note": "Fields below concerning Hy4/TokenHarbor quota blockage and 32-group incompletion are historical evidence for those lanes, not the current DeepSeek benchmark status.",
+    "current_authoritative_benchmark": "opencode-go/deepseek-v4.1-flash diagnostic matrix: 114/114 structurally valid active records, one attempt per cell; see current_status_supersession_2026_11_27"
+  },
+  "working_tree_status_at_benchmark_finalization": {
+    "branch": "## master...origin/master [ahead 2]",
+    "status_entries": 236,
+    "note": "count includes extensive pre-existing, generated, audit, and concurrent external worktree changes; nothing reset or cleaned",
+    "entries": 238
+  },
+  "benchmark_harness_regressions": {
+    "test_file": "tests/test_ai_benchmark_harness.py",
+    "result": "35 passed in 0.47s",
+    "controls": [
+      "immutable per-attempt sandbox bridge snapshot",
+      "read-only EVM JSON-RPC filtering",
+      "resume watchdog uses unused attempt numbers and provider retryAfterMs cooldown",
+      "resume watchdog prioritises zero-valid essential groups",
+      "Hy4 legitimate-runtime secrets fail closed without redacting MITM lane",
+      "exact and JSON-escaped MITM redaction replaces secrets before upstream transmission",
+      "compatibility relay uses redacting MITM backend",
+      "sandbox bridge prefers redacting MITM socket for CONNECT",
+      "scorer handles fail-closed no-workspace records as invalid",
+      "repair step skips fail-closed records that never created a workspace",
+      "payload ELF scan detects Python base64-embedded recovered native objects",
+      "scorer prefers preserved copied workspaces",
+      "scorer enforces the hard 20-tool-call validity limit using unique preserved-event invocation counts",
+      "renderer reports over-limit and ELF precision boundaries",
+      "read-only EVM JSON-RPC filtering at the host-side Unix socket boundary",
+      "host-side EVM proxy blocks direct-socket bypass of sandbox chain filter",
+      "minimal endpoint-only sandbox exposure uses hard-linked Unix socket inodes",
+      "proxy logs/PID files/MITM statistics are not exposed inside agent sandboxes",
+      "model-separated endpoint exposure prevents cross-model provider oracle use",
+      "Hy4 redacting lane readiness requires live MITM/relay processes and expanded-redaction metadata, not just a stale ready file",
+      "model-written solution.py hidden-vector validation runs in isolated bubblewrap namespace",
+      "host Python no longer imports candidate solution.py during benchmark validation",
+      "static scenario prompts explicitly forbid execution/import/tracing/debugging consistent with scorer policy",
+      "dynamic scenario prompts state bounded local execution permission",
+      "result records carry prompt version/hash and static-dynamic execution policy metadata",
+      "resume watchdog source avoids a model-consuming probe before every successful batch on future restart"
+    ]
+  },
+  "lowering_family_performance": {
+    "path": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/performance/lowering_family_perf.json",
+    "iterations": 10000,
+    "repeats": 5,
+    "operations": 132,
+    "runtime_families": 15,
+    "all_ops_parity_ok": true,
+    "family_geomean_shim_over_plain": {
+      "bytes": 2.076074,
+      "container": 2.04123,
+      "dict": 1.764512,
+      "function": 2.096857,
+      "fusion": 2.687415,
+      "import": 2.129102,
+      "io": 1.516727,
+      "list": 2.442245,
+      "protocol": 2.264187,
+      "range": 1.981814,
+      "scalar": 2.336087,
+      "service": 2.007595,
+      "set": 1.885748,
+      "string": 2.648154,
+      "tuple": 3.798424
+    },
+    "untimed_node_kind_families": [
+      "arithmetic",
+      "truth",
+      "slice",
+      "format",
+      "augassign"
+    ],
+    "interpretation": "Phase-1 Python-shim per-operation microbenchmark; end-to-end native artifact overhead is recorded separately"
+  },
+  "tests": {
+    "lowering_perf_harness": {
+      "file": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/test_outputs/lowering_perf_test.txt",
+      "summary_line": "5 passed in 0.13s",
+      "returncode": 0
+    },
+    "operator_shard_masking_later_source": {
+      "file": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/test_outputs/operator_shard_masking_tests.txt",
+      "summary_line": "19 passed in 0.79s",
+      "returncode": 0,
+      "boundary": "validates later concurrent source edits only; not part of authoritative artifact pair or benchmark evidence"
+    },
+    "benchmark_harness_regression": {
+      "file": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/test_outputs/benchmark_harness_regression.txt",
+      "summary_line": "35 passed in 0.47s",
+      "returncode": 0
+    },
+    "cfi_loader_test_fixes": {
+      "file": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/test_outputs/pytest-cfi-loader-test-fixes.log",
+      "summary_line": "104 passed in 5.80s",
+      "returncode": 0
+    },
+    "evidence_completeness_perf_fix": {
+      "file": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/test_outputs/pytest-evidence-completeness-perf-fix.log",
+      "summary_line": "23 passed",
+      "returncode": 0,
+      "measurement": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/test_outputs/evidence_completeness_perf_measurement.json"
+    },
+    "tmp_path_hardcoded_test_fixes": {
+      "file": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/test_outputs/pytest-tmp-path-hardcoded-fixes.log",
+      "summary_line": "9 passed in 7.91s",
+      "returncode": 0
+    },
+    "hybrid_loader_fragment_fix": {
+      "file": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/test_outputs/pytest-hybrid-loader-fragment-fix.log",
+      "summary_line": "6 passed in 0.08s",
+      "returncode": 0
+    },
+    "ai_findings_current_source": {
+      "file": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/test_outputs/ai_findings_current_source_rerun.log",
+      "summary_line": "7 passed in 0.14s",
+      "returncode": 0,
+      "boundary": "current-source operator-keyed honey/decoy regression; not evidence that authoritative artifacts were rebuilt"
+    },
+    "partitioned_full_suite_completion": {
+      "file": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/test_outputs/partitioned_full_suite_completion_summary.json",
+      "markdown": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/test_outputs/partitioned_full_suite_completion_summary.md",
+      "test_files": 496,
+      "partitions": 9,
+      "passed_parameterized_rows": 30745,
+      "skipped": 9,
+      "failed_in_selected_passing_runs": 0,
+      "boundary": "bounded disjoint partition completion, not one serial or byte-frozen clean-checkout full-suite run; tree remained concurrently modified"
+    }
+  },
+  "later_source_operator_shard_masking": {
+    "status": "source-level tests passed; artifact rebuild and benchmark not performed",
+    "tests": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/test_outputs/operator_shard_masking_tests.txt",
+    "am001_boundary": "does not solve customer-machine attacker boundary if legitimate execution requires the same shard(s) on that machine"
+  },
+  "manifest_update_note": "updated 2026-11-27 to reconcile stale Hy4/TokenHarbor in-progress benchmark status with the completed OpenCode Go DeepSeek diagnostic matrix, validated final cloud artifact identities, AM-001 architectural acceptance, and diagnostic-only statistical scope; authoritative artifact hashes/build identity unchanged",
+  "benchmark_endpoint_hardening": {
+    "finding": "AM-028",
+    "sandbox_profile": "credential-isolated-unshare-net-pid-v2-minimal-endpoints",
+    "runtime_smoke": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/evm/per_model_endpoint_runtime_smoke.json",
+    "metadata_assessment": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/ai_benchmark/orchestrator/proxy_operational_log_metadata_assessment.json",
+    "boundary": "only required Unix endpoint socket inodes for the selected model family are visible in new sandboxes; operational logs and cross-model provider endpoints are not part of attacker input",
+    "endpoint_root": "/home/nixon/absmax-sandbox-endpoints",
+    "opencode_entries": [
+      "evm.sock",
+      "opencode-mitm.sock",
+      "opencode-connect.sock"
+    ],
+    "tokenharbor_entries": [
+      "evm.sock",
+      "tokenharbor.sock"
+    ],
+    "model_separation_validation": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/ai_benchmark/orchestrator/model_endpoint_separation_validation.json"
+  },
+  "benchmark_solution_validation_isolation": {
+    "finding": "AM-029",
+    "corrected_path": "re-bench/tools/ai_bench.py::run_solution_validation_isolated",
+    "execution_isolation": "bubblewrap-unshare-net-pid-readonly-workspace",
+    "retrospective_scan": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/ai_benchmark/orchestrator/solution_validation_host_execution_retrospective_scan.json",
+    "boundary": "benchmark infrastructure containment only; no artifact resistance or weakness evidence; first three post-resume batches predate correction boundary"
+  },
+  "benchmark_static_prompt_correction": {
+    "finding": "AM-030",
+    "boundary": "prompt/scorer alignment only; pre-correction invalid executions are not reclassified",
+    "corrected_path": "re-bench/tools/ai_bench.py::prompt_for"
+  },
+  "benchmark_resume_watchdog_update": {
+    "pid": 2261091,
+    "status": "running; all authorised lanes quota-blocked at latest probe",
+    "hy4_cooldown_until_utc": "2026-11-27T00:58:33Z",
+    "tokenharbor_free_reset_utc": "2026-12-02T15:07:00Z",
+    "tokenharbor_paid_status": "HTTP 402 plan_allowance_exhausted; no reset timestamp exposed",
+    "update": "watchdog now parses explicit provider free-lane reset timestamps and does not reprobe that lane every interval while the timestamped block is active"
+  },
+  "crypto_validation": {
+    "authoritative_honey_key_derivation": {
+      "file": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/crypto_validation/authoritative_artifact_honey_key_derivation_check.json",
+      "result": "old artifact-public derivation exactly matches emitted hints and recovers plausible 2012-byte Python decoy plaintext in both authoritative variants; real hidden secret absent; current source fixed but no artifact rebuild"
+    }
+  },
+  "current_status_supersession_2026_11_27": {
+    "date": "2026-11-27",
+    "lane": "opencode-go/deepseek-v4.1-flash",
+    "variants": 6,
+    "scenarios": 19,
+    "planned_cells": 114,
+    "valid_active_records": 114,
+    "invalid_active_records": 0,
+    "attempts_per_cell": 1,
+    "classification": "broad diagnostic evidence only; not statistical completion and not a release gate",
+    "aggregate": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/deepseek_benchmark_aggregate.json",
+    "cache_summary": "re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/opencode_go_cache_summary.json",
+    "final_report": "re-bench/ABSOLUTE_MAXIMUM_DEEPSEEK_FINAL_REPORT_20261126.md",
+    "closeout": "re-bench/ABSOLUTE_MAXIMUM_FINAL_CLOSEOUT_20261127.md",
+    "am001_decision": "re-bench/ABSOLUTE_MAXIMUM_AM001_ARCHITECTURAL_DECISION_20261127.md",
+    "cloud_artifacts": {
+      "maximum-cloud": "f9c5256d796c57fccc81e0eff0064b5743a1768e2dc203dfa3fc91651965a395",
+      "absolute-cloud": "9bfdadef9414f9f79b0529f16bfa9591423f6f93bc53a5f9dbea83e1e6330dc0"
+    }
+  }
+}

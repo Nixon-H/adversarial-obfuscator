@@ -54,4 +54,7 @@ FROM builder AS tester
 RUN apt-get update && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed ruff==0.16.1
+# The in-container filesystem is slower than the developer host; keep the
+# per-test safety net but allow enough headroom for build-heavy tests.
+ENV NIXON_TEST_TIMEOUT=180
 RUN make test
