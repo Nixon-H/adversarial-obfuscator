@@ -47,6 +47,7 @@ wins; if a current document and the code disagree, the code and its tests win.
 | [`TRANSFORMS.md`](TRANSFORMS.md) | Protection layers, transformation taxonomy, flag-to-effect map, inert flags | Maintained |
 | [`SECURITY_FEATURES.md`](SECURITY_FEATURES.md) | Objective-level classification; IP protection vs licensing vs integrity; wiring | Maintained |
 | [`MAXIMUM_SECURITY.md`](MAXIMUM_SECURITY.md) | Configuration matrix, interactions, measured builds, bounded attack probe, negative results | Maintained |
+| [`MAXIMUM_SECURITY_ADDENDUM_20261127.md`](MAXIMUM_SECURITY_ADDENDUM_20261127.md) | Companion inventory for post-freeze farm-repository retention flags | Current |
 | [`research/ai-layer-bench-2026-11-11/RESULTS.md`](research/ai-layer-bench-2026-11-11/RESULTS.md) | Fresh per-layer AI benchmark: crack/recall and refusal rates, read-only agent replication, and full-tool packed-loader recovery | Pilot measurement |
 | [`CRYPTO_REVIEW.md`](CRYPTO_REVIEW.md) | Internal review of payload/string/section/licence crypto; **not independent** | Maintained |
 | [`SEED_ARCHITECTURE.md`](SEED_ARCHITECTURE.md) | Reproducibility seeds vs randomisation vs key material; measured determinism | Maintained |
