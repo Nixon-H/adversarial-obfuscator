@@ -31,23 +31,18 @@ AM-001 is formally accepted as an architectural limitation rather than falsely m
 
 ## Final partitioned test evidence
 
-The initial fresh nine-partition run exposed only documentation/CLI drift, not runtime protection regressions:
-
-- `build-native-loader`: 4 CLI-documentation/deprecation failures
-- `unit-static-3`: missing `--keep-farm-repo` inventory documentation
-
-After correction, both partitions were rerun independently and passed. The corrected final aggregate is:
+A single fresh post-closeout nine-partition run completed successfully. No corrective partition substitution is used in the final aggregate:
 
 - **30,853 passed**
 - **9 skipped**
 - **0 failed**
 - all 9 partitions rc 0
 
-Machine-readable aggregate: `re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/final_partition_test_aggregate_20261127.json`. This is a corrected composite: the two red partitions were rerun after the fix, while earlier green partitions are retained because the only intervening product-runtime behavioral correction was the deprecated `--public` warning path, and no test outside `build-native-loader` invokes `--public`. The intervening Dockerfile/Makefile/test-opcount changes are test infrastructure: the Makefile/Dockerfile surface is exercised or inspected in the rerun `build-native-loader` partition, and `test_opcount_truth.py` is in the rerun `unit-static-3` partition. Remaining intervening changes were documentation or test inventory only.
+Machine-readable aggregate: `re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/final_partition_test_aggregate_20261127.json`. The run started after the benchmark closeout fixes; subsequent intervening commits were documentation-only historical-status supersession notices and did not change product or test code. The earlier corrected-composite aggregate remains in git history only as interim evidence.
 
 ## Evidence hygiene
 
-Final redaction scan after closeout: `credential_hits=0` across 83,493 scanned files; evidence copy: `re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/final_closeout_redaction_scan_20261127.json`. Provider-key material was held only by host-side proxy processes and was not present in benchmark sandboxes.
+Final redaction scan after closeout: `credential_hits=0` across 83,518 scanned files; evidence copy: `re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/final_closeout_redaction_scan_20261127.json`. Provider-key material was held only by host-side proxy processes and was not present in benchmark sandboxes.
 
 ## Push state
 

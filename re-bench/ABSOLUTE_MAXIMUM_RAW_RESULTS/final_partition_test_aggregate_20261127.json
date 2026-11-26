@@ -1,54 +1,23 @@
 {
-  "generated_utc": "2026-11-26T20:14:07Z",
-  "interpretation": "Final corrected partition aggregate. The initial fresh run completed all nine partitions; build-native-loader and unit-static-3 exposed documentation/CLI drift. After the corrective fixes, those two partitions were rerun independently and replace their initial red results here. Earlier green partitions are retained because the only intervening product-runtime behavioral correction was the deprecated --public warning path, and no test outside build-native-loader invokes --public. The intervening Dockerfile/Makefile/test-opcount changes are test infrastructure: the Makefile/Dockerfile surface is exercised or inspected in the rerun build-native-loader partition, and test_opcount_truth.py is in the rerun unit-static-3 partition. Remaining intervening changes were documentation or test inventory only.",
-  "initial_run": {
-    "out_dir": "/home/nixon/absmax-scratch/final-partition-tests",
-    "results_json": "/home/nixon/absmax-scratch/final-partition-tests/results.json",
-    "partition_count": 9,
-    "failed_partitions": [
-      "build-native-loader",
-      "unit-static-3"
-    ]
-  },
-  "corrective_rerun": {
-    "out_dir": "/home/nixon/absmax-scratch/final-partition-rerun-fixed",
-    "results_json": "/home/nixon/absmax-scratch/final-partition-rerun-fixed/results.json",
-    "partitions": [
-      "unit-static-3",
-      "build-native-loader"
-    ],
-    "all_partitions_passed": true
-  },
-  "replaced_partitions": [
-    {
-      "name": "build-native-loader",
-      "initial_returncode": 1,
-      "initial_counts": {
-        "failed": 4,
-        "passed": 558,
-        "skipped": 4
-      },
-      "rerun_returncode": 0,
-      "rerun_counts": {
-        "passed": 562,
-        "skipped": 4
-      }
-    },
-    {
-      "name": "unit-static-3",
-      "initial_returncode": 1,
-      "initial_counts": {
-        "failed": 1,
-        "passed": 951,
-        "skipped": 3
-      },
-      "rerun_returncode": 0,
-      "rerun_counts": {
-        "passed": 952,
-        "skipped": 3
-      }
+  "generated_utc": "2026-11-26T20:42:31Z",
+  "interpretation": "Single fresh post-closeout partitioned run of all nine partitions. No corrective partition substitution is used in this aggregate. The run started after the benchmark closeout fixes; subsequent intervening commits were documentation-only historical-status supersession notices and did not change product or test code.",
+  "run": {
+    "out_dir": "/home/nixon/absmax-scratch/final-partition-tests-postcloseout",
+    "results_json": "/home/nixon/absmax-scratch/final-partition-tests-postcloseout/results.json",
+    "runner": "/home/nixon/absmax-runner/run_pytest.py",
+    "file_count": 500,
+    "partition_file_counts": {
+      "vm-ir-llvm": 45,
+      "crypto-container": 26,
+      "security-licensing": 58,
+      "build-native-loader": 63,
+      "distributed-network": 9,
+      "unit-static-1": 75,
+      "unit-static-2": 75,
+      "unit-static-3": 75,
+      "unit-static-4": 74
     }
-  ],
+  },
   "final_partitions": [
     {
       "name": "vm-ir-llvm",
@@ -56,9 +25,9 @@
       "counts": {
         "passed": 779
       },
-      "duration_seconds": 151.298,
+      "duration_seconds": 156.37,
       "file_count": 45,
-      "log": "/home/nixon/absmax-scratch/final-partition-tests/vm-ir-llvm.log"
+      "log": "/home/nixon/absmax-scratch/final-partition-tests-postcloseout/vm-ir-llvm.log"
     },
     {
       "name": "crypto-container",
@@ -67,9 +36,9 @@
         "passed": 405,
         "skipped": 1
       },
-      "duration_seconds": 39.76,
+      "duration_seconds": 49.451,
       "file_count": 26,
-      "log": "/home/nixon/absmax-scratch/final-partition-tests/crypto-container.log"
+      "log": "/home/nixon/absmax-scratch/final-partition-tests-postcloseout/crypto-container.log"
     },
     {
       "name": "security-licensing",
@@ -77,9 +46,9 @@
       "counts": {
         "passed": 846
       },
-      "duration_seconds": 680.926,
+      "duration_seconds": 486.491,
       "file_count": 58,
-      "log": "/home/nixon/absmax-scratch/final-partition-tests/security-licensing.log"
+      "log": "/home/nixon/absmax-scratch/final-partition-tests-postcloseout/security-licensing.log"
     },
     {
       "name": "build-native-loader",
@@ -88,9 +57,9 @@
         "passed": 562,
         "skipped": 4
       },
-      "duration_seconds": 692.666,
+      "duration_seconds": 300.956,
       "file_count": 63,
-      "log": "/home/nixon/absmax-scratch/final-partition-rerun-fixed/build-native-loader.log"
+      "log": "/home/nixon/absmax-scratch/final-partition-tests-postcloseout/build-native-loader.log"
     },
     {
       "name": "distributed-network",
@@ -98,9 +67,9 @@
       "counts": {
         "passed": 169
       },
-      "duration_seconds": 5.479,
+      "duration_seconds": 5.427,
       "file_count": 9,
-      "log": "/home/nixon/absmax-scratch/final-partition-tests/distributed-network.log"
+      "log": "/home/nixon/absmax-scratch/final-partition-tests-postcloseout/distributed-network.log"
     },
     {
       "name": "unit-static-1",
@@ -108,9 +77,9 @@
       "counts": {
         "passed": 521
       },
-      "duration_seconds": 178.043,
+      "duration_seconds": 164.877,
       "file_count": 75,
-      "log": "/home/nixon/absmax-scratch/final-partition-tests/unit-static-1.log"
+      "log": "/home/nixon/absmax-scratch/final-partition-tests-postcloseout/unit-static-1.log"
     },
     {
       "name": "unit-static-2",
@@ -119,9 +88,9 @@
         "passed": 25640,
         "skipped": 1
       },
-      "duration_seconds": 567.705,
+      "duration_seconds": 360.433,
       "file_count": 75,
-      "log": "/home/nixon/absmax-scratch/final-partition-tests/unit-static-2.log"
+      "log": "/home/nixon/absmax-scratch/final-partition-tests-postcloseout/unit-static-2.log"
     },
     {
       "name": "unit-static-3",
@@ -130,9 +99,9 @@
         "passed": 952,
         "skipped": 3
       },
-      "duration_seconds": 62.736,
+      "duration_seconds": 41.777,
       "file_count": 75,
-      "log": "/home/nixon/absmax-scratch/final-partition-rerun-fixed/unit-static-3.log"
+      "log": "/home/nixon/absmax-scratch/final-partition-tests-postcloseout/unit-static-3.log"
     },
     {
       "name": "unit-static-4",
@@ -140,9 +109,9 @@
       "counts": {
         "passed": 979
       },
-      "duration_seconds": 147.231,
+      "duration_seconds": 86.846,
       "file_count": 74,
-      "log": "/home/nixon/absmax-scratch/final-partition-tests/unit-static-4.log"
+      "log": "/home/nixon/absmax-scratch/final-partition-tests-postcloseout/unit-static-4.log"
     }
   ],
   "final_totals": {
@@ -150,5 +119,6 @@
     "skipped": 9
   },
   "final_failed_partitions": [],
-  "final_all_partitions_passed": true
+  "final_all_partitions_passed": true,
+  "superseded_interim_evidence": "The earlier corrected-composite aggregate remains in git history; this direct post-closeout run supersedes it as the strict final test evidence."
 }
