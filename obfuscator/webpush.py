@@ -12,7 +12,6 @@ import base64
 import hashlib
 import hmac as _hmac
 import json
-import os
 import time
 import urllib.request
 

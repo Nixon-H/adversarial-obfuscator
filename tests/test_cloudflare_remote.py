@@ -1739,3 +1739,130 @@ def test_all_responses_carry_security_headers(tmp_path, monkeypatch):
     assert "connect-src 'self'" in csp
     assert "form-action 'none'" in csp
     assert headers.get("Cache-Control") == "no-store"
+
+
+def _enrolled_phone(worker, module, monkeypatch):
+    _install_real_verify(module, monkeypatch)
+    phone = _Phone()
+    assert _enrol(worker, phone).get("enrolled") is True
+    return phone
+
+
+def _approve_fresh(worker, phone, nonce):
+    """Park one request and approve it. Returns the decide response."""
+    submitted = _fetch(worker, _approval_payload(nonce=nonce))
+    assert submitted.get("approval_pending") is True
+    item = [i for i in _pending_items(worker, phone)
+            if i["approval_id"] == submitted["approval_id"]][0]
+    return _decide(worker, phone, item, "approve")
+
+
+def test_anomaly_novel_function_flags_first_approval_only(tmp_path, monkeypatch, capsys):
+    """First-ever approval of a function is the highest-value signal for a
+    deceived-approver attack; once operator-vouched it must go quiet."""
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    phone = _enrolled_phone(worker, module, monkeypatch)
+    capsys.readouterr()
+
+    assert _approve_fresh(worker, phone, "anom-novel-1").get("approved") is True
+    captured = capsys.readouterr().out
+    anomaly_events = [l for l in captured.splitlines() if '"anomaly"' in l]
+    assert len(anomaly_events) == 1
+    assert "novel-function" in anomaly_events[0]
+
+    assert _approve_fresh(worker, phone, "anom-novel-2").get("approved") is True
+    captured = capsys.readouterr().out
+    assert '"anomaly"' not in captured
+
+
+def test_anomaly_denied_function_stays_novel(tmp_path, monkeypatch, capsys):
+    """A denied function was never operator-vouched, so it must keep alerting
+    when re-requested rather than being silently legitimised by the denial."""
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    phone = _enrolled_phone(worker, module, monkeypatch)
+    capsys.readouterr()
+
+    _fetch(worker, _approval_payload(nonce="anom-deny-1"))
+    item = _pending_items(worker, phone)[0]
+    assert _decide(worker, phone, item, "deny").get("denied") is True
+
+    assert _approve_fresh(worker, phone, "anom-deny-2").get("approved") is True
+    captured = capsys.readouterr().out
+    assert '"anomaly"' in captured
+    assert "novel-function" in captured
+
+
+def test_anomaly_velocity_flags_burst(tmp_path, monkeypatch, capsys):
+    """A burst of approvals beyond the configured window threshold flags
+    high-velocity even when every individual approval is properly signed —
+    the piggybacking-shaped failure mode."""
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    phone = _enrolled_phone(worker, module, monkeypatch)
+    worker.env.NIXON_REMOTE_ANOMALY_MAX_APPROVALS = "2"
+    capsys.readouterr()
+
+    # two approvals legitimise the function and fill the velocity window
+    assert _approve_fresh(worker, phone, "anom-vel-1").get("approved") is True
+    assert _approve_fresh(worker, phone, "anom-vel-2").get("approved") is True
+    capsys.readouterr()
+
+    # the third is within the window and must flag velocity
+    assert _approve_fresh(worker, phone, "anom-vel-3").get("approved") is True
+    captured = capsys.readouterr().out
+    assert '"anomaly"' in captured
+    assert "high-velocity" in captured
+    assert "novel-function" not in captured
+
+
+def test_anomaly_disabled_emits_nothing(tmp_path, monkeypatch, capsys):
+    """NIXON_REMOTE_ANOMALY=0 disables detection entirely: no audit events
+    and no list annotations."""
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    phone = _enrolled_phone(worker, module, monkeypatch)
+    worker.env.NIXON_REMOTE_ANOMALY = "0"
+    capsys.readouterr()
+
+    _fetch(worker, _approval_payload(nonce="anom-off-1"))
+    items = _pending_items(worker, phone)
+    assert "anomalies" not in items[0]
+    assert _approve_fresh(worker, phone, "anom-off-2").get("approved") is True
+    captured = capsys.readouterr().out
+    assert '"anomaly"' not in captured
+
+
+def test_anomaly_list_annotation_and_no_secret_leakage(tmp_path, monkeypatch, capsys):
+    """Pending items carry machine-readable anomaly tags for the page, and
+    anomaly audit detail contains only fixed tags — never arguments, tokens,
+    or request values."""
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    phone = _enrolled_phone(worker, module, monkeypatch)
+    capsys.readouterr()
+
+    _fetch(worker, _approval_payload(nonce="anom-list-1", args=[12345]))
+    items = _pending_items(worker, phone)
+    assert items[0]["anomalies"] == ["novel-function"]
+
+    assert _approve_fresh(worker, phone, "anom-list-2").get("approved") is True
+    captured = capsys.readouterr().out
+    anomaly_lines = [l for l in captured.splitlines() if '"anomaly"' in l]
+    assert anomaly_lines
+    for line in anomaly_lines:
+        assert "12345" not in line
+        assert "novel-function" in line
+
+
+def test_anomaly_annotation_present_in_refreshed_pending_list(tmp_path, monkeypatch):
+    """Decision responses carry the refreshed pending list; the annotations
+    must survive that path too since that is what the page renders next."""
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    phone = _enrolled_phone(worker, module, monkeypatch)
+
+    _fetch(worker, _approval_payload(nonce="anom-ref-a"))
+    submitted = _fetch(worker, _approval_payload(nonce="anom-ref-b"))
+    item = [i for i in _pending_items(worker, phone)
+            if i["approval_id"] == submitted["approval_id"]][0]
+    decided = _decide(worker, phone, item, "deny")
+    assert decided.get("denied") is True
+    remaining = decided.get("pending") or []
+    assert len(remaining) == 1
+    assert remaining[0]["anomalies"] == ["novel-function"]

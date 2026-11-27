@@ -76,6 +76,35 @@ Runtime configuration:
 | `NIXON_REMOTE_TOTP_WITH_APPROVAL` | When `1`, typed dual TOTP remains required in addition to phone approval as defense-in-depth. Default off because request-bound approval is strictly stronger than typed codes. |
 | `NIXON_REMOTE_APPROVAL_TIMEOUT` | Client-side ceiling in seconds for approval polling before failing closed; default 150. |
 | `NIXON_REMOTE_RP_ID` | Worker-side WebAuthn relying-party identifier used to verify passkey assertions. Defaults to the request Host header (port stripped), which is correct when the approval page is opened on the worker's own domain; pin it explicitly when the page is served through a custom domain or alias. |
+| `NIXON_VAPID_PUBLIC` | Worker-side VAPID public key (base64url) enabling browser push subscriptions on the approval page. Without it the page skips push enrolment entirely. |
+| `NIXON_VAPID_PRIVATE` | Worker-side VAPID private key (base64url) used to sign payload-less push tickles. Owner-only; never present in customer artifacts. |
+| `NIXON_VAPID_SUBJECT` | Worker-side VAPID subject (`mailto:` or URL) required by push services; defaults to a placeholder and should be set to operator contact. |
+| `NIXON_REMOTE_ANOMALY` | Worker-side anomaly detection switch; default enabled. Set `0`/`false`/`off` to disable. Detection is alert-only: it never blocks execution. |
+| `NIXON_REMOTE_ANOMALY_MAX_APPROVALS` | Approvals within the sliding window at or above which the high-velocity anomaly fires; default 5. |
+| `NIXON_REMOTE_ANOMALY_WINDOW_SECONDS` | Sliding window in seconds for approval-velocity detection; default 600. |
+
+## Alert-only anomaly detection
+
+Two approval-time signals are tracked per customer inside the Durable Object
+and surface in three places: machine-readable `anomalies` tags on pending-list
+items, a visible warning card in the approval page at decision time, and
+`outcome: "anomaly"` audit events whose detail contains only fixed tags.
+
+- `novel-function` — the function has never been approved for this customer.
+  A function becomes operator-vouched only through an approval; denials leave
+  it novel, so a repeatedly re-requested unknown function keeps alerting
+  instead of being silently legitimised.
+- `high-velocity` — approvals within the sliding window reached the configured
+  threshold. Detection precedes recording, so a burst is judged against prior
+  history rather than inflating its own baseline.
+
+This is deliberately detection without enforcement: every alert still requires
+the same user-verified passkey decision, and false positives can never lock
+out legitimate use. The value is concentrated in the approval page warning —
+the human approver is the last control that cannot be cryptographic, and the
+warning is the machine's only channel for telling them something is unusual
+before they sign. Enforcement tiers (cooling-off holds) remain possible future
+work behind explicit operator opt-in.
 
 Current operator-bundle limitation: the bundle contains the marked function
 implementations, not arbitrary module-level helper functions or constants.

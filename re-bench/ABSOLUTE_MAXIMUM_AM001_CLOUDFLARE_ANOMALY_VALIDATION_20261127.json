@@ -1,0 +1,17 @@
+{
+ "results": {
+  "enrolment succeeds": true,
+  "first pending item annotated novel-function": true,
+  "first approval executes": true,
+  "second approval executes": true,
+  "after first approval annotation loses novel tag when window not full": true,
+  "velocity annotation appears in list once window full": true,
+  "velocity approval still executes (alert-only)": true,
+  "audit log contains anomaly events": true,
+  "anomaly audit mentions novel-function": true,
+  "anomaly audit mentions high-velocity": true,
+  "anomaly audits leak no argument values": true
+ },
+ "passed": 11,
+ "total": 11
+}

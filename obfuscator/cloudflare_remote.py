@@ -64,6 +64,8 @@ DEFAULT_AUTH_FAILURE_LIMIT_PER_MINUTE = 10
 DEFAULT_TOTP_PAIR_MAX_USES = 1
 DEFAULT_APPROVAL_EXPIRY_SECONDS = 120
 DEFAULT_MAX_PENDING_PER_CUSTOMER = 8
+DEFAULT_ANOMALY_MAX_APPROVALS = 5
+DEFAULT_ANOMALY_WINDOW_SECONDS = 600
 ENROL_TOKEN_COUNT = 8
 
 
@@ -791,6 +793,8 @@ h1{font-size:1.25rem}.card{border:1px solid #ccd;border-radius:8px;padding:.8rem
 .args{background:#f4f6f8;border-radius:6px;padding:.4rem;font-family:ui-monospace,monospace;font-size:.78rem;word-break:break-all;white-space:pre-wrap}
 button{font-size:1rem;padding:.55rem 1.1rem;border-radius:7px;border:1px solid #999;margin:.3rem .4rem .3rem 0;cursor:pointer}
 .ok{background:#146c2e;color:#fff;border-color:#146c2e}.no{background:#fff;color:#8a1111;border-color:#8a1111}
+  .warn { color: #b00020; font-weight: bold; font-size: 0.9em; margin: 6px 0; }
+  .warn-card { border-left: 4px solid #b00020; }
 .go{background:#1a4f9c;color:#fff;border-color:#1a4f9c}
 #status{padding:.5rem;border-radius:6px;margin:.5rem 0}.info{background:#e8f0fe}.err{background:#fde8e8}.good{background:#e6f4ea}
 small{color:#667}</style></head>
@@ -955,7 +959,21 @@ function rowElement(item, record, onDone) {
   const when = new Date(item.submitted_at * 1000).toLocaleTimeString();
   div.innerHTML = "<div class='fn'></div>"
     + "<div class='meta'></div>"
+    + "<div class='warn'></div>"
     + "<div class='args'></div>";
+  const anomalyText = {
+    "novel-function": "first time this function has ever been approved",
+    "high-velocity": "unusually many approvals in the last few minutes",
+  };
+  const warnings = (item.anomalies || []).map(
+    tag => anomalyText[tag] || tag);
+  if (warnings.length) {
+    div.querySelector(".warn").textContent =
+      "warning: " + warnings.join("; ") + " — verify this is really yours";
+    div.className = "card warn-card";
+  } else {
+    div.querySelector(".warn").remove();
+  }
   div.querySelector(".fn").textContent = item.function + "  (" + when + ")";
   div.querySelector(".meta").textContent =
     "customer " + item.customer + " · request " + item.request_hash.slice(0, 16) + "…";
@@ -1121,6 +1139,14 @@ class SecurityRegistry(DurableObject):
         self.sql.exec(
             "CREATE TABLE IF NOT EXISTS customer_state ("
             "customer TEXT PRIMARY KEY, disabled INTEGER NOT NULL)")
+        self.sql.exec(
+            "CREATE TABLE IF NOT EXISTS decision_log ("
+            "customer TEXT NOT NULL, decided_at REAL NOT NULL, "
+            "function TEXT NOT NULL)")
+        self.sql.exec(
+            "CREATE TABLE IF NOT EXISTS approved_functions ("
+            "customer TEXT NOT NULL, function TEXT NOT NULL, "
+            "first_seen REAL NOT NULL, PRIMARY KEY (customer, function))")
         # Operators upgrading from the WebCrypto approval deployment already
         # have an approval_keys table without cred_id. CREATE TABLE IF NOT
         # EXISTS never adds columns, so the passkey enrolment insert would
@@ -1373,26 +1399,61 @@ class SecurityRegistry(DurableObject):
             float(now), float(expires_at))
         return "ok"
 
-    async def list_pending(self, customer, now):
+    def _prune_decisions(self, customer, now, window):
+        self.sql.exec(
+            "DELETE FROM decision_log WHERE customer = ? AND decided_at < ?",
+            str(customer), float(now) - float(window))
+
+    def _recent_approvals(self, customer, now, window):
+        rows = self.sql.exec(
+            "SELECT COUNT(*) AS n FROM decision_log WHERE customer = ? "
+            "AND decided_at >= ?", str(customer),
+            float(now) - float(window)).toArray()
+        if len(rows) == 0:
+            return 0
+        return int(_col(rows[0], "n", 0))
+
+    def _anomalies_for(self, customer, function, now, max_approvals, window):
+        """Alert-only anomaly signals. Metadata only: the returned tags never
+        carry arguments, payloads, or secret material."""
+        out = []
+        rows = self.sql.exec(
+            "SELECT first_seen FROM approved_functions WHERE customer = ? "
+            "AND function = ?", str(customer), str(function)).toArray()
+        if len(rows) == 0:
+            out.append("novel-function")
+        recent = self._recent_approvals(customer, now, window)
+        if recent >= int(max_approvals):
+            out.append("high-velocity")
+        return out
+
+    async def list_pending(self, customer, now, max_approvals=0, window=0):
         self._expire_pending(now)
         rows = self.sql.exec(
             "SELECT approval_id, function, args_preview, submitted_at, "
             "request_hash FROM pending_requests WHERE customer = ? AND "
             "status = 'pending' ORDER BY submitted_at", str(customer)).toArray()
+        annotate = int(max_approvals) > 0 and float(window) > 0
+        if annotate:
+            self._prune_decisions(customer, now, window)
         out = []
         for row in rows:
-            out.append({
+            item = {
                 "approval_id": str(_col(row, "approval_id", 0)),
                 "customer": str(customer),
                 "function": str(_col(row, "function", 1)),
                 "args_preview": str(_col(row, "args_preview", 2)),
                 "submitted_at": float(_col(row, "submitted_at", 3)),
                 "request_hash": str(_col(row, "request_hash", 4)),
-            })
+            }
+            if annotate:
+                item["anomalies"] = self._anomalies_for(
+                    customer, item["function"], now, max_approvals, window)
+            out.append(item)
         return json.dumps(out, separators=(",", ":"))
 
     async def decide_pending(self, approval_id, customer, decision,
-                             expected_hash, now):
+                             expected_hash, now, max_approvals=0, window=0):
         self._expire_pending(now)
         rows = self.sql.exec(
             "SELECT status, request_json, request_hash FROM pending_requests "
@@ -1409,17 +1470,46 @@ class SecurityRegistry(DurableObject):
             # nothing keeps a mismatched approval from becoming a confused-
             # deputy authorization.
             return json.dumps({"status": "hash-mismatch"}, separators=(",", ":"))
+        annotate = int(max_approvals) > 0 and float(window) > 0
+        anomalies = []
+        function_name = ""
+        try:
+            function_name = str(json.loads(
+                str(_col(row, "request_json", 1)) or "{}").get("function") or "")
+        except Exception:
+            function_name = ""
+        if annotate and decision == "approve":
+            self._prune_decisions(customer, now, window)
+            # Detection precedes recording so the current decision is judged
+            # against prior history rather than inflating it.
+            anomalies = self._anomalies_for(
+                customer, function_name, now, max_approvals, window)
         new_status = "approved" if decision == "approve" else "denied"
         self.sql.exec(
             "UPDATE pending_requests SET status = ?, decided_at = ? "
             "WHERE approval_id = ? AND status = 'pending'",
             new_status, float(now), str(approval_id))
-        return json.dumps({
+        if decision == "approve":
+            # Approvals are the risk-bearing decisions: they feed the velocity
+            # window and mark the function as operator-vouched. Denials leave
+            # the function novel so it keeps alerting if re-requested.
+            self.sql.exec(
+                "INSERT INTO decision_log (customer, decided_at, function) "
+                "VALUES (?, ?, ?)",
+                str(customer), float(now), str(function_name))
+            self.sql.exec(
+                "INSERT OR IGNORE INTO approved_functions "
+                "(customer, function, first_seen) VALUES (?, ?, ?)",
+                str(customer), str(function_name), float(now))
+        out = {
             "status": "ok",
             "decision": new_status,
             "request_json": str(_col(row, "request_json", 1)),
             "request_hash": str(_col(row, "request_hash", 2)),
-        }, separators=(",", ":"))
+        }
+        if annotate:
+            out["anomalies"] = anomalies
+        return json.dumps(out, separators=(",", ":"))
 
     async def complete_pending(self, approval_id, final_status, result_json):
         self.sql.exec(
@@ -1534,6 +1624,21 @@ class Default(WorkerEntrypoint):
             return _hex32(master_hex)
         except ValueError:
             return None
+
+    def _anomaly_cfg(self):
+        """Alert-only anomaly detection configuration. Enabled by default;
+        NIXON_REMOTE_ANOMALY=0/false/off disables detection entirely."""
+        raw = (_env(self.env, "NIXON_REMOTE_ANOMALY") or "1").strip().lower()
+        if raw in ("0", "false", "off", "disabled"):
+            return None
+        return {
+            "max_approvals": _positive_int_env(
+                self.env, "NIXON_REMOTE_ANOMALY_MAX_APPROVALS",
+                DEFAULT_ANOMALY_MAX_APPROVALS),
+            "window": _positive_int_env(
+                self.env, "NIXON_REMOTE_ANOMALY_WINDOW_SECONDS",
+                DEFAULT_ANOMALY_WINDOW_SECONDS),
+        }
 
     def _security_stub(self):
         security_ns = _binding(self.env, "SECURITY")
@@ -1688,7 +1793,12 @@ class Default(WorkerEntrypoint):
             _audit("rejected", customer, "", "pending-assertion-" + detail)
             return _response({"error": "remote approval signature invalid"})
         try:
-            list_json = await stub.list_pending(customer, now)
+            anomaly = self._anomaly_cfg()
+            if anomaly is None:
+                list_json = await stub.list_pending(customer, now)
+            else:
+                list_json = await stub.list_pending(
+                    customer, now, anomaly["max_approvals"], anomaly["window"])
         except Exception:
             return _response({"error": "remote replay protection unavailable"})
         try:
@@ -1699,7 +1809,13 @@ class Default(WorkerEntrypoint):
 
     async def _pending_response_items(self, stub, customer):
         try:
-            list_json = await stub.list_pending(customer, time.time())
+            anomaly = self._anomaly_cfg()
+            if anomaly is None:
+                list_json = await stub.list_pending(customer, time.time())
+            else:
+                list_json = await stub.list_pending(
+                    customer, time.time(),
+                    anomaly["max_approvals"], anomaly["window"])
             return json.loads(list_json)
         except Exception:
             return []
@@ -1744,8 +1860,14 @@ class Default(WorkerEntrypoint):
             _audit("rejected", customer, "", "approval-assertion-" + detail)
             return _response({"error": "remote approval signature invalid"})
         try:
-            decided = json.loads(await stub.decide_pending(
-                approval_id, customer, decision, request_hash, now))
+            anomaly_cfg = self._anomaly_cfg()
+            if anomaly_cfg is None:
+                decided = json.loads(await stub.decide_pending(
+                    approval_id, customer, decision, request_hash, now))
+            else:
+                decided = json.loads(await stub.decide_pending(
+                    approval_id, customer, decision, request_hash, now,
+                    anomaly_cfg["max_approvals"], anomaly_cfg["window"]))
         except Exception:
             return _response({"error": "remote replay protection unavailable"})
         status = decided.get("status")
@@ -1779,6 +1901,13 @@ class Default(WorkerEntrypoint):
         args = request_doc.get("args", [])
         kwargs = request_doc.get("kwargs", {})
         nonce = request_doc.get("nonce", "")
+        anomalies = decided.get("anomalies") or []
+        if anomalies:
+            # Alert-only: detection never blocks execution, but every anomalous
+            # approval leaves operator-visible metadata. Tags are fixed strings
+            # and never carry arguments or secret material.
+            _audit("anomaly", customer, function, ",".join(
+                str(tag) for tag in anomalies))
         result_doc = None
         try:
             consume = await stub.check_and_store(
@@ -2339,6 +2468,20 @@ When the customer has an enrolled approval phone, the stub automatically
 polls for the decision. `NIXON_REMOTE_APPROVAL_TIMEOUT` (seconds, default
 150) bounds how long the client waits before failing closed; choose it above
 `NIXON_REMOTE_APPROVAL_EXPIRY_SECONDS` on the server.
+
+## Anomaly detection
+
+The Worker tracks two alert-only approval-time signals per customer and shows
+them as warning cards in the approval page before the user signs:
+
+- `novel-function`: the function has never been approved for this customer
+- `high-velocity`: approvals within a sliding window reached the threshold
+  (`NIXON_REMOTE_ANOMALY_MAX_APPROVALS` per
+  `NIXON_REMOTE_ANOMALY_WINDOW_SECONDS`; defaults 5 per 600)
+
+Detection never blocks execution; it exists to warn the human approver, and
+it also emits `anomaly` audit events carrying fixed tags only. It is enabled
+by default; set `NIXON_REMOTE_ANOMALY=0` on the Worker to disable it.
 
 ## Legacy shared-secret compatibility mode
 
