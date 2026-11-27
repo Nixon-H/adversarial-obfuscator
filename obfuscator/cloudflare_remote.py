@@ -457,7 +457,7 @@ async function keyFingerprint(x, y) {
   return hex(digest).slice(0, 24);
 }
 async function signWith(record, parts) {
-  const data = enc.encode(parts.join("\x00"));
+  const data = enc.encode(parts.join("\\x00"));
   const sig = await crypto.subtle.sign(
     {name: "ECDSA", hash: "SHA-256"}, record.key, data);
   return hex(sig);
@@ -479,7 +479,7 @@ async function enrolFromHash() {
       {name: "ECDSA", namedCurve: "P-256"}, false, ["sign"]);
     const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
     const keyId = await keyFingerprint(jwk.x, jwk.y);
-    const data = enc.encode(["nixon-remote-enrol-v1", customer, token].join("\x00"));
+    const data = enc.encode(["nixon-remote-enrol-v1", customer, token].join("\\x00"));
     const proof = hex(await crypto.subtle.sign(
       {name: "ECDSA", hash: "SHA-256"}, pair.privateKey, data));
     const res = await post({type: "enrol", version: 1, customer: customer,
