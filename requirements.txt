@@ -37,7 +37,7 @@ cryptography==50.0.0     # pipeline.py _check_aes_ctr tries cryptography first
 # pycryptodome kept as fallback branch in pipeline.py — intentionally not required.
 
 # ─── Test ────────────────────────────────────────────────────────────────────
-pytest==9.0.3             # test runner
+pytest==9.2.0             # test runner
 pytest-benchmark==5.3.0    # bench_* suites (benchmark fixture)
 # ─── SMT-backed suites (test_metrics, test_smt_validation, proof
 # soundness, vm_correctness, watermark_survivability, etc. — 15 modules
