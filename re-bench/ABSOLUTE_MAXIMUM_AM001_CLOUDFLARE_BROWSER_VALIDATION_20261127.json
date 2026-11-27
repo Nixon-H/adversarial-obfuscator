@@ -1,0 +1,12 @@
+{
+ "results": {
+  "browser enrolment ceremony succeeds": true,
+  "rpc pends after enrolment": true,
+  "pending request appears in browser": true,
+  "approval succeeds in browser": true,
+  "result delivered after browser approval": true,
+  "no phantom pendings remain": true
+ },
+ "passed": 6,
+ "total": 6
+}

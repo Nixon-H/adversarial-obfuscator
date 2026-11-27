@@ -1089,7 +1089,7 @@ class SecurityRegistry(DurableObject):
 
     async def list_keys(self, customer):
         rows = self.sql.exec(
-            "SELECT key_id, label, revoked, enrolled_at FROM approval_keys "
+            "SELECT key_id, label, revoked, enrolled_at, cred_id FROM approval_keys "
             "WHERE customer = ?", str(customer)).toArray()
         out = []
         for row in rows:
@@ -1098,6 +1098,7 @@ class SecurityRegistry(DurableObject):
                 "label": str(_col(row, "label", 1)),
                 "revoked": bool(int(_col(row, "revoked", 2))),
                 "enrolled_at": float(_col(row, "enrolled_at", 3)),
+                "cred_id": str(_col(row, "cred_id", 4) or ""),
             })
         return json.dumps(out, separators=(",", ":"))
 
@@ -2489,6 +2490,32 @@ def _read_master_secret(path: str = "") -> str:
     return text.lower()
 
 
+def admin_call(worker_url, action, master_secret, customer, key_id=""):
+    """Call the Worker admin endpoint. Raises RemoteError on failure."""
+    import json as _json
+    import urllib.request as _u
+
+    doc = {
+        "type": "admin", "version": 1, "action": action,
+        "customer": customer, "secret": derive_admin_secret(master_secret),
+    }
+    if key_id:
+        doc["key_id"] = key_id
+    body = _json.dumps(doc, separators=(",", ":")).encode("utf-8")
+    request = _u.Request(
+        worker_url, data=body, method="POST",
+        headers={"Content-Type": "application/json",
+                 "User-Agent": "Mozilla/5.0"})
+    try:
+        with _u.urlopen(request, timeout=30.0) as response:
+            out = _json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        raise RemoteError("admin request failed: %s" % (exc,)) from exc
+    if not isinstance(out, dict):
+        raise RemoteError("admin response was not an object")
+    return out
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="Cloudflare remote-execution helper utilities")
@@ -2521,6 +2548,22 @@ def main(argv=None) -> int:
         "--master-secret-file", default="",
         help="owner-only master JSON/raw hex file; default: NIXON_REMOTE_MASTER_SECRET")
 
+    for name, helptext in (
+            ("list-keys", "list enrolled approval keys for a customer on a live Worker"),
+            ("revoke-key", "revoke one enrolled approval key on a live Worker"),
+            ("revoke-stale-keys",
+             "revoke every enrolled key that has no passkey credential id "
+             "(pre-upgrade WebCrypto enrolments, which can never sign again)")):
+        cmd = sub.add_parser(name, help=helptext)
+        cmd.add_argument("--worker-url", required=True,
+                         help="full Worker URL, e.g. https://name.workers.dev/")
+        cmd.add_argument("--customer-id", required=True)
+        cmd.add_argument(
+            "--master-secret-file", default="",
+            help="owner-only master JSON/raw hex file; default: NIXON_REMOTE_MASTER_SECRET")
+        if name == "revoke-key":
+            cmd.add_argument("--key-id", required=True)
+
     args = parser.parse_args(argv)
     if args.command == "provision":
         write_totp_provisioning(args.path, label_prefix=args.label_prefix)
@@ -2549,6 +2592,59 @@ def main(argv=None) -> int:
         except (OSError, ValueError, RemoteError) as exc:
             parser.error(str(exc))
         print(derive_admin_secret(master_secret))
+        return 0
+    if args.command == "list-keys":
+        try:
+            master_secret = _read_master_secret(args.master_secret_file)
+            out = admin_call(
+                args.worker_url, "list-keys", master_secret, args.customer_id)
+        except (OSError, ValueError, RemoteError) as exc:
+            parser.error(str(exc))
+        if out.get("error"):
+            parser.error(out["error"])
+        keys = out.get("keys", [])
+        if not keys:
+            print("no enrolled keys for customer %s" % args.customer_id)
+            return 0
+        for key in keys:
+            cred = key.get("cred_id") or ""
+            kind = "passkey" if cred else "pre-passkey (cannot sign)"
+            print("%s  %s  label=%s  revoked=%s" % (
+                key.get("key_id", "?"), kind,
+                key.get("label", ""), key.get("revoked", "?")))
+        return 0
+    if args.command == "revoke-key":
+        try:
+            master_secret = _read_master_secret(args.master_secret_file)
+            out = admin_call(
+                args.worker_url, "revoke-key", master_secret,
+                args.customer_id, key_id=args.key_id)
+        except (OSError, ValueError, RemoteError) as exc:
+            parser.error(str(exc))
+        if out.get("revoked") is True:
+            print("revoked key %s for customer %s" % (args.key_id, args.customer_id))
+            return 0
+        parser.error(out.get("error", "revocation failed"))
+    if args.command == "revoke-stale-keys":
+        try:
+            master_secret = _read_master_secret(args.master_secret_file)
+            keys = admin_call(
+                args.worker_url, "list-keys", master_secret, args.customer_id)
+        except (OSError, ValueError, RemoteError) as exc:
+            parser.error(str(exc))
+        if keys.get("error"):
+            parser.error(keys["error"])
+        revoked = 0
+        for key in keys.get("keys", []):
+            if key.get("cred_id") or int(key.get("revoked", 0)):
+                continue
+            out = admin_call(
+                args.worker_url, "revoke-key", master_secret,
+                args.customer_id, key_id=key["key_id"])
+            if out.get("revoked") is True:
+                revoked += 1
+                print("revoked stale key %s" % key["key_id"])
+        print("revoked %d stale key(s)" % revoked)
         return 0
     return 2
 

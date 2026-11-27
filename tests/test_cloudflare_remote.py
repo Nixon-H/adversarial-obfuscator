@@ -1615,3 +1615,84 @@ def test_approval_page_handles_pre_passkey_records(tmp_path, monkeypatch):
     guard = re.search(
         r'if \(!record \|\| typeof record\.credId !== "string"', page)
     assert guard is not None, "assertWith lacks the stale-record guard"
+
+
+def test_admin_cli_commands(tmp_path, monkeypatch, capsys):
+    """The admin CLI commands derive the secret, post the right actions, and
+    revoke-stale-keys revokes only keys lacking a passkey credential id."""
+    import json as jsonlib
+
+    calls = []
+
+    class _Resp:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def read(self):
+            return jsonlib.dumps(self._payload).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    keys = [
+        {"key_id": "k-old", "label": "x", "revoked": False, "enrolled_at": 1.0, "cred_id": ""},
+        {"key_id": "k-new", "label": "y", "revoked": False, "enrolled_at": 2.0, "cred_id": "AQID"},
+        {"key_id": "k-dead", "label": "z", "revoked": True, "enrolled_at": 1.5, "cred_id": ""},
+    ]
+
+    def fake_urlopen(request, timeout=0):
+        body = jsonlib.loads(request.data.decode())
+        calls.append(body)
+        if body.get("action") == "list-keys":
+            return _Resp({"keys": keys})
+        return _Resp({"revoked": True})
+
+    master_file = tmp_path / "master.json"
+    import obfuscator.cloudflare_remote as cr
+    cr.write_master_provisioning(str(master_file))
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    rc = cr.main(["list-keys", "--worker-url", "http://x/",
+                  "--customer-id", "acme",
+                  "--master-secret-file", str(master_file)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "pre-passkey (cannot sign)" in out
+    assert "passkey" in out
+    assert calls[0]["action"] == "list-keys"
+    assert len(calls[0]["secret"]) == 64
+
+    calls.clear()
+    rc = cr.main(["revoke-stale-keys", "--worker-url", "http://x/",
+                  "--customer-id", "acme",
+                  "--master-secret-file", str(master_file)])
+    assert rc == 0
+    revoke_targets = [c.get("key_id") for c in calls if c.get("action") == "revoke-key"]
+    assert revoke_targets == ["k-old"], (
+        "only the unrevoked pre-passkey key must be revoked")
+    assert "revoked 1 stale key(s)" in capsys.readouterr().out
+
+    calls.clear()
+    rc = cr.main(["revoke-key", "--worker-url", "http://x/",
+                  "--customer-id", "acme", "--key-id", "k-manual",
+                  "--master-secret-file", str(master_file)])
+    assert rc == 0
+    assert calls[0]["action"] == "revoke-key"
+    assert calls[0]["key_id"] == "k-manual"
+
+
+def test_admin_list_keys_response_includes_cred_id(tmp_path, monkeypatch):
+    """The Worker list_keys admin response must expose cred_id so operators
+    can identify pre-passkey enrolments that can never sign again."""
+    module, worker, sql, _target = _load_worker(tmp_path, monkeypatch)
+    phone = _Phone()
+    _enrol(worker, phone)
+    rows = sql.exec(
+        "SELECT key_id, cred_id FROM approval_keys WHERE customer = ?",
+        CUSTOMER).toArray()
+    import base64 as _b64
+    expected = _b64.urlsafe_b64encode(phone.cred_id).rstrip(b"=").decode()
+    assert rows and rows[0][1] == expected
