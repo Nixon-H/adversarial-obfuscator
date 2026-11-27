@@ -7805,6 +7805,8 @@ _LOADER_TX_FIELDS = {
     "data": "tx_data", "data-level": "tx_data_level",
     "function-intent": "tx_function_intent", "speculation": "tx_speculation",
     "remote": "tx_remote", "remote-bundle": "tx_remote_bundle",
+    "remote-cloudflare": "tx_remote_cloudflare",
+    "remote-cloudflare-name": "tx_remote_cloudflare_name",
     # Keyless string sealing: string-key-env=NAME derives the seal key from
     # environment variable NAME instead of shipping it in the artefact.
     # Lives here (not as a standalone build flag) to respect the CLI
@@ -7879,6 +7881,21 @@ def _prepare_remote_split_source(args, source: str) -> str:
         raise SystemExit(
             "--transforms remote failed: cannot write operator bundle %r: %s"
             % (bundle_path, exc)) from exc
+
+    cloudflare_path = str(getattr(args, "tx_remote_cloudflare", "") or "")
+    if cloudflare_path:
+        from obfuscator.cloudflare_remote import write_cloudflare_worker
+        try:
+            worker_path = write_cloudflare_worker(
+                remote_functions, cloudflare_path,
+                worker_name=str(getattr(args, "tx_remote_cloudflare_name", "") or ""))
+        except (OSError, ValueError) as exc:
+            raise SystemExit(
+                "--transforms remote failed: cannot write Cloudflare worker %r: %s"
+                % (cloudflare_path, exc)) from exc
+        args._remote_cloudflare_worker = worker_path
+        print("    [+] Cloudflare worker project written: %s" % worker_path)
+
     fd, client_path = tempfile.mkstemp(prefix="nx_remote_client_", suffix=".py")
     os.close(fd)
     try:
@@ -8285,7 +8302,11 @@ def build_parser():
                             'remote = remove every module-level @remote function '
                             'from the client artefact, remote-bundle=PATH = write '
                             'the operator-side implementations required by remote '
-                            '(required when @remote functions are present). struct '
+                            '(required when @remote functions are present), '
+                            'remote-cloudflare=DIR = also write a deployable '
+                            'dual-TOTP Cloudflare Python Worker project, '
+                            'remote-cloudflare-name=NAME = override its worker '
+                            'name. struct '
                             'stays native-pipeline only (it configures the '
                             'LLVM/IR flow). string-key-env=NAME = derive the '
                             'string-seal key from environment variable NAME '

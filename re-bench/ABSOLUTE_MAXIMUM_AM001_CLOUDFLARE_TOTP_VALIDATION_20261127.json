@@ -1,0 +1,62 @@
+{
+  "schema": "nixon-cloudflare-totp-validation-v1",
+  "date": "2026-11-27",
+  "target": "generated Cloudflare Python Worker running locally under pywrangler/wrangler dev",
+  "worker_name": "test-remote-modular",
+  "wrangler_version": "4.168.0",
+  "python_worker_runtime": "Pyodide/Cpython local workerd runtime installed by pywrangler",
+  "protocol": "nixon-remote-v1 plus top-level dual-TOTP authentication fields",
+  "test_function": "hidden_pricing(x, scale=2) = coefficient + x * scale; coefficient 991",
+  "secret_handling": "test-only HMAC/TOTP seeds were supplied through .dev.vars and are not included in this evidence file",
+  "results": {
+    "direct_valid": {
+      "result": 1012
+    },
+    "exact_replay": {
+      "error": "remote request replayed"
+    },
+    "tampered_args": {
+      "error": "remote request signature mismatch"
+    },
+    "stale_timestamp": {
+      "error": "remote request expired"
+    },
+    "missing_first_totp": {
+      "error": "remote request authentication failed"
+    },
+    "wrong_second_totp": {
+      "error": "remote request authentication failed"
+    },
+    "embedded_client_valid": {
+      "result": 1012
+    },
+    "artifact_scan": {
+      "client_contains_coefficient_name": false,
+      "client_contains_coefficient_value": false,
+      "client_contains_marker": false,
+      "worker_entry_contains_coefficient_value": false,
+      "worker_impl_contains_coefficient_name": true,
+      "worker_impl_contains_coefficient_value": true,
+      "worker_impl_mode": "0o600"
+    },
+    "expectations": {
+      "direct_valid_result": true,
+      "embedded_client_result": true,
+      "exact_replay_rejected": true,
+      "tampered_rejected": true,
+      "stale_rejected": true,
+      "missing_totp_rejected": true,
+      "wrong_totp_rejected": true
+    }
+  },
+  "notes": [
+    "valid direct worker call returned 1012",
+    "valid embedded split-client call returned 1012",
+    "exact replay was rejected by the Durable Object registry",
+    "tampered arguments were rejected by protocol-v1 HMAC verification",
+    "stale timestamps were rejected",
+    "missing or wrong TOTP codes were rejected after valid HMAC verification",
+    "the split client did not contain the coefficient name/value or marker; the generated operator worker did",
+    "validation was rerun against the final modular worker layout; Wrangler attached remote_impl.py as a Python module"
+  ]
+}

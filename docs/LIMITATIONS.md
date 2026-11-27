@@ -37,9 +37,15 @@ external-attacker semantic break was validated. AM-001 remains an architectural
 boundary for everything executed client-side, not a defect that more client-side
 obfuscation can fix. The implemented remediation is opt-in server-side split
 execution for functions explicitly marked `@remote`; those implementations are
-removed before native compilation and packing. See
-`../re-bench/ABSOLUTE_MAXIMUM_AM001_ARCHITECTURAL_DECISION_20261127.md` and
-`../re-bench/ABSOLUTE_MAXIMUM_AM001_REMOTE_SPLIT_VALIDATION_20261127.md`.
+removed before native compilation and packing. A Cloudflare Python Worker target
+is available for low-cost serverless deployment, with dual independent TOTP as
+an additional server-verified oracle-access gate and a Durable-Object replay
+registry. TOTP must not be misread as client-side protection or host
+attestation: a compromised customer machine can capture typed codes or abuse an
+authenticated window, and unmarked plaintext logic remains extractable. See
+`../re-bench/ABSOLUTE_MAXIMUM_AM001_ARCHITECTURAL_DECISION_20261127.md`,
+`../re-bench/ABSOLUTE_MAXIMUM_AM001_REMOTE_SPLIT_VALIDATION_20261127.md`, and
+`../re-bench/ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_TOTP_VALIDATION_20261127.md`.
 
 ### 1.3 Build-host trust
 

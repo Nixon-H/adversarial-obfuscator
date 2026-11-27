@@ -40,6 +40,35 @@ must never ship with the client. The loopback reference endpoint is plain HTTP
 by design; non-loopback deployments must put it behind TLS and the client
 refuses non-loopback plain HTTP before emitting a request.
 
+## Cloudflare Worker alternative
+
+`orbital-relay --serve-remote` remains the self-hosted reference service. The
+build can alternatively emit a deployable Cloudflare Python Worker with:
+
+```text
+--transforms remote remote-bundle=/secure/operator-bundle.py \
+  remote-cloudflare=/secure/cloudflare-worker
+```
+
+The generated worker contains the operator-side implementations and must never
+ship to customers. It verifies the same protocol-v1 HMAC envelope, requires
+fresh six-digit codes from two independent TOTP seeds, and uses a
+SQLite-backed Durable Object for replay rejection. Configure these values as
+Cloudflare secrets, not in `wrangler.jsonc`:
+
+| secret | meaning |
+|---|---|
+| `NIXON_REMOTE_SECRET` | The same 64-hex HMAC key used by the client |
+| `NIXON_REMOTE_TOTP_SECRET` | Primary independent base32 authenticator seed, intended for Google Authenticator enrolment |
+| `NIXON_REMOTE_TOTP2_SECRET` | Secondary independent base32 authenticator seed, intended for Microsoft Authenticator enrolment |
+
+Use `python3 -m obfuscator.cloudflare_remote provision PATH` to generate
+owner-only enrolment material. Deployment instructions are written into the
+generated project's `DEPLOYMENT.md`. TOTP is an additional server-side access
+gate, not host attestation and not protection for plaintext client-side logic.
+It is enforced only by the generated Cloudflare Worker; the Rust reference
+relay accepts the same signed protocol envelope but does not enforce TOTP.
+
 ## `AppConfig` (`relay/src/config.rs`)
 
 `AppConfig` is the small, CLI-derived launch configuration:

@@ -124,3 +124,65 @@ def test_unmarked_payload_is_allowed_when_remote_transform_is_not_enabled(tmp_pa
     args = argparse.Namespace(tx_remote=False, tx_remote_bundle="")
     args._input_source = str(path)
     assert _prepare_remote_split_source(args, str(path)) == str(path)
+
+
+def test_transforms_parser_accepts_cloudflare_worker_output():
+    parser, _subparsers = build_parser()
+    args = parser.parse_args([
+        "build", "payload.py", "--transforms", "remote",
+        "remote-bundle=operator_bundle.py",
+        "remote-cloudflare=cloudflare-worker",
+        "remote-cloudflare-name=my-remote-worker",
+    ])
+    args = apply_unified_specs(args)
+    assert args.tx_remote is True
+    assert args.tx_remote_cloudflare == "cloudflare-worker"
+    assert args.tx_remote_cloudflare_name == "my-remote-worker"
+
+
+def test_remote_split_writes_cloudflare_worker_project(tmp_path):
+    source = _write_source(tmp_path)
+    bundle = str(tmp_path / "operator_bundle.py")
+    worker_dir = str(tmp_path / "cloudflare-worker")
+    args = argparse.Namespace(
+        tx_remote=True,
+        tx_remote_bundle=bundle,
+        tx_remote_cloudflare=worker_dir,
+        tx_remote_cloudflare_name="test-remote-worker",
+    )
+    args._input_source = source
+    try:
+        client_path = _prepare_remote_split_source(args, source)
+        assert client_path != source
+        assert args._remote_cloudflare_worker == os.path.abspath(worker_dir)
+        entry = open(os.path.join(worker_dir, "src", "entry.py"),
+                     encoding="utf-8").read()
+        implementation = open(os.path.join(worker_dir, "src", "remote_impl.py"),
+                              encoding="utf-8").read()
+        assert "SECRET_COEFFICIENT" not in entry
+        assert "SECRET_COEFFICIENT" in implementation
+        assert "class ReplayRegistry" in entry
+        assert "NIXON_REMOTE_TOTP_SECRET" in entry
+        assert stat.S_IMODE(os.stat(os.path.join(
+            worker_dir, "src", "entry.py")).st_mode) & 0o077 == 0
+        assert stat.S_IMODE(os.stat(os.path.join(
+            worker_dir, "src", "remote_impl.py")).st_mode) & 0o077 == 0
+        client = open(client_path, encoding="utf-8").read()
+        assert "SECRET_COEFFICIENT" not in client
+    finally:
+        _cleanup(args)
+
+
+def test_remote_split_fails_closed_when_cloudflare_output_exists(tmp_path):
+    source = _write_source(tmp_path)
+    worker_dir = tmp_path / "cloudflare-worker"
+    worker_dir.mkdir()
+    args = argparse.Namespace(
+        tx_remote=True,
+        tx_remote_bundle=str(tmp_path / "operator_bundle.py"),
+        tx_remote_cloudflare=str(worker_dir),
+        tx_remote_cloudflare_name="test-remote-worker",
+    )
+    args._input_source = source
+    with pytest.raises(SystemExit, match="Cloudflare worker"):
+        _prepare_remote_split_source(args, source)
