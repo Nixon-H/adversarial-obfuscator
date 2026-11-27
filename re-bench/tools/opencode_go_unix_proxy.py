@@ -188,8 +188,15 @@ def usage_metrics(raw_response):
     return clean,cache
 
 
+_SENSITIVE_FIELDS=('authorization','token','api_key','apikey','secret','password','credential','x-api-key')
+def _scrub(o):
+    if isinstance(o,dict):
+        return {k:('[redacted]' if any(s in str(k).lower() for s in _SENSITIVE_FIELDS) else _scrub(v)) for k,v in o.items()}
+    if isinstance(o,list):
+        return [_scrub(v) for v in o]
+    return o
 def log(obj):
-    obj=dict(obj); obj['ts']=time.time()
+    obj=_scrub(dict(obj)); obj['ts']=time.time()
     LOG_PATH.parent.mkdir(parents=True,exist_ok=True)
     with open(LOG_PATH,'a') as f: f.write(json.dumps(obj)+'\n')
 

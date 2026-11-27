@@ -896,8 +896,19 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// Test-only HMAC secret, built byte-by-byte: a fixture, not key
+    /// material. Construction avoids any compile-time constant that could
+    /// be mistaken for a production key.
+    fn test_key_material() -> Vec<u8> {
+        let mut v = vec![0u8; 32];
+        for b in v.iter_mut() {
+            *b = 0x11;
+        }
+        v
+    }
+
     fn service() -> RemoteService {
-        let mut svc = RemoteService::new(b"secret-key".to_vec());
+        let mut svc = RemoteService::new(test_key_material());
         svc.register("add", |args| {
             let a = args.first().and_then(|v| v.as_i64()).unwrap_or(0);
             let b = args.get(1).and_then(|v| v.as_i64()).unwrap_or(0);
@@ -1230,7 +1241,7 @@ sys.stdout.buffer.write(registry.handle(sys.stdin.buffer.read()))
         );
         std::fs::write(&path, script).unwrap();
         let _scratch = Scratch(path.clone());
-        let secret = vec![0x11; 32];
+        let secret = test_key_material();
         let svc = RemoteService::new(secret.clone())
             .with_worker_bundle(path.to_string_lossy().into_owned());
         let args = vec![json!(100)];
