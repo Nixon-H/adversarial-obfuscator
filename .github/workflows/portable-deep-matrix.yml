@@ -86,8 +86,8 @@ jobs:
             zips: "2"
             level: "5"
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # pinned immutable; original actions/checkout@v4
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # pinned immutable; original actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # pinned immutable; original actions/checkout@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # pinned immutable; original actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Install builder dependencies
@@ -101,7 +101,7 @@ jobs:
         run: python scripts/ci/build_on_platform.py
       - name: Keep the failing artefact
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pinned immutable; original actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # pinned immutable; original actions/upload-artifact@v7
         with:
           name: failing-artefact-config-${{ matrix.label }}-${{ matrix.os }}
           path: ci-artifacts/
@@ -161,8 +161,8 @@ jobs:
           - label: fast
             args: "--fast"
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # pinned immutable; original actions/checkout@v4
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # pinned immutable; original actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # pinned immutable; original actions/checkout@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # pinned immutable; original actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Install builder dependencies
@@ -179,8 +179,8 @@ jobs:
     outputs:
       flags: ${{ steps.list.outputs.flags }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # pinned immutable; original actions/checkout@v4
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # pinned immutable; original actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # pinned immutable; original actions/checkout@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # pinned immutable; original actions/setup-python@v7
         with:
           python-version: "3.13"
       - id: list
@@ -201,8 +201,8 @@ jobs:
       matrix:
         flag: ${{ fromJSON(needs.ladder-catalogue.outputs.flags) }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # pinned immutable; original actions/checkout@v4
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # pinned immutable; original actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # pinned immutable; original actions/checkout@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # pinned immutable; original actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Install builder dependencies
@@ -215,7 +215,7 @@ jobs:
         run: python scripts/ci/build_with_flag.py
       - name: Keep the failing artefact
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pinned immutable; original actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # pinned immutable; original actions/upload-artifact@v7
         with:
           name: failing-ladder-${{ matrix.flag }}
           path: ci-artifacts/
