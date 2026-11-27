@@ -120,10 +120,18 @@ class ThreadingUnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamSe
     daemon_threads=True
     allow_reuse_address=True
 
-_SENSITIVE_FIELDS=('authorization','token','api_key','apikey','secret','password','credential','x-api-key')
+_SENSITIVE_FIELDS=('authorization','api_key','apikey','secret','password','credential','x-api-key','cookie')
+def _redact(k,v):
+    lk=str(k).lower()
+    if any(s in lk for s in _SENSITIVE_FIELDS):
+        return True
+    # token-named fields are redacted only when the value is credential-
+    # shaped; numeric usage counters (prompt_tokens etc.) must survive
+    # because the cache summarizer does arithmetic on them.
+    return 'token' in lk and isinstance(v,str) and len(v)>=16
 def _scrub(o):
     if isinstance(o,dict):
-        return {k:('[redacted]' if any(s in str(k).lower() for s in _SENSITIVE_FIELDS) else _scrub(v)) for k,v in o.items()}
+        return {k:('[redacted]' if _redact(k,v) else _scrub(v)) for k,v in o.items()}
     if isinstance(o,list):
         return [_scrub(v) for v in o]
     return o
