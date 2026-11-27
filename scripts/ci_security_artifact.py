@@ -82,7 +82,7 @@ def _clean_env(state_dir, extra=None):
     return env
 
 
-def _emit(payload_src, workdir, name, **kwargs):
+def _emit(payload_src, workdir, name, extra_src="", **kwargs):
     """Emit a gated loader artifact file via the production builder."""
     enc = fast_xor_bytes(
         zlib.compress(marshal.dumps(compile(payload_src, "<ci>", "exec"))),
@@ -95,6 +95,8 @@ def _emit(payload_src, workdir, name, **kwargs):
     # returns None); drive the encrypted fallback explicitly -- the same
     # pattern tests/test_build_id.py and the gate e2e tests use.
     src += "\n_ci_probe_out = _exec_fallback()\n"
+    if extra_src:
+        src += extra_src
     # Production artefacts are stamped with their self-check values before
     # shipping; since the AI-BIN-002 fix an unstamped loader fails closed
     # (the zeroed anchor can no longer skip the check), so an unstamped
@@ -293,17 +295,20 @@ def probe_vm_report(workdir):
     # Informational: genuine verdict at the DEFAULT threshold on this
     # host. Never asserted -- hosted VM signals are host-noise
     # dependent. Logged as evidence for the anti-VM threat-model row.
+    # The verdict prints must be part of the artefact BEFORE it is
+    # stamped: appending them after sealing invalidates the merkle/HMAC
+    # self-check and the artefact dies at startup on EVERY host, so the
+    # probe could never observe the evidence it exists to collect.
     target = _emit(
         "print('%s')\n" % _MARKER,
         workdir,
         "vm_report.py",
         build_id="ci-vm-report",
-    )
-    with open(target, "a", encoding="utf-8") as fh:
-        fh.write(
+        extra_src=(
             'print("CI_VM_VERDICT=" + str(vm_check()))\n'
             'print("CI_VM_PERCENT=%.2f" % (vm_score_percent(),))\n'
-        )
+        ),
+    )
     proc = _run(target, workdir, "state_vm_report")
     print("INFO vm-report rc=%s" % proc.returncode)
     for line in proc.stdout.splitlines():
