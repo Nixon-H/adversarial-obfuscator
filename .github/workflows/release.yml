@@ -105,11 +105,15 @@ jobs:
                        NIXON_PROVENANCE_PUBKEY=pin_hex))
           assert build.returncode == 0, "build failed: " + (build.stderr or "")[-500:]
 
+          # The artefact is named after the payload stem: payload_probe.py
+          # builds payload_probe_protected.py. The walk looked for
+          # payload_protected.py -- a name no build ever produces -- so the
+          # lane could never find what it had just built.
           art = None
           for root, _dirs, files in os.walk("."):
-              if "payload_protected.py" in files and \
-                      "payload_protected.py.build-manifest.json" in files:
-                  art = os.path.join(root, "payload_protected.py")
+              if "payload_probe_protected.py" in files and \
+                      "payload_probe_protected.py.build-manifest.json" in files:
+                  art = os.path.join(root, "payload_probe_protected.py")
                   break
           assert art, "no artefact produced"
           published = open(art, "rb").read()

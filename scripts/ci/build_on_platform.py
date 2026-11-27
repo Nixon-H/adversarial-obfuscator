@@ -117,14 +117,29 @@ def main():
         print(proc.stderr.decode("utf-8", "replace")[-3000:])
         return 1
 
+    # The pipeline stages into dist-staging/<name>-<timestamp>/ by default;
+    # dist/ is only populated for --in-place builds. The staging layout IS
+    # the user-facing default, so the harness looks there first -- checking
+    # the real product behaviour rather than a legacy layout override.
     built = os.path.join(work, "dist", "demo_protected.py")
     if not os.path.exists(built):
-        candidates = []
-        dist = os.path.join(work, "dist")
-        if os.path.isdir(dist):
-            candidates = [f for f in os.listdir(dist) if f.endswith(".py") and "protected" in f]
-        print("FAIL: expected", built, "| dist has:", candidates)
-        return 1
+        staging = os.path.join(work, "dist-staging")
+        staged = []
+        if os.path.isdir(staging):
+            for sub in sorted(os.listdir(staging)):
+                cand = os.path.join(staging, sub, "demo_protected.py")
+                if os.path.exists(cand):
+                    staged.append(cand)
+        if len(staged) == 1:
+            built = staged[0]
+        else:
+            candidates = []
+            dist = os.path.join(work, "dist")
+            if os.path.isdir(dist):
+                candidates = [f for f in os.listdir(dist) if f.endswith(".py") and "protected" in f]
+            print("FAIL: expected", built, "| dist has:", candidates,
+                  "| staging has:", staged)
+            return 1
 
     size = os.path.getsize(built)
     print("built here:", built, size, "bytes")
