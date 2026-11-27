@@ -23,7 +23,7 @@ jobs:
           python-version: '3.11'
       
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca  # pinned immutable; original dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6a52aad76a94a5fbc50d567bb5be24419801c1fb  # pinned immutable; original dtolnay/rust-toolchain@stable
       
       - name: Install Dependencies
         run: |
