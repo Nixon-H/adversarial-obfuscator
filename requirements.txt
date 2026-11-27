@@ -5,9 +5,9 @@
 # =============================================================================
 
 # ─── Core ────────────────────────────────────────────────────────────────────
-requests==2.33.0         # GitHub API (build farms, repo mgmt, artifact download)
+requests==2.34.2         # GitHub API (build farms, repo mgmt, artifact download)
 urllib3==2.8.0           # HTTP retry adapter (used by CloudBuilder with requests)
-numpy==2.2.4             # Optional — HAS_NUMPY check; used if present for numeric obf
+numpy==2.5.5             # Optional — HAS_NUMPY check; used if present for numeric obf
 
 # ─── Build (C extension compilation) ─────────────────────────────────────────
 Cython==3.0.12           # C extension compilation (GitHubBuildFarm → .pyd/.so/.dylib)
@@ -33,7 +33,7 @@ wheel==0.48.0            # bdist_wheel for the Cython path. Was installed by nam
                          # traversal in `wheel unpack`, patched 0.46.2.
 
 # ─── Crypto (primary: cryptography → AES-CTR; fallback: pycryptodome; else XOR) ──
-cryptography==50.0.0     # pipeline.py _check_aes_ctr tries cryptography first
+cryptography==50.0.2     # pipeline.py _check_aes_ctr tries cryptography first
 # pycryptodome kept as fallback branch in pipeline.py — intentionally not required.
 
 # ─── Test ────────────────────────────────────────────────────────────────────
