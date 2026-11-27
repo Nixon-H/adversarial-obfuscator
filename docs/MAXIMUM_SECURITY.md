@@ -41,7 +41,7 @@ Every measurement below was run on this host:
 | Interpreter | CPython 3.13.5 |
 | Payload | `tests/fixtures/portable/constructs_source.py`, 2,635 bytes |
 | Payload constructs | dataclass, `match`, closures, generators, descriptors, async, decorators |
-| AST-only builds | `--skip-irgen --skip-llvmgen --skip-encrypt --skip-relay --skip-extras` |
+| AST-only builds | `--skip irgen llvmgen encrypt relay extras` |
 | Loader builds | `python3 -m obfuscator.core.pipeline build … --skip-cloud` |
 | Timing | wall clock around the whole process, `date +%s` |
 | Output check | run the artefact and compare the final line to `OK` |
@@ -79,7 +79,7 @@ where more than one sample exists. Do not use size as a proxy for strength.
 | O5, run 1 / 2 | 1.9 s / 1.9 s | 34,076 / 33,797 B | Yes (`OK`) |
 | O5 + `--lowering all`, run 1 / 2 | 1.9 s / 1.9 s | 37,280 / 37,505 B | Yes with `PYTHONPATH=obfuscator`; no without |
 | O0 + `--phase2-only none` | 1.8 s | 6,282 B | Yes — **not** a copy |
-| `--skip-obfuscate` | 1.8 s | 2,635 B | Yes — byte-identical copy |
+| `--skip obfuscate` | 1.8 s | 2,635 B | Yes — byte-identical copy |
 
 The O5 build is not consistently larger or smaller than O4. Output size is a
 poor proxy for transformation strength.
@@ -189,7 +189,7 @@ can be less availability.**
 | `--hwid-lock` without `--hwid` | **Silently disabled** | `hwid_lock=(flag and bool(hwid))` |
 | `--licence token=` + `--licence salt=` | **Token wins**; its `key_material` becomes the salt | pipeline: `_customer_salt = _lic_key_material` |
 | `--access trial=7d expire=DATE` | Two time gates; prefer one | both parsed; no conflict check |
-| `--watermark` + `--skip-irgen` (build.py) | **Watermark not embedded**; conflict report; build succeeds | `grep` count 0 in artifact |
+| `--watermark` + `--skip irgen` (build.py) | **Watermark not embedded**; conflict report; build succeeds | `grep` count 0 in artifact |
 | `--temporal-keys` | **Inert**; ~24 s of hashing, metadata nothing reads | phase log; CLI note |
 | `--crypto-binding` | **Build-time only**; nothing decrypts at run time | CLI note; phase log |
 | `--cfg-mutation`, `--class-dispatch`, `--ssa-mutation`, `--state-isa`, `--per-exec-recompile`, `--self-healing` | **Metadata-only**; phase writes JSON, no runtime consumer | config files have no readers |
@@ -394,6 +394,13 @@ python3 -m obfuscator.licensing issue --key-hex "$ISSUER_SEED" \
 # String-seal shard. Export it for the build AND for every run.
 NX_SEAL_SHARD=$(openssl rand -hex 32)
 export NX_SEAL_SHARD
+# When NX_SEAL_SHARD or NX_TABLE_SHARD is present at BUILD time, the hybrid
+# loader's payload/native-blob key is also bound to those operator-held
+# shards. They are not embedded in the artefact; export the same value(s)
+# again at run time. The artefact records only whether this binding was
+# enabled, never the shard values. With neither set at build time, legacy
+# unbound key derivation is unchanged and shard variables exported for some
+# other artefact are ignored at run time.
 
 # 2026-11-20: provenance signing key. A fresh key per artefact release;
 # the artefact embeds its Ed25519 signature and the loader verifies it at
@@ -565,7 +572,9 @@ run — breaks re-runs, add only for burn-after-use payloads), `--exclude …`
 (nothing: every shield family is on), `--fast` / `--public` /
 `--debug-dump-raw` / `--pin-structure` (weaken or debug — never in a max
 build), `--tor`/`--tor-proxy` (build-host privacy, not artifact security),
-`--resume`/`--exclude-android`/`--python` (farm ops). `--package
+`--resume`/`--exclude-android`/`--python` (farm ops), `--keep-farm-repo`
+(debug only: retains the disposable farm repository, which contains the
+uploaded payload source — never use it for a release build). `--package
 native-only` is NO LONGER in the excluded list (2026-11-20): it has its
 own measured command above.
 
@@ -767,7 +776,7 @@ Recorded because they are evidence:
 2. **`--opt-level 5` and `--section-split` are redundant on the loader.** They
    were in the old maximum-security recipe as if they added protection; they do
    not.
-3. **`--watermark` with `--skip-irgen` does not watermark the AST artefact.**
+3. **`--watermark` with `--skip irgen` does not watermark the AST artefact.**
    The log says "Watermarking" and writes `program_wm.ir`, but `grep` finds no
    watermark string in the emitted artefact.
 4. **`--temporal-keys` adds 24 s and no runtime effect.**
@@ -985,7 +994,7 @@ signing cannot be optional) remains buildable.
    | build/test jobs have no production private keys | `NIXON_ARTEFACT_SIGN_KEY` / `NIXON_BUILD_MANIFEST_KEY` appear in no other job's env block; production keys enter ONLY through a protected environment in the release workflow, not CI |
    | token permissions minimal | workflow-level `contents: read`; the acceptance job declares the same explicitly |
    | protected environments gate production credentials | the production publish target is documented as a protected-environment job with required reviewers (§5.6 dry-run note) — configuring the GitHub environment is the operator step |
-   | third-party actions pinned to full commit SHAs | done: checkout `11bd719…`, setup-python `0b93645…`, upload-artifact `b4b15b8…`, download-artifact `fa0a91b…` (resolved from the GitHub API, v4.2.2 / v5.3.0 / v4.4.3 / v4.1.8) |
+   | third-party actions pinned to full commit SHAs | done across all workflows: checkout `11d5960…`/`11bd719…`, setup-python `a26af69…`/`0b93645…`, upload-artifact `ea165f8…`/`b4b15b8…`, download-artifact `d3f86a1…`/`fa0a91b…`, cache `0057852…`, rust-toolchain and codeql-action likewise SHA-pinned (all resolved from upstream tags/heads) |
    | logs reviewed, not assumed redacted | the acceptance printouts contain no key material (the key is generated with `secrets` and only ever assigned to the environment, never printed); the ephemeral key dies with the job |
 
    The ephemeral acceptance keys are deliberately DISTINCT from the
@@ -1225,6 +1234,7 @@ logs, or test reports.
 | `NIXON_ASCII_IDS` | Restrict identifiers to ASCII (required for the Cython path) |
 | `NIXON_NATIVE_CC` | C compiler selection for native blobs |
 | `NIXON_BUILD_ID` | Build identity |
+| `NIXON_SOURCE_COMMIT` | Explicit 40-hex source revision for VCS-less builds (Docker source `COPY`, sdists). Used only when `git rev-parse HEAD` is unavailable; `GITHUB_SHA` is the CI fallback. It is provenance metadata, not secret material |
 | `NIXON_KEY_SALT`, `NIXON_OBF_KEY` | Key-derivation inputs |
 | `NIXON_FARM_ID` | Farm identity |
 | `NIXON_LAST_TRANSFORMS` | Records the transform set applied |
@@ -1252,7 +1262,14 @@ invite someone to set a value the loader then fails to find.
 
 `NIXON_AI_TOOL_COST`, `NIXON_ANALYST_COST`, `NIXON_TIMING_BENCHMARK_PAYLOAD_2024`,
 `NIXON_TOR_PROXY`, `NIXON_ALLOW_DEP_DRIFT`, `NIXON_AUTHENTICODE_CERT`,
-`NIXON_AUTHENTICODE_KEY`, `NIXON_AUTHENTICODE_PASS`.
+`NIXON_AUTHENTICODE_KEY`, `NIXON_AUTHENTICODE_PASS`,
+`NIXON_TEST_TIMEOUT`.
+
+`NIXON_TEST_TIMEOUT` is test-harness housekeeping, not a product setting: it
+sets the per-test wall-clock budget in seconds (`tests/conftest.py`, default
+600) and is exported by `scripts/run_test_partitions.py` for the bounded audit
+runs. Raise it only for a test that is legitimately long; the per-test
+`nixon_timeout(seconds)` marker is the documented alternative.
 
 The Authenticode three are consumed by the Windows signing path and are external
 identity material — see §11 of the audit on what cannot be produced locally.
