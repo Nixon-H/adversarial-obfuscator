@@ -14,7 +14,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from obfuscator.remote_exec import (  # noqa: E402
-    CUSTOMER_ENV, CUSTOMER_KWARG, RemoteError, RemoteRegistry, SECRET_ENV,
+    APPROVAL_TIMEOUT_ENV, CUSTOMER_ENV, CUSTOMER_KWARG, RemoteError, RemoteRegistry, SECRET_ENV,
     TOTP_ENV, TOTP_KWARG,
     TOTP_SECONDARY_ENV, TOTP_SECONDARY_KWARG, URL_ENV, call_remote,
     extract_remote_functions, sign_request, split_module, stub_source,
@@ -842,3 +842,108 @@ def test_embedded_client_polls_for_approval_result(monkeypatch):
     assert bodies[1]["type"] == "poll"
     assert bodies[1]["customer"] == "acme"
     assert bodies[1]["approval_id"] == "ef" * 32
+
+
+def test_approval_poll_timeout_raises_instead_of_hanging(monkeypatch):
+    """Regression guard: if the phone never decides, the client must not
+    hang forever — the approval ceiling must terminate polling."""
+    clock = [1000.0]
+    monkeypatch.setattr(time, "time", lambda: clock[0])
+
+    def fake_sleep(seconds):
+        clock[0] += seconds
+
+    monkeypatch.setattr(time, "sleep", fake_sleep)
+    monkeypatch.setenv(APPROVAL_TIMEOUT_ENV, "5")
+    monkeypatch.delenv(CUSTOMER_ENV, raising=False)
+
+    def opener(_url, _body):
+        if not getattr(opener, "submitted", False):
+            opener.submitted = True
+            return b'{"approval_pending": true, "approval_id": "' + b"ab" * 32 + b'"}'
+        return b'{"approval_status": "pending"}'
+
+    caught = ""
+    try:
+        call_remote(
+            "pricing_engine", [1], url="http://127.0.0.1:8787/rpc",
+            secret=SECRET, opener=opener)
+    except RemoteError as exc:
+        caught = str(exc)
+    assert "not completed before the timeout" in caught
+
+
+def test_approval_pending_without_valid_id_is_not_polled(monkeypatch):
+    """Defensive regression: a malformed approval-pending response missing a
+    usable approval id must not enter the polling loop at all."""
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    monkeypatch.delenv(CUSTOMER_ENV, raising=False)
+    responses = [b'{"approval_pending": true}']
+    calls = []
+
+    def opener(_url, body):
+        calls.append(json.loads(body.decode("utf-8")))
+        return responses.pop(0)
+
+    caught = ""
+    try:
+        call_remote(
+            "pricing_engine", [1], url="http://127.0.0.1:8787/rpc",
+            secret=SECRET, opener=opener)
+    except RemoteError as exc:
+        caught = str(exc)
+    assert caught
+    # Exactly one request: no poll was ever attempted.
+    assert len(calls) == 1
+    assert "type" not in calls[0]
+
+
+def test_embedded_client_approval_timeout_raises(monkeypatch):
+    """Same hang regression in the generated embedded client, which carries
+    its own copy of the polling loop."""
+    client, _remote = split_module(SOURCE)
+    ns = {}
+    exec(compile(client, "<client>", "exec"), ns)
+
+    import obfuscator.remote_exec as rx
+
+    clock = [1000.0]
+    monkeypatch.setattr(rx.time, "time", lambda: clock[0])
+    monkeypatch.setattr(rx.time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    monkeypatch.setenv(URL_ENV, "https://relay.invalid/rpc")
+    monkeypatch.setenv(SECRET_ENV, SECRET.hex())
+    monkeypatch.setenv(CUSTOMER_ENV, "acme")
+    monkeypatch.setenv(APPROVAL_TIMEOUT_ENV, "5")
+
+    responses = [{"approval_pending": True, "approval_id": "ef" * 32}]
+
+    class _Resp:
+        def __init__(self, doc):
+            self._doc = doc
+
+        def read(self):
+            return json.dumps(self._doc).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    real_urlopen = rx.urllib.request.urlopen
+
+    def fake_urlopen(request, timeout=None):
+        if responses:
+            return _Resp(responses.pop(0))
+        return _Resp({"approval_status": "pending"})
+
+    rx.urllib.request.urlopen = fake_urlopen
+    caught = ""
+    try:
+        try:
+            ns["pricing_engine"](10, "gold")
+        except RuntimeError as exc:
+            caught = str(exc)
+    finally:
+        rx.urllib.request.urlopen = real_urlopen
+    assert "not completed before the timeout" in caught
