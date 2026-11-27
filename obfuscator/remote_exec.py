@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import ast
 import builtins
+import getpass
 import hashlib
 import hmac
 import json
@@ -37,6 +38,7 @@ import math
 import os
 import struct
 import symtable
+import sys
 import tempfile
 import time
 import urllib.parse
@@ -48,6 +50,14 @@ from typing import Callable, Optional
 SECRET_ENV = "NIXON_REMOTE_SECRET"
 #: Environment variable holding the service base URL.
 URL_ENV = "NIXON_REMOTE_URL"
+#: Optional first authenticator code for server-side step-up authentication.
+TOTP_ENV = "NIXON_REMOTE_TOTP"
+#: Optional second independent authenticator code.
+TOTP_SECONDARY_ENV = "NIXON_REMOTE_TOTP_SECONDARY"
+#: Reserved per-call keyword arguments. They are consumed by the transport
+#: and are never forwarded to the remote implementation.
+TOTP_KWARG = "_nx_totp"
+TOTP_SECONDARY_KWARG = "_nx_totp_secondary"
 #: Requests older than this are rejected (seconds).
 MAX_SKEW = 300.0
 #: Wire/signing protocol version. Version 1 uses the typed canonical form
@@ -190,6 +200,53 @@ def validate_endpoint(url: str) -> None:
         "remote endpoint must be HTTPS, or loopback HTTP for the reference relay")
 
 
+
+def _totp_prompt_enabled() -> bool:
+    return os.environ.get("NIXON_REMOTE_TOTP_PROMPT", "").strip().lower() in {
+        "1", "true", "yes", "on"}
+
+
+def _prompt_totp(field: str) -> str:
+    """Interactively collect one fresh authenticator code when opted in."""
+    if not sys.stdin.isatty():
+        raise RemoteError(
+            "%s is required but interactive TOTP entry is unavailable" % field)
+    label = "Google Authenticator code: " if field == "totp" else (
+        "Microsoft Authenticator code: ")
+    return getpass.getpass(label)
+
+
+def _consume_totp_fields(kwargs: dict) -> dict:
+    """Remove reserved TOTP kwargs and return top-level request fields.
+
+    TOTP codes are authentication inputs, not function arguments. They are
+    therefore carried beside the signed body rather than inside ``kwargs``;
+    including them in kwargs would both change the implementation signature
+    and make the authentication input part of application data. The optional
+    environment fallback exists for tests and tightly controlled launchers;
+    interactive applications should either pass fresh codes per call or opt in
+    to prompting with ``NIXON_REMOTE_TOTP_PROMPT=1``.
+    """
+    fields = {}
+    for kwarg, env_name, field in (
+            (TOTP_KWARG, TOTP_ENV, "totp"),
+            (TOTP_SECONDARY_KWARG, TOTP_SECONDARY_ENV, "totp_secondary")):
+        value = kwargs.pop(kwarg, None)
+        if value is None:
+            value = os.environ.get(env_name, "")
+        if value in (None, "") and _totp_prompt_enabled():
+            value = _prompt_totp(field)
+        if value in (None, ""):
+            continue
+        if not isinstance(value, str):
+            raise RemoteError("%s must be a six-digit text code" % field)
+        compact = "".join(value.strip().split())
+        if len(compact) != 6 or not compact.isdigit():
+            raise RemoteError("%s must be a six-digit text code" % field)
+        fields[field] = compact
+    return fields
+
+
 def call_remote(function: str, args: list, kwargs: Optional[dict] = None, *,
                 url: Optional[str] = None,
                 secret: Optional[bytes] = None,
@@ -218,7 +275,8 @@ def call_remote(function: str, args: list, kwargs: Optional[dict] = None, *,
     nonce = os.urandom(16).hex()
     timestamp = time.time()
     kwargs = dict(kwargs or {})
-    body = json.dumps({
+    totp_fields = _consume_totp_fields(kwargs)
+    request_doc = {
         "version": REMOTE_PROTOCOL_VERSION,
         "function": function,
         "args": list(args),
@@ -227,7 +285,10 @@ def call_remote(function: str, args: list, kwargs: Optional[dict] = None, *,
         "timestamp": timestamp,
         "signature": sign_request(raw_secret, function, list(args),
                                   nonce, timestamp, kwargs),
-    }, allow_nan=False, separators=(",", ":")).encode("utf-8")
+    }
+    request_doc.update(totp_fields)
+    body = json.dumps(
+        request_doc, allow_nan=False, separators=(",", ":")).encode("utf-8")
 
     if opener is not None:
         payload = opener(url, body)
@@ -335,6 +396,7 @@ def remote(func):
 #: part of the shipped trust boundary and may not exist on the customer host.
 EMBEDDED_CLIENT_SOURCE = r'''
 def _nx_call_remote(function, args, kwargs):
+    import getpass as _nx_getpass
     import hashlib as _nx_hashlib
     import hmac as _nx_hmac
     import ipaddress as _nx_ipaddress
@@ -343,6 +405,7 @@ def _nx_call_remote(function, args, kwargs):
     import os as _nx_os
     import socket as _nx_socket
     import struct as _nx_struct
+    import sys as _nx_sys
     import time as _nx_time
     import urllib.parse as _nx_uparse
     import urllib.request as _nx_ureq
@@ -427,7 +490,30 @@ def _nx_call_remote(function, args, kwargs):
     nonce = _nx_os.urandom(16).hex()
     timestamp = _nx_time.time()
     kwargs = dict(kwargs or {})
-    body = _nx_json.dumps({
+    totp_fields = {}
+    for kwarg, env_name, field in (
+            ("_nx_totp", "NIXON_REMOTE_TOTP", "totp"),
+            ("_nx_totp_secondary", "NIXON_REMOTE_TOTP_SECONDARY", "totp_secondary")):
+        value = kwargs.pop(kwarg, None)
+        if value is None:
+            value = _nx_os.environ.get(env_name, "")
+        if value in (None, "") and _nx_os.environ.get(
+                "NIXON_REMOTE_TOTP_PROMPT", "").strip().lower() in ("1", "true", "yes", "on"):
+            if not _nx_sys.stdin.isatty():
+                raise RuntimeError(field + " is required but interactive TOTP entry is unavailable")
+            if field == "totp":
+                value = _nx_getpass.getpass("Google Authenticator code: ")
+            else:
+                value = _nx_getpass.getpass("Microsoft Authenticator code: ")
+        if value in (None, ""):
+            continue
+        if not isinstance(value, str):
+            raise RuntimeError(field + " must be a six-digit text code")
+        compact = "".join(value.strip().split())
+        if len(compact) != 6 or not compact.isdigit():
+            raise RuntimeError(field + " must be a six-digit text code")
+        totp_fields[field] = compact
+    request_doc = {
         "version": 1,
         "function": function,
         "args": list(args),
@@ -435,7 +521,10 @@ def _nx_call_remote(function, args, kwargs):
         "nonce": nonce,
         "timestamp": timestamp,
         "signature": _sign(secret, function, list(args), kwargs, nonce, timestamp),
-    }, allow_nan=False, separators=(",", ":")).encode("utf-8")
+    }
+    request_doc.update(totp_fields)
+    body = _nx_json.dumps(
+        request_doc, allow_nan=False, separators=(",", ":")).encode("utf-8")
     request = _nx_ureq.Request(
         url, data=body, method="POST",
         headers={"Content-Type": "application/json"})

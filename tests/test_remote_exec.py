@@ -13,7 +13,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from obfuscator.remote_exec import (  # noqa: E402
-    RemoteError, RemoteRegistry, SECRET_ENV, URL_ENV, call_remote,
+    RemoteError, RemoteRegistry, SECRET_ENV, TOTP_ENV, TOTP_KWARG,
+    TOTP_SECONDARY_ENV, TOTP_SECONDARY_KWARG, URL_ENV, call_remote,
     extract_remote_functions, sign_request, split_module, stub_source,
     verify_request, write_remote_bundle,
 )
@@ -458,3 +459,197 @@ def test_shadowed_builtin_is_an_unbundled_global_dependency():
     )
     with pytest_raises(RemoteError):
         split_module(src)
+
+
+
+def test_totp_reserved_kwargs_become_top_level_transport_fields(monkeypatch):
+    captured = {}
+
+    def opener(_url, body):
+        captured["body"] = json.loads(body.decode("utf-8"))
+        return b'{"result": 1}'
+
+    monkeypatch.setenv(TOTP_ENV, "111111")
+    monkeypatch.setenv(TOTP_SECONDARY_ENV, "222222")
+    out = call_remote(
+        "pricing_engine", [1], {
+            "tier": "gold",
+            TOTP_KWARG: "333333",
+            TOTP_SECONDARY_KWARG: "444444",
+        }, url="http://127.0.0.1:8787/rpc", secret=SECRET, opener=opener)
+    assert out == 1
+    body = captured["body"]
+    assert body["totp"] == "333333"
+    assert body["totp_secondary"] == "444444"
+    assert body["kwargs"] == {"tier": "gold"}
+    expected = sign_request(
+        SECRET, "pricing_engine", [1], body["nonce"], body["timestamp"],
+        {"tier": "gold"})
+    assert body["signature"] == expected
+
+
+def test_totp_environment_fallback_is_used_when_per_call_kwargs_are_absent(monkeypatch):
+    captured = {}
+
+    def opener(_url, body):
+        captured["body"] = json.loads(body.decode("utf-8"))
+        return b'{"result": 1}'
+
+    monkeypatch.setenv(TOTP_ENV, "111111")
+    monkeypatch.setenv(TOTP_SECONDARY_ENV, "222222")
+    call_remote("pricing_engine", [1], url="http://127.0.0.1:8787/rpc",
+                secret=SECRET, opener=opener)
+    assert captured["body"]["totp"] == "111111"
+    assert captured["body"]["totp_secondary"] == "222222"
+
+
+def test_malformed_totp_fails_before_network(monkeypatch):
+    called = []
+
+    def opener(_url, body):
+        called.append(body)
+        return b'{"result": 1}'
+
+    monkeypatch.delenv(TOTP_ENV, raising=False)
+    monkeypatch.delenv(TOTP_SECONDARY_ENV, raising=False)
+    with pytest_raises(RemoteError):
+        call_remote("pricing_engine", [1], {TOTP_KWARG: "12345"},
+                    url="http://127.0.0.1:8787/rpc", secret=SECRET,
+                    opener=opener)
+    assert called == []
+
+
+def test_embedded_client_totp_kwargs_are_not_signed_as_function_kwargs(monkeypatch):
+    client, _remote = split_module(SOURCE)
+    ns = {}
+    exec(compile(client, "<client>", "exec"), ns)
+    captured = {}
+
+    import obfuscator.remote_exec as rx
+
+    class _Resp:
+        def read(self):
+            return b'{"result": 5}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    real_urlopen = rx.urllib.request.urlopen
+
+    def fake_urlopen(request, timeout=None):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return _Resp()
+
+    monkeypatch.setenv(URL_ENV, "https://relay.invalid/rpc")
+    monkeypatch.setenv(SECRET_ENV, SECRET.hex())
+    rx.urllib.request.urlopen = fake_urlopen
+    try:
+        assert ns["pricing_engine"](
+            10, "gold", _nx_totp="123456", _nx_totp_secondary="654321") == 5
+    finally:
+        rx.urllib.request.urlopen = real_urlopen
+    body = captured["body"]
+    assert body["totp"] == "123456"
+    assert body["totp_secondary"] == "654321"
+    assert body["kwargs"] == {}
+    expected = sign_request(
+        SECRET, "pricing_engine", [10, "gold"], body["nonce"],
+        body["timestamp"], {})
+    assert body["signature"] == expected
+
+
+def test_totp_prompt_opt_in_collects_two_fresh_codes(monkeypatch):
+    import getpass as _getpass
+
+    captured = {}
+
+    def opener(_url, body):
+        captured["body"] = json.loads(body.decode("utf-8"))
+        return b'{"result": 1}'
+
+    class _TTY:
+        @staticmethod
+        def isatty():
+            return True
+
+    answers = iter(["123456", "654321"])
+    prompts = []
+    monkeypatch.setattr(sys, "stdin", _TTY())
+    monkeypatch.setattr(_getpass, "getpass",
+                        lambda prompt: prompts.append(prompt) or next(answers))
+    monkeypatch.setenv("NIXON_REMOTE_TOTP_PROMPT", "1")
+    monkeypatch.delenv(TOTP_ENV, raising=False)
+    monkeypatch.delenv(TOTP_SECONDARY_ENV, raising=False)
+    call_remote("pricing_engine", [1], url="http://127.0.0.1:8787/rpc",
+                secret=SECRET, opener=opener)
+    assert captured["body"]["totp"] == "123456"
+    assert captured["body"]["totp_secondary"] == "654321"
+    assert prompts == [
+        "Google Authenticator code: ", "Microsoft Authenticator code: "]
+
+
+def test_totp_prompt_opt_in_fails_closed_when_not_interactive(monkeypatch):
+    class _NoTTY:
+        @staticmethod
+        def isatty():
+            return False
+
+    monkeypatch.setattr(sys, "stdin", _NoTTY())
+    monkeypatch.setenv("NIXON_REMOTE_TOTP_PROMPT", "1")
+    monkeypatch.delenv(TOTP_ENV, raising=False)
+    monkeypatch.delenv(TOTP_SECONDARY_ENV, raising=False)
+    with pytest_raises(RemoteError):
+        call_remote("pricing_engine", [1], url="http://127.0.0.1:8787/rpc",
+                    secret=SECRET, opener=lambda _u, _b: b'{"result": 1}')
+
+
+def test_embedded_client_totp_prompt_opt_in(monkeypatch):
+    import getpass as _getpass
+
+    client, _remote = split_module(SOURCE)
+    ns = {}
+    exec(compile(client, "<client>", "exec"), ns)
+    captured = {}
+
+    import obfuscator.remote_exec as rx
+
+    class _Resp:
+        def read(self):
+            return b'{"result": 5}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class _TTY:
+        @staticmethod
+        def isatty():
+            return True
+
+    answers = iter(["123456", "654321"])
+    real_urlopen = rx.urllib.request.urlopen
+
+    def fake_urlopen(request, timeout=None):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return _Resp()
+
+    monkeypatch.setattr(sys, "stdin", _TTY())
+    monkeypatch.setattr(_getpass, "getpass", lambda prompt: next(answers))
+    monkeypatch.setenv("NIXON_REMOTE_TOTP_PROMPT", "1")
+    monkeypatch.delenv(TOTP_ENV, raising=False)
+    monkeypatch.delenv(TOTP_SECONDARY_ENV, raising=False)
+    monkeypatch.setenv(URL_ENV, "https://relay.invalid/rpc")
+    monkeypatch.setenv(SECRET_ENV, SECRET.hex())
+    rx.urllib.request.urlopen = fake_urlopen
+    try:
+        assert ns["pricing_engine"](10, "gold") == 5
+    finally:
+        rx.urllib.request.urlopen = real_urlopen
+    assert captured["body"]["totp"] == "123456"
+    assert captured["body"]["totp_secondary"] == "654321"
+    assert captured["body"]["kwargs"] == {}

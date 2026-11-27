@@ -99,14 +99,38 @@ history of edge-case defects.
 | Flag | Class | What it does | Status |
 |---|---|---|---|
 | `--transforms remote remote-bundle=PATH` | EXEC/REP | Removes every module-level `@remote` function from the client before native compilation, AST mutation, farm upload, or loader embedding; writes the implementation to an owner-only operator bundle | Implemented and validated; opt-in and function-scoped |
+| `--transforms remote remote-bundle=PATH remote-cloudflare=DIR` | EXEC/REP | Additionally writes a deployable Cloudflare Python Worker project containing the operator-side implementations, dual-TOTP verification, and a Durable-Object replay registry | Implemented and locally validated through `pywrangler dev`; deployment remains operator-controlled |
+| `remote-cloudflare-name=NAME` | EXEC/REP | Selects the generated Cloudflare Worker name; defaults to `nixon-remote-service` | Implemented |
 
 This is not obfuscation. It is an architecture change: the client contains a
 self-contained authenticated call stub, while the confidential implementation
 runs only on the operator service. Network endpoints must be HTTPS, except
-loopback HTTP for the reference relay. The client reads `NIXON_REMOTE_URL` and
-`NIXON_REMOTE_SECRET`; requests are HMAC-signed over typed canonical
-arguments, keyword arguments, nonce, and timestamp, with stale timestamps and
-nonce replay rejected.
+loopback HTTP for the reference relay or local Cloudflare development server.
+The client reads `NIXON_REMOTE_URL` and `NIXON_REMOTE_SECRET`; requests are
+HMAC-signed over typed canonical arguments, keyword arguments, nonce, and
+timestamp, with stale timestamps and nonce replay rejected.
+
+The Cloudflare worker target is serverless but still server-side: Cloudflare
+and everyone with access to the operator's Cloudflare account are inside the
+trust boundary. Dual TOTP is enforced by this generated Worker, not by the
+self-hosted Rust reference relay; an operator who chooses the relay must add
+equivalent authentication in front of it if that property is required. The
+generated project requires three Cloudflare secrets:
+`NIXON_REMOTE_SECRET`, `NIXON_REMOTE_TOTP_SECRET`, and
+`NIXON_REMOTE_TOTP2_SECRET`. The two TOTP seeds must be independent and are
+intended for separate enrolment in Google Authenticator and Microsoft
+Authenticator. A request must carry fresh six-digit codes from both. The
+worker verifies the codes server-side and uses a SQLite-backed Durable Object
+for consistent nonce replay rejection; Workers KV alone would be eventually
+consistent and is not used for that security invariant.
+
+TOTP inputs are application authentication inputs, not remote-function
+arguments. Protected applications may pass the reserved per-call keys
+`_nx_totp` and `_nx_totp_secondary`; the transport strips them before signing
+and dispatch. Non-interactive tests may use `NIXON_REMOTE_TOTP` and
+`NIXON_REMOTE_TOTP_SECONDARY`, and interactive launchers may opt in to prompts
+with `NIXON_REMOTE_TOTP_PROMPT=1`. Statically storing current codes is not a
+valid production design because the codes expire.
 
 The transform is deliberately conservative. Nested or async remote functions,
 duplicate names, indirect marker usage, combined decorators, and reads of
@@ -119,9 +143,15 @@ Residual boundary: unmarked client-side logic remains extractable on a
 customer-controlled machine. Because the customer-held HMAC secret is present
 in the client environment, it authenticates the client but is not a secrecy
 boundary; a customer-machine attacker can invoke the service as an oracle
-while valid configuration exists. The service must enforce account, quota,
-rate-limit, revocation, and abuse policy. Validation evidence is in
-`../re-bench/ABSOLUTE_MAXIMUM_AM001_REMOTE_SPLIT_VALIDATION_20261127.md`.
+while valid configuration exists. Dual TOTP raises that oracle-access cost by
+requiring fresh factors, but it does not prove the customer machine is clean,
+does not protect plaintext client-side logic, and does not make compromise
+impossible. The service must still enforce account, quota, rate-limit,
+revocation, and abuse policy. Cloudflare free-tier CPU/request limits also make
+the target appropriate for lightweight functions rather than heavy computation
+or high-frequency loops. Validation evidence is in
+`../re-bench/ABSOLUTE_MAXIMUM_AM001_REMOTE_SPLIT_VALIDATION_20261127.md` and
+`../re-bench/ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_TOTP_VALIDATION_20261127.md`.
 
 ---
 

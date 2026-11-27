@@ -10,6 +10,20 @@ JSON evidence file. This supersedes the original "accepted only" outcome for
 logic the developer explicitly moves server-side. It does not alter the fixed
 benchmark artifacts and does not protect unmarked client-side logic.
 
+## Update — Cloudflare serverless target and dual-TOTP gate implemented
+
+Also on 2026-11-27, the server-side remediation gained a Cloudflare Python
+Worker deployment target. `remote-cloudflare=DIR` generates an operator-side
+Worker project that verifies the same protocol-v1 HMAC envelope, requires two
+independent TOTP factors server-side, and uses a SQLite-backed Durable Object
+for replay rejection. Local Worker-runtime validation is in
+`ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_TOTP_VALIDATION_20261127.md` and its JSON
+companion. This is a deployment/access-control improvement, not a change to
+the fundamental boundary: TOTP is not host attestation, Cloudflare is inside
+the operator trust boundary, oracle abuse remains possible where valid client
+configuration and fresh factors are available, and unmarked client-side logic
+remains extractable.
+
 ## Original decision
 
 AM-001 is **formally accepted as an architectural limitation of client-side execution** for the current artifact generation. No client-side source change is claimed as a complete fix.
