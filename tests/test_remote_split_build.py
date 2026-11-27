@@ -161,8 +161,9 @@ def test_remote_split_writes_cloudflare_worker_project(tmp_path):
                               encoding="utf-8").read()
         assert "SECRET_COEFFICIENT" not in entry
         assert "SECRET_COEFFICIENT" in implementation
-        assert "class ReplayRegistry" in entry
-        assert "NIXON_REMOTE_TOTP_SECRET" in entry
+        assert "class SecurityRegistry" in entry
+        assert "NIXON_REMOTE_MASTER_SECRET" in entry
+        assert "NIXON_REMOTE_RATE_LIMIT_PER_MINUTE" in entry
         assert stat.S_IMODE(os.stat(os.path.join(
             worker_dir, "src", "entry.py")).st_mode) & 0o077 == 0
         assert stat.S_IMODE(os.stat(os.path.join(

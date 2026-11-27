@@ -13,7 +13,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from obfuscator.remote_exec import (  # noqa: E402
-    RemoteError, RemoteRegistry, SECRET_ENV, TOTP_ENV, TOTP_KWARG,
+    CUSTOMER_ENV, CUSTOMER_KWARG, RemoteError, RemoteRegistry, SECRET_ENV,
+    TOTP_ENV, TOTP_KWARG,
     TOTP_SECONDARY_ENV, TOTP_SECONDARY_KWARG, URL_ENV, call_remote,
     extract_remote_functions, sign_request, split_module, stub_source,
     verify_request, write_remote_bundle,
@@ -653,3 +654,90 @@ def test_embedded_client_totp_prompt_opt_in(monkeypatch):
     assert captured["body"]["totp"] == "123456"
     assert captured["body"]["totp_secondary"] == "654321"
     assert captured["body"]["kwargs"] == {}
+
+
+def test_customer_identity_is_a_transport_field_not_function_kwargs(monkeypatch):
+    captured = {}
+
+    def opener(_url, body):
+        captured["body"] = json.loads(body.decode("utf-8"))
+        return b'{"result": 1}'
+
+    call_remote(
+        "pricing_engine", [1], {CUSTOMER_KWARG: "acme"},
+        url="http://127.0.0.1:8787/rpc", secret=SECRET, opener=opener)
+    body = captured["body"]
+    assert body["customer"] == "acme"
+    assert body["kwargs"] == {}
+    expected = sign_request(
+        SECRET, "pricing_engine", [1], body["nonce"], body["timestamp"], {})
+    assert body["signature"] == expected
+
+
+def test_customer_identity_can_come_from_environment(monkeypatch):
+    captured = {}
+
+    def opener(_url, body):
+        captured["body"] = json.loads(body.decode("utf-8"))
+        return b'{"result": 1}'
+
+    monkeypatch.setenv(CUSTOMER_ENV, "customer-42")
+    call_remote("pricing_engine", [1], url="http://127.0.0.1:8787/rpc",
+                secret=SECRET, opener=opener)
+    assert captured["body"]["customer"] == "customer-42"
+
+
+def test_malformed_customer_identity_fails_before_network():
+    called = []
+
+    def opener(_url, body):
+        called.append(body)
+        return b'{"result": 1}'
+
+    with pytest_raises(RemoteError):
+        call_remote(
+            "pricing_engine", [1], {CUSTOMER_KWARG: "bad customer"},
+            url="http://127.0.0.1:8787/rpc", secret=SECRET, opener=opener)
+    assert called == []
+
+
+def test_embedded_client_customer_identity_is_not_signed_as_kwargs(monkeypatch):
+    client, _remote = split_module(SOURCE)
+    ns = {}
+    exec(compile(client, "<client>", "exec"), ns)
+    captured = {}
+
+    import obfuscator.remote_exec as rx
+
+    class _Resp:
+        def read(self):
+            return b'{"result": 5}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    real_urlopen = rx.urllib.request.urlopen
+
+    def fake_urlopen(request, timeout=None):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return _Resp()
+
+    monkeypatch.setenv(URL_ENV, "https://relay.invalid/rpc")
+    monkeypatch.setenv(SECRET_ENV, SECRET.hex())
+    rx.urllib.request.urlopen = fake_urlopen
+    try:
+        assert ns["pricing_engine"](
+            10, "gold", _nx_customer="acme", _nx_totp="123456",
+            _nx_totp_secondary="654321") == 5
+    finally:
+        rx.urllib.request.urlopen = real_urlopen
+    body = captured["body"]
+    assert body["customer"] == "acme"
+    assert body["kwargs"] == {}
+    expected = sign_request(
+        SECRET, "pricing_engine", [10, "gold"], body["nonce"],
+        body["timestamp"], {})
+    assert body["signature"] == expected

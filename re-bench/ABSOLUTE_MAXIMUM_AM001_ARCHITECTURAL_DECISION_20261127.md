@@ -24,6 +24,33 @@ the operator trust boundary, oracle abuse remains possible where valid client
 configuration and fresh factors are available, and unmarked client-side logic
 remains extractable.
 
+## Update — customer-bound abuse controls implemented
+
+The Cloudflare target was further hardened after the first dual-TOTP version.
+The generated Worker now supports a recommended customer-bound credential mode:
+the service stores a worker-only master secret and derives independent HMAC and
+TOTP credentials per customer ID. It also implements static customer
+revocation, fixed-window per-customer rate limiting, fixed-window daily quotas,
+HMAC-valid TOTP-failure throttling, verified-code-pair replay limitation,
+metadata-only audit events, and
+generic client-visible implementation errors.
+The original shared-secret mode is retained only as an explicit compatibility
+opt-in. Local Workers-runtime validation is in
+`ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_HARDENING_VALIDATION_20261127.md` and its
+JSON companion.
+
+These additions are complete within their narrow server-side scope: they can
+separate customer credentials, limit accepted-request abuse, revoke configured
+customer identities, and avoid leaking arguments/secrets through audit or
+implementation exception messages. They do **not** solve the remaining
+architectural boundaries: typed TOTP can still be captured at first use or piggybacked, the
+service cannot prove physical authenticator-device separation, generic
+customer-controlled hosts cannot be strongly attested by this Python artifact,
+unmarked client-side logic remains extractable, and Cloudflare remains inside
+the trust boundary. Request-bound FIDO2/passkey approval is a possible future
+improvement, but it is platform/hardware integration work and is not claimed
+here.
+
 ## Original decision
 
 AM-001 is **formally accepted as an architectural limitation of client-side execution** for the current artifact generation. No client-side source change is claimed as a complete fix.

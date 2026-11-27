@@ -8304,7 +8304,7 @@ def build_parser():
                             'the operator-side implementations required by remote '
                             '(required when @remote functions are present), '
                             'remote-cloudflare=DIR = also write a deployable '
-                            'dual-TOTP Cloudflare Python Worker project, '
+                            'customer-bound dual-TOTP Cloudflare Python Worker project with replay/quota controls, '
                             'remote-cloudflare-name=NAME = override its worker '
                             'name. struct '
                             'stays native-pipeline only (it configures the '

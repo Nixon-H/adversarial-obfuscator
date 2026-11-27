@@ -24,7 +24,10 @@ Design (each point is a test):
 
 Network transport is HTTPS JSON. Plain HTTP is accepted only for the
 loopback reference relay, where traffic does not leave the host. The secret
-comes from the environment, never from source.
+comes from the environment, never from source. Customer identity and TOTP
+codes are reserved transport fields, not implementation kwargs; customer-bound
+services use the identity to select customer-derived credentials and enforce
+accounting policy.
 """
 from __future__ import annotations
 
@@ -36,6 +39,7 @@ import hmac
 import json
 import math
 import os
+import re
 import struct
 import symtable
 import sys
@@ -54,15 +58,36 @@ URL_ENV = "NIXON_REMOTE_URL"
 TOTP_ENV = "NIXON_REMOTE_TOTP"
 #: Optional second independent authenticator code.
 TOTP_SECONDARY_ENV = "NIXON_REMOTE_TOTP_SECONDARY"
+#: Optional customer/deployment identity used by customer-bound services.
+CUSTOMER_ENV = "NIXON_REMOTE_CUSTOMER_ID"
 #: Reserved per-call keyword arguments. They are consumed by the transport
 #: and are never forwarded to the remote implementation.
 TOTP_KWARG = "_nx_totp"
 TOTP_SECONDARY_KWARG = "_nx_totp_secondary"
+#: Reserved per-call customer identity. It is consumed by the transport and
+#: is never forwarded to the remote implementation.
+CUSTOMER_KWARG = "_nx_customer"
 #: Requests older than this are rejected (seconds).
 MAX_SKEW = 300.0
 #: Wire/signing protocol version. Version 1 uses the typed canonical form
 #: below, so Python and Rust agree on integers, binary64 values and strings.
 REMOTE_PROTOCOL_VERSION = 1
+
+_CUSTOMER_ID_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,127})?$")
+
+
+def validate_customer_id(value: str) -> str:
+    """Validate the non-secret customer/deployment identity.
+
+    The identity is routing/accounting metadata, not authentication by itself.
+    Customer-bound services derive the request key from this value, so keeping
+    it ASCII and delimiter-free prevents quota/revocation ambiguity.
+    """
+    if not isinstance(value, str) or not _CUSTOMER_ID_RE.fullmatch(value):
+        raise RemoteError(
+            "remote customer identity must be 1-128 ASCII letters, digits, "
+            "underscore, dot, or hyphen and start alphanumeric")
+    return value
 
 
 class RemoteError(RuntimeError):
@@ -216,18 +241,23 @@ def _prompt_totp(field: str) -> str:
     return getpass.getpass(label)
 
 
-def _consume_totp_fields(kwargs: dict) -> dict:
-    """Remove reserved TOTP kwargs and return top-level request fields.
+def _consume_transport_fields(kwargs: dict) -> dict:
+    """Remove reserved transport kwargs and return top-level request fields.
 
-    TOTP codes are authentication inputs, not function arguments. They are
-    therefore carried beside the signed body rather than inside ``kwargs``;
-    including them in kwargs would both change the implementation signature
-    and make the authentication input part of application data. The optional
-    environment fallback exists for tests and tightly controlled launchers;
-    interactive applications should either pass fresh codes per call or opt in
-    to prompting with ``NIXON_REMOTE_TOTP_PROMPT=1``.
+    TOTP codes and customer identity are transport/authentication inputs, not
+    function arguments. They are therefore carried beside the signed body
+    rather than inside ``kwargs``; including them in kwargs would both change
+    the implementation signature and confuse authentication with application
+    data. The optional environment fallback exists for tests and tightly
+    controlled launchers; interactive applications should either pass fresh
+    codes per call or opt in to prompting with ``NIXON_REMOTE_TOTP_PROMPT=1``.
     """
     fields = {}
+    customer = kwargs.pop(CUSTOMER_KWARG, None)
+    if customer is None:
+        customer = os.environ.get(CUSTOMER_ENV, "")
+    if customer not in (None, ""):
+        fields["customer"] = validate_customer_id(customer)
     for kwarg, env_name, field in (
             (TOTP_KWARG, TOTP_ENV, "totp"),
             (TOTP_SECONDARY_KWARG, TOTP_SECONDARY_ENV, "totp_secondary")):
@@ -245,6 +275,10 @@ def _consume_totp_fields(kwargs: dict) -> dict:
             raise RemoteError("%s must be a six-digit text code" % field)
         fields[field] = compact
     return fields
+
+
+# Backward-compatible private alias for tests and tightly integrated callers.
+_consume_totp_fields = _consume_transport_fields
 
 
 def call_remote(function: str, args: list, kwargs: Optional[dict] = None, *,
@@ -275,7 +309,7 @@ def call_remote(function: str, args: list, kwargs: Optional[dict] = None, *,
     nonce = os.urandom(16).hex()
     timestamp = time.time()
     kwargs = dict(kwargs or {})
-    totp_fields = _consume_totp_fields(kwargs)
+    transport_fields = _consume_transport_fields(kwargs)
     request_doc = {
         "version": REMOTE_PROTOCOL_VERSION,
         "function": function,
@@ -286,7 +320,7 @@ def call_remote(function: str, args: list, kwargs: Optional[dict] = None, *,
         "signature": sign_request(raw_secret, function, list(args),
                                   nonce, timestamp, kwargs),
     }
-    request_doc.update(totp_fields)
+    request_doc.update(transport_fields)
     body = json.dumps(
         request_doc, allow_nan=False, separators=(",", ":")).encode("utf-8")
 
@@ -467,6 +501,18 @@ def _nx_call_remote(function, args, kwargs):
         except ValueError:
             return False
 
+    def _valid_customer(value):
+        if not isinstance(value, str) or not value or len(value) > 128:
+            return False
+        first = value[0]
+        if not (("a" <= first <= "z") or ("A" <= first <= "Z") or ("0" <= first <= "9")):
+            return False
+        for ch in value[1:]:
+            if not (("a" <= ch <= "z") or ("A" <= ch <= "Z")
+                    or ("0" <= ch <= "9") or ch in ("_", ".", "-")):
+                return False
+        return True
+
     url = _nx_os.environ.get("NIXON_REMOTE_URL", "").strip()
     if not url:
         raise RuntimeError("remote function is not available: NIXON_REMOTE_URL is not set")
@@ -513,6 +559,13 @@ def _nx_call_remote(function, args, kwargs):
         if len(compact) != 6 or not compact.isdigit():
             raise RuntimeError(field + " must be a six-digit text code")
         totp_fields[field] = compact
+    customer = kwargs.pop("_nx_customer", None)
+    if customer is None:
+        customer = _nx_os.environ.get("NIXON_REMOTE_CUSTOMER_ID", "")
+    if customer not in (None, ""):
+        if not _valid_customer(customer):
+            raise RuntimeError("remote customer identity is malformed")
+        totp_fields["customer"] = customer
     request_doc = {
         "version": 1,
         "function": function,
