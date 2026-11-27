@@ -39,7 +39,7 @@ jobs:
           pip install --require-hashes -r requirements.lock
           pip install --require-hashes -r requirements-dev.lock
           # `pip install pytest` used to sit here, unpinned. The lock above
-          # already carries pytest==9.0.3 with its hashes, so the extra line
+          # already carries pytest with its hashes, so the extra line
           # added nothing except an unverified artefact. Removed (AI-SC-003).
       - name: Lint Python
         # The gate must be reproducible: requirements-dev.txt pins ruff

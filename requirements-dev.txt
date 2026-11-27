@@ -4,11 +4,11 @@
 # `pip install ruff` means CI can start failing on a rule whose
 # behaviour changed upstream, on a tree that is clean locally.
 #
-#   ruff==0.16.1
+#   ruff==0.17.6
 #
 # The pin is also recorded in .github/workflows/build.yml; keep the two
 # in step.
-ruff==0.16.1
+ruff==0.17.6
 # Test tooling. tests/test_ci_workflows.py parses the workflow YAML to catch a
 # duplicate key -- the bug that once made GitHub run ZERO jobs for an entire
 # workflow, because yaml.safe_load accepts duplicates and GitHub does not.

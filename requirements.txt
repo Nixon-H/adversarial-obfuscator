@@ -5,12 +5,13 @@
 # =============================================================================
 
 # ─── Core ────────────────────────────────────────────────────────────────────
-requests==2.33.0         # GitHub API (build farms, repo mgmt, artifact download)
+requests==2.34.2         # GitHub API (build farms, repo mgmt, artifact download)
 urllib3==2.8.0           # HTTP retry adapter (used by CloudBuilder with requests)
-numpy==2.2.4             # Optional — HAS_NUMPY check; used if present for numeric obf
+numpy==2.2.4; python_version < "3.12"  # Optional — HAS_NUMPY check; legacy floor for the 3.10/3.11 CI lanes
+numpy==2.5.5; python_version >= "3.12"  # Optional — HAS_NUMPY check; used if present for numeric obf
 
 # ─── Build (C extension compilation) ─────────────────────────────────────────
-Cython==3.0.12           # C extension compilation (GitHubBuildFarm → .pyd/.so/.dylib)
+Cython==3.3.1           # C extension compilation (GitHubBuildFarm → .pyd/.so/.dylib)
 setuptools==84.2.1       # build backend required by the Cython/setup.py path
                          # (kernel_gen.cythonize_kernel, scripts/phases/phase_pytoc.py)
                          # PINNED, was `>=68.0.0`: a floating floor cannot be
@@ -33,12 +34,12 @@ wheel==0.48.0            # bdist_wheel for the Cython path. Was installed by nam
                          # traversal in `wheel unpack`, patched 0.46.2.
 
 # ─── Crypto (primary: cryptography → AES-CTR; fallback: pycryptodome; else XOR) ──
-cryptography==50.0.0     # pipeline.py _check_aes_ctr tries cryptography first
+cryptography==50.0.2     # pipeline.py _check_aes_ctr tries cryptography first
 # pycryptodome kept as fallback branch in pipeline.py — intentionally not required.
 
 # ─── Test ────────────────────────────────────────────────────────────────────
-pytest==9.0.3             # test runner
-pytest-benchmark==5.3.0    # bench_* suites (benchmark fixture)
+pytest==9.2.0             # test runner
+pytest-benchmark==5.3.1    # bench_* suites (benchmark fixture)
 # ─── SMT-backed suites (test_metrics, test_smt_validation, proof
 # soundness, vm_correctness, watermark_survivability, etc. — 15 modules
 # import z3 via scripts/metrics/resilience.py and scripts/validation/)

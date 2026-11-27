@@ -336,7 +336,7 @@ jobs:
     # default) so a vulnerable pin breaks the build until a human bumps
     # the pin after reviewing the advisory. Deliberately no --fix
     # auto-mutation in CI. NOTE (2026-09-28): pins were bumped
-    # (requests 2.33.0, urllib3 2.8.0, cryptography 50.0.0, pytest 9.0.3)
+    # (versions float with requirements.txt; the lock is the authority)
     # and a local `pip-audit -r requirements.txt` run reports clean, so
     # this job is green on current pins. That is the gate working as
     # designed: it will go red the moment a new advisory matches a pin.
