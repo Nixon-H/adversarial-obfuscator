@@ -19,3 +19,7 @@
 ## Local environment caveat
 
 - `/tmp` has been full on this host because of pre-existing data. Tests that hard-code `/tmp` can fail with `ENOSPC`; use pytest `tmp_path` in tests and `TMPDIR=/home/nixon/absmax-tmp` in commands.
+
+## Commit message convention
+
+- Do NOT add "Generated with ..." tool attribution lines or "Co-Authored-By:" agent trailers to commit messages. History was rewritten on 2026-11-27 to remove them project-wide at the owner's request; keep all future commits free of them.
