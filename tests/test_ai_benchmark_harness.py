@@ -1,6 +1,7 @@
 """Regression tests for benchmark harness isolation controls."""
 import importlib.util
 import json
+import shutil
 
 import pytest
 from pathlib import Path
@@ -91,6 +92,7 @@ def test_opencode_mitm_addon_exact_redaction():
     assert counts == {'unit-test-secret': 1}
 
 
+@pytest.mark.skipif(shutil.which("rg") is None, reason="ripgrep not installed")
 def test_secret_candidate_prefilter_supports_multiline_values(tmp_path):
     rbc = _load('redact_benchmark_credentials_multiline', ROOT / 're-bench/tools/redact_benchmark_credentials.py')
     secret = '-----BEGIN TEST KEY-----\nabcdefgh12345678\n-----END TEST KEY-----'
@@ -854,6 +856,9 @@ def test_benchmark_profile_matrix_includes_local_cloud_packed_and_absolute():
 
 
 def test_source_assisted_workspace_receives_original_source(tmp_path, monkeypatch):
+    artifact = ROOT / 're-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/builds/absolute-native-only/cipher/artifact.py'
+    if not artifact.exists():
+        pytest.skip('authoritative artifact fixture is unavailable')
     bench = _load('ai_bench_source_assisted_workspace', ROOT / 're-bench/tools/ai_bench.py')
     monkeypatch.setattr(bench, 'LIVE_WORKSPACE_ROOT', tmp_path / 'live')
     assert 'source-assisted-runtime-secrets' in bench.SCENARIOS
@@ -884,6 +889,9 @@ def test_resume_watchdog_matrix_covers_profiles_and_source_assisted_scenarios():
 
 
 def test_workspace_secret_root_can_be_overridden(tmp_path, monkeypatch):
+    artifact = ROOT / 're-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/builds/absolute-native-only/cipher/artifact.py'
+    if not artifact.exists():
+        pytest.skip('authoritative artifact fixture is unavailable')
     bench = _load('ai_bench_secret_root_override', ROOT / 're-bench/tools/ai_bench.py')
     monkeypatch.setattr(bench, 'LIVE_WORKSPACE_ROOT', tmp_path / 'live')
     alt = tmp_path / 'alt-secrets' / 'absolute-native-only' / 'cipher'

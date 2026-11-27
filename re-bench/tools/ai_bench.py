@@ -597,9 +597,14 @@ def opencode_go_redacting_proxy_ready(proxy_dir=Path('/home/nixon/absmax-tokenha
 def blocked_before_workspace(variant,scenario,model,attempt,reason):
  """Record a fail-closed harness decision without copying runtime secrets."""
  artifact=artifact_for(variant)
+ # The blocked path must not depend on the artifact being present: it runs
+ # precisely under abnormal conditions, and a missing artifact is itself a
+ # legitimate reason a job never reaches the workspace. Identity fields
+ # become None rather than crashing the fail-closed record.
+ artifact_present=artifact.exists()
  result={
   'variant':variant,'scenario':scenario,'model':model,'requested_model':model,'fallback_reason':None,'attempt':attempt,'workspace':None,
-  'sandbox_profile':'credential-isolated-unshare-net-pid-v2-minimal-endpoints','artifact_sha256':sha(artifact),'artifact_size':artifact.stat().st_size,
+  'sandbox_profile':'credential-isolated-unshare-net-pid-v2-minimal-endpoints','artifact_sha256':sha(artifact) if artifact_present else None,'artifact_size':artifact.stat().st_size if artifact_present else None,
   'returncode':None,'timeout':False,'elapsed_seconds':0.0,'command':[],'events_log':None,'stderr_log':None,
   'response_text_sha256':None,'response_chars':0,'tool_event_count':0,'workspace_violations':[],'provider_error':None,'provider_retry_errors':[],'tokens':{},
   'harness_error':reason,
