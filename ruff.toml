@@ -68,6 +68,10 @@ exclude = [
     # reproduction and review, and the Docker context excludes it as well.
     "audit",
     "re-bench",
+    # Generated obfuscated test inputs, LFS-tracked. Not maintainable source:
+    # they are hundred-megabyte pipeline outputs, and in CI checkouts
+    # (lfs: false) they are bare pointer files that cannot parse at all.
+    "tests/fixtures",
     ".benchmarks",
     ".opencode",
     ".mypy_cache",
