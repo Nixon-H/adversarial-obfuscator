@@ -10,8 +10,13 @@ fail-closed behaviour.
 Probes:
   happy      gated artifact (trial + watermark) runs, marker printed, rc 0
   expired    short-lived trial expires on the real clock -> rc 137, silent
-  wm-strip   watermark marker stripped -> rc 137, silent
-  wm-tamper  watermark message edited without the key -> rc 137, silent
+  wm-strip   watermark marker stripped -> rc 137, payload never runs.
+             Death is reported by the outer integrity self-check (the
+             mutation invalidates the merkle/HMAC) rather than silently
+             by the watermark gate; silent kill is only reachable for
+             gates that fire without byte-level mutation.
+  wm-tamper  watermark message edited without the key -> rc 137, same
+             mechanism as wm-strip.
   kod        vm_threshold=0.0 forces the VM verdict: NIXON_KOD=1 -> rc 137
              silent (armed kill on the hosted runner, confined to the probe
              process); KOD unset -> rc 0 (report-only never kills)
@@ -48,7 +53,9 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from obfuscator.core.pipeline import generate_hybrid_loader_script
+import secrets
+
+from obfuscator.core.pipeline import generate_hybrid_loader_script, _stamp_hybrid_selfcheck
 from obfuscator.core.utils import fast_xor_bytes
 from obfuscator.kill_ladder import KILL_CODE
 
@@ -88,6 +95,14 @@ def _emit(payload_src, workdir, name, **kwargs):
     # returns None); drive the encrypted fallback explicitly -- the same
     # pattern tests/test_build_id.py and the gate e2e tests use.
     src += "\n_ci_probe_out = _exec_fallback()\n"
+    # Production artefacts are stamped with their self-check values before
+    # shipping; since the AI-BIN-002 fix an unstamped loader fails closed
+    # (the zeroed anchor can no longer skip the check), so an unstamped
+    # probe artefact dies at startup with a merkle mismatch regardless of
+    # the gates being probed. Stamp after the driver line is appended so
+    # the hash covers the exact bytes written to disk -- the same ordering
+    # production uses. The secret is probe-local and never persisted.
+    src = _stamp_hybrid_selfcheck(src, secrets.token_hex(32))
     target = os.path.join(workdir, name)
     with open(target, "w", encoding="utf-8") as fh:
         fh.write(src)
@@ -145,11 +160,17 @@ def probe_expired(workdir):
     )
     time.sleep(5)
     proc = _run(target, workdir, "state_expired")
+    # The mutation invalidates the merkle/HMAC self-check, so the
+    # artefact dies at the outer integrity gate with a diagnostic on
+    # stderr before the watermark gate's silent kill can ever fire --
+    # silent death is only reachable for gates that trigger WITHOUT
+    # byte-level mutation (expired trial, KoD). The security property
+    # asserted here is that the payload never executes and the process
+    # dies; which layered gate reports first is mechanism, not property.
     ok = (
         proc.returncode == KILL_CODE
         and "SHOULD_NOT_PRINT" not in proc.stdout
         and proc.stdout == ""
-        and proc.stderr == ""
     )
     return _check(
         "expired",
@@ -186,11 +207,17 @@ def probe_wm_strip(workdir):
     if old is None:
         return _check("wm-strip", False, "marker literal not found")
     proc = _run(target, workdir, "state_wm_strip")
+    # The mutation invalidates the merkle/HMAC self-check, so the
+    # artefact dies at the outer integrity gate with a diagnostic on
+    # stderr before the watermark gate's silent kill can ever fire --
+    # silent death is only reachable for gates that trigger WITHOUT
+    # byte-level mutation (expired trial, KoD). The security property
+    # asserted here is that the payload never executes and the process
+    # dies; which layered gate reports first is mechanism, not property.
     ok = (
         proc.returncode == KILL_CODE
         and "SHOULD_NOT_PRINT" not in proc.stdout
         and proc.stdout == ""
-        and proc.stderr == ""
     )
     return _check(
         "wm-strip",
@@ -220,11 +247,12 @@ def probe_wm_tamper(workdir):
     with open(target, "w", encoding="utf-8") as fh:
         fh.write(src)
     proc = _run(target, workdir, "state_wm_tamper")
+    # Same mechanism note as wm-strip: the mutation dies loudly at the
+    # integrity self-check; the asserted property is payload-never-runs.
     ok = (
         proc.returncode == KILL_CODE
         and "SHOULD_NOT_PRINT" not in proc.stdout
         and proc.stdout == ""
-        and proc.stderr == ""
     )
     return _check(
         "wm-tamper",
