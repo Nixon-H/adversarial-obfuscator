@@ -3865,6 +3865,24 @@ def _load_native():
                     break
                 except ImportError:
                     continue
+                except SystemExit:
+                    raise
+                except Exception as _nx_payload_err:
+                    # exec_module advanced past loading into module init, so
+                    # a non-ImportError exception here is the payload itself
+                    # failing mid-run (remote approval denied/expired/timed
+                    # out, or payload logic error) -- not a loader failure.
+                    # Record the real exception so the entrypoint diagnostic
+                    # is accurate, and do NOT fall through to the remaining
+                    # module names: the payload already ran, and re-executing
+                    # it would duplicate side effects such as remote calls.
+                    try:
+                        globals()["_NX_PAYLOAD_STARTED"] = True
+                        globals()["_NX_PAYLOAD_ERROR"] = "%s: %s" % (
+                            type(_nx_payload_err).__name__, _nx_payload_err)
+                    except Exception:
+                        pass
+                    return None
             if _nx_ok:
                 # SUCCESS HAS ITS OWN VERDICT (measured 2026-11-21). This was a
                 # bare `return`, so success and every failure path both handed
@@ -3969,10 +3987,16 @@ if __name__ in ("__main__", "__mp_main__"):
             _nx_fallback_done = bool(globals().get("_NX_FALLBACK_RAN", False))
             _nx_had_payload = bool(globals().get("_NX_HAD_PAYLOAD", False))
             if _nx_had_payload and not _nx_fallback_done:
-                _nx_m2.stderr.write(
-                    "[FATAL] artefact ran no payload: this build embedded "
-                    "payload material, but neither the native blob nor the "
-                    "Python fallback executed it (exit 79)\n")
+                _nx_perr = globals().get("_NX_PAYLOAD_ERROR")
+                if _nx_perr:
+                    _nx_m2.stderr.write(
+                        "[FATAL] payload started but failed inside the "
+                        "native module: %s (exit 79)\n" % (_nx_perr,))
+                else:
+                    _nx_m2.stderr.write(
+                        "[FATAL] artefact ran no payload: this build embedded "
+                        "payload material, but neither the native blob nor the "
+                        "Python fallback executed it (exit 79)\n")
                 _nx_m2.stderr.flush()
                 _nx_m2.exit(79)
         except SystemExit:
