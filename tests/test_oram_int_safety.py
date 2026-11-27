@@ -232,7 +232,10 @@ def test_argument_used_outside_bitwise_is_not_virtualized():
 def test_unwritten_slot_reads_as_zero_not_none():
     """read() returns None for an empty slot; the unpack must not raise."""
     out = _oram("def f():\n    hash_count = 1\n    return hash_count\n")
-    assert "or b'\\x00' * 8" in out or 'or b"\\x00" * 8' in out
+    # bytes(8) rather than the equivalent b"\\x00" * 8: the read
+    # substitution can land inside an f-string expression, where a
+    # backslash spelling is unparseable on Python < 3.12 (pre-PEP-701).
+    assert "or bytes(8)" in out
 
 
 # ── slot allocation must be collision-free (measured 2026-11-20) ─────────

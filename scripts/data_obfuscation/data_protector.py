@@ -225,7 +225,11 @@ def _oram_read_expr(slot: int, oram_name: str) -> ast.expr:
                 ast.Constant(value="<q"),
                 ast.Subscript(
                     # read() returns None for a slot that was never written;
-                    # `or b"\x00" * 8` keeps the unpack from raising on it.
+                    # `or bytes(8)` keeps the unpack from raising on it. This
+                    # is bytes(8) rather than the equivalent b"\x00" * 8
+                    # because the read substitution can land inside an
+                    # f-string expression, where a backslash spelling is
+                    # unparseable on Python < 3.12 (pre-PEP-701).
                     value=ast.BoolOp(
                         op=ast.Or(),
                         values=[
@@ -238,10 +242,10 @@ def _oram_read_expr(slot: int, oram_name: str) -> ast.expr:
                                 args=[ast.Constant(value=slot)],
                                 keywords=[],
                             ),
-                            ast.BinOp(
-                                left=ast.Constant(value=b"\x00"),
-                                op=ast.Mult(),
-                                right=ast.Constant(value=8),
+                            ast.Call(
+                                func=ast.Name(id="bytes", ctx=ast.Load()),
+                                args=[ast.Constant(value=8)],
+                                keywords=[],
                             ),
                         ],
                     ),
