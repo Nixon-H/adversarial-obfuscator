@@ -58,7 +58,7 @@ jobs:
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659  # pinned immutable; original actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30  # pinned immutable; original actions-rust-lang/setup-rust-toolchain@v2.0.1
       - name: Install LLVM (llc for the lowering tests)
         # tests/test_native_lowering.py carries ~21 regression tests for
         # the IR -> LLVM defects (shr dropped, gep losing indices, phi
