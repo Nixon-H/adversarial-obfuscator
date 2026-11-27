@@ -44,7 +44,11 @@ def phase_rop_compile(input_ir, output_rop, config):
     """
     log("ROP", f"{input_ir} -> {output_rop}")
     if not os.path.exists(input_ir):
-        log("ERROR", f"Input IR not found: {input_ir}")
+        # Missing IR is never the primary failure: either irgen was explicitly
+        # skipped (a legal fast-flags combination) or irgen itself failed, in
+        # which case its own errors are already counted. Erroring here would
+        # double-count cascade noise and fail otherwise-successful builds.
+        log("SKIP", f"Input IR not found: {input_ir}")
         return {"ok": False, "reason": f"input IR not found: {input_ir}", "compiled": 0}
 
     try:

@@ -1989,6 +1989,8 @@ in config/default.json.
         _ef_bin = obj_output if os.path.exists(obj_output) else (enc_output if os.path.exists(enc_output) else None)
         if _ef_bin is not None:
             phase_entropy_flatten(_ef_bin, _ef_bin, _ef_config)
+        elif getattr(opts, "skip_llvmgen", False) and getattr(opts, "skip_encrypt", False):
+            log("SKIP", "Entropy flatten skipped: no ELF binary exists because llvmgen/encrypt were explicitly skipped")
         else:
             log("ERROR", "Entropy flatten enabled in config but no ELF binary available (obj_output/enc_output missing); ensure --skip llvmgen and --skip encrypt are not both set")
     # =========================================================================
