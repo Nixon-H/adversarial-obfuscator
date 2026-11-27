@@ -1016,7 +1016,7 @@ function renderItems(items, record) {
   rows.innerHTML = "";
   const list = items || [];
   if (list.length === 0) {
-    say("No pending requests.", "info");
+    say("No pending requests right now. Start your application first, then check again — or wait for the push notification.", "info");
     return;
   }
   say(list.length + " pending request(s). Review each one carefully.", "info");

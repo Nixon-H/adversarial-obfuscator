@@ -355,6 +355,14 @@ def call_remote(function: str, args: list, kwargs: Optional[dict] = None, *,
         approval_id = doc["approval_id"]
         customer = str(transport_fields.get("customer", "") or "")
         try:
+            import sys as _sys
+            _sys.stderr.write(
+                "remote execution is waiting for phone approval "
+                "(approve the pending request on the enrolled device)\n")
+            _sys.stderr.flush()
+        except Exception:
+            pass
+        try:
             ceiling = float(os.environ.get(APPROVAL_TIMEOUT_ENV, "") or 150.0)
         except (TypeError, ValueError):
             ceiling = 150.0
