@@ -98,6 +98,13 @@ def test_plain_http_endpoint_is_refused(monkeypatch):
         call_remote("pricing_engine", [1, "gold"])
 
 
+def test_loopback_http_endpoint_is_allowed_for_the_reference_relay():
+    out = call_remote(
+        "pricing_engine", [1, "gold"], url="http://127.0.0.1:8787/rpc",
+        secret=SECRET, opener=lambda _url, _body: b'{"result": 3}')
+    assert out == 3
+
+
 def test_signature_round_trip():
     sig = sign_request(SECRET, "f", [1, "x"], "nonce1", 1000.0)
     verify_request(SECRET, "f", [1, "x"], "nonce1", 1000.0, sig, now=1000.0)
@@ -332,3 +339,122 @@ def test_bundle_main_invokes_impl_with_kwargs(tmp_path):
     out = _sp.run([_sys.executable, str(bundle)], input=_json.dumps(req),
                   capture_output=True, text=True, env=env, timeout=10)
     assert "signature" in _json.loads(out.stdout).get("error", ""), out.stderr
+
+
+def test_split_client_is_standalone_and_removes_the_marker_dependency():
+    client, _remote = split_module(SOURCE)
+    assert "obfuscator" not in client
+    assert "@remote" not in client
+    assert "from obfuscator.remote_exec" not in client
+    assert "_nx_call_remote" in client
+
+
+def test_operator_bundle_is_owner_readable_only(tmp_path):
+    import stat
+
+    _client, remote = split_module(SOURCE)
+    path = tmp_path / "remote_bundle.py"
+    write_remote_bundle(remote, str(path))
+    mode = stat.S_IMODE(path.stat().st_mode)
+    assert mode & 0o077 == 0, oct(mode)
+
+
+def test_nested_remote_function_is_refused_instead_of_half_split():
+    src = (
+        "from obfuscator.remote_exec import remote\n\n"
+        "def outer():\n"
+        "    @remote\n"
+        "    def hidden():\n"
+        "        return 1\n"
+        "    return hidden()\n"
+    )
+    with pytest_raises(RemoteError):
+        split_module(src)
+
+
+def test_non_marker_remote_exec_import_is_refused():
+    src = (
+        "from obfuscator.remote_exec import remote, call_remote\n\n"
+        "@remote\n"
+        "def hidden():\n"
+        "    return 1\n"
+    )
+    with pytest_raises(RemoteError):
+        split_module(src)
+
+
+def test_combined_decorators_are_refused_instead_of_shipping_wrong_semantics():
+    src = (
+        "from obfuscator.remote_exec import remote\n\n"
+        "def wrap(fn):\n"
+        "    return fn\n\n"
+        "@wrap\n"
+        "@remote\n"
+        "def hidden():\n"
+        "    return 1\n"
+    )
+    with pytest_raises(RemoteError):
+        split_module(src)
+
+
+def test_unimported_remote_name_is_not_treated_as_the_marker():
+    src = (
+        "def remote(fn):\n"
+        "    return fn\n\n"
+        "@remote\n"
+        "def hidden():\n"
+        "    return 1\n"
+    )
+    with pytest_raises(RemoteError):
+        split_module(src)
+
+
+def test_module_global_dependency_is_refused_because_it_would_not_be_bundled():
+    src = (
+        "from obfuscator.remote_exec import remote\n\n"
+        "SECRET = 3\n\n"
+        "@remote\n"
+        "def hidden():\n"
+        "    return SECRET\n"
+    )
+    with pytest_raises(RemoteError):
+        split_module(src)
+
+
+def test_function_local_import_is_self_contained():
+    src = (
+        "from obfuscator.remote_exec import remote\n\n"
+        "@remote\n"
+        "def hidden(value):\n"
+        "    import math\n"
+        "    return int(math.sqrt(value))\n"
+    )
+    client, remote = split_module(src)
+    assert len(remote) == 1
+    assert "import math" in remote[0].source
+    assert "def hidden(*args, **kwargs):" in client
+
+
+def test_module_global_default_value_is_refused_because_it_would_not_be_bundled():
+    src = (
+        "from obfuscator.remote_exec import remote\n\n"
+        "SECRET = 3\n\n"
+        "@remote\n"
+        "def hidden(value=SECRET):\n"
+        "    return value\n"
+    )
+    with pytest_raises(RemoteError):
+        split_module(src)
+
+
+def test_shadowed_builtin_is_an_unbundled_global_dependency():
+    src = (
+        "from obfuscator.remote_exec import remote\n\n"
+        "def len(_value):\n"
+        "    return 99\n\n"
+        "@remote\n"
+        "def hidden(value):\n"
+        "    return len(value)\n"
+    )
+    with pytest_raises(RemoteError):
+        split_module(src)

@@ -1,0 +1,108 @@
+{
+  "architectural_limit": "This remediation protects only functions explicitly marked @remote. Client-side code and the customer-held HMAC secret remain inside the customer-machine boundary; the service can still be used as an oracle while valid client configuration is present.",
+  "date": "2026-11-27",
+  "files": {
+    "bundle.py": {
+      "bytes": 898,
+      "contains_SECRET_COEFFICIENT": true,
+      "contains_decimal_123456789": false,
+      "contains_decimal_987654321": false,
+      "contains_hex_coefficient": true,
+      "contains_marker_import": true,
+      "path": "bundle.py",
+      "sha256": "ff7e0f0fae52bf947f4f00558bef663022a164013eb99c7110dd66fb2dc3a53d"
+    },
+    "client.py": {
+      "bytes": 5226,
+      "contains_SECRET_COEFFICIENT": false,
+      "contains_decimal_123456789": false,
+      "contains_decimal_987654321": false,
+      "contains_hex_coefficient": false,
+      "contains_marker_import": false,
+      "path": "client.py",
+      "sha256": "cc61d36561579afe97484fdad6c5137b01e1cedd6175b607c5fca9a430b6142e"
+    },
+    "dist/payload_protected.py": {
+      "bytes": 3713376,
+      "contains_SECRET_COEFFICIENT": false,
+      "contains_decimal_123456789": false,
+      "contains_decimal_987654321": false,
+      "contains_hex_coefficient": false,
+      "contains_marker_import": false,
+      "path": "dist/payload_protected.py",
+      "sha256": "4ee42f5693dab86c7485dd92f29b745b775bac2b69f6821142000cfd61071b20"
+    },
+    "dist/payload_protected_dbg.py": {
+      "bytes": 912201,
+      "contains_SECRET_COEFFICIENT": false,
+      "contains_decimal_123456789": false,
+      "contains_decimal_987654321": false,
+      "contains_hex_coefficient": false,
+      "contains_marker_import": false,
+      "path": "dist/payload_protected_dbg.py",
+      "sha256": "d246cc85dc02059fc2bde1e3f7b9f68b5e4fc52b5069582a50c4d911c93055c4"
+    },
+    "payload.py": {
+      "bytes": 335,
+      "contains_SECRET_COEFFICIENT": true,
+      "contains_decimal_123456789": false,
+      "contains_decimal_987654321": false,
+      "contains_hex_coefficient": true,
+      "contains_marker_import": true,
+      "path": "payload.py",
+      "sha256": "2f23cfeb0b9277544afcd8d0bc3f173491a4cc2074598c70f1ff92a2d88c5e4f"
+    },
+    "payload_module.so": {
+      "bytes": 149472,
+      "contains_SECRET_COEFFICIENT": false,
+      "contains_decimal_123456789": false,
+      "contains_decimal_987654321": false,
+      "contains_hex_coefficient": false,
+      "contains_marker_import": false,
+      "path": "payload_module.so",
+      "sha256": "e49d34ecb505eba448d4394555cc14f3b8c1e78591fdb9bf370ca68f9e387593"
+    }
+  },
+  "fixed_benchmark_tree_modified": false,
+  "focused_tests": {
+    "make_lint": "passed",
+    "python_remote_lane": "37 passed",
+    "relevant_partitions": "distributed-network: 186 passed; build-native-loader: 562 passed, 4 skipped",
+    "ruff_touched_files": "passed",
+    "rust_remote_lane": "26 passed"
+  },
+  "negative_controls": {
+    "artifact_without_remote_url_or_secret": {
+      "exit_code": 1,
+      "failure": "NIXON_REMOTE_URL is not set"
+    },
+    "non_loopback_plain_http": "refused by unit test before any request is emitted",
+    "replayed_nonce": {
+      "error": "remote request replayed"
+    },
+    "stale_timestamp": {
+      "error": "remote request expired"
+    },
+    "tampered_args": {
+      "error": "remote request signature mismatch"
+    }
+  },
+  "positive_controls": {
+    "native_cython_blob_import_with_remote_service": {
+      "exit_code": 0,
+      "stdout": "remote-result 864409510"
+    },
+    "packed_artifact_with_remote_service": {
+      "build": "final validation build with portable layers=1",
+      "exit_code": 0,
+      "stdout": "remote-result 864409510"
+    },
+    "reference_client_loopback": {
+      "exit_code": 0,
+      "stdout": "remote-result 864409510"
+    },
+    "relay_integrity_baseline": "0x9cba7a4a",
+    "relay_started_with_normal_runtime_initialisation": true
+  },
+  "scope": "AM-001 opt-in server-side split execution validation; test payload only, fixed benchmark artifacts untouched"
+}

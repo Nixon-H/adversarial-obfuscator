@@ -107,7 +107,7 @@ The same attempt did not recover the exact hidden master secret and did not pass
 
 It confirms the documented customer-controlled runtime-secret boundary: when the attacker controls the customer machine and has legitimate runtime secrets, native payload material can be extracted for offline analysis. This is a real architectural limitation of client-side protection. It cannot be completely fixed by more obfuscation.
 
-Detailed boundary analysis and remediation ordering are in `re-bench/ABSOLUTE_MAXIMUM_RUNTIME_SECRET_BOUNDARY.md`. The formal decision record is `re-bench/ABSOLUTE_MAXIMUM_AM001_ARCHITECTURAL_DECISION_20261127.md`: AM-001 is accepted as an architectural limitation, not falsely marked fixed.
+Detailed boundary analysis and remediation ordering are in `re-bench/ABSOLUTE_MAXIMUM_RUNTIME_SECRET_BOUNDARY.md`. The formal decision record is `re-bench/ABSOLUTE_MAXIMUM_AM001_ARCHITECTURAL_DECISION_20261127.md`. At the time of this benchmark report, AM-001 was accepted as an architectural limitation rather than falsely marked fixed; the later opt-in server-side split remediation is validated separately in `re-bench/ABSOLUTE_MAXIMUM_AM001_REMOTE_SPLIT_VALIDATION_20261127.md` and does not retroactively change these benchmark artifacts.
 
 ## `maximum-packed` provenance anomaly resolution
 

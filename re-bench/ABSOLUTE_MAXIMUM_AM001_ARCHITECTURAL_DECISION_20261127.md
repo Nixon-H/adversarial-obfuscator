@@ -1,6 +1,16 @@
 # AM-001 architectural decision record — 2026-11-27
 
-## Decision
+## Update — opt-in server-side remediation implemented
+
+Later on 2026-11-27, the architectural remediation path was implemented for
+functions explicitly marked `@remote`: split/server-side execution removes
+those implementations before native compilation and packing. Validation is in
+`ABSOLUTE_MAXIMUM_AM001_REMOTE_SPLIT_VALIDATION_20261127.md` and the matching
+JSON evidence file. This supersedes the original "accepted only" outcome for
+logic the developer explicitly moves server-side. It does not alter the fixed
+benchmark artifacts and does not protect unmarked client-side logic.
+
+## Original decision
 
 AM-001 is **formally accepted as an architectural limitation of client-side execution** for the current artifact generation. No client-side source change is claimed as a complete fix.
 
@@ -38,4 +48,4 @@ Do not represent any current client-side artifact as providing strong cryptograp
 
 ## Implementation consequence
 
-No new artifact build or benchmark campaign is required for this decision because no AM-001 product code fix is being claimed. If a native handshake, memory-only loader, remote key-release system, or server-side execution architecture is implemented later, it must be built as new artifacts and validated in a separate campaign without overwriting the fixed benchmark artifact tree.
+The original decision required no new artifact build because no product code fix was then being claimed. The implemented split-execution remediation has now been validated separately without overwriting the fixed benchmark artifact tree; see the update above. Any future native handshake, memory-only loader, or remote key-release system still requires its own artifact-level validation campaign.
