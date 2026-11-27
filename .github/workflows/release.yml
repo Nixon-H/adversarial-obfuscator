@@ -196,7 +196,7 @@ jobs:
           assert verdict == "PASS", "the acceptance matrix failed"
           PY
       - name: Upload immutable release artefact + report
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # pinned immutable; upstream tag actions/upload-artifact@v4.4.3
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # pinned immutable; upstream tag actions/upload-artifact@v7.0.2
         with:
           name: release-candidate
           path: |
