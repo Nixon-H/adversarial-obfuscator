@@ -72,6 +72,7 @@ def mock_rpc():
 
     srv = http.server.HTTPServer(("127.0.0.1", 0), _MockRPCHandler)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
     ctx.load_cert_chain(cert, key)
     srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
     port = srv.server_address[1]
