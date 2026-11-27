@@ -1,0 +1,29 @@
+{
+  "checks": {
+    "all_passed": true,
+    "client_implementation_absent": true,
+    "cross_customer_credential_rejected": true,
+    "daily_quota_enforced": true,
+    "direct_valid_result_correct": true,
+    "embedded_client_result_correct": true,
+    "exact_replay_rejected": true,
+    "implementation_exception_generic": true,
+    "missing_customer_rejected": true,
+    "missing_totp_rejected": true,
+    "operator_implementation_present": true,
+    "rate_limit_allows_configured_window": true,
+    "rate_limit_rejects_after_window": true,
+    "revoked_customer_rejected": true,
+    "stale_timestamp_rejected": true,
+    "tampered_args_rejected": true,
+    "totp_failure_limit_enforced": true,
+    "totp_pair_reuse_rejected": true,
+    "worker_logs_avoid_secrets_args_and_exception_messages": true,
+    "wrong_second_totp_rejected": true
+  },
+  "date": "2026-11-27",
+  "log_forbidden_matches": [],
+  "public_cloudflare_deployment": false,
+  "runtime": "pywrangler dev / wrangler local Workers runtime",
+  "validation": "cloudflare-customer-bound-hardening"
+}

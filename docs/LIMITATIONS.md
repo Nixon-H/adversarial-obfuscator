@@ -38,14 +38,18 @@ boundary for everything executed client-side, not a defect that more client-side
 obfuscation can fix. The implemented remediation is opt-in server-side split
 execution for functions explicitly marked `@remote`; those implementations are
 removed before native compilation and packing. A Cloudflare Python Worker target
-is available for low-cost serverless deployment, with dual independent TOTP as
-an additional server-verified oracle-access gate and a Durable-Object replay
-registry. TOTP must not be misread as client-side protection or host
-attestation: a compromised customer machine can capture typed codes or abuse an
-authenticated window, and unmarked plaintext logic remains extractable. See
+is available for low-cost serverless deployment. Its implemented server-side
+controls include customer-bound derived credentials, dual independent TOTP,
+strongly consistent replay/usage accounting, static revocation, fixed-window
+rate limits, daily quotas, TOTP-failure throttling, verified-code-pair replay limitation, and metadata-only audit events. Those controls
+limit oracle abuse and customer credential blast radius, but they do not create
+host attestation: a compromised customer machine can capture typed codes,
+piggyback on legitimate use, abuse an authenticated window, or extract unmarked
+plaintext logic. Cloudflare also remains trusted infrastructure. See
 `../re-bench/ABSOLUTE_MAXIMUM_AM001_ARCHITECTURAL_DECISION_20261127.md`,
 `../re-bench/ABSOLUTE_MAXIMUM_AM001_REMOTE_SPLIT_VALIDATION_20261127.md`, and
-`../re-bench/ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_TOTP_VALIDATION_20261127.md`.
+`../re-bench/ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_TOTP_VALIDATION_20261127.md`,
+and `../re-bench/ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_HARDENING_VALIDATION_20261127.md`.
 
 ### 1.3 Build-host trust
 

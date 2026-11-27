@@ -99,38 +99,69 @@ history of edge-case defects.
 | Flag | Class | What it does | Status |
 |---|---|---|---|
 | `--transforms remote remote-bundle=PATH` | EXEC/REP | Removes every module-level `@remote` function from the client before native compilation, AST mutation, farm upload, or loader embedding; writes the implementation to an owner-only operator bundle | Implemented and validated; opt-in and function-scoped |
-| `--transforms remote remote-bundle=PATH remote-cloudflare=DIR` | EXEC/REP | Additionally writes a deployable Cloudflare Python Worker project containing the operator-side implementations, dual-TOTP verification, and a Durable-Object replay registry | Implemented and locally validated through `pywrangler dev`; deployment remains operator-controlled |
+| `--transforms remote remote-bundle=PATH remote-cloudflare=DIR` | EXEC/REP | Additionally writes a deployable Cloudflare Python Worker project containing the operator-side implementations, customer-bound credentials, dual-TOTP verification, replay rejection, revocation, rate limits, quotas, and metadata-only audit events | Implemented and locally validated through `pywrangler dev`; deployment remains operator-controlled |
 | `remote-cloudflare-name=NAME` | EXEC/REP | Selects the generated Cloudflare Worker name; defaults to `nixon-remote-service` | Implemented |
 
 This is not obfuscation. It is an architecture change: the client contains a
 self-contained authenticated call stub, while the confidential implementation
 runs only on the operator service. Network endpoints must be HTTPS, except
 loopback HTTP for the reference relay or local Cloudflare development server.
-The client reads `NIXON_REMOTE_URL` and `NIXON_REMOTE_SECRET`; requests are
-HMAC-signed over typed canonical arguments, keyword arguments, nonce, and
-timestamp, with stale timestamps and nonce replay rejected.
+The client reads `NIXON_REMOTE_URL` and `NIXON_REMOTE_SECRET`; customer-bound
+Cloudflare deployments also use `NIXON_REMOTE_CUSTOMER_ID` or the reserved
+per-call key `_nx_customer`. Requests are HMAC-signed over typed canonical
+arguments, keyword arguments, nonce, and timestamp, with stale timestamps and
+nonce replay rejected. The customer identity is transport/accounting metadata,
+not application kwargs.
 
 The Cloudflare worker target is serverless but still server-side: Cloudflare
 and everyone with access to the operator's Cloudflare account are inside the
 trust boundary. Dual TOTP is enforced by this generated Worker, not by the
 self-hosted Rust reference relay; an operator who chooses the relay must add
-equivalent authentication in front of it if that property is required. The
-generated project requires three Cloudflare secrets:
-`NIXON_REMOTE_SECRET`, `NIXON_REMOTE_TOTP_SECRET`, and
-`NIXON_REMOTE_TOTP2_SECRET`. The two TOTP seeds must be independent and are
-intended for separate enrolment in Google Authenticator and Microsoft
-Authenticator. A request must carry fresh six-digit codes from both. The
-worker verifies the codes server-side and uses a SQLite-backed Durable Object
-for consistent nonce replay rejection; Workers KV alone would be eventually
-consistent and is not used for that security invariant.
+equivalent authentication in front of it if that property is required.
 
-TOTP inputs are application authentication inputs, not remote-function
-arguments. Protected applications may pass the reserved per-call keys
-`_nx_totp` and `_nx_totp_secondary`; the transport strips them before signing
-and dispatch. Non-interactive tests may use `NIXON_REMOTE_TOTP` and
-`NIXON_REMOTE_TOTP_SECONDARY`, and interactive launchers may opt in to prompts
-with `NIXON_REMOTE_TOTP_PROMPT=1`. Statically storing current codes is not a
-valid production design because the codes expire.
+The recommended Cloudflare configuration is customer-bound mode. The Worker
+stores only `NIXON_REMOTE_MASTER_SECRET`; the provisioning utility derives an
+independent HMAC secret and two independent TOTP seeds for each customer ID.
+The customer receives only that customer's derived HMAC secret and enrolment
+material. Cross-customer credential substitution therefore fails signature
+verification, and compromise of one customer's derived material does not expose
+the master secret or another customer's credentials. Treat the customer ID as
+a unique customer/deployment/credential issuance identifier: per-customer
+rotation is provision a new identifier, migrate the customer, and revoke the
+old identifier. The legacy shared-secret mode still exists only behind explicit
+`NIXON_REMOTE_ALLOW_SHARED=1` for compatibility with the first generated worker
+design; new deployments should not use it.
+
+The generated Worker also implements the production abuse controls that can be
+implemented completely in this architecture:
+
+- static customer revocation through `NIXON_REMOTE_DISABLED_CUSTOMERS`
+- fixed-window accepted-request rate limiting through
+  `NIXON_REMOTE_RATE_LIMIT_PER_MINUTE` (default 60)
+- fixed-window daily accepted-request quotas through
+  `NIXON_REMOTE_QUOTA_PER_DAY` (default 10,000)
+- fixed-window throttling of HMAC-valid TOTP failures through
+  `NIXON_REMOTE_AUTH_FAILURE_LIMIT_PER_MINUTE` (default 10)
+- replay limitation for successfully verified TOTP code pairs through
+  `NIXON_REMOTE_TOTP_PAIR_MAX_USES` (default 1)
+- metadata-only audit events for success, rejection, revocation, rate limiting,
+  quota exhaustion, authentication-failure throttling, and implementation errors
+- generic client-visible implementation errors, so exception messages cannot
+  leak confidential constants or argument values
+
+Nonce replay and usage accounting share a SQLite-backed Durable Object. Workers
+KV alone would be eventually consistent and is not used for those security
+invariants. Audit events deliberately omit arguments, keyword arguments,
+nonces, TOTP codes, HMAC secrets, TOTP seeds, and results.
+
+TOTP/customer inputs are application authentication inputs, not
+remote-function arguments. Protected applications may pass the reserved
+per-call keys `_nx_customer`, `_nx_totp`, and `_nx_totp_secondary`; the
+transport strips them before signing and dispatch. Non-interactive tests may
+use `NIXON_REMOTE_TOTP` and `NIXON_REMOTE_TOTP_SECONDARY`, and interactive
+launchers may opt in to prompts with `NIXON_REMOTE_TOTP_PROMPT=1`. Statically
+storing current codes is not a valid production design because the codes
+expire.
 
 The transform is deliberately conservative. Nested or async remote functions,
 duplicate names, indirect marker usage, combined decorators, and reads of
@@ -140,18 +171,24 @@ that imports and uses `@remote` without enabling the transform is refused
 rather than silently shipping the implementation.
 
 Residual boundary: unmarked client-side logic remains extractable on a
-customer-controlled machine. Because the customer-held HMAC secret is present
-in the client environment, it authenticates the client but is not a secrecy
-boundary; a customer-machine attacker can invoke the service as an oracle
-while valid configuration exists. Dual TOTP raises that oracle-access cost by
-requiring fresh factors, but it does not prove the customer machine is clean,
-does not protect plaintext client-side logic, and does not make compromise
-impossible. The service must still enforce account, quota, rate-limit,
-revocation, and abuse policy. Cloudflare free-tier CPU/request limits also make
-the target appropriate for lightweight functions rather than heavy computation
-or high-frequency loops. Validation evidence is in
+customer-controlled machine. Because the customer-held derived HMAC secret is
+present in the client environment, it authenticates that customer but is not a
+secrecy boundary; a customer-machine attacker can invoke the service as an
+oracle while valid configuration exists. Customer isolation, quotas, rate
+limits, and revocation limit blast radius but cannot make the endpoint
+trustworthy. Dual TOTP raises oracle-access cost by requiring fresh factors,
+but TOTP is typed and not cryptographically bound to the exact request:
+malware can capture typed codes, race first use, or piggyback on legitimate approval; verified-code-pair replay is limited but first-use capture is not impossible. A future
+FIDO2/passkey design could provide request-bound approval, but it requires
+platform/hardware integration and does not by itself attest the host. The
+server also cannot prove the two TOTP seeds were enrolled on physically
+separate devices. Cloudflare remains trusted infrastructure, and unmarked
+plaintext client-side logic remains extractable. Cloudflare free-tier
+CPU/request limits make the target appropriate for lightweight functions rather
+than heavy computation or high-frequency loops. Validation evidence is in
 `../re-bench/ABSOLUTE_MAXIMUM_AM001_REMOTE_SPLIT_VALIDATION_20261127.md` and
-`../re-bench/ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_TOTP_VALIDATION_20261127.md`.
+`../re-bench/ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_TOTP_VALIDATION_20261127.md`,
+and `../re-bench/ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_HARDENING_VALIDATION_20261127.md`.
 
 ---
 

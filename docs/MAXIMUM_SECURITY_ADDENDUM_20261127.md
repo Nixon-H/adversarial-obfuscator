@@ -34,20 +34,39 @@ mode `0600` and must never ship.
 `remote-cloudflare=DIR` additionally writes a deployable Cloudflare Python
 Worker project. The worker is serverless but still server-side: it contains
 the confidential implementations inside the operator-controlled Cloudflare
-account, verifies protocol-v1 HMAC requests, requires two independent RFC 6238
-TOTP codes, and uses a SQLite-backed Durable Object for nonce replay rejection.
-`remote-cloudflare-name=NAME` overrides the default worker name. The generated
-`DEPLOYMENT.md` contains the exact provisioning and deployment steps. The
-confidential implementations are isolated in the generated `src/remote_impl.py`
-so they cannot collide with service-runtime helper names. Dual TOTP is enforced
-by the Cloudflare Worker, not by the self-hosted Rust reference relay.
+account, verifies protocol-v1 HMAC requests, supports customer-bound derived
+credentials, requires two independent RFC 6238 TOTP codes, and uses a
+SQLite-backed Durable Object for nonce replay, accepted-request rate limiting,
+daily quota accounting, HMAC-valid TOTP-failure throttling, and verified-code-pair replay limitation. `remote-cloudflare-name=NAME` overrides the
+default worker name. The generated `DEPLOYMENT.md` contains exact provisioning
+and deployment steps. Confidential implementations are isolated in
+`src/remote_impl.py` so they cannot collide with service-runtime helper names.
+Dual TOTP is enforced by the Cloudflare Worker, not by the self-hosted Rust
+reference relay.
+
+The recommended worker mode stores only `NIXON_REMOTE_MASTER_SECRET`. The
+provisioning utility derives an independent HMAC secret and two independent
+TOTP seeds for every customer ID. Customers receive only their derived
+credentials. Shared-secret mode remains available only through explicit
+`NIXON_REMOTE_ALLOW_SHARED=1` compatibility configuration and is not
+recommended for new deployments.
 
 Runtime configuration:
 
 | variable | security meaning |
 |---|---|
-| `NIXON_REMOTE_URL` | Remote-function endpoint. Network endpoints must be HTTPS; plain HTTP is accepted only for the loopback reference relay. |
-| `NIXON_REMOTE_SECRET` | 64-hex HMAC key shared by the client and operator service. It authenticates requests; it is not a confidentiality boundary against the customer machine. |
+| `NIXON_REMOTE_URL` | Remote-function endpoint. Network endpoints must be HTTPS; plain HTTP is accepted only for the loopback reference relay or local development service. |
+| `NIXON_REMOTE_SECRET` | 64-hex HMAC key held by the client. In customer-bound Cloudflare mode it is derived per customer; in legacy shared mode it is shared. It authenticates requests but is not a confidentiality boundary against the customer machine. |
+| `NIXON_REMOTE_CUSTOMER_ID` | Non-secret customer/deployment identity sent as transport metadata. It is never forwarded to the remote implementation as an application kwarg. |
+| `NIXON_REMOTE_MASTER_SECRET` | **Worker-only** 64-hex master secret used to derive per-customer HMAC secrets and TOTP seeds. It must never be placed in a customer artifact or environment. |
+| `NIXON_REMOTE_ALLOW_SHARED` | Explicit compatibility opt-in for the original shared-secret Cloudflare mode. Not recommended for new deployments. |
+| `NIXON_REMOTE_TOTP_SECRET` | Legacy shared-mode worker-only primary base32 TOTP seed. Not used in recommended customer-bound mode. |
+| `NIXON_REMOTE_TOTP2_SECRET` | Legacy shared-mode worker-only secondary independent base32 TOTP seed. Not used in recommended customer-bound mode. |
+| `NIXON_REMOTE_DISABLED_CUSTOMERS` | Worker-side comma-separated static revocation list. |
+| `NIXON_REMOTE_RATE_LIMIT_PER_MINUTE` | Worker-side accepted-request fixed-window rate limit per customer; default 60. |
+| `NIXON_REMOTE_QUOTA_PER_DAY` | Worker-side accepted-request fixed-window daily quota per customer; default 10,000. |
+| `NIXON_REMOTE_AUTH_FAILURE_LIMIT_PER_MINUTE` | Worker-side fixed-window budget for HMAC-valid TOTP failures per customer; default 10. Successful dual-TOTP authentications decrement their provisional attempt and do not consume this budget. |
+| `NIXON_REMOTE_TOTP_PAIR_MAX_USES` | Worker-side maximum number of requests permitted with one verified TOTP code pair during its short replay window; default 1. Raising it improves burst usability but weakens capture containment. |
 | `NIXON_REMOTE_TOTP` | Optional first six-digit authenticator code for controlled non-interactive tests. It expires quickly and must not be treated as a static production secret. |
 | `NIXON_REMOTE_TOTP_SECONDARY` | Optional second independent six-digit authenticator code for controlled non-interactive tests. |
 | `NIXON_REMOTE_TOTP_PROMPT` | When `1`, interactive clients prompt for the Google Authenticator and Microsoft Authenticator codes if no per-call codes were supplied. |
@@ -61,14 +80,15 @@ names, indirect markers, and combined decorators) also fail the build closed
 rather than silently changing semantics.
 
 Operational boundary: moving a function server-side prevents artifact
-extraction from revealing that function's implementation. It does not prevent
-a customer-machine attacker from invoking the service as an oracle while they
-possess valid client configuration, and it does not protect functions left
-client-side. Dual TOTP raises oracle-access cost by requiring two fresh
-server-verified factors, but it is not host attestation: malware on the
-customer machine can still capture typed codes, piggyback on legitimate use,
-or abuse a valid authenticated window. The operator service must enforce its
-own deployment, rate-limit, accounting, and revocation policy.
+extraction from revealing that function's implementation. Customer-bound
+credentials, static revocation, fixed-window rate limits, daily quotas, TOTP-failure throttling,
+and metadata-only audit events are implemented server-side controls. They limit
+blast radius and abuse, but do not make a compromised endpoint trustworthy.
+Dual TOTP raises oracle-access cost by requiring two fresh server-verified
+factors, but it is not host attestation or request-bound cryptographic
+approval: malware on the customer machine can capture typed codes, piggyback
+on legitimate use, or abuse a valid authenticated window. Unmarked client-side
+logic remains extractable.
 
 Cloudflare deployment boundary: Cloudflare and anyone with access to the
 Cloudflare account are trusted infrastructure. The free tier is suitable for

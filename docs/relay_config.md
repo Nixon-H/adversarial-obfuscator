@@ -51,23 +51,38 @@ build can alternatively emit a deployable Cloudflare Python Worker with:
 ```
 
 The generated worker contains the operator-side implementations and must never
-ship to customers. It verifies the same protocol-v1 HMAC envelope, requires
-fresh six-digit codes from two independent TOTP seeds, and uses a
-SQLite-backed Durable Object for replay rejection. Configure these values as
-Cloudflare secrets, not in `wrangler.jsonc`:
+ship to customers. It verifies the same protocol-v1 HMAC envelope, supports
+customer-bound derived credentials, requires fresh six-digit codes from two
+independent TOTP seeds, and uses a SQLite-backed Durable Object for replay,
+rate-limit, and quota accounting.
+
+The recommended configuration stores only this worker secret:
 
 | secret | meaning |
 |---|---|
-| `NIXON_REMOTE_SECRET` | The same 64-hex HMAC key used by the client |
-| `NIXON_REMOTE_TOTP_SECRET` | Primary independent base32 authenticator seed, intended for Google Authenticator enrolment |
-| `NIXON_REMOTE_TOTP2_SECRET` | Secondary independent base32 authenticator seed, intended for Microsoft Authenticator enrolment |
+| `NIXON_REMOTE_MASTER_SECRET` | Worker-only 64-hex master secret used to derive each customer's HMAC secret and two independent TOTP seeds |
 
-Use `python3 -m obfuscator.cloudflare_remote provision PATH` to generate
-owner-only enrolment material. Deployment instructions are written into the
-generated project's `DEPLOYMENT.md`. TOTP is an additional server-side access
-gate, not host attestation and not protection for plaintext client-side logic.
-It is enforced only by the generated Cloudflare Worker; the Rust reference
-relay accepts the same signed protocol envelope but does not enforce TOTP.
+Optional policy secrets are `NIXON_REMOTE_DISABLED_CUSTOMERS`,
+`NIXON_REMOTE_RATE_LIMIT_PER_MINUTE`, `NIXON_REMOTE_QUOTA_PER_DAY`,
+`NIXON_REMOTE_AUTH_FAILURE_LIMIT_PER_MINUTE`, and
+`NIXON_REMOTE_TOTP_PAIR_MAX_USES`. Use:
+
+```sh
+python3 -m obfuscator.cloudflare_remote provision-master master-provisioning.json
+python3 -m obfuscator.cloudflare_remote provision-customer customer.json \
+  --customer-id CUSTOMER --master-secret-file master-provisioning.json
+```
+
+The customer artifact then uses `NIXON_REMOTE_CUSTOMER_ID` plus the derived
+customer `hmac_secret` as `NIXON_REMOTE_SECRET`. Legacy shared mode requires
+explicit `NIXON_REMOTE_ALLOW_SHARED=1` and the original three shared secrets;
+it is compatibility behavior, not the recommended design.
+
+Deployment instructions are written into the generated project's
+`DEPLOYMENT.md`. TOTP is an additional server-side access gate, not host
+attestation and not protection for plaintext client-side logic. It is enforced
+only by the generated Cloudflare Worker; the Rust reference relay accepts the
+same signed protocol envelope but does not enforce TOTP.
 
 ## `AppConfig` (`relay/src/config.rs`)
 
