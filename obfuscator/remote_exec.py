@@ -67,6 +67,8 @@ TOTP_SECONDARY_KWARG = "_nx_totp_secondary"
 #: Reserved per-call customer identity. It is consumed by the transport and
 #: is never forwarded to the remote implementation.
 CUSTOMER_KWARG = "_nx_customer"
+#: Optional client-side ceiling (seconds) for phone-approval polling.
+APPROVAL_TIMEOUT_ENV = "NIXON_REMOTE_APPROVAL_TIMEOUT"
 #: Requests older than this are rejected (seconds).
 MAX_SKEW = 300.0
 #: Wire/signing protocol version. Version 1 uses the typed canonical form
@@ -324,24 +326,54 @@ def call_remote(function: str, args: list, kwargs: Optional[dict] = None, *,
     body = json.dumps(
         request_doc, allow_nan=False, separators=(",", ":")).encode("utf-8")
 
-    if opener is not None:
-        payload = opener(url, body)
-    else:
+    def post(payload_body):
+        if opener is not None:
+            return opener(url, payload_body)
         request = urllib.request.Request(
-            url, data=body, method="POST",
-            headers={"Content-Type": "application/json"})
+            url, data=payload_body, method="POST",
+            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"})
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
-                payload = response.read()
+                return response.read()
         except Exception as exc:  # network, TLS, HTTP status
             raise RemoteError("remote call failed: %s" % (exc,)) from exc
 
-    try:
-        doc = json.loads(payload.decode("utf-8"))
-    except (ValueError, AttributeError) as exc:
-        raise RemoteError("remote response was not JSON") from exc
-    if not isinstance(doc, dict):
-        raise RemoteError("remote response was not a JSON object")
+    def decode(payload):
+        try:
+            parsed = json.loads(payload.decode("utf-8"))
+        except (ValueError, AttributeError) as exc:
+            raise RemoteError("remote response was not JSON") from exc
+        if not isinstance(parsed, dict):
+            raise RemoteError("remote response was not a JSON object")
+        return parsed
+
+    doc = decode(post(body))
+    if doc.get("approval_pending") is True and isinstance(doc.get("approval_id"), str):
+        # Customer-bound services may hold the request for request-bound phone
+        # approval. Polling uses the unguessable approval id as a capability;
+        # it authorizes collection of this request's own result only.
+        approval_id = doc["approval_id"]
+        customer = str(transport_fields.get("customer", "") or "")
+        try:
+            ceiling = float(os.environ.get(APPROVAL_TIMEOUT_ENV, "") or 150.0)
+        except (TypeError, ValueError):
+            ceiling = 150.0
+        deadline = time.time() + max(5.0, ceiling)
+        while True:
+            if time.time() >= deadline:
+                raise RemoteError(
+                    "remote approval was not completed before the timeout")
+            time.sleep(2.0)
+            poll_body = json.dumps({
+                "type": "poll",
+                "version": REMOTE_PROTOCOL_VERSION,
+                "customer": customer,
+                "approval_id": approval_id,
+            }, separators=(",", ":")).encode("utf-8")
+            doc = decode(post(poll_body))
+            if doc.get("approval_status") in ("pending", "approved"):
+                continue
+            break
     if doc.get("error"):
         raise RemoteError("remote function failed: %s" % (doc["error"],))
     if "result" not in doc:
@@ -578,20 +610,50 @@ def _nx_call_remote(function, args, kwargs):
     request_doc.update(totp_fields)
     body = _nx_json.dumps(
         request_doc, allow_nan=False, separators=(",", ":")).encode("utf-8")
-    request = _nx_ureq.Request(
-        url, data=body, method="POST",
-        headers={"Content-Type": "application/json"})
-    try:
-        with _nx_ureq.urlopen(request, timeout=10.0) as response:
-            payload = response.read()
-    except Exception as exc:
-        raise RuntimeError("remote call failed: %s" % (exc,)) from exc
-    try:
-        doc = _nx_json.loads(payload.decode("utf-8"))
-    except (ValueError, AttributeError) as exc:
-        raise RuntimeError("remote response was not JSON") from exc
-    if not isinstance(doc, dict):
-        raise RuntimeError("remote response was not a JSON object")
+    def _post(payload_body):
+        request = _nx_ureq.Request(
+            url, data=payload_body, method="POST",
+            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"})
+        try:
+            with _nx_ureq.urlopen(request, timeout=10.0) as response:
+                return response.read()
+        except Exception as exc:
+            raise RuntimeError("remote call failed: %s" % (exc,)) from exc
+
+    def _decode(payload):
+        try:
+            parsed = _nx_json.loads(payload.decode("utf-8"))
+        except (ValueError, AttributeError) as exc:
+            raise RuntimeError("remote response was not JSON") from exc
+        if not isinstance(parsed, dict):
+            raise RuntimeError("remote response was not a JSON object")
+        return parsed
+
+    doc = _decode(_post(body))
+    if doc.get("approval_pending") is True and isinstance(doc.get("approval_id"), str):
+        # The service is holding this authenticated request for request-bound
+        # phone approval. The approval id is an unguessable capability that
+        # authorizes collecting only this request's own result.
+        approval_id = doc["approval_id"]
+        try:
+            ceiling = float(_nx_os.environ.get("NIXON_REMOTE_APPROVAL_TIMEOUT", "") or 150.0)
+        except (TypeError, ValueError):
+            ceiling = 150.0
+        deadline = _nx_time.time() + max(5.0, ceiling)
+        while True:
+            if _nx_time.time() >= deadline:
+                raise RuntimeError("remote approval was not completed before the timeout")
+            _nx_time.sleep(2.0)
+            poll_body = _nx_json.dumps({
+                "type": "poll",
+                "version": 1,
+                "customer": str(customer or ""),
+                "approval_id": approval_id,
+            }, separators=(",", ":")).encode("utf-8")
+            doc = _decode(_post(poll_body))
+            if doc.get("approval_status") in ("pending", "approved"):
+                continue
+            break
     if doc.get("error"):
         raise RuntimeError("remote function failed: %s" % (doc["error"],))
     if "result" not in doc:

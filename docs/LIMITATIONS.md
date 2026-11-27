@@ -40,16 +40,23 @@ execution for functions explicitly marked `@remote`; those implementations are
 removed before native compilation and packing. A Cloudflare Python Worker target
 is available for low-cost serverless deployment. Its implemented server-side
 controls include customer-bound derived credentials, dual independent TOTP,
-strongly consistent replay/usage accounting, static revocation, fixed-window
+request-bound phone approval, strongly consistent replay/usage accounting,
+static and dynamic revocation, fixed-window
 rate limits, daily quotas, TOTP-failure throttling, verified-code-pair replay limitation, and metadata-only audit events. Those controls
 limit oracle abuse and customer credential blast radius, but they do not create
-host attestation: a compromised customer machine can capture typed codes,
-piggyback on legitimate use, abuse an authenticated window, or extract unmarked
-plaintext logic. Cloudflare also remains trusted infrastructure. See
+host attestation. For customers with an enrolled approval device, typed-code
+capture and request-independent piggybacking are fixed because no copyable
+secret transits the customer machine and each approval signature binds exactly
+one displayed request. What remains is weaker but nonzero: malware can spam
+visible approval requests, a user can be deceived into approving a malicious
+operation, approval proves enrolled-phone-key possession rather than host
+integrity, and unmarked plaintext logic remains extractable. Cloudflare also
+remains trusted infrastructure. See
 `../re-bench/ABSOLUTE_MAXIMUM_AM001_ARCHITECTURAL_DECISION_20261127.md`,
-`../re-bench/ABSOLUTE_MAXIMUM_AM001_REMOTE_SPLIT_VALIDATION_20261127.md`, and
+`../re-bench/ABSOLUTE_MAXIMUM_AM001_REMOTE_SPLIT_VALIDATION_20261127.md`,
 `../re-bench/ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_TOTP_VALIDATION_20261127.md`,
-and `../re-bench/ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_HARDENING_VALIDATION_20261127.md`.
+`../re-bench/ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_HARDENING_VALIDATION_20261127.md`,
+and `../re-bench/ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_APPROVAL_VALIDATION_20261127.md`.
 
 ### 1.3 Build-host trust
 

@@ -53,8 +53,10 @@ build can alternatively emit a deployable Cloudflare Python Worker with:
 The generated worker contains the operator-side implementations and must never
 ship to customers. It verifies the same protocol-v1 HMAC envelope, supports
 customer-bound derived credentials, requires fresh six-digit codes from two
-independent TOTP seeds, and uses a SQLite-backed Durable Object for replay,
-rate-limit, and quota accounting.
+independent TOTP seeds for customers without an enrolled device, implements
+request-bound phone approval for enrolled customers, and uses a SQLite-backed
+Durable Object for replay, rate-limit, quota, approval, and enrolment
+accounting.
 
 The recommended configuration stores only this worker secret:
 
@@ -64,8 +66,10 @@ The recommended configuration stores only this worker secret:
 
 Optional policy secrets are `NIXON_REMOTE_DISABLED_CUSTOMERS`,
 `NIXON_REMOTE_RATE_LIMIT_PER_MINUTE`, `NIXON_REMOTE_QUOTA_PER_DAY`,
-`NIXON_REMOTE_AUTH_FAILURE_LIMIT_PER_MINUTE`, and
-`NIXON_REMOTE_TOTP_PAIR_MAX_USES`. Use:
+`NIXON_REMOTE_AUTH_FAILURE_LIMIT_PER_MINUTE`,
+`NIXON_REMOTE_TOTP_PAIR_MAX_USES`, `NIXON_REMOTE_APPROVAL_MODE`,
+`NIXON_REMOTE_APPROVAL_EXPIRY_SECONDS`, `NIXON_REMOTE_MAX_PENDING`, and
+`NIXON_REMOTE_TOTP_WITH_APPROVAL`. Use:
 
 ```sh
 python3 -m obfuscator.cloudflare_remote provision-master master-provisioning.json
@@ -79,10 +83,12 @@ explicit `NIXON_REMOTE_ALLOW_SHARED=1` and the original three shared secrets;
 it is compatibility behavior, not the recommended design.
 
 Deployment instructions are written into the generated project's
-`DEPLOYMENT.md`. TOTP is an additional server-side access gate, not host
-attestation and not protection for plaintext client-side logic. It is enforced
+`DEPLOYMENT.md`, including phone-approval enrolment and the admin endpoint for
+dynamic key revocation and customer disable/enable. TOTP and phone approval
+are additional server-side access gates, not host
+attestation and not protection for plaintext client-side logic. They are enforced
 only by the generated Cloudflare Worker; the Rust reference relay accepts the
-same signed protocol envelope but does not enforce TOTP.
+same signed protocol envelope but enforces neither TOTP nor approval.
 
 ## `AppConfig` (`relay/src/config.rs`)
 

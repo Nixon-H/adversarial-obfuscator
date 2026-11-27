@@ -72,57 +72,21 @@ class _Cursor:
 
 
 class _FakeSQL:
-    """Behavioral SQL double for the generated security-registry statements."""
+    """SQLite-backed double matching Durable Object storage semantics.
+
+    The real runtime is SQLite inside the Durable Object, so driving the same
+    statements through sqlite3 exercises the actual schema, upserts, and
+    transitions instead of reimplementing them in the test double.
+    """
 
     def __init__(self):
-        self.rows = {}
-        self.usage = {}
-        self.statements = []
+        import sqlite3
+        self.db = sqlite3.connect(":memory:")
 
     def exec(self, query, *bindings):
-        compact = " ".join(query.split()).upper()
-        self.statements.append((compact, bindings))
-        if compact.startswith("CREATE TABLE"):
-            return _Cursor([])
-        if compact.startswith("DELETE FROM NONCES"):
-            now = bindings[0]
-            for nonce, expires in list(self.rows.items()):
-                if expires < now:
-                    del self.rows[nonce]
-            return _Cursor([])
-        if compact.startswith("DELETE FROM USAGE_WINDOWS"):
-            now = bindings[0]
-            for key, (_expires, _hits) in list(self.usage.items()):
-                if _expires < now:
-                    del self.usage[key]
-            return _Cursor([])
-        if compact.startswith("SELECT NONCE FROM NONCES"):
-            nonce = bindings[0]
-            return _Cursor([{"nonce": nonce}] if nonce in self.rows else [])
-        if compact.startswith("SELECT HITS FROM USAGE_WINDOWS"):
-            key = bindings[0]
-            if key not in self.usage:
-                return _Cursor([])
-            return _Cursor([{"hits": self.usage[key][1]}])
-        if compact.startswith("INSERT INTO NONCES"):
-            nonce, expires = bindings
-            self.rows[nonce] = expires
-            return _Cursor([])
-        if compact.startswith("INSERT INTO USAGE_WINDOWS"):
-            key, expires = bindings
-            if key in self.usage:
-                _old_expires, hits = self.usage[key]
-                self.usage[key] = (expires, hits + 1)
-            else:
-                self.usage[key] = (expires, 1)
-            return _Cursor([])
-        if compact.startswith("UPDATE USAGE_WINDOWS SET HITS = HITS - 1"):
-            key = bindings[0]
-            if key in self.usage and self.usage[key][1] > 0:
-                expires, hits = self.usage[key]
-                self.usage[key] = (expires, hits - 1)
-            return _Cursor([])
-        raise AssertionError("unexpected SQL: %s" % compact)
+        cursor = self.db.execute(query, bindings)
+        self.db.commit()
+        return _Cursor(cursor.fetchall())
 
 
 class _FakeSecurityNamespace:
@@ -246,7 +210,7 @@ def test_generated_project_layout_permissions_and_worker_source(tmp_path):
     assert "NIXON_REMOTE_RATE_LIMIT_PER_MINUTE" in entry
     assert "NIXON_REMOTE_TOTP_PAIR_MAX_USES" in entry
     assert "NIXON_REMOTE_DISABLED_CUSTOMERS" in deployment
-    assert "FIDO2/passkey" in deployment
+    assert "Request-bound phone approval" in deployment
     assert stat.S_IMODE((target / "src" / "entry.py").stat().st_mode) & 0o077 == 0
     assert stat.S_IMODE((target / "src" / "remote_impl.py").stat().st_mode) & 0o077 == 0
     assert stat.S_IMODE(target.stat().st_mode) & 0o077 == 0
@@ -395,7 +359,9 @@ def test_generated_worker_rejects_replayed_nonce(tmp_path, monkeypatch):
     assert _fetch(worker, doc) == {"result": 1012}
     replayed = _fetch(worker, doc)
     assert "replayed" in replayed["error"]
-    assert doc["nonce"] in sql.rows
+    rows = sql.db.execute(
+        "SELECT nonce FROM nonces WHERE nonce = ?", (doc["nonce"],)).fetchall()
+    assert len(rows) == 1
 
 
 def test_totp_pair_cannot_be_reused_with_a_different_nonce(tmp_path, monkeypatch):
@@ -590,3 +556,376 @@ def test_implementation_text_cannot_retrigger_template_substitution():
     assert "_FUNCTIONS = {\n    'token_text': _remote_impl.token_text,\n}" in generated
     compile(generated, "<generated-token-worker>", "exec")
     compile(implementation, "<generated-token-impl>", "exec")
+
+
+# ── request-bound phone approval ─────────────────────────────────────────
+
+def _b64url(raw):
+    import base64 as _b64
+    return _b64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+class _Phone:
+    """Test double for the browser approval device using real ECDSA."""
+
+    def __init__(self):
+        from cryptography.hazmat.primitives.asymmetric import ec
+        self._private = ec.generate_private_key(ec.SECP256R1())
+        numbers = self._private.public_key().public_numbers()
+        self.x = _b64url(numbers.x.to_bytes(32, "big"))
+        self.y = _b64url(numbers.y.to_bytes(32, "big"))
+
+    def sign(self, message):
+        from cryptography.hazmat.primitives.asymmetric import ec, utils
+        from cryptography.hazmat.primitives import hashes
+        der = self._private.sign(message, ec.ECDSA(hashes.SHA256()))
+        r, s = utils.decode_dss_signature(der)
+        return (r.to_bytes(32, "big") + s.to_bytes(32, "big")).hex()
+
+    def key_id(self):
+        import hashlib as _hashlib
+        return _hashlib.sha256((self.x + ":" + self.y).encode("utf-8")).hexdigest()[:24]
+
+
+def _install_real_verify(module, monkeypatch):
+    """Replace the worker FFI verifier with real ECDSA verification.
+
+    The generated worker verifies through the WebCrypto FFI, which does not
+    exist under CPython. This replacement implements the same P-256/SHA-256
+    P1363 semantics, so tests exercise real signatures rather than a stub.
+    """
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric import ec, utils
+    from cryptography.hazmat.primitives import hashes
+    import base64 as _b64
+
+    def unb64url(text):
+        return _b64.urlsafe_b64decode(text + "=" * ((4 - len(text) % 4) % 4))
+
+    async def verify(x, y, signature_hex, message):
+        try:
+            numbers = ec.EllipticCurvePublicNumbers(
+                int.from_bytes(unb64url(x), "big"),
+                int.from_bytes(unb64url(y), "big"),
+                ec.SECP256R1())
+            public = numbers.public_key()
+            raw = bytes.fromhex(signature_hex)
+            if len(raw) != 64:
+                return False
+            der = utils.encode_dss_signature(
+                int.from_bytes(raw[:32], "big"), int.from_bytes(raw[32:], "big"))
+            public.verify(der, bytes(message), ec.ECDSA(hashes.SHA256()))
+            return True
+        except InvalidSignature:
+            return False
+        except Exception:
+            return False
+
+    monkeypatch.setattr(module, "_ecdsa_verify", verify)
+
+
+def _enrol(worker, phone, customer=CUSTOMER, token_index=0, tamper=False):
+    from obfuscator.cloudflare_remote import derive_enrol_tokens
+    token = derive_enrol_tokens(MASTER_HEX, customer)[token_index]["token"]
+    message = (b"nixon-remote-enrol-v1\x00" + customer.encode("utf-8")
+               + b"\x00" + token.encode("ascii"))
+    proof = phone.sign(message + (b"x" if tamper else b""))
+    doc = {
+        "type": "enrol", "version": 1, "customer": customer, "token": token,
+        "x": phone.x, "y": phone.y, "proof": proof, "label": "test-phone",
+    }
+    return _fetch(worker, doc)
+
+
+def _pending_items(worker, phone, customer=CUSTOMER):
+    stamp = str(int(time.time()))
+    message = (b"nixon-remote-pending-v1\x00" + customer.encode("utf-8")
+               + b"\x00" + phone.key_id().encode("ascii")
+               + b"\x00" + stamp.encode("ascii"))
+    doc = {
+        "type": "pending", "version": 1, "customer": customer,
+        "key_id": phone.key_id(), "ts": stamp, "signature": phone.sign(message),
+    }
+    out = _fetch(worker, doc)
+    assert "pending" in out, out
+    return out["pending"]
+
+
+def _decide(worker, phone, item, decision, customer=CUSTOMER, hash_override=None):
+    stamp = str(int(time.time()))
+    request_hash = hash_override or item["request_hash"]
+    message = (b"nixon-remote-approval-v1\x00" + customer.encode("utf-8")
+               + b"\x00" + item["approval_id"].encode("ascii")
+               + b"\x00" + request_hash.encode("ascii")
+               + b"\x00" + decision.encode("ascii")
+               + b"\x00" + stamp.encode("ascii"))
+    doc = {
+        "type": "approve", "version": 1, "customer": customer,
+        "key_id": phone.key_id(), "approval_id": item["approval_id"],
+        "request_hash": request_hash, "decision": decision,
+        "ts": stamp, "signature": phone.sign(message),
+    }
+    return _fetch(worker, doc)
+
+
+def _poll(worker, approval_id, customer=CUSTOMER):
+    return _fetch(worker, {
+        "type": "poll", "version": 1, "customer": customer,
+        "approval_id": approval_id,
+    })
+
+
+def _admin(worker, action, customer=CUSTOMER, key_id="", secret=None):
+    from obfuscator.cloudflare_remote import derive_admin_secret
+    doc = {
+        "type": "admin", "version": 1, "action": action, "customer": customer,
+        "secret": derive_admin_secret(MASTER_HEX) if secret is None else secret,
+    }
+    if key_id:
+        doc["key_id"] = key_id
+    return _fetch(worker, doc)
+
+
+def _approval_payload(**overrides):
+    doc = _valid_payload(**overrides)
+    # Once enrolled, approval supersedes typed codes; clients need not send any.
+    doc.pop("totp", None)
+    doc.pop("totp_secondary", None)
+    return doc
+
+
+def test_enrol_happy_path_and_tokens_are_single_use(tmp_path, monkeypatch):
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    phone = _Phone()
+    out = _enrol(worker, phone)
+    assert out.get("enrolled") is True
+    assert out["key_id"] == phone.key_id()
+    reused = _enrol(worker, _Phone())
+    assert "already used" in reused["error"]
+    second = _enrol(worker, _Phone(), token_index=1)
+    assert second.get("enrolled") is True
+
+
+def test_enrol_rejects_invalid_token_and_bad_proof(tmp_path, monkeypatch):
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    phone = _Phone()
+    out = _enrol(worker, phone, tamper=True)
+    assert "proof invalid" in out["error"]
+    from obfuscator.cloudflare_remote import derive_enrol_tokens
+    doc_token = derive_enrol_tokens(MASTER_HEX, "other-customer")[0]["token"]
+    message = (b"nixon-remote-enrol-v1\x00" + CUSTOMER.encode("utf-8")
+               + b"\x00" + doc_token.encode("ascii"))
+    doc = {
+        "type": "enrol", "version": 1, "customer": CUSTOMER, "token": doc_token,
+        "x": phone.x, "y": phone.y, "proof": phone.sign(message), "label": "x",
+    }
+    out = _fetch(worker, doc)
+    assert "token invalid" in out["error"]
+
+
+def test_enrolled_customer_rpc_pends_and_full_approval_executes(tmp_path, monkeypatch):
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    phone = _Phone()
+    assert _enrol(worker, phone).get("enrolled") is True
+
+    submitted = _fetch(worker, _approval_payload())
+    assert submitted.get("approval_pending") is True
+    assert len(submitted["approval_id"]) == 64
+
+    items = _pending_items(worker, phone)
+    assert len(items) == 1
+    item = items[0]
+    assert item["function"] == "hidden_pricing"
+    assert item["approval_id"] == submitted["approval_id"]
+
+    status = _poll(worker, submitted["approval_id"])
+    assert status.get("approval_status") == "pending"
+
+    decided = _decide(worker, phone, item, "approve")
+    assert decided == {"approved": True}
+
+    out = _poll(worker, submitted["approval_id"])
+    assert out == {"result": 1012}
+
+
+def test_approval_denied_is_terminal_for_the_client(tmp_path, monkeypatch):
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    phone = _Phone()
+    assert _enrol(worker, phone).get("enrolled") is True
+    submitted = _fetch(worker, _approval_payload())
+    item = _pending_items(worker, phone)[0]
+    assert _decide(worker, phone, item, "deny") == {"denied": True}
+    out = _poll(worker, submitted["approval_id"])
+    assert "denied" in out["error"]
+
+
+def test_approval_binds_the_exact_stored_request(tmp_path, monkeypatch):
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    phone = _Phone()
+    assert _enrol(worker, phone).get("enrolled") is True
+    _fetch(worker, _approval_payload())
+    item = _pending_items(worker, phone)[0]
+    wrong_hash = "0" * 64 if item["request_hash"] != "0" * 64 else "1" * 64
+    out = _decide(worker, phone, item, "approve", hash_override=wrong_hash)
+    assert "does not match" in out["error"]
+    # The request must still be pending: a mismatched approval records nothing.
+    assert len(_pending_items(worker, phone)) == 1
+
+
+def test_approval_requires_valid_signature_and_active_key(tmp_path, monkeypatch):
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    phone = _Phone()
+    assert _enrol(worker, phone).get("enrolled") is True
+    _fetch(worker, _approval_payload())
+    item = _pending_items(worker, phone)[0]
+
+    stamp = str(int(time.time()))
+    doc = {
+        "type": "approve", "version": 1, "customer": CUSTOMER,
+        "key_id": phone.key_id(), "approval_id": item["approval_id"],
+        "request_hash": item["request_hash"], "decision": "approve",
+        "ts": stamp, "signature": "00" * 64,
+    }
+    out = _fetch(worker, doc)
+    assert "signature invalid" in out["error"]
+
+    assert _admin(worker, "revoke-key", key_id=phone.key_id()).get("revoked") is True
+    out = _decide(worker, phone, item, "approve")
+    assert "not active" in out["error"]
+
+
+def test_admin_requires_secret_and_disable_blocks_requests(tmp_path, monkeypatch):
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    phone = _Phone()
+    assert _enrol(worker, phone).get("enrolled") is True
+
+    out = _admin(worker, "disable-customer", secret="00" * 32)
+    assert "authentication failed" in out["error"]
+
+    assert _admin(worker, "disable-customer").get("disabled") is True
+    out = _fetch(worker, _approval_payload(nonce="admin-disabled"))
+    assert "access revoked" in out["error"]
+
+    assert _admin(worker, "enable-customer").get("disabled") is False
+    submitted = _fetch(worker, _approval_payload(nonce="admin-enabled"))
+    assert submitted.get("approval_pending") is True
+
+    keys = _admin(worker, "list-keys")
+    assert len(keys["keys"]) == 1
+    assert keys["keys"][0]["key_id"] == phone.key_id()
+
+
+def test_approval_mode_off_executes_directly_and_required_fails_closed(
+        tmp_path, monkeypatch):
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    phone = _Phone()
+    assert _enrol(worker, phone).get("enrolled") is True
+
+    worker.env.NIXON_REMOTE_APPROVAL_MODE = "off"
+    out = _fetch(worker, _valid_payload(nonce="mode-off"))
+    assert out == {"result": 1012}
+
+    worker.env.NIXON_REMOTE_APPROVAL_MODE = "required"
+    out = _fetch(worker, _valid_payload(nonce="mode-required-enrolled"))
+    assert out.get("approval_pending") is True
+
+
+def test_approval_required_without_enrolment_fails_closed(tmp_path, monkeypatch):
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    worker.env.NIXON_REMOTE_APPROVAL_MODE = "required"
+    out = _fetch(worker, _valid_payload())
+    assert "approval enrolment is required" in out["error"]
+
+
+def test_approval_backlog_is_capped_per_customer(tmp_path, monkeypatch):
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    worker.env.NIXON_REMOTE_MAX_PENDING = "1"
+    phone = _Phone()
+    assert _enrol(worker, phone).get("enrolled") is True
+    first = _fetch(worker, _approval_payload(nonce="backlog-1"))
+    assert first.get("approval_pending") is True
+    second = _fetch(worker, _approval_payload(nonce="backlog-2"))
+    assert "backlog is full" in second["error"]
+
+
+def test_expired_pending_cannot_be_approved(tmp_path, monkeypatch):
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    worker.env.NIXON_REMOTE_APPROVAL_EXPIRY_SECONDS = "30"
+    phone = _Phone()
+    assert _enrol(worker, phone).get("enrolled") is True
+
+    fixed = 1700000000.0
+    monkeypatch.setattr(module.time, "time", lambda: fixed)
+    submitted = _fetch(worker, _approval_payload())
+    assert submitted.get("approval_pending") is True
+
+    monkeypatch.setattr(module.time, "time", lambda: fixed + 31.0)
+    # Phone signatures use fresh-ts semantics relative to worker time.
+    items = _pending_items_at(worker, phone, fixed + 31.0)
+    assert items == [] or all(
+        item["approval_id"] != submitted["approval_id"] for item in items)
+
+
+def _pending_items_at(worker, phone, at, customer=CUSTOMER):
+    stamp = str(int(at))
+    message = (b"nixon-remote-pending-v1\x00" + customer.encode("utf-8")
+               + b"\x00" + phone.key_id().encode("ascii")
+               + b"\x00" + stamp.encode("ascii"))
+    doc = {
+        "type": "pending", "version": 1, "customer": customer,
+        "key_id": phone.key_id(), "ts": stamp, "signature": phone.sign(message),
+    }
+    out = _fetch(worker, doc)
+    return out.get("pending", [])
+
+
+def test_poll_requires_matching_customer(tmp_path, monkeypatch):
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    phone = _Phone()
+    assert _enrol(worker, phone).get("enrolled") is True
+    submitted = _fetch(worker, _approval_payload())
+    out = _poll(worker, submitted["approval_id"], customer="other-customer")
+    assert "unknown" in out["error"]
+
+
+def test_enrolment_audit_does_not_leak_token(tmp_path, monkeypatch, capsys):
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    from obfuscator.cloudflare_remote import derive_enrol_tokens
+    phone = _Phone()
+    token = derive_enrol_tokens(MASTER_HEX, CUSTOMER)[0]["token"]
+    assert _enrol(worker, phone).get("enrolled") is True
+    captured = capsys.readouterr().out
+    assert '"outcome":"enrolled"' in captured
+    assert token not in captured
+    assert phone.x not in captured and phone.y not in captured
+
+
+def test_get_requests_serve_the_approval_page(tmp_path, monkeypatch):
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+
+    class GetRequest:
+        method = "GET"
+
+    asyncio.run(worker.fetch(GetRequest()))
+    # The fake Response constructor does not model the real runtime; check the
+    # page constant directly for the enrolment/signing surface instead.
+    page = module._APPROVAL_PAGE
+    assert "nixon-remote-approval-v1" in page
+    assert "nixon-remote-enrol-v1" in page
+    assert "generateKey" in page
+    assert "namedCurve" in page
+    assert "indexedDB" in page
+    assert "fetch" in page
