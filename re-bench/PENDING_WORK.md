@@ -41,13 +41,32 @@
   them, and moving them into a system keyring adds no real protection on the
   same threat model (same machine compromise). Documented as accepted risk.
   The master provisioning files must never leave this machine.
-- Loader error masking (exit 79): NOT small — the fatal guard at
-  pipeline.py:3973 fires even when the payload ran but failed mid-execution,
-  and payload stderr is swallowed by the loader output redirection. Needs a
-  focused debugging session: capture payload stderr into the fatal message
-  and fix the _NX_FALLBACK_RAN discrimination for the remote-error path.
+- Loader error masking (exit 79): FIXED 2026-11-28 (commit: report real
+  payload errors). Root cause was different from the note above: non-ImportError
+  payload exceptions inside exec_module were swallowed as a None verdict, so
+  the fatal misfired on any mid-run payload failure. Now the real exception is
+  recorded and surfaced ("payload started but failed inside the native module:
+  <error>"), and module-name retry stops after a mid-run failure. Validated
+  end-to-end on the v4 absolute artifact. Regression test:
+  tests/test_payload_error_reporting.py.
 - External signing: scoped as future work — obfuscator/authenticode.py and
   authenticode_verify.py exist; the open question is whether to sign the
   native .so/.pyd blobs embedded in artifacts (self-signed vs CA) and how
   verification integrates with the loader. Needs owner direction before
   implementation.
+
+
+## Status update 2026-11-28 (this session)
+
+- Benchmark repeat analysis: DONE — see
+  re-bench/ABSOLUTE_MAXIMUM_RAW_RESULTS/ai_benchmark_profile_matrix_go-v12/REPEAT_ANALYSIS.md
+  Headline: 0/165 valid non-source-assisted exploits across all 6 variants;
+  source-assisted-static positives are control positives by design.
+  Coverage gap noted: legitimate-runtime-secrets / runtime-secrets-withheld
+  not in the repeat matrix — prioritize those in any future round.
+- v4 artifact rebuilds (fixed loader + approval progress notice embedded):
+  absolute DONE + validated; maximum-local/maximum-cloud rebuilding.
+  PHONE validation should use the v4 artifacts once all three are built.
+- Loader UX progress notice + approval-page empty-state text: committed.
+  NOTE: workers still need a redeploy for the page-text fix to go live;
+  the push/anomaly/security-header deployment predates it.
