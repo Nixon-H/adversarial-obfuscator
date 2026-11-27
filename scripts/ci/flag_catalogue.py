@@ -145,6 +145,14 @@ def catalogue():
         if meta["nargs"] in ("*", "+"):
             entries.append({"flag": name, "kind": "excluded", "why": "variadic; no safe sample"})
             continue
+        if meta["nargs"] == "?":
+            # Optional-value flags must be invoked bare: their activation is
+            # the const= value, and a positional sample like "2" is almost
+            # never a valid value. Measured 2026-11-27 in the tier-A1 shard
+            # lanes: --validate got argv [--validate, 2] and the builder
+            # exited "--validate: expected no value or 'fail'".
+            entries.append({"flag": name, "kind": "boolean", "argv": [name]})
+            continue
         value = sample_value(name, meta)
         if value is None:
             entries.append({"flag": name, "kind": "excluded", "why": "needs a filesystem path"})

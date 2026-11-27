@@ -121,7 +121,7 @@ class SelfCritiqueEngine:
                     fpath = os.path.join(root_dir, fname)
                     rel = os.path.relpath(fpath, self.root)
                     try:
-                        with open(fpath) as f:
+                        with open(fpath, encoding="utf-8") as f:
                             content = f.read()
                     except OSError:
                         continue
@@ -168,7 +168,7 @@ class SelfCritiqueEngine:
             alt_path if os.path.isfile(alt_path) else ""
         )
         if fpath:
-            with open(fpath) as f:
+            with open(fpath, encoding="utf-8") as f:
                 data = json.load(f)
             claim_cov = float(data.get("claim_coverage_pct", 0))
             ev_cov = float(data.get("coverage_pct", 0))
@@ -221,7 +221,7 @@ class SelfCritiqueEngine:
                     fpath = os.path.join(root_dir, fname)
                     rel = os.path.relpath(fpath, self.root)
                     try:
-                        with open(fpath) as f:
+                        with open(fpath, encoding="utf-8") as f:
                             content = f.read()
                     except OSError:
                         continue
@@ -276,7 +276,7 @@ class SelfCritiqueEngine:
                     fpath = os.path.join(root_dir, fname)
                     rel = os.path.relpath(fpath, self.root)
                     try:
-                        with open(fpath) as f:
+                        with open(fpath, encoding="utf-8") as f:
                             content = f.read()
                     except OSError:
                         continue
@@ -320,7 +320,7 @@ class SelfCritiqueEngine:
                 if fname.startswith("test_") and fname.endswith(".py"):
                     fpath = os.path.join(tests_dir, fname)
                     try:
-                        with open(fpath) as f:
+                        with open(fpath, encoding="utf-8") as f:
                             content = f.read()
                     except OSError:
                         continue
@@ -364,7 +364,7 @@ class SelfCritiqueEngine:
         refs: list[str] = []
         msg = ""
         if os.path.isfile(claim_path):
-            with open(claim_path) as f:
+            with open(claim_path, encoding="utf-8") as f:
                 content = f.read()
             claims = re.findall(r"##\s+(.+)", content)
             for c in claims[:10]:
