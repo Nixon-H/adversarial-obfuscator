@@ -681,6 +681,9 @@ async function assertWith(record, parts) {
   /* One WebAuthn assertion bound to the canonical message. The browser places
      base64url(SHA-256(message)) into clientDataJSON.challenge, which is the
      exact value the server reconstructs and compares. */
+  if (!record || typeof record.credId !== "string" || record.credId.length === 0) {
+    throw new Error("this enrolment predates passkeys or is incomplete — re-enrol with a fresh enrolment link");
+  }
   const challenge = await challengeOf(parts);
   const cred = await navigator.credentials.get({publicKey: {
     challenge: challenge,
@@ -830,7 +833,26 @@ async function main() {
     say("No enrolled device keys on this browser. Open the enrolment link provided by your operator.", "err");
     return;
   }
-  currentRecord = records[0];
+  // Enrolments from before the passkey upgrade have no credential id and can
+  // never produce WebAuthn assertions; they must be re-enrolled, not used.
+  const valid = records.filter(
+    (r) => r && typeof r.credId === "string" && r.credId.length > 0);
+  if (valid.length === 0) {
+    say("This browser's enrolment predates passkey approval. Ask your operator for a fresh enrolment link and enrol again — the old enrolment cannot be used.", "err");
+    return;
+  }
+  // When the enrolment link's customer is still visible in the fragment,
+  // prefer the matching device record over an arbitrary one.
+  let chosen = valid[0];
+  if (location.hash && location.hash.indexOf("customer=") >= 0) {
+    const wanted = new URLSearchParams(location.hash.slice(1)).get("customer");
+    const match = valid.filter((r) => r.customer === wanted);
+    if (match.length > 0) chosen = match[0];
+  }
+  const staleNote = valid.length < records.length
+    ? " (" + (records.length - valid.length) + " outdated pre-passkey enrolment(s) on this browser are ignored)"
+    : "";
+  currentRecord = chosen;
   const keybox = document.getElementById("keybox");
   keybox.hidden = false;
   keybox.textContent = "device: " + (currentRecord.label || "phone")
@@ -844,7 +866,7 @@ async function main() {
       say(err.message || "check failed", "err");
     }
   };
-  say("Tap \"Check for pending requests\" and authenticate to review pending operations.", "info");
+  say("Tap \"Check for pending requests\" and authenticate to review pending operations." + staleNote, "info");
 }
 main().catch((err) => say(err.message || "setup failed", "err"));
 </script></body></html>"""
@@ -988,6 +1010,16 @@ class SecurityRegistry(DurableObject):
     async def enrol_key(self, customer, key_id, x, y, label, token_hash, now, cred_id=""):
         # Single-object storage is serial, so the token consumption and key
         # insertion cannot interleave with another enrolment of the same token.
+        # Repeat the column migration here as well as in the constructor: an
+        # actor whose constructor ran before the upgrade would otherwise keep
+        # failing the cred_id insert until the next restart, and a consumed
+        # enrolment token must never be stranded by that ordering.
+        try:
+            self.sql.exec(
+                "ALTER TABLE approval_keys ADD COLUMN "
+                "cred_id TEXT NOT NULL DEFAULT ''")
+        except Exception:
+            pass  # column already present
         rows = self.sql.exec(
             "SELECT token_hash FROM enrol_tokens WHERE token_hash = ?",
             str(token_hash)).toArray()

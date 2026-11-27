@@ -1592,3 +1592,26 @@ def test_approval_page_javascript_is_syntactically_valid(tmp_path, monkeypatch):
     out = subprocess.run(
         [node, "--check", str(script)], capture_output=True, text=True)
     assert out.returncode == 0, out.stderr
+
+
+def test_approval_page_handles_pre_passkey_records(tmp_path, monkeypatch):
+    """Regression for the live-deployment crash: browsers that enrolled under
+    the original WebCrypto page hold IndexedDB records with no credId (the
+    database name is shared). Reading .length of the missing field crashed
+    the page with 'cannot read properties of undefined'. The page must skip
+    those records, prefer credentialed ones, and tell the user to re-enrol
+    when nothing usable remains."""
+    module, _worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    page = module._APPROVAL_PAGE
+    # Stale records are filtered out before use.
+    assert "credId" in page
+    assert "filter(" in page
+    assert 'typeof r.credId !== "string"' in page or "r.credId" in page
+    # The user-facing guidance for the all-stale case exists.
+    assert "predates passkey" in page
+    # The assertion path itself refuses incomplete records with a clear error
+    # rather than crashing inside base64 decoding.
+    import re
+    guard = re.search(
+        r'if \(!record \|\| typeof record\.credId !== "string"', page)
+    assert guard is not None, "assertWith lacks the stale-record guard"
