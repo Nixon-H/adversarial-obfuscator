@@ -191,6 +191,7 @@ def test_fla_cross_block_ssa_skip_and_safe_execution(tmp_path):
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.skipif(shutil.which("llc") is None, reason="llc not installed")
 def test_default_build_pass_chain_assembles(lowered, tmp_path):
     """The chain the build actually runs must assemble as a whole."""
     chain = ["bcf", "fla", "sub", "replay", "speculative"]
