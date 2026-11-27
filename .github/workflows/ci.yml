@@ -54,7 +54,7 @@ jobs:
         # otherwise ship silently (CI previously pinned 3.12 only).
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # pinned immutable; original actions/checkout@v4
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -160,7 +160,7 @@ jobs:
     env:
       NIXON_LOG_REDIRECT: "0"
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # pinned immutable; original actions/checkout@v4
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -346,7 +346,7 @@ jobs:
     # vulnerable indirect dependency is only visible there.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # pinned immutable; original actions/checkout@v4
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -373,7 +373,7 @@ jobs:
     # for v3 migration.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # pinned immutable; original actions/checkout@v4
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # pinned immutable; original gitleaks/gitleaks-action@v2
@@ -387,7 +387,7 @@ jobs:
     # human review. Always exits 0 (|| true); reviewers check the log.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # pinned immutable; original actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Show requirements.txt diff (informational)
@@ -404,7 +404,7 @@ jobs:
     # `make lint-upgrade` prints the same thing locally.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # pinned immutable; original actions/checkout@v4
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: "3.11"

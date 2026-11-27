@@ -47,7 +47,7 @@ jobs:
     env:
       NIXON_LOG_REDIRECT: "0"
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # pinned immutable; original actions/checkout@v4
       - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -224,7 +224,7 @@ jobs:
     timeout-minutes: 20
     environment: production
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # pinned immutable; original actions/checkout@v4
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # pinned immutable; upstream tag actions/download-artifact@v4.1.8
         with:
           name: release-candidate

@@ -11,7 +11,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # pinned immutable; original actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # pinned immutable; original actions/checkout@v7.0.1
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -116,7 +116,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # pinned immutable; original actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # pinned immutable; original actions/checkout@v7.0.1
       - name: Cache Cargo registry
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # pinned immutable; original actions/cache@v4
         with:
@@ -159,7 +159,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # pinned immutable; original actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # pinned immutable; original actions/checkout@v7.0.1
       - name: Cache Cargo registry
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # pinned immutable; original actions/cache@v4
         with:
@@ -190,7 +190,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # pinned immutable; original actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # pinned immutable; original actions/checkout@v7.0.1
       - name: Cache Cargo registry
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # pinned immutable; original actions/cache@v4
         with:
