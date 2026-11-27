@@ -26,7 +26,7 @@ No full non-source external-attacker break was validated. Source-assisted recove
 
 ## AM-001 resolution
 
-AM-001 is formally accepted as an architectural limitation rather than falsely marked fixed. The decision record is `re-bench/ABSOLUTE_MAXIMUM_AM001_ARCHITECTURAL_DECISION_20261127.md`.
+AM-001 was initially accepted as an architectural limitation rather than falsely marked fixed. The opt-in server-side split remediation has since been implemented and validated for functions explicitly marked `@remote`; unmarked client-side logic remains under the same architectural boundary. The decision record is `re-bench/ABSOLUTE_MAXIMUM_AM001_ARCHITECTURAL_DECISION_20261127.md`, and validation evidence is `re-bench/ABSOLUTE_MAXIMUM_AM001_REMOTE_SPLIT_VALIDATION_20261127.md`.
 
 
 ## Final partitioned test evidence

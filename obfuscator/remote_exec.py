@@ -22,19 +22,24 @@ Design (each point is a test):
 * **Explicit opt-in per function.**  Nothing is remote unless marked, so the
   default build is unchanged.
 
-Transport is HTTPS JSON; the reference server is stdlib-only so it can run
-anywhere.  The secret comes from the environment, never from source.
+Network transport is HTTPS JSON. Plain HTTP is accepted only for the
+loopback reference relay, where traffic does not leave the host. The secret
+comes from the environment, never from source.
 """
 from __future__ import annotations
 
 import ast
+import builtins
 import hashlib
 import hmac
 import json
 import math
 import os
 import struct
+import symtable
+import tempfile
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -142,6 +147,49 @@ def verify_request(secret: bytes, function: str, args: list, nonce: str,
         raise RemoteError("remote request signature mismatch")
 
 
+def _loopback_host(host: str) -> bool:
+    """True only for a literal loopback address or localhost resolving there."""
+    import ipaddress
+    import socket
+
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        pass
+    if host.lower() != "localhost":
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return False
+    if not infos:
+        return False
+    try:
+        return all(ipaddress.ip_address(info[4][0]).is_loopback for info in infos)
+    except ValueError:
+        return False
+
+
+def validate_endpoint(url: str) -> None:
+    """Validate the remote endpoint before any request is emitted.
+
+    Network endpoints must use HTTPS. Plain HTTP is accepted only for the
+    loopback reference relay, where the traffic does not leave the host; this
+    is what allows a production-shaped end-to-end validation without adding a
+    TLS dependency to the Rust relay.
+    """
+    parsed = urllib.parse.urlsplit(str(url or ""))
+    scheme = parsed.scheme.lower()
+    if scheme == "https" and parsed.hostname:
+        return
+    if scheme == "http" and parsed.hostname and _loopback_host(parsed.hostname):
+        return
+    raise RemoteError(
+        "remote endpoint must be HTTPS, or loopback HTTP for the reference relay")
+
+
 def call_remote(function: str, args: list, kwargs: Optional[dict] = None, *,
                 url: Optional[str] = None,
                 secret: Optional[bytes] = None,
@@ -150,15 +198,15 @@ def call_remote(function: str, args: list, kwargs: Optional[dict] = None, *,
     """Invoke a remote function.  Fails closed on any problem.
 
     ``opener`` lets a test inject a transport without a live server; the
-    default uses ``urllib`` over HTTPS only.
+    default uses ``urllib``. Network endpoints are HTTPS-only; plain HTTP is
+    accepted only when it resolves to the loopback reference relay.
     """
     url = url or os.environ.get(URL_ENV, "").strip()
     if not url:
         raise RemoteError(
             "remote function %r is not available: %s is not set"
             % (function, URL_ENV))
-    if not url.lower().startswith("https://"):
-        raise RemoteError("remote endpoint must be HTTPS")
+    validate_endpoint(url)
     raw_secret = secret
     if raw_secret is None:
         env = os.environ.get(SECRET_ENV, "").strip()
@@ -197,10 +245,12 @@ def call_remote(function: str, args: list, kwargs: Optional[dict] = None, *,
         doc = json.loads(payload.decode("utf-8"))
     except (ValueError, AttributeError) as exc:
         raise RemoteError("remote response was not JSON") from exc
-    if not isinstance(doc, dict) or "result" not in doc:
-        raise RemoteError("remote response missing 'result'")
+    if not isinstance(doc, dict):
+        raise RemoteError("remote response was not a JSON object")
     if doc.get("error"):
         raise RemoteError("remote function failed: %s" % (doc["error"],))
+    if "result" not in doc:
+        raise RemoteError("remote response missing 'result'")
     return doc["result"]
 
 
@@ -280,11 +330,147 @@ def remote(func):
     return func
 
 
+#: Self-contained client runtime embedded beside the stubs. The artefact must
+#: not import this build package at run time: the operator-side package is not
+#: part of the shipped trust boundary and may not exist on the customer host.
+EMBEDDED_CLIENT_SOURCE = r'''
+def _nx_call_remote(function, args, kwargs):
+    import hashlib as _nx_hashlib
+    import hmac as _nx_hmac
+    import ipaddress as _nx_ipaddress
+    import json as _nx_json
+    import math as _nx_math
+    import os as _nx_os
+    import socket as _nx_socket
+    import struct as _nx_struct
+    import time as _nx_time
+    import urllib.parse as _nx_uparse
+    import urllib.request as _nx_ureq
+
+    def _canon(value):
+        if value is None:
+            return '["n"]'
+        if isinstance(value, bool):
+            return '["b","1"]' if value else '["b","0"]'
+        if isinstance(value, int):
+            if value < -(1 << 63) or value > (1 << 64) - 1:
+                raise RuntimeError("remote protocol integer out of range")
+            return '["i","%s"]' % value
+        if isinstance(value, float):
+            if not _nx_math.isfinite(value):
+                raise RuntimeError("remote protocol numbers must be finite")
+            return '["f","%s"]' % _nx_struct.pack(">d", value).hex()
+        if isinstance(value, str):
+            return '["s","%s"]' % value.encode("utf-8").hex()
+        if isinstance(value, (list, tuple)):
+            return '["a",[%s]]' % ",".join(_canon(item) for item in value)
+        if isinstance(value, dict):
+            if not all(isinstance(key, str) for key in value):
+                raise RuntimeError("remote protocol object keys must be strings")
+            parts = []
+            for key in sorted(value, key=lambda item: item.encode("utf-8")):
+                parts.append("[%s,%s]" % (_canon(key), _canon(value[key])))
+            return '["o",[%s]]' % ",".join(parts)
+        raise RuntimeError("remote protocol value is not JSON-compatible")
+
+    def _sign(secret, name, positional, named, nonce, timestamp):
+        material = "\n".join([
+            "nixon-remote-v1",
+            _canon(name),
+            _canon(list(positional)),
+            _canon(dict(named or {})),
+            _canon(nonce),
+            _canon(timestamp),
+        ]).encode("utf-8")
+        return _nx_hmac.new(bytes(secret), material, _nx_hashlib.sha256).hexdigest()
+
+    def _loopback(host):
+        if not host:
+            return False
+        try:
+            return _nx_ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            pass
+        if host.lower() != "localhost":
+            return False
+        try:
+            infos = _nx_socket.getaddrinfo(host, None, proto=_nx_socket.IPPROTO_TCP)
+        except OSError:
+            return False
+        if not infos:
+            return False
+        try:
+            return all(_nx_ipaddress.ip_address(info[4][0]).is_loopback for info in infos)
+        except ValueError:
+            return False
+
+    url = _nx_os.environ.get("NIXON_REMOTE_URL", "").strip()
+    if not url:
+        raise RuntimeError("remote function is not available: NIXON_REMOTE_URL is not set")
+    try:
+        parsed = _nx_uparse.urlsplit(url)
+        host = parsed.hostname
+    except ValueError as exc:
+        raise RuntimeError("remote endpoint URL is malformed") from exc
+    scheme = parsed.scheme.lower()
+    if not ((scheme == "https" and host) or
+            (scheme == "http" and host and _loopback(host))):
+        raise RuntimeError(
+            "remote endpoint must be HTTPS, or loopback HTTP for the reference relay")
+    raw_secret = _nx_os.environ.get("NIXON_REMOTE_SECRET", "").strip()
+    if not raw_secret:
+        raise RuntimeError("remote function is not available: NIXON_REMOTE_SECRET is not set")
+    try:
+        secret = bytes.fromhex(raw_secret)
+    except ValueError as exc:
+        raise RuntimeError("NIXON_REMOTE_SECRET must be hex") from exc
+    nonce = _nx_os.urandom(16).hex()
+    timestamp = _nx_time.time()
+    kwargs = dict(kwargs or {})
+    body = _nx_json.dumps({
+        "version": 1,
+        "function": function,
+        "args": list(args),
+        "kwargs": kwargs,
+        "nonce": nonce,
+        "timestamp": timestamp,
+        "signature": _sign(secret, function, list(args), kwargs, nonce, timestamp),
+    }, allow_nan=False, separators=(",", ":")).encode("utf-8")
+    request = _nx_ureq.Request(
+        url, data=body, method="POST",
+        headers={"Content-Type": "application/json"})
+    try:
+        with _nx_ureq.urlopen(request, timeout=10.0) as response:
+            payload = response.read()
+    except Exception as exc:
+        raise RuntimeError("remote call failed: %s" % (exc,)) from exc
+    try:
+        doc = _nx_json.loads(payload.decode("utf-8"))
+    except (ValueError, AttributeError) as exc:
+        raise RuntimeError("remote response was not JSON") from exc
+    if not isinstance(doc, dict):
+        raise RuntimeError("remote response was not a JSON object")
+    if doc.get("error"):
+        raise RuntimeError("remote function failed: %s" % (doc["error"],))
+    if "result" not in doc:
+        raise RuntimeError("remote response missing 'result'")
+    return doc["result"]
+
+'''
+
+
 @dataclass
 class ExtractedFunction:
     name: str
     source: str
     lineno: int
+
+
+def _has_remote_marker(node) -> bool:
+    return any(
+        (isinstance(d, ast.Name) and d.id == MARKER)
+        or (isinstance(d, ast.Attribute) and d.attr == MARKER)
+        for d in node.decorator_list)
 
 
 def extract_remote_functions(tree: ast.AST, source: str = "") -> list:
@@ -299,10 +485,7 @@ def extract_remote_functions(tree: ast.AST, source: str = "") -> list:
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        if not any(
-                (isinstance(d, ast.Name) and d.id == MARKER)
-                or (isinstance(d, ast.Attribute) and d.attr == MARKER)
-                for d in node.decorator_list):
+        if not _has_remote_marker(node):
             continue
         segment = ""
         if source:
@@ -322,33 +505,211 @@ def stub_source(func: ExtractedFunction) -> str:
     return (
         "def %s(*args, **kwargs):\n"
         '    """Executed on the operator\'s service; not present in this build."""\n'
-        "    from obfuscator.remote_exec import call_remote\n"
-        "    return call_remote(%r, list(args), kwargs=kwargs)\n"
+        "    return _nx_call_remote(%r, list(args), kwargs=kwargs)\n"
         % (func.name, func.name))
 
 
-def split_module(source: str) -> tuple:
-    """Replace every ``@remote`` function body with a stub.
+def _assert_self_contained_remote_functions(source: str, marked: list) -> None:
+    """Reject remote implementations that depend on unbundled module globals.
 
-    Returns ``(client_source, [ExtractedFunction, ...])``.  The extracted
-    list is what the operator deploys; it must never be shipped.
+    The operator bundle contains the marked implementations, not arbitrary
+    module-level helpers/constants. Symtable analysis covers function bodies;
+    the AST pass below covers defaults and annotations because those are
+    evaluated in module scope when the operator bundle defines the function.
+    Both passes are conservative: builtins and other bundled remote functions
+    are allowed, but any other global read fails the build instead of becoming
+    a server-side NameError after release.
+    """
+    builtin_names = set(dir(builtins))
+    names = [node.name for node in marked]
+    remote_names = set(names)
+    root = symtable.symtable(source, "<remote-split>", "exec")
+    module_names = {symbol.get_name() for symbol in root.get_symbols()}
+    # A module-level assignment/import shadowing a builtin is itself an
+    # unbundled global dependency, so the builtin name is not safe merely
+    # because it normally exists.
+    allowed_builtins = builtin_names - module_names
+
+    def check_external_names(expr, owner: str, what: str) -> None:
+        if expr is None:
+            return
+        for node in ast.walk(expr):
+            if isinstance(node, ast.Name) and (
+                    node.id not in allowed_builtins
+                    and node.id not in remote_names):
+                raise RemoteError(
+                    "@remote function %r uses module global %r in %s, which "
+                    "is not included in the operator bundle; make the function "
+                    "self-contained or move the dependency inside it"
+                    % (owner, node.id, what))
+
+    for node in marked:
+        arguments = (
+            list(node.args.posonlyargs) + list(node.args.args)
+            + list(node.args.kwonlyargs))
+        if node.args.vararg:
+            arguments.append(node.args.vararg)
+        if node.args.kwarg:
+            arguments.append(node.args.kwarg)
+        for argument in arguments:
+            check_external_names(
+                argument.annotation, node.name, "an argument annotation")
+        check_external_names(node.returns, node.name, "the return annotation")
+        for default in list(node.args.defaults) + list(node.args.kw_defaults):
+            check_external_names(default, node.name, "a default value")
+
+    children = {child.get_name(): child for child in root.get_children()}
+
+    def check_scope(scope, owner: str) -> None:
+        for symbol in scope.get_symbols():
+            name = symbol.get_name()
+            if symbol.is_global() and (
+                    name not in allowed_builtins
+                    and name not in remote_names):
+                raise RemoteError(
+                    "@remote function %r depends on module global %r, which "
+                    "is not included in the operator bundle; make the function "
+                    "self-contained or move the dependency inside it"
+                    % (owner, name))
+        for child in scope.get_children():
+            check_scope(child, owner)
+
+    for name in names:
+        scope = children.get(name)
+        if scope is None:
+            raise RemoteError("cannot analyse @remote function %r safely" % name)
+        check_scope(scope, name)
+
+
+def _marker_import_edits(tree: ast.AST) -> list:
+    """Return line edits removing the no-op marker import.
+
+    The marker import is required, not inferred from the name alone: otherwise
+    an unrelated local decorator that happens to be called ``remote`` would be
+    reinterpreted as a split-execution marker. Any other use of this package
+    from client payload code would make the shipped artefact depend on the
+    build environment, so that is refused too.
+    """
+    edits = []
+    imports = 0
+    module_name = "obfuscator.remote_exec"
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module == module_name:
+            marker_only = all(
+                alias.name == MARKER and alias.asname in (None, MARKER)
+                for alias in node.names)
+            if not marker_only:
+                raise RemoteError(
+                    "client payload may import only the @remote marker from "
+                    "obfuscator.remote_exec; the runtime is embedded by the build")
+            imports += 1
+            edits.append((node.lineno - 1, node.end_lineno, []))
+        elif isinstance(node, ast.Import) and any(
+                alias.name == module_name for alias in node.names):
+            raise RemoteError(
+                "use 'from obfuscator.remote_exec import remote' for the "
+                "split-execution marker; module imports are not shippable")
+    if not imports:
+        raise RemoteError(
+            "@remote split execution requires "
+            "'from obfuscator.remote_exec import remote'")
+    return edits
+
+
+def split_module(source: str) -> tuple:
+    """Replace every module-level ``@remote`` function body with a stub.
+
+    Returns ``(client_source, [ExtractedFunction, ...])``. Unsupported shapes
+    fail closed: silently leaving a decorator import, a nested implementation,
+    or an async/sync mismatch in the artefact would either break standalone
+    execution or ship the very implementation this pass exists to remove.
     """
     tree = ast.parse(source)
-    remote = extract_remote_functions(tree, source)
-    if not remote:
+    marked = [
+        node for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and _has_remote_marker(node)
+    ]
+    if not marked:
         return source, []
 
+    top_level = {
+        node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    names = [node.name for node in marked]
+    if len(names) != len(set(names)):
+        raise RemoteError("duplicate @remote function names cannot be split safely")
+    for node in marked:
+        if node not in top_level:
+            raise RemoteError(
+                "@remote split execution supports module-level functions only")
+        if isinstance(node, ast.AsyncFunctionDef):
+            raise RemoteError("@remote does not support async functions yet")
+        if len(node.decorator_list) != 1:
+            raise RemoteError(
+                "@remote cannot be combined with other decorators in a split build")
+        marker = node.decorator_list[0]
+        if not (isinstance(marker, ast.Name) and marker.id == MARKER):
+            raise RemoteError(
+                "@remote split execution requires the direct '@remote' marker")
+
+    _assert_self_contained_remote_functions(source, marked)
+
+    remote = []
+    edits = []
+    insert_at = len(source.splitlines())
+    for node in marked:
+        segment = ast.get_source_segment(source, node) or ""
+        if not segment:
+            raise RemoteError("cannot recover source for @remote function %r" % node.name)
+        func = ExtractedFunction(node.name, segment, node.lineno)
+        remote.append(func)
+        marker = node.decorator_list[0]
+        insert_at = min(insert_at, marker.lineno - 1)
+        edits.append((marker.lineno - 1, marker.end_lineno, []))
+        edits.append((node.lineno - 1, node.end_lineno,
+                      [stub_source(func) + "\n"]))
+    edits.extend(_marker_import_edits(tree))
+
+    replacement_starts = {}
+    deletion_ranges = []
+    for start, end, replacement in edits:
+        if replacement:
+            if start in replacement_starts:
+                raise RemoteError("overlapping remote split edits")
+            replacement_starts[start] = (end, replacement)
+        else:
+            deletion_ranges.append((start, end))
+
     lines = source.splitlines(keepends=True)
-    # Replace from the bottom up so earlier line numbers stay valid.
-    for func in sorted(remote, key=lambda f: f.lineno, reverse=True):
-        node = next(n for n in ast.walk(tree)
-                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and n.name == func.name
-                    and getattr(n, "lineno", 0) == func.lineno)
-        start = node.lineno - 1
-        end = getattr(node, "end_lineno", node.lineno)
-        lines[start:end] = [stub_source(func) + "\n"]
-    return "".join(lines), remote
+    out = []
+    index = 0
+    while index < len(lines):
+        if index == insert_at:
+            out.append(EMBEDDED_CLIENT_SOURCE)
+        if index in replacement_starts:
+            end, replacement = replacement_starts[index]
+            out.extend(replacement)
+            index = end
+            continue
+        deletion_end = None
+        for start, end in deletion_ranges:
+            if start <= index < end:
+                deletion_end = end if deletion_end is None else max(deletion_end, end)
+        if deletion_end is not None:
+            index = deletion_end
+            continue
+        out.append(lines[index])
+        index += 1
+    if insert_at >= len(lines):
+        out.append(EMBEDDED_CLIENT_SOURCE)
+    client = "".join(out)
+    try:
+        compile(client, "<remote-client>", "exec")
+    except SyntaxError as exc:
+        raise RemoteError("remote split produced invalid client source: %s" % exc) from exc
+    return client, remote
 
 
 def write_remote_bundle(remote: list, path: str) -> None:
@@ -388,5 +749,18 @@ if __name__ == "__main__":
     _out = _registry.handle(sys.stdin.buffer.read())
     sys.stdout.buffer.write(_out)
 ''')
-    with open(path, "w", encoding="utf-8") as handle:
-        handle.write("".join(parts))
+    directory = os.path.dirname(os.path.abspath(path)) or "."
+    fd, temp_path = tempfile.mkstemp(
+        prefix=".remote-bundle-", suffix=".py", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write("".join(parts))
+        os.chmod(temp_path, 0o600)
+        os.replace(temp_path, path)
+        os.chmod(path, 0o600)
+    except Exception:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+        raise

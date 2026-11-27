@@ -12,7 +12,7 @@ not exist.
 |----------|------|---------|-------------|
 | `-p`, `--payload <path>` | string | — | Path to the payload file to launch |
 | `--no-init-runtime` | flag | off | Skip protection-runtime initialisation. The runtime runs **by default**; this is the debug opt-out |
-| `--antidebug` | bool | `true` | Enable anti-debugging checks (`--antidebug false` disables) |
+| `--antidebug` | flag | on | Anti-debugging checks are compiled as on-by-default; the current clap surface has no supported `false` value |
 | `--serve-remote` | flag | off | Serve `@remote` function implementations instead of launching a payload |
 | `--remote-bind <addr>` | string | `127.0.0.1:8787` | Bind address for `--serve-remote` |
 | `--allow-remote` | flag | off | Allow a non-loopback bind. The endpoint speaks plain HTTP; put it behind TLS |
@@ -20,6 +20,25 @@ not exist.
 
 The remote shared secret is read from `NIXON_REMOTE_SECRET`; it is never
 accepted on the command line or from a repository file.
+
+
+## Split-execution service
+
+A production-shaped loopback validation command is:
+
+```sh
+NIXON_REMOTE_SECRET=<64-hex> \
+PYTHONPATH=/path/to/repository \
+orbital-relay --serve-remote \
+  --remote-bind 127.0.0.1:8787 \
+  --remote-bundle /secure/operator-bundle.py
+```
+
+`PYTHONPATH` is needed only because the generated Python operator bundle uses
+the repository's verification registry. The bundle itself is mode `0600` and
+must never ship with the client. The loopback reference endpoint is plain HTTP
+by design; non-loopback deployments must put it behind TLS and the client
+refuses non-loopback plain HTTP before emitting a request.
 
 ## `AppConfig` (`relay/src/config.rs`)
 

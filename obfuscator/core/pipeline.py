@@ -5431,6 +5431,11 @@ def build_project(args):
     if not os.path.exists(source): 
         UI.fatal(f"Source file not found: {source}")
         return
+    args._input_source = source
+    # Server-side execution must happen before ANY payload consumer reads the
+    # source: native compilation, farm upload, AST mutation and loader
+    # embedding all use this local variable after this point.
+    source = _prepare_remote_split_source(args, source)
     # The hybrid loader (and therefore the section split + moving decryption)
     # used to be reachable ONLY on the native path, which is cloud-gated --
     # so no local build ever armed `_NX_SECTION_PACK` and the moving
@@ -6144,7 +6149,7 @@ def build_project(args):
         UI.item("Hybrid Context", loader_path, "READY")
         # Remember the payload the user named: the artefact must be named
         # after it, not after this temp loader.
-        args._original_source = source
+        args._original_source = getattr(args, "_input_source", source)
         args.source = loader_path
         source = loader_path 
     start_time = time.time()
@@ -7682,6 +7687,9 @@ def _VERIFY_INTEGRITY():
         _tmp_loader = getattr(args, '_tmp_hybrid_loader', None)
         if _tmp_loader and os.path.exists(_tmp_loader):
             os.unlink(_tmp_loader)
+        _tmp_remote_client = getattr(args, '_tmp_remote_client', None)
+        if _tmp_remote_client and os.path.exists(_tmp_remote_client):
+            os.unlink(_tmp_remote_client)
     except Exception:
         pass
     return generated_files_map
@@ -7806,6 +7814,88 @@ _LOADER_TX_FIELDS = {
 _LOADER_TX_BOOLEAN = {"data", "function-intent", "speculation", "remote"}
 
 
+def _payload_uses_remote_marker(source_text: str) -> bool:
+    """True when the payload explicitly imports and uses the split marker."""
+    import ast as _ast
+    try:
+        tree = _ast.parse(source_text)
+    except SyntaxError:
+        return False
+    has_import = any(
+        isinstance(node, _ast.ImportFrom)
+        and node.module == "obfuscator.remote_exec"
+        and any(alias.name == "remote" for alias in node.names)
+        for node in tree.body)
+    if not has_import:
+        return False
+    for node in _ast.walk(tree):
+        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)) and any(
+                (isinstance(decorator, _ast.Name) and decorator.id == "remote")
+                or (isinstance(decorator, _ast.Attribute) and decorator.attr == "remote")
+                for decorator in node.decorator_list):
+            return True
+    return False
+
+
+def _prepare_remote_split_source(args, source: str) -> str:
+    """Move ``@remote`` implementations to the operator bundle before packing.
+
+    This must run before native compilation, AST mutation, farm upload and
+    loader embedding: every one of those paths reads the payload source, so a
+    late split would still compile the confidential implementation into the
+    shipped blob. The client stub is written to a mode-0600 temporary file;
+    the implementation is written only to the explicit operator bundle path.
+    """
+    if not getattr(args, "tx_remote", False):
+        try:
+            with open(source, "r", encoding="utf-8") as fh:
+                _source_text = fh.read()
+        except OSError:
+            return source
+        if _payload_uses_remote_marker(_source_text):
+            raise SystemExit(
+                "payload uses @remote but --transforms remote is not enabled; "
+                "refusing to ship a server-side implementation client-side")
+        return source
+    from obfuscator.remote_exec import RemoteError, split_module, write_remote_bundle
+    try:
+        with open(source, "r", encoding="utf-8") as fh:
+            original_source = fh.read()
+        client_source, remote_functions = split_module(original_source)
+    except RemoteError as exc:
+        raise SystemExit("--transforms remote failed: %s" % (exc,))
+    if not remote_functions:
+        return source
+
+    bundle_path = str(getattr(args, "tx_remote_bundle", "") or "")
+    if not bundle_path:
+        raise SystemExit(
+            "--transforms remote requires remote-bundle=PATH when @remote "
+            "functions are present; without the operator bundle the "
+            "implementation would be lost or shipped")
+    try:
+        write_remote_bundle(remote_functions, bundle_path)
+    except (OSError, RemoteError) as exc:
+        raise SystemExit(
+            "--transforms remote failed: cannot write operator bundle %r: %s"
+            % (bundle_path, exc)) from exc
+    fd, client_path = tempfile.mkstemp(prefix="nx_remote_client_", suffix=".py")
+    os.close(fd)
+    try:
+        os.chmod(client_path, 0o600)
+    except OSError:
+        pass
+    with open(client_path, "w", encoding="utf-8") as fh:
+        fh.write(client_source)
+    args._tmp_remote_client = client_path
+    args._remote_operator_bundle = bundle_path
+    args._remote_function_count = len(remote_functions)
+    args._original_source = getattr(args, "_input_source", source)
+    print("    [+] Split execution: %d function(s) removed before packing; "
+          "operator bundle: %s" % (len(remote_functions), bundle_path))
+    return client_path
+
+
 def _run_loader_transforms(source: str, args) -> str:
     import ast as _ast
     if getattr(args, "tx_function_intent", False):
@@ -7821,24 +7911,6 @@ def _run_loader_transforms(source: str, args) -> str:
         level = getattr(args, "tx_data_level", 3)
         tree = DataProtector(level=level).protect(_ast.parse(source))
         source = _ast.unparse(_ast.fix_missing_locations(tree))
-    # Level-5 split execution (Tier 4): every `@remote` function's body is
-    # replaced by a stub and the implementation is written to an operator
-    # bundle that never ships.  Opt-in per function (the decorator), so a
-    # build with no marked function is byte-identical.
-    if getattr(args, "tx_remote", False):
-        from obfuscator.remote_exec import split_module, write_remote_bundle
-        source, _remote_funcs = split_module(source)
-        if _remote_funcs:
-            _bundle = getattr(args, "tx_remote_bundle", "") or ""
-            if _bundle:
-                try:
-                    write_remote_bundle(_remote_funcs, _bundle)
-                    print("    [+] Remote bundle written: %s (%d function(s))"
-                          % (_bundle, len(_remote_funcs)))
-                except Exception as _rb_exc:
-                    print("    [!] Remote bundle not written: %s" % (_rb_exc,))
-            print("    [+] Split execution: %d function(s) removed from the "
-                  "artefact" % (len(_remote_funcs),))
     return source
 
 
@@ -8209,7 +8281,11 @@ def build_parser():
                             'packing (off by default). Options: data = data-'
                             'layout obfuscation, data-level=N (1-3), function-'
                             'intent = rename functions by what they do, '
-                            'speculation = speculation-resistant code. struct '
+                            'speculation = speculation-resistant code, '
+                            'remote = remove every module-level @remote function '
+                            'from the client artefact, remote-bundle=PATH = write '
+                            'the operator-side implementations required by remote '
+                            '(required when @remote functions are present). struct '
                             'stays native-pipeline only (it configures the '
                             'LLVM/IR flow). string-key-env=NAME = derive the '
                             'string-seal key from environment variable NAME '

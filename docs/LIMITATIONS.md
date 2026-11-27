@@ -33,10 +33,13 @@ The 2026-11-26/27 OpenCode Go DeepSeek diagnostic matrix confirmed the same
 boundary against the current artifacts: a customer-machine attacker with
 legitimate runtime secrets extracted native payload material in one
 `maximum-local / legitimate-runtime-secrets` attempt, while no full non-source
-external-attacker semantic break was validated. AM-001 is therefore formally
-accepted as an architectural limitation, not a defect that more client-side
-obfuscation can fix. See
-`../re-bench/ABSOLUTE_MAXIMUM_AM001_ARCHITECTURAL_DECISION_20261127.md`.
+external-attacker semantic break was validated. AM-001 remains an architectural
+boundary for everything executed client-side, not a defect that more client-side
+obfuscation can fix. The implemented remediation is opt-in server-side split
+execution for functions explicitly marked `@remote`; those implementations are
+removed before native compilation and packing. See
+`../re-bench/ABSOLUTE_MAXIMUM_AM001_ARCHITECTURAL_DECISION_20261127.md` and
+`../re-bench/ABSOLUTE_MAXIMUM_AM001_REMOTE_SPLIT_VALIDATION_20261127.md`.
 
 ### 1.3 Build-host trust
 

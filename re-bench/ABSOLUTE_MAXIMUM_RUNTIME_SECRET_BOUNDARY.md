@@ -103,8 +103,9 @@ The most robust product design is often architectural minimization: ship only no
 
 - Loader-mediated controls are meaningful against casual copying, offline licence misuse, and many automated attacks.
 - They are not a boundary against a customer-machine attacker with legitimate runtime secrets.
-- No source change in this continuation has solved AM-001.
-- The correct completion state for this item is therefore **documented architectural limitation with defined remediation paths**, not “fixed.”
+- As of the 2026-11-27 remediation, functions explicitly marked `@remote` can be moved server-side before native compilation and packing. Validation evidence is in `ABSOLUTE_MAXIMUM_AM001_REMOTE_SPLIT_VALIDATION_20261127.md`.
+- That remediation is opt-in and function-scoped. It does not protect unmarked client-side logic, does not retroactively change the fixed benchmark artifacts, and does not prevent oracle use while valid client configuration exists.
+- The correct completion state is therefore: **architectural remediation available for explicitly server-side functions; inherent client-side boundary remains for everything left on the customer machine.**
 
 ## OpenCode Go DeepSeek confirmation, 2026-11-26 continuation
 

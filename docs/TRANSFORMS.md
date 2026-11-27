@@ -93,6 +93,36 @@ These are not on the default path. "Experimental" here means the code exists
 and has tests, but it has not been evaluated against an attacker and has a
 history of edge-case defects.
 
+
+### 2.2 Server-side split execution (`--transforms remote`)
+
+| Flag | Class | What it does | Status |
+|---|---|---|---|
+| `--transforms remote remote-bundle=PATH` | EXEC/REP | Removes every module-level `@remote` function from the client before native compilation, AST mutation, farm upload, or loader embedding; writes the implementation to an owner-only operator bundle | Implemented and validated; opt-in and function-scoped |
+
+This is not obfuscation. It is an architecture change: the client contains a
+self-contained authenticated call stub, while the confidential implementation
+runs only on the operator service. Network endpoints must be HTTPS, except
+loopback HTTP for the reference relay. The client reads `NIXON_REMOTE_URL` and
+`NIXON_REMOTE_SECRET`; requests are HMAC-signed over typed canonical
+arguments, keyword arguments, nonce, and timestamp, with stale timestamps and
+nonce replay rejected.
+
+The transform is deliberately conservative. Nested or async remote functions,
+duplicate names, indirect marker usage, combined decorators, and reads of
+unbundled module globals fail the build closed. Marked functions must be
+self-contained or import dependencies inside the function body. A payload
+that imports and uses `@remote` without enabling the transform is refused
+rather than silently shipping the implementation.
+
+Residual boundary: unmarked client-side logic remains extractable on a
+customer-controlled machine. Because the customer-held HMAC secret is present
+in the client environment, it authenticates the client but is not a secrecy
+boundary; a customer-machine attacker can invoke the service as an oracle
+while valid configuration exists. The service must enforce account, quota,
+rate-limit, revocation, and abuse policy. Validation evidence is in
+`../re-bench/ABSOLUTE_MAXIMUM_AM001_REMOTE_SPLIT_VALIDATION_20261127.md`.
+
 ---
 
 ## 3. Semantic lowering (`--lowering`)
