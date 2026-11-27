@@ -37,10 +37,26 @@ def hidden_pricing(x, scale=2):
 '''
 
 
-class _FakeResponse:
+class _FakeResponse(dict):
+    """Mimics the Workers Response closely enough for handler assertions:
+    parses a JSON body back into a mapping and retains the headers."""
+
+    def __init__(self, body=None, headers=None):
+        import json as _json
+        self.headers = dict(headers or {})
+        self.body = body
+        if isinstance(body, str):
+            try:
+                parsed = _json.loads(body)
+            except Exception:
+                parsed = None
+            if isinstance(parsed, dict):
+                super().__init__(parsed)
+
     @classmethod
     def json(cls, doc):
-        return doc
+        import json as _json
+        return cls(_json.dumps(doc))
 
 
 class _FakeWorkerEntrypoint:
@@ -1696,3 +1712,30 @@ def test_admin_list_keys_response_includes_cred_id(tmp_path, monkeypatch):
     import base64 as _b64
     expected = _b64.urlsafe_b64encode(phone.cred_id).rstrip(b"=").decode()
     assert rows and rows[0][1] == expected
+
+
+def test_all_responses_carry_security_headers(tmp_path, monkeypatch):
+    """Regression for the header-hardening gap: every Worker response — JSON
+    API, approval page, service worker — must deny framing, sniffing, and
+    referrer leakage; the page CSP must lock down everything but the inline
+    scripts it needs."""
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+
+    out = _fetch(worker, {"version": 1, "type": "nope"})
+    assert out.headers["X-Frame-Options"] == "DENY"
+    assert out.headers["X-Content-Type-Options"] == "nosniff"
+    assert out.headers["Referrer-Policy"] == "no-referrer"
+    assert "frame-ancestors 'none'" in out.headers["Content-Security-Policy"]
+
+    class _Get:
+        method = "GET"
+        url = "https://x.workers.dev/"
+
+    page_response = asyncio.run(worker.fetch(_Get()))
+    headers = getattr(page_response, "headers", {})
+    assert headers.get("X-Frame-Options") == "DENY"
+    csp = headers.get("Content-Security-Policy", "")
+    assert "frame-ancestors 'none'" in csp
+    assert "connect-src 'self'" in csp
+    assert "form-action 'none'" in csp
+    assert headers.get("Cache-Control") == "no-store"

@@ -243,11 +243,39 @@ def _derive_customer_credentials(master, customer):
     return hmac_secret, primary, secondary
 
 
+# Baseline hardening applied to every response the Worker emits. frame-ancestors
+# 'none' plus X-Frame-Options: DENY keep the approval surface out of iframes
+# (clickjacking/UI-redress); nosniff and no-referrer are defence-in-depth.
+_SEC_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+}
+# The approval page is self-contained inline HTML/JS by design: script-src
+# 'unsafe-inline' is required for it to execute at all, so the policy instead
+# leans on default-src 'none' — no external resources, no exfiltration channel
+# beyond same-origin connect-src, no base/form hijacking, no framing.
+_PAGE_CSP = (
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+    "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+
+
+def _sec(extra=None):
+    headers = dict(_SEC_HEADERS)
+    if extra:
+        headers.update(extra)
+    return headers
+
+
 def _response(doc):
     # Remote clients intentionally read the JSON error body. Non-200 statuses
     # would be collapsed by urllib into a transport error before that body is
     # available, so protocol/authentication failures remain JSON responses.
-    return Response.json(doc)
+    return Response(
+        json.dumps(doc, separators=(",", ":")),
+        headers=_sec({"Content-Type": "application/json; charset=utf-8",
+                      "Cache-Control": "no-store"}))
 
 
 def _audit(outcome, customer="", function="", detail=""):
@@ -1439,8 +1467,8 @@ class Default(WorkerEntrypoint):
                 if url_path.split("?")[0].rstrip("/").endswith("/sw.js"):
                     return Response(
                         _SERVICE_WORKER_JS,
-                        headers={"Content-Type": "application/javascript; charset=utf-8",
-                                 "Cache-Control": "no-store"})
+                        headers=_sec({"Content-Type": "application/javascript; charset=utf-8",
+                                      "Cache-Control": "no-store"}))
                 page = _APPROVAL_PAGE
                 vapid_public = _env(self.env, "NIXON_VAPID_PUBLIC")
                 if vapid_public:
@@ -1449,8 +1477,9 @@ class Default(WorkerEntrypoint):
                     page = page.replace("__VAPID_PUBLIC__", "")
                 return Response(
                     page,
-                    headers={"Content-Type": "text/html; charset=utf-8",
-                             "Cache-Control": "no-store"})
+                    headers=_sec({"Content-Type": "text/html; charset=utf-8",
+                                  "Cache-Control": "no-store",
+                                  "Content-Security-Policy": _PAGE_CSP}))
             if request.method != "POST":
                 return _response({"error": "method not allowed"})
             try:
