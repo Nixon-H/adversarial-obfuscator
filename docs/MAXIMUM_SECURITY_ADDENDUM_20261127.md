@@ -75,6 +75,7 @@ Runtime configuration:
 | `NIXON_REMOTE_MAX_PENDING` | Worker-side cap on concurrent pending approval requests per customer; default 8. |
 | `NIXON_REMOTE_TOTP_WITH_APPROVAL` | When `1`, typed dual TOTP remains required in addition to phone approval as defense-in-depth. Default off because request-bound approval is strictly stronger than typed codes. |
 | `NIXON_REMOTE_APPROVAL_TIMEOUT` | Client-side ceiling in seconds for approval polling before failing closed; default 150. |
+| `NIXON_REMOTE_RP_ID` | Worker-side WebAuthn relying-party identifier used to verify passkey assertions. Defaults to the request Host header (port stripped), which is correct when the approval page is opened on the worker's own domain; pin it explicitly when the page is served through a custom domain or alias. |
 
 Current operator-bundle limitation: the bundle contains the marked function
 implementations, not arbitrary module-level helper functions or constants.

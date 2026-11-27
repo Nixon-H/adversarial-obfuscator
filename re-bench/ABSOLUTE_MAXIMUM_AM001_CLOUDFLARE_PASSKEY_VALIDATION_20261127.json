@@ -1,0 +1,39 @@
+{
+ "schema": "ABSOLUTE-MAXIMUM/cloudflare-passkey-validation/v1",
+ "recorded_at": "2026-11-27T12:38:59Z",
+ "runtime": "pywrangler dev / wrangler local Workers runtime, WebAuthn/passkey scheme",
+ "passed": 23,
+ "total": 23,
+ "checks": {
+  "approval page served": true,
+  "page has no raw NUL": true,
+  "page carries visible escape": true,
+  "page requires user verification": true,
+  "unenrolled legacy TOTP executes": true,
+  "passkey enrolment accepted": true,
+  "enrolment token single-use": true,
+  "tampered enrolment proof rejected": true,
+  "enrolled RPC pends without TOTP": true,
+  "valid TOTP does not bypass approval": true,
+  "pending list shows requests": true,
+  "assertion without UV rejected": true,
+  "UV approval accepted": true,
+  "decision response carries pending list": true,
+  "approved result correct": true,
+  "result delivered exactly once": true,
+  "denial accepted": true,
+  "denial propagated to client poll": true,
+  "wrong-RP assertion rejected": true,
+  "admin list keys works": true,
+  "admin revoke key works": true,
+  "revoked key cannot list pending": true,
+  "revoked key cannot approve": true
+ },
+ "worker_log_secret_scan": "no master/HMAC/TOTP/token material in worker logs",
+ "scope_notes": [
+  "Validated through the real local Python Workers runtime (pywrangler dev / wrangler), not mocks.",
+  "Enrolment used a soft-authenticator producing real WebAuthn attestation objects (CBOR/COSE) and assertions (authenticatorData + clientDataJSON + DER ECDSA).",
+  "No physical phone/browser ceremony was performed; browser-side WebAuthn behaviour is standards-defined but manual device testing is still recommended before production enrolment.",
+  "UV enforcement, RP binding, challenge binding, revocation, admin operations, exactly-once delivery, and the TOTP non-bypass invariant were all validated live."
+ ]
+}

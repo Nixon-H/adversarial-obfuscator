@@ -108,3 +108,27 @@ Do not represent any current client-side artifact as providing strong cryptograp
 ## Implementation consequence
 
 The original decision required no new artifact build because no product code fix was then being claimed. The implemented split-execution remediation has now been validated separately without overwriting the fixed benchmark artifact tree; see the update above. Any future native handshake, memory-only loader, or remote key-release system still requires its own artifact-level validation campaign.
+
+## Update — passkey (WebAuthn) approval replaces raw WebCrypto keys
+
+The approval scheme was subsequently upgraded from browser-held WebCrypto
+keys to standard WebAuthn/passkey ceremonies. Enrolment is a
+`navigator.credentials.create` flow with required user verification;
+decisions and pending-list reads are `credentials.get` assertions whose
+challenge is the SHA-256 digest of the same canonical request-bound message.
+The Worker parses attestation objects with an inline CBOR/COSE decoder,
+verifies the relying-party hash, and rejects any assertion lacking the
+user-verification flag even when the signature itself is valid.
+
+This closes the key-extraction residual of the browser-key design: on modern
+phones passkeys live in the Secure Enclave / StrongBox and are non-exportable
+even to the phone OS, so phone/browser compromise can at most abuse the key
+while the user is actively authenticating. Because passkeys never sign
+silently, the approval page does not auto-poll; each check and each decision
+is a deliberate authenticated user action. Newly documented non-claims:
+consumer passkeys provide no meaningful authenticator attestation, and
+account-synced passkeys inherit the syncing account's security. Validation
+against the real local Workers runtime (23/23, including UV enforcement,
+RP binding, challenge binding, and the TOTP non-bypass invariant) is in
+`ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_PASSKEY_VALIDATION_20261127.md` and its
+JSON companion.

@@ -159,19 +159,30 @@ nonces, TOTP codes, HMAC secrets, TOTP seeds, and results.
 Typed TOTP is structurally copyable and not bound to the exact request, so
 the Worker also implements the stronger approval architecture. Each customer
 device enrols through a single-use token using a Worker-served page: the
-phone browser generates a non-extractable ECDSA P-256 key and only the public
-key reaches the server. Once a customer has an enrolled key, remote calls no
-longer execute on submission. The authenticated request is parked in the
-Durable Object, the phone page displays the function, customer, time, and
-argument preview, and the user approves or denies it. Approval signs the exact
-stored request hash; execution, nonce consumption, and quota accounting happen
-only after that signature verifies. The client artifact polls automatically,
-so no codes are typed at all.
+phone browser performs a standard WebAuthn ceremony and creates a
+hardware-backed passkey with biometric/PIN user verification — on modern
+phones the private key lives in the Secure Enclave / StrongBox and is
+non-exportable even to the phone's own OS. Only the public credential reaches
+the server. Once a customer has an enrolled key, remote calls no longer
+execute on submission. The authenticated request is parked in the Durable
+Object, the phone page displays the function, customer, time, and argument
+preview, and the user approves or denies it. Every approval is a passkey
+assertion whose challenge is the exact stored request hash, with
+user-verification flags enforced server-side; execution, nonce consumption,
+and quota accounting happen only after that assertion verifies. The client
+artifact polls automatically, so no codes are typed at all. Because passkeys
+never sign silently, the page does not auto-poll: the user taps to check and
+authenticates each decision.
 
 This fixes the two structural TOTP weaknesses for enrolled customers: there is
 no typed secret for malware to capture, and a signature for one request is
 useless for any other, so invisible piggybacking requires the user to approve
-each displayed operation. The policy is `NIXON_REMOTE_APPROVAL_MODE` =
+each displayed operation. Browser compromise is contained as well: the key
+cannot be extracted from secure hardware, so even phone malware can at most
+abuse it while the user is actively authenticating. Consumer passkeys
+deliberately lack meaningful attestation, so the server cannot prove which
+authenticator model enrolled, and synced passkeys inherit the security of the
+syncing account. The policy is `NIXON_REMOTE_APPROVAL_MODE` =
 `enrolled` (default), `required`, or `off`; pending lifetime and backlog are
 bounded by `NIXON_REMOTE_APPROVAL_EXPIRY_SECONDS` (default 120) and
 `NIXON_REMOTE_MAX_PENDING` (default 8). Customers without an enrolled key keep

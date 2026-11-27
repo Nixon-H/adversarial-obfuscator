@@ -125,6 +125,7 @@ def _load_worker(tmp_path, monkeypatch, source=SOURCE):
     registry = module.SecurityRegistry(ctx, None)
     env = types.SimpleNamespace(
         NIXON_REMOTE_MASTER_SECRET=MASTER_HEX,
+        NIXON_REMOTE_RP_ID="approval.example.test",
         SECURITY=_FakeSecurityNamespace(registry),
     )
     worker = module.Default()
@@ -565,26 +566,132 @@ def _b64url(raw):
     return _b64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
-class _Phone:
-    """Test double for the browser approval device using real ECDSA."""
+def _cbor_encode(value):
+    """Minimal CBOR encoder matching the subset _cbor_decode supports."""
+    import struct as _struct
 
-    def __init__(self):
+    def head(major, argument):
+        if argument < 24:
+            return bytes([(major << 5) | argument])
+        if argument < 256:
+            return bytes([(major << 5) | 24, argument])
+        if argument < 65536:
+            return bytes([(major << 5) | 25]) + _struct.pack(">H", argument)
+        return bytes([(major << 5) | 26]) + _struct.pack(">I", argument)
+
+    if isinstance(value, bool):
+        return bytes([0xF5 if value else 0xF4])
+    if isinstance(value, int):
+        if value >= 0:
+            return head(0, value)
+        return head(1, -1 - value)
+    if isinstance(value, bytes):
+        return head(2, len(value)) + value
+    if isinstance(value, str):
+        encoded = value.encode("utf-8")
+        return head(3, len(encoded)) + encoded
+    if isinstance(value, dict):
+        out = head(5, len(value))
+        for key, item in value.items():
+            out += _cbor_encode(key) + _cbor_encode(item)
+        return out
+    if isinstance(value, (list, tuple)):
+        out = head(4, len(value))
+        for item in value:
+            out += _cbor_encode(item)
+        return out
+    raise TypeError("cannot cbor encode %r" % type(value))
+
+
+def _b64url_encode(raw):
+    import base64 as _b64
+    return _b64.urlsafe_b64encode(bytes(raw)).decode("ascii").rstrip("=")
+
+
+TEST_RP_ID = "approval.example.test"
+
+
+def _webauthn_challenge(message):
+    import hashlib as _hashlib
+    return _b64url_encode(_hashlib.sha256(bytes(message)).digest())
+
+
+class _Phone:
+    """Test double emulating a WebAuthn authenticator with a hardware-backed
+    passkey: produces real attestation objects and assertions using ECDSA
+    P-256, exactly shaped like a browser ceremony."""
+
+    def __init__(self, rp_id=TEST_RP_ID):
+        import os as _os
         from cryptography.hazmat.primitives.asymmetric import ec
         self._private = ec.generate_private_key(ec.SECP256R1())
         numbers = self._private.public_key().public_numbers()
-        self.x = _b64url(numbers.x.to_bytes(32, "big"))
-        self.y = _b64url(numbers.y.to_bytes(32, "big"))
+        self.x = _b64url_encode(numbers.x.to_bytes(32, "big"))
+        self.y = _b64url_encode(numbers.y.to_bytes(32, "big"))
+        self.cred_id = _os.urandom(32)
+        self.rp_id = rp_id
+        self.uv = True  # authenticator performs user verification
 
-    def sign(self, message):
-        from cryptography.hazmat.primitives.asymmetric import ec, utils
+    def sign_der(self, message):
+        from cryptography.hazmat.primitives.asymmetric import ec
         from cryptography.hazmat.primitives import hashes
-        der = self._private.sign(message, ec.ECDSA(hashes.SHA256()))
-        r, s = utils.decode_dss_signature(der)
-        return (r.to_bytes(32, "big") + s.to_bytes(32, "big")).hex()
+        return self._private.sign(message, ec.ECDSA(hashes.SHA256()))
 
     def key_id(self):
         import hashlib as _hashlib
         return _hashlib.sha256((self.x + ":" + self.y).encode("utf-8")).hexdigest()[:24]
+
+    def _cose_key(self):
+        import base64 as _b64
+
+        def unb64url(text):
+            return _b64.urlsafe_b64decode(text + "=" * ((4 - len(text) % 4) % 4))
+        return _cbor_encode({
+            1: 2, 3: -7, -1: 1, -2: unb64url(self.x), -3: unb64url(self.y)})
+
+    def _auth_data(self, flags):
+        import hashlib as _hashlib
+        import struct as _struct
+        rp_hash = _hashlib.sha256(self.rp_id.encode("utf-8")).digest()
+        base = rp_hash + bytes([flags]) + _struct.pack(">I", 1)
+        if flags & 0x40:
+            # attested credential data: AAGUID + credIdLen + credId + COSE key
+            base += b"\x00" * 16
+            base += _struct.pack(">H", len(self.cred_id)) + self.cred_id
+            base += self._cose_key()
+        return base
+
+    def enrolment(self, customer, token):
+        """Build (attestation_b64, clientDataJSON_b64) for a create ceremony."""
+        flags = 0x01 | 0x40 | (0x04 if self.uv else 0)
+        auth_data = self._auth_data(flags)
+        attestation = _cbor_encode({
+            "fmt": "none", "attStmt": {}, "authData": auth_data})
+        message = (b"nixon-remote-enrol-v1\x00" + customer.encode("utf-8")
+                   + b"\x00" + token.encode("ascii"))
+        client = json.dumps({
+            "type": "webauthn.create",
+            "challenge": _webauthn_challenge(message),
+            "origin": "https://" + self.rp_id,
+        }, separators=(",", ":")).encode("utf-8")
+        return _b64url_encode(attestation), _b64url_encode(client)
+
+    def assertion(self, message):
+        """Build a webauthn.get assertion dict over the canonical message."""
+        import hashlib as _hashlib
+        flags = 0x01 | (0x04 if self.uv else 0)
+        auth_data = self._auth_data(flags)
+        client = json.dumps({
+            "type": "webauthn.get",
+            "challenge": _webauthn_challenge(message),
+            "origin": "https://" + self.rp_id,
+        }, separators=(",", ":")).encode("utf-8")
+        signed = bytes(auth_data) + _hashlib.sha256(client).digest()
+        return {
+            "authenticatorData": _b64url_encode(auth_data),
+            "clientDataJSON": _b64url_encode(client),
+            "signature": _b64url_encode(self.sign_der(signed)),
+        }
 
 
 def _install_real_verify(module, monkeypatch):
@@ -627,12 +734,15 @@ def _install_real_verify(module, monkeypatch):
 def _enrol(worker, phone, customer=CUSTOMER, token_index=0, tamper=False):
     from obfuscator.cloudflare_remote import derive_enrol_tokens
     token = derive_enrol_tokens(MASTER_HEX, customer)[token_index]["token"]
-    message = (b"nixon-remote-enrol-v1\x00" + customer.encode("utf-8")
-               + b"\x00" + token.encode("ascii"))
-    proof = phone.sign(message + (b"x" if tamper else b""))
+    attestation, client_data = phone.enrolment(customer, token)
+    if tamper:
+        # Rebinding the attestation to a different message invalidates the
+        # proof: the challenge no longer matches the enrolment canonical form.
+        attestation2, client_data = phone.enrolment(customer, token + "ff")
     doc = {
         "type": "enrol", "version": 1, "customer": customer, "token": token,
-        "x": phone.x, "y": phone.y, "proof": proof, "label": "test-phone",
+        "attestation": attestation, "clientDataJSON": client_data,
+        "label": "test-phone",
     }
     return _fetch(worker, doc)
 
@@ -644,8 +754,9 @@ def _pending_items(worker, phone, customer=CUSTOMER):
                + b"\x00" + stamp.encode("ascii"))
     doc = {
         "type": "pending", "version": 1, "customer": customer,
-        "key_id": phone.key_id(), "ts": stamp, "signature": phone.sign(message),
+        "key_id": phone.key_id(), "ts": stamp,
     }
+    doc.update(phone.assertion(message))
     out = _fetch(worker, doc)
     assert "pending" in out, out
     return out["pending"]
@@ -663,8 +774,9 @@ def _decide(worker, phone, item, decision, customer=CUSTOMER, hash_override=None
         "type": "approve", "version": 1, "customer": customer,
         "key_id": phone.key_id(), "approval_id": item["approval_id"],
         "request_hash": request_hash, "decision": decision,
-        "ts": stamp, "signature": phone.sign(message),
+        "ts": stamp,
     }
+    doc.update(phone.assertion(message))
     return _fetch(worker, doc)
 
 
@@ -715,11 +827,10 @@ def test_enrol_rejects_invalid_token_and_bad_proof(tmp_path, monkeypatch):
     assert "proof invalid" in out["error"]
     from obfuscator.cloudflare_remote import derive_enrol_tokens
     doc_token = derive_enrol_tokens(MASTER_HEX, "other-customer")[0]["token"]
-    message = (b"nixon-remote-enrol-v1\x00" + CUSTOMER.encode("utf-8")
-               + b"\x00" + doc_token.encode("ascii"))
+    attestation, client_data = phone.enrolment(CUSTOMER, doc_token)
     doc = {
         "type": "enrol", "version": 1, "customer": CUSTOMER, "token": doc_token,
-        "x": phone.x, "y": phone.y, "proof": phone.sign(message), "label": "x",
+        "attestation": attestation, "clientDataJSON": client_data, "label": "x",
     }
     out = _fetch(worker, doc)
     assert "token invalid" in out["error"]
@@ -745,7 +856,7 @@ def test_enrolled_customer_rpc_pends_and_full_approval_executes(tmp_path, monkey
     assert status.get("approval_status") == "pending"
 
     decided = _decide(worker, phone, item, "approve")
-    assert decided == {"approved": True}
+    assert decided.get("approved") is True
 
     out = _poll(worker, submitted["approval_id"])
     assert out == {"result": 1012}
@@ -758,7 +869,7 @@ def test_approval_denied_is_terminal_for_the_client(tmp_path, monkeypatch):
     assert _enrol(worker, phone).get("enrolled") is True
     submitted = _fetch(worker, _approval_payload())
     item = _pending_items(worker, phone)[0]
-    assert _decide(worker, phone, item, "deny") == {"denied": True}
+    assert _decide(worker, phone, item, "deny").get("denied") is True
     out = _poll(worker, submitted["approval_id"])
     assert "denied" in out["error"]
 
@@ -790,7 +901,8 @@ def test_approval_requires_valid_signature_and_active_key(tmp_path, monkeypatch)
         "type": "approve", "version": 1, "customer": CUSTOMER,
         "key_id": phone.key_id(), "approval_id": item["approval_id"],
         "request_hash": item["request_hash"], "decision": "approve",
-        "ts": stamp, "signature": "00" * 64,
+        "ts": stamp, "authenticatorData": "AA", "clientDataJSON": "AA",
+        "signature": "AA",
     }
     out = _fetch(worker, doc)
     assert "signature invalid" in out["error"]
@@ -884,8 +996,9 @@ def _pending_items_at(worker, phone, at, customer=CUSTOMER):
                + b"\x00" + stamp.encode("ascii"))
     doc = {
         "type": "pending", "version": 1, "customer": customer,
-        "key_id": phone.key_id(), "ts": stamp, "signature": phone.sign(message),
+        "key_id": phone.key_id(), "ts": stamp,
     }
+    doc.update(phone.assertion(message))
     out = _fetch(worker, doc)
     return out.get("pending", [])
 
@@ -925,8 +1038,9 @@ def test_get_requests_serve_the_approval_page(tmp_path, monkeypatch):
     page = module._APPROVAL_PAGE
     assert "nixon-remote-approval-v1" in page
     assert "nixon-remote-enrol-v1" in page
-    assert "generateKey" in page
-    assert "namedCurve" in page
+    assert "credentials.create" in page
+    assert "credentials.get" in page
+    assert "userVerification" in page
     assert "indexedDB" in page
     assert "fetch" in page
 
@@ -1057,10 +1171,21 @@ def test_pending_list_rejects_invalid_signature_and_stale_timestamp(
     assert _enrol(worker, phone).get("enrolled") is True
 
     stamp = str(int(time.time()))
+    message = (b"nixon-remote-pending-v1\x00" + CUSTOMER.encode("utf-8")
+               + b"\x00" + phone.key_id().encode("ascii")
+               + b"\x00" + stamp.encode("ascii"))
+    bad = phone.assertion(message)
+    # Corrupt the signature bytes: a well-formed but wrong assertion.
+    import base64 as _b64
+    raw = bytearray(_b64.urlsafe_b64decode(
+        bad["signature"] + "=" * ((4 - len(bad["signature"]) % 4) % 4)))
+    raw[-1] ^= 0xFF
+    bad["signature"] = _b64.urlsafe_b64encode(bytes(raw)).decode("ascii").rstrip("=")
     doc = {
         "type": "pending", "version": 1, "customer": CUSTOMER,
-        "key_id": phone.key_id(), "ts": stamp, "signature": "00" * 64,
+        "key_id": phone.key_id(), "ts": stamp,
     }
+    doc.update(bad)
     out = _fetch(worker, doc)
     assert "signature invalid" in out["error"]
 
@@ -1070,8 +1195,9 @@ def test_pending_list_rejects_invalid_signature_and_stale_timestamp(
                + b"\x00" + stale.encode("ascii"))
     doc = {
         "type": "pending", "version": 1, "customer": CUSTOMER,
-        "key_id": phone.key_id(), "ts": stale, "signature": phone.sign(message),
+        "key_id": phone.key_id(), "ts": stale,
     }
+    doc.update(phone.assertion(message))
     out = _fetch(worker, doc)
     assert "expired" in out["error"]
 
@@ -1096,8 +1222,9 @@ def test_approve_rejects_stale_or_future_timestamp(tmp_path, monkeypatch):
             "type": "approve", "version": 1, "customer": CUSTOMER,
             "key_id": phone.key_id(), "approval_id": item["approval_id"],
             "request_hash": item["request_hash"], "decision": "approve",
-            "ts": stamp, "signature": phone.sign(message),
+            "ts": stamp,
         }
+        doc.update(phone.assertion(message))
         out = _fetch(worker, doc)
         assert "expired" in out["error"], label
     # Neither attempt counted as a decision: the request is still pending.
@@ -1136,10 +1263,12 @@ def test_revoked_key_cannot_list_pending_but_other_device_can(tmp_path, monkeypa
     message = (b"nixon-remote-pending-v1\x00" + CUSTOMER.encode("utf-8")
                + b"\x00" + first.key_id().encode("ascii")
                + b"\x00" + stamp.encode("ascii"))
-    out = _fetch(worker, {
+    doc = {
         "type": "pending", "version": 1, "customer": CUSTOMER,
-        "key_id": first.key_id(), "ts": stamp, "signature": first.sign(message),
-    })
+        "key_id": first.key_id(), "ts": stamp,
+    }
+    doc.update(first.assertion(message))
+    out = _fetch(worker, doc)
     assert "not active" in out["error"]
 
     # The surviving device can still see and approve the request.
@@ -1168,7 +1297,7 @@ def test_deployment_template_renders_without_keyerror(tmp_path):
 def test_approval_page_uses_one_timestamp_for_sign_and_submit(tmp_path, monkeypatch):
     """Regression for the approval-page timestamp defect: the same `stamp`
     value must feed both the signed message parts and the submitted body —
-    signing one timestamp while submitting another produces signatures the
+    signing one timestamp while submitting another produces assertions the
     server always rejects."""
     module, _worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
     page = module._APPROVAL_PAGE
@@ -1181,15 +1310,16 @@ def test_approval_page_uses_one_timestamp_for_sign_and_submit(tmp_path, monkeypa
     # Exactly one timestamp sample inside the decision flow.
     assert body.count("ts()") == 1
     assert "const stamp = ts();" in body
-    # The stamp is part of the signed message...
-    sign_parts = re.search(r"signWith\(record, \[(.*?)\]\)", body, re.S)
+    # The stamp is part of the signed canonical parts...
+    sign_parts = re.search(r"assertWith\(record, \[(.*?)\]\)", body, re.S)
     assert sign_parts is not None
     assert "stamp" in sign_parts.group(1)
     # ...and the identical variable is submitted, not a fresh sample.
-    assert re.search(r"ts: stamp,", body) is not None
+    assert re.search(r"ts: stamp", body) is not None
 
-    # Same invariant in the pending-list flow.
-    pending = re.search(r"async function pollOnce\(record\) \{(.*?)\n\}", page, re.S)
+    # Same invariant in the pending-check flow.
+    pending = re.search(
+        r"async function checkPending\(record\) \{(.*?)\n\}", page, re.S)
     assert pending is not None
     assert pending.group(1).count("ts()") == 1
     assert "ts: stamp" in pending.group(1)
@@ -1198,6 +1328,7 @@ def test_approval_page_uses_one_timestamp_for_sign_and_submit(tmp_path, monkeypa
     for domain in ("nixon-remote-approval-v1", "nixon-remote-enrol-v1",
                    "nixon-remote-pending-v1"):
         assert domain in page
+
 
 
 def test_approval_page_canonical_part_order_matches_server(tmp_path, monkeypatch):
@@ -1213,16 +1344,16 @@ def test_approval_page_canonical_part_order_matches_server(tmp_path, monkeypatch
     # decision, stamp — the exact order of _approval_message server-side.
     decide = re.search(
         r"const decide = async \(decision\) => \{(.*?)\n  \};", page, re.S).group(1)
-    parts = re.search(r"signWith\(record, \[(.*?)\]\)", decide, re.S).group(1)
+    parts = re.search(r"assertWith\(record, \[(.*?)\]\)", decide, re.S).group(1)
     order = [piece.strip() for piece in parts.split(",")]
     assert order == [
         '"nixon-remote-approval-v1"', "item.customer", "item.approval_id",
         "item.request_hash", "decision", "stamp"]
 
-    # Pending list: domain, customer, keyId, stamp — _pending_message order.
+    # Pending check: domain, customer, keyId, stamp — _pending_message order.
     pending = re.search(
-        r"async function pollOnce\(record\) \{(.*?)\n\}", page, re.S).group(1)
-    parts = re.search(r"signWith\(record, \[(.*?)\]\)", pending, re.S).group(1)
+        r"async function checkPending\(record\) \{(.*?)\n\}", page, re.S).group(1)
+    parts = re.search(r"assertWith\(record, \[(.*?)\]\)", pending, re.S).group(1)
     order = [piece.strip() for piece in parts.split(",")]
     assert order == [
         '"nixon-remote-pending-v1"', "record.customer", "record.keyId", "stamp"]
@@ -1230,16 +1361,14 @@ def test_approval_page_canonical_part_order_matches_server(tmp_path, monkeypatch
     # Enrolment: domain, customer, token — _enrol_proof_message order.
     enrol = re.search(
         r"async function enrolFromHash\(\) \{(.*?)\n\}", page, re.S).group(1)
-    enc = re.search(r"enc\.encode\(\[(.*?)\]\.join", enrol, re.S)
-    assert enc is not None
-    order = [piece.strip() for piece in enc.group(1).split(",")]
+    chal = re.search(r"challengeOf\(\[(.*?)\]\)", enrol, re.S)
+    assert chal is not None
+    order = [piece.strip() for piece in chal.group(1).split(",")]
     assert order == ['"nixon-remote-enrol-v1"', "customer", "token"]
 
-    # All three flows must join with NUL separators, matching the server.
-    # The page must carry the visible escape sequence, not a raw NUL byte:
-    # the outer worker template is a raw string, so a single backslash in the
-    # template would be converted to a raw control byte when the worker
-    # parses its own page literal.
+    # All flows must join with NUL separators, matching the server. The page
+    # is a raw string in the generated worker, so the served JavaScript must
+    # carry the visible escape sequence with no raw control bytes at all.
     assert 'join("\\x00")' in page
     assert "\x00" not in page
     for code in range(32):
@@ -1247,3 +1376,219 @@ def test_approval_page_canonical_part_order_matches_server(tmp_path, monkeypatch
             continue
         assert chr(code) not in page, "raw control byte %d in page" % code
     assert '.join(" ")' not in page
+
+    # WebAuthn ceremonies must demand user verification — without it the
+    # biometric/PIN guarantee the design relies on silently disappears.
+    assert 'userVerification: "required"' in page
+    assert page.count('userVerification: "required"') >= 2
+
+
+
+def test_assertion_without_user_verification_is_rejected(tmp_path, monkeypatch):
+    """The core passkey guarantee: an assertion lacking the UV flag must be
+    rejected even when the signature is cryptographically valid. Without this
+    check, a stolen or unattended device could approve with mere presence."""
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    phone = _Phone()
+    assert _enrol(worker, phone).get("enrolled") is True
+    submitted = _fetch(worker, _approval_payload())
+    item = _pending_items(worker, phone)[0]
+
+    phone.uv = False  # authenticator that only checked presence
+    out = _decide(worker, phone, item, "approve")
+    assert "signature invalid" in out["error"]
+    assert out.get("approved") is not True
+
+    # And the genuine UV-flagged approval still works afterwards.
+    phone.uv = True
+    out = _decide(worker, phone, item, "approve")
+    assert out.get("approved") is True
+    assert _poll(worker, submitted["approval_id"]) == {"result": 1012}
+
+
+def test_enrolment_without_user_verification_is_rejected(tmp_path, monkeypatch):
+    """Enrolment with a presence-only ceremony must fail: keys enrolled
+    without user verification would never provide the biometric/PIN
+    guarantee at decision time either."""
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    phone = _Phone()
+    phone.uv = False
+    out = _enrol(worker, phone)
+    assert out.get("enrolled") is not True
+    assert "proof invalid" in out["error"]
+
+
+def test_assertion_for_wrong_relying_party_is_rejected(tmp_path, monkeypatch):
+    """RP binding: a passkey assertion produced for a different relying party
+    (e.g. a phishing-origin lookalike) must not verify for this service."""
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    phone = _Phone()
+    assert _enrol(worker, phone).get("enrolled") is True
+    _fetch(worker, _approval_payload())
+    item = _pending_items(worker, phone)[0]
+
+    phone.rp_id = "evil-phishing.example"
+    out = _decide(worker, phone, item, "approve")
+    assert "signature invalid" in out["error"]
+    assert out.get("approved") is not True
+
+
+def test_assertion_with_tampered_challenge_is_rejected(tmp_path, monkeypatch):
+    """Challenge binding: an assertion whose clientDataJSON challenge does
+    not match the exact canonical message must fail even with a valid key."""
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    phone = _Phone()
+    assert _enrol(worker, phone).get("enrolled") is True
+    _fetch(worker, _approval_payload())
+    item = _pending_items(worker, phone)[0]
+
+    stamp = str(int(time.time()))
+    message = (b"nixon-remote-approval-v1\x00" + CUSTOMER.encode("utf-8")
+               + b"\x00" + item["approval_id"].encode("ascii")
+               + b"\x00" + item["request_hash"].encode("ascii")
+               + b"\x00approve\x00" + stamp.encode("ascii"))
+    assertion = phone.assertion(message + b"tampered")
+    doc = {
+        "type": "approve", "version": 1, "customer": CUSTOMER,
+        "key_id": phone.key_id(), "approval_id": item["approval_id"],
+        "request_hash": item["request_hash"], "decision": "approve",
+        "ts": stamp,
+    }
+    doc.update(assertion)
+    out = _fetch(worker, doc)
+    assert "signature invalid" in out["error"]
+    assert out.get("approved") is not True
+
+
+def test_security_registry_migrates_pre_passkey_approval_keys(tmp_path, monkeypatch):
+    """Operators upgrading from the WebCrypto approval deployment already have
+    an approval_keys table without cred_id. CREATE TABLE IF NOT EXISTS does
+    not add columns, so enrolment inserts would fail closed forever. The
+    constructor must migrate the pre-passkey schema."""
+    module, worker, sql, target = _load_worker(tmp_path, monkeypatch)
+    # Rebuild the pre-passkey schema in the same storage, then construct a
+    # fresh registry exactly as the upgraded worker would on the existing
+    # Durable Object.
+    sql.exec("DROP TABLE approval_keys")
+    sql.exec(
+        "CREATE TABLE approval_keys ("
+        "customer TEXT NOT NULL, key_id TEXT NOT NULL, x TEXT NOT NULL, "
+        "y TEXT NOT NULL, label TEXT NOT NULL, enrolled_at REAL NOT NULL, "
+        "revoked INTEGER NOT NULL DEFAULT 0, "
+        "PRIMARY KEY (customer, key_id))")
+    ctx = types.SimpleNamespace(storage=types.SimpleNamespace(sql=sql))
+    registry = module.SecurityRegistry(ctx, None)
+    status = asyncio.run(registry.enrol_key(
+        CUSTOMER, "ab" * 12, "x-coord", "y-coord", "phone", "tokenhash",
+        time.time(), "cred-id-1"))
+    assert status == "ok"
+    key_json = asyncio.run(registry.get_key(CUSTOMER, "ab" * 12))
+    assert json.loads(key_json)["cred_id"] == "cred-id-1"
+
+
+def test_der_to_raw64_handles_padded_and_minimal_integers(tmp_path, monkeypatch):
+    """DER-encoded WebAuthn signatures pad r/s with a leading zero byte when
+    the high bit is set — roughly half of all random authenticator
+    signatures. The conversion must strip exactly that padding and re-pad to
+    the 64-byte P1363 form; a regression here would reject most genuine
+    browser signatures while passing deterministic test vectors by luck."""
+    module, _worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+
+    def der_int(raw):
+        if raw[0] & 0x80:
+            raw = b"\x00" + raw
+        return b"\x02" + bytes([len(raw)]) + raw
+
+    def make_der(r_bytes, s_bytes):
+        body = der_int(r_bytes) + der_int(s_bytes)
+        return b"\x30" + bytes([len(body)]) + body
+
+    # High-bit r (padded in DER) and small s (minimal length).
+    r = (0x80).to_bytes(1, "big") + b"\x11" * 31
+    s = b"\x42"
+    out = module._der_to_raw64(make_der(r, s))
+    assert out is not None and len(out) == 64
+    assert out[:32] == r
+    assert out[32:] == bytes(31) + s
+
+    # High bits set in both halves.
+    r2 = b"\xff" * 32
+    s2 = b"\xfe" * 32
+    out = module._der_to_raw64(make_der(r2, s2))
+    assert out == r2 + s2
+
+    # Both halves small.
+    out = module._der_to_raw64(make_der(b"\x01", b"\x02"))
+    assert out is not None
+    assert out[:32] == bytes(31) + b"\x01"
+    assert out[32:] == bytes(31) + b"\x02"
+
+    # Structurally invalid inputs fail closed.
+    assert module._der_to_raw64(b"") is None
+    assert module._der_to_raw64(b"\x30\x00") is None
+    assert module._der_to_raw64(make_der(b"\x01" + bytes(33), s)) is None
+
+
+def test_padded_der_signature_from_authenticator_verifies(tmp_path, monkeypatch):
+    """End-to-end: an assertion whose DER signature required padding must
+    verify and execute — not just convert in isolation."""
+    module, worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    _install_real_verify(module, monkeypatch)
+    phone = _Phone()
+    assert _enrol(worker, phone).get("enrolled") is True
+    submitted = _fetch(worker, _approval_payload())
+    item = _pending_items(worker, phone)[0]
+
+    # Sign messages until the DER encoding has a padded integer, then submit
+    # that exact assertion. RFC 6979 determinism means the same phone and
+    # message always produce the same signature, so scan by varying the ts.
+    import base64 as _b64
+    for offset in range(200):
+        stamp = str(int(time.time()) + offset)
+        message = (b"nixon-remote-approval-v1\x00" + CUSTOMER.encode("utf-8")
+                   + b"\x00" + item["approval_id"].encode("ascii")
+                   + b"\x00" + item["request_hash"].encode("ascii")
+                   + b"\x00approve\x00" + stamp.encode("ascii"))
+        assertion = phone.assertion(message)
+        raw = _b64.urlsafe_b64decode(
+            assertion["signature"] + "=" * ((4 - len(assertion["signature"]) % 4) % 4))
+        # DER length > 70 means at least one integer was padded.
+        if len(raw) > 70:
+            doc = {
+                "type": "approve", "version": 1, "customer": CUSTOMER,
+                "key_id": phone.key_id(), "approval_id": item["approval_id"],
+                "request_hash": item["request_hash"], "decision": "approve",
+                "ts": stamp,
+            }
+            doc.update(assertion)
+            out = _fetch(worker, doc)
+            assert out.get("approved") is True, (
+                "padded-DER assertion rejected: %s" % out)
+            assert _poll(worker, submitted["approval_id"]) == {"result": 1012}
+            return
+    raise AssertionError("no padded-DER signature found in 200 deterministic tries")
+
+
+def test_approval_page_javascript_is_syntactically_valid(tmp_path, monkeypatch):
+    """The approval page JavaScript is never executed by the Python test
+    harness, so a syntax error would only surface in a real browser. Parse
+    it with node when available."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if node is None:
+        import pytest
+        pytest.skip("node is not available to parse the page JavaScript")
+    module, _worker, _sql, _target = _load_worker(tmp_path, monkeypatch)
+    import re
+    match = re.search(r"<script>\n(.*)\n</script>", module._APPROVAL_PAGE, re.S)
+    assert match is not None
+    script = tmp_path / "page.js"
+    script.write_text(match.group(1))
+    out = subprocess.run(
+        [node, "--check", str(script)], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr

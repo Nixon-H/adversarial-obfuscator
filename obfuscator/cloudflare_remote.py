@@ -342,6 +342,206 @@ def _approval_message(customer, approval_id, request_hash, decision, ts):
             + str(decision) + "\x00" + str(ts)).encode("utf-8")
 
 
+def _b64url_decode(text):
+    if not isinstance(text, str):
+        raise ValueError("not text")
+    padded = text + "=" * ((4 - len(text) % 4) % 4)
+    return base64.urlsafe_b64decode(padded.encode("ascii"))
+
+
+def _b64url_encode(raw):
+    return base64.urlsafe_b64encode(bytes(raw)).decode("ascii").rstrip("=")
+
+
+def _cbor_decode(data, pos=0):
+    """Minimal definite-length CBOR decoder sufficient for WebAuthn
+    attestation objects and COSE keys. Returns (value, next_position)."""
+    if pos >= len(data):
+        raise ValueError("truncated cbor")
+    initial = data[pos]
+    pos += 1
+    major = initial >> 5
+    info = initial & 0x1F
+    if info < 24:
+        argument = info
+    elif info == 24:
+        argument = data[pos]; pos += 1
+    elif info == 25:
+        argument = struct.unpack(">H", data[pos:pos + 2])[0]; pos += 2
+    elif info == 26:
+        argument = struct.unpack(">I", data[pos:pos + 4])[0]; pos += 4
+    elif info == 27:
+        argument = struct.unpack(">Q", data[pos:pos + 8])[0]; pos += 8
+    else:
+        raise ValueError("indefinite cbor is unsupported")
+    if major == 0:
+        return argument, pos
+    if major == 1:
+        return -1 - argument, pos
+    if major == 2:
+        end = pos + argument
+        if end > len(data):
+            raise ValueError("truncated cbor bytes")
+        return bytes(data[pos:end]), end
+    if major == 3:
+        end = pos + argument
+        if end > len(data):
+            raise ValueError("truncated cbor text")
+        return bytes(data[pos:end]).decode("utf-8"), end
+    if major == 4:
+        items = []
+        for _index in range(argument):
+            value, pos = _cbor_decode(data, pos)
+            items.append(value)
+        return items, pos
+    if major == 5:
+        mapping = {}
+        for _index in range(argument):
+            key, pos = _cbor_decode(data, pos)
+            value, pos = _cbor_decode(data, pos)
+            mapping[key] = value
+        return mapping, pos
+    if major == 7:
+        if info == 20:
+            return False, pos
+        if info == 21:
+            return True, pos
+        if info in (22, 23):
+            return None, pos
+    raise ValueError("unsupported cbor major type")
+
+
+def _der_to_raw64(der):
+    """Convert a DER-encoded ECDSA signature to the 64-byte P1363 form
+    WebCrypto expects. Returns None when the structure is invalid."""
+    try:
+        if len(der) < 8 or der[0] != 0x30:
+            return None
+        total = der[1]
+        if total + 2 > len(der):
+            return None
+        pos = 2
+        parts = []
+        for _index in range(2):
+            if der[pos] != 0x02:
+                return None
+            length = der[pos + 1]
+            pos += 2
+            part = bytes(der[pos:pos + length])
+            if len(part) != length:
+                return None
+            pos += length
+            part = part.lstrip(b"\x00")
+            if len(part) > 32:
+                return None
+            parts.append(part.rjust(32, b"\x00"))
+        return parts[0] + parts[1]
+    except Exception:
+        return None
+
+
+def _webauthn_challenge(message):
+    return _b64url_encode(hashlib.sha256(bytes(message)).digest())
+
+
+def _check_client_data(client_raw, expected_type, expected_message):
+    """Validate clientDataJSON structure and exact challenge binding."""
+    try:
+        client = json.loads(bytes(client_raw).decode("utf-8"))
+    except Exception:
+        return False
+    if not isinstance(client, dict):
+        return False
+    if client.get("type") != expected_type:
+        return False
+    challenge = str(client.get("challenge", ""))
+    return hmac.compare_digest(challenge, _webauthn_challenge(expected_message))
+
+
+def _parse_attestation(attestation_raw, client_raw, expected_message, rp_id):
+    """Parse a WebAuthn attestation response at enrolment.
+
+    Returns (credential_id_b64url, x_b64url, y_b64url) or raises ValueError.
+    Attestation statements are not verified: consumer passkeys deliberately
+    withhold meaningful attestation, and enrolment authorization comes from
+    the single-use token rather than authenticator provenance. What matters
+    is the credential public key, the RP binding and user verification.
+    """
+    if not _check_client_data(client_raw, "webauthn.create", expected_message):
+        raise ValueError("client data")
+    try:
+        top, end = _cbor_decode(bytes(attestation_raw))
+    except Exception as exc:
+        raise ValueError("attestation cbor") from exc
+    if not isinstance(top, dict) or not isinstance(top.get("authData"), bytes):
+        raise ValueError("attestation structure")
+    auth_data = top["authData"]
+    if len(auth_data) < 55:
+        raise ValueError("attestation authData short")
+    if auth_data[:32] != hashlib.sha256(rp_id.encode("utf-8")).digest():
+        raise ValueError("rp")
+    flags = auth_data[32]
+    if not (flags & 0x01) or not (flags & 0x04):
+        raise ValueError("user verification")
+    if not (flags & 0x40):
+        raise ValueError("attested credential data missing")
+    pos = 37
+    pos += 16  # AAGUID
+    cred_len = struct.unpack(">H", auth_data[pos:pos + 2])[0]
+    pos += 2
+    cred_id = bytes(auth_data[pos:pos + cred_len])
+    pos += cred_len
+    if len(cred_id) == 0 or len(cred_id) > 1023:
+        raise ValueError("credential id")
+    try:
+        cose, end = _cbor_decode(auth_data, pos)
+    except Exception as exc:
+        raise ValueError("cose") from exc
+    if not isinstance(cose, dict):
+        raise ValueError("cose structure")
+    if cose.get(1) != 2 or cose.get(3) != -7 or cose.get(-1) != 1:
+        raise ValueError("cose algorithm")
+    x_raw = cose.get(-2)
+    y_raw = cose.get(-3)
+    if (not isinstance(x_raw, bytes) or not isinstance(y_raw, bytes)
+            or len(x_raw) != 32 or len(y_raw) != 32):
+        raise ValueError("cose coordinates")
+    return _b64url_encode(cred_id), _b64url_encode(x_raw), _b64url_encode(y_raw)
+
+
+async def _webauthn_verify(key_doc, doc, expected_message, rp_id):
+    """Verify a WebAuthn assertion against an enrolled credential.
+
+    Returns (True, "ok") only when the relying-party binding, user-presence
+    and user-verification flags, exact challenge binding, and the ECDSA
+    signature all hold. Any failure returns (False, detail); approval is
+    fail-closed.
+    """
+    try:
+        auth_data = _b64url_decode(doc.get("authenticatorData", ""))
+        client_raw = _b64url_decode(doc.get("clientDataJSON", ""))
+        signature_raw = _b64url_decode(doc.get("signature", ""))
+    except Exception:
+        return False, "malformed"
+    if len(auth_data) < 37:
+        return False, "malformed"
+    if auth_data[:32] != hashlib.sha256(rp_id.encode("utf-8")).digest():
+        return False, "rp"
+    flags = auth_data[32]
+    if not (flags & 0x01) or not (flags & 0x04):
+        return False, "user verification required"
+    if not _check_client_data(client_raw, "webauthn.get", expected_message):
+        return False, "challenge"
+    raw64 = _der_to_raw64(signature_raw)
+    if raw64 is None:
+        return False, "malformed"
+    signed = bytes(auth_data) + hashlib.sha256(bytes(client_raw)).digest()
+    ok = await _ecdsa_verify(key_doc["x"], key_doc["y"], raw64.hex(), signed)
+    if not ok:
+        return False, "signature"
+    return True, "ok"
+
+
 def _valid_key_id(value):
     return (isinstance(value, str) and len(value) == 24
             and all(ch in "0123456789abcdef" for ch in value))
@@ -390,7 +590,7 @@ def _preview(value, limit=200):
 
 
 
-_APPROVAL_PAGE = """<!doctype html>
+_APPROVAL_PAGE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Nixon remote approval</title>
@@ -401,6 +601,7 @@ h1{font-size:1.25rem}.card{border:1px solid #ccd;border-radius:8px;padding:.8rem
 .args{background:#f4f6f8;border-radius:6px;padding:.4rem;font-family:ui-monospace,monospace;font-size:.78rem;word-break:break-all;white-space:pre-wrap}
 button{font-size:1rem;padding:.55rem 1.1rem;border-radius:7px;border:1px solid #999;margin:.3rem .4rem .3rem 0;cursor:pointer}
 .ok{background:#146c2e;color:#fff;border-color:#146c2e}.no{background:#fff;color:#8a1111;border-color:#8a1111}
+.go{background:#1a4f9c;color:#fff;border-color:#1a4f9c}
 #status{padding:.5rem;border-radius:6px;margin:.5rem 0}.info{background:#e8f0fe}.err{background:#fde8e8}.good{background:#e6f4ea}
 small{color:#667}</style></head>
 <body>
@@ -408,20 +609,36 @@ small{color:#667}</style></head>
 <div id="status" class="info">loading&hellip;</div>
 <div id="enrolbox" class="card" hidden></div>
 <div id="keybox" class="card" hidden></div>
+<div id="checkwrap" class="card" hidden>
+<button id="check" class="go">Check for pending requests</button>
+<small>Each check and each decision uses your passkey with biometric or PIN
+verification. Nothing is approved silently.</small></div>
 <div id="rows"></div>
 <div class="card"><small>Only approve requests you expect from your own application.
-Approval is bound to the exact request and cannot be reused for any other call.
-If you did not just trigger this action on your computer, press Deny.</small></div>
+Approval is cryptographically bound to the exact request by your passkey and cannot
+be reused for any other call. If you did not just trigger this action on your
+computer, press Deny.</small></div>
 <script>
 "use strict";
 const enc = new TextEncoder();
+const dec = new TextDecoder();
 const statusEl = document.getElementById("status");
 function say(text, cls) { statusEl.textContent = text; statusEl.className = cls || "info"; }
-function hex(buf) {
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+function b64u(buf) {
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function b64uDec(text) {
+  const pad = text + "=".repeat((4 - text.length % 4) % 4);
+  const binary = atob(pad.replace(/-/g, "+").replace(/_/g, "/"));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 async function post(doc) {
-  const res = await fetch(location.pathname || "/", {
+  const res = await fetch(location.pathname, {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify(doc)});
   return await res.json();
@@ -429,7 +646,7 @@ async function post(doc) {
 function dbOpen() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open("nixon-remote-approval", 1);
-    req.onupgradeneeded = () => { req.result.createObjectStore("keys"); };
+    req.onupgradeneeded = () => req.result.createObjectStore("keys");
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
@@ -452,17 +669,31 @@ async function dbAll() {
     req.onerror = () => reject(req.error);
   });
 }
-async function keyFingerprint(x, y) {
-  const digest = await crypto.subtle.digest("SHA-256", enc.encode(x + ":" + y));
-  return hex(digest).slice(0, 24);
+function canonical(parts) {
+  return enc.encode(parts.join("\x00"));
 }
-async function signWith(record, parts) {
-  const data = enc.encode(parts.join("\\x00"));
-  const sig = await crypto.subtle.sign(
-    {name: "ECDSA", hash: "SHA-256"}, record.key, data);
-  return hex(sig);
+async function challengeOf(parts) {
+  return await crypto.subtle.digest("SHA-256", canonical(parts));
 }
 function ts() { return Math.floor(Date.now() / 1000).toString(); }
+
+async function assertWith(record, parts) {
+  /* One WebAuthn assertion bound to the canonical message. The browser places
+     base64url(SHA-256(message)) into clientDataJSON.challenge, which is the
+     exact value the server reconstructs and compares. */
+  const challenge = await challengeOf(parts);
+  const cred = await navigator.credentials.get({publicKey: {
+    challenge: challenge,
+    rpId: location.hostname,
+    allowCredentials: [{type: "public-key", id: b64uDec(record.credId)}],
+    userVerification: "required",
+  }});
+  return {
+    authenticatorData: b64u(cred.response.authenticatorData),
+    clientDataJSON: b64u(cred.response.clientDataJSON),
+    signature: b64u(cred.response.signature),
+  };
+}
 
 async function enrolFromHash() {
   if (!location.hash || location.hash.indexOf("customer=") < 0) return false;
@@ -475,19 +706,25 @@ async function enrolFromHash() {
   box.hidden = false;
   box.textContent = "Enrolling this device for customer " + customer + " ...";
   try {
-    const pair = await crypto.subtle.generateKey(
-      {name: "ECDSA", namedCurve: "P-256"}, false, ["sign"]);
-    const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
-    const keyId = await keyFingerprint(jwk.x, jwk.y);
-    const data = enc.encode(["nixon-remote-enrol-v1", customer, token].join("\\x00"));
-    const proof = hex(await crypto.subtle.sign(
-      {name: "ECDSA", hash: "SHA-256"}, pair.privateKey, data));
-    const res = await post({type: "enrol", version: 1, customer: customer,
-      token: token, x: jwk.x, y: jwk.y, proof: proof, label: label});
+    const challenge = await challengeOf(["nixon-remote-enrol-v1", customer, token]);
+    const userId = enc.encode((customer + ":" + token.slice(0, 16)).slice(0, 64));
+    const cred = await navigator.credentials.create({publicKey: {
+      challenge: challenge,
+      rp: {name: "Nixon remote approval"},
+      user: {id: userId, name: customer + " approval", displayName: customer + " approval"},
+      pubKeyCredParams: [{type: "public-key", alg: -7}],
+      authenticatorSelection: {userVerification: "required", residentKey: "preferred"},
+      attestation: "none",
+    }});
+    if (!cred) throw new Error("enrolment was cancelled");
+    const res = await post({
+      type: "enrol", version: 1, customer: customer, token: token, label: label,
+      attestation: b64u(cred.response.attestationObject),
+      clientDataJSON: b64u(cred.response.clientDataJSON)});
     if (!res.enrolled) throw new Error(res.error || "enrolment failed");
     await dbPut(customer + ":" + res.key_id, {
-      customer: customer, keyId: res.key_id, x: jwk.x, y: jwk.y,
-      label: label, key: pair.privateKey});
+      customer: customer, keyId: res.key_id, label: label,
+      credId: b64u(cred.rawId)});
     history.replaceState(null, "", location.pathname);
     box.textContent = "Device enrolled for " + customer + ". Keep this page bookmarked.";
     return true;
@@ -497,7 +734,7 @@ async function enrolFromHash() {
   }
 }
 
-function rowElement(item, record) {
+function rowElement(item, record, onDone) {
   const div = document.createElement("div");
   div.className = "card";
   const when = new Date(item.submitted_at * 1000).toLocaleTimeString();
@@ -516,17 +753,20 @@ function rowElement(item, record) {
     yes.disabled = true; no.disabled = true;
     try {
       const stamp = ts();
-      const sig = await signWith(record, [
+      const assertion = await assertWith(record, [
         "nixon-remote-approval-v1", item.customer, item.approval_id,
         item.request_hash, decision, stamp]);
-      const res = await post({type: "approve", version: 1,
+      const res = await post(Object.assign({
+        type: "approve", version: 1,
         customer: item.customer, key_id: record.keyId,
         approval_id: item.approval_id, request_hash: item.request_hash,
-        decision: decision, ts: stamp, signature: sig});
+        decision: decision, ts: stamp}, assertion));
       if (res.error) throw new Error(res.error);
       div.querySelector(".args").textContent =
         decision === "approve" ? "approved" : "denied";
       yes.remove(); no.remove();
+      say(decision === "approve" ? "Request approved and executed." : "Request denied.", "good");
+      if (typeof onDone === "function") onDone(res.pending);
     } catch (err) {
       yes.disabled = false; no.disabled = false;
       say("decision failed: " + err.message, "err");
@@ -538,63 +778,75 @@ function rowElement(item, record) {
   return div;
 }
 
-async function pollOnce(record) {
-  const stamp = ts();
-  const sig = await signWith(record, [
-    "nixon-remote-pending-v1", record.customer, record.keyId, stamp]);
-  const res = await post({type: "pending", version: 1, customer: record.customer,
-    key_id: record.keyId, ts: stamp, signature: sig});
-  return res.pending || [];
-}
-
-async function loop() {
+function renderItems(items, record) {
   const rows = document.getElementById("rows");
-  let records = [];
-  try { records = await dbAll(); } catch (err) { say("local key store unavailable", "err"); return; }
-  const keybox = document.getElementById("keybox");
-  if (records.length) {
-    keybox.hidden = false;
-    keybox.textContent = "enrolled: " + records.map(r => r.customer + " (" + r.label + ")").join(", ");
+  rows.innerHTML = "";
+  const list = items || [];
+  if (list.length === 0) {
+    say("No pending requests.", "info");
+    return;
   }
-  const refresh = async () => {
-    if (!records.length) {
-      if (!document.getElementById("enrolbox").hidden || !location.hash) {
-        say(records.length ? "" : "no enrolled device key on this browser yet", "info");
-      }
-    }
-    const seen = new Set();
-    for (const record of records) {
-      let items = [];
-      try { items = await pollOnce(record); }
-      catch (err) { say("polling failed: " + err.message, "err"); continue; }
-      for (const item of items) {
-        const tag = item.approval_id;
-        if (seen.has(tag) || document.getElementById("p-" + tag)) continue;
-        seen.add(tag);
-        const el = rowElement(item, record);
-        el.id = "p-" + tag;
-        rows.prepend(el);
-      }
-    }
-    const any = rows.querySelector("button");
-    if (!any && records.length) say("listening — no pending requests", "good");
-    else if (any) say("pending request — verify it is yours before approving", "info");
-  };
-  await refresh();
-  setInterval(refresh, 3000);
+  say(list.length + " pending request(s). Review each one carefully.", "info");
+  for (const item of list) {
+    rows.appendChild(rowElement(item, record, renderRefresh));
+  }
+}
+function renderRefresh(items) {
+  const rows = document.getElementById("rows");
+  const list = items || [];
+  if (list.length === 0) return;
+  rows.innerHTML = "";
+  for (const item of list) {
+    rows.appendChild(rowElement(item, currentRecord, renderRefresh));
+  }
+}
+let currentRecord = null;
+
+async function checkPending(record) {
+  const stamp = ts();
+  const assertion = await assertWith(record, [
+    "nixon-remote-pending-v1", record.customer, record.keyId, stamp]);
+  const res = await post(Object.assign({
+    type: "pending", version: 1, customer: record.customer,
+    key_id: record.keyId, ts: stamp}, assertion));
+  if (res.error) throw new Error(res.error);
+  renderItems(res.pending || [], record);
 }
 
-(async () => {
-  if (!crypto.subtle) { say("secure context required — use the HTTPS worker URL", "err"); return; }
-  try {
-    const didEnrol = await enrolFromHash();
-    if (didEnrol) say("enrolled — listening for requests", "good");
-    await loop();
-    if (!location.hash) say("listening", "info");
-  } catch (err) {
-    say(err.message || "setup failed", "err");
+async function main() {
+  if (!window.PublicKeyCredential) {
+    say("This browser does not support passkeys. Use a current version of Safari, Chrome or Firefox.", "err");
+    return;
   }
-})();
+  try {
+    if (await enrolFromHash()) {
+      say("Enrolment complete. You can now approve requests.", "good");
+    }
+  } catch (err) {
+    return;
+  }
+  const records = await dbAll();
+  if (records.length === 0) {
+    say("No enrolled device keys on this browser. Open the enrolment link provided by your operator.", "err");
+    return;
+  }
+  currentRecord = records[0];
+  const keybox = document.getElementById("keybox");
+  keybox.hidden = false;
+  keybox.textContent = "device: " + (currentRecord.label || "phone")
+    + " · customer " + currentRecord.customer;
+  document.getElementById("checkwrap").hidden = false;
+  document.getElementById("check").onclick = async () => {
+    try {
+      say("authenticating…", "info");
+      await checkPending(currentRecord);
+    } catch (err) {
+      say(err.message || "check failed", "err");
+    }
+  };
+  say("Tap \"Check for pending requests\" and authenticate to review pending operations.", "info");
+}
+main().catch((err) => say(err.message || "setup failed", "err"));
 </script></body></html>"""
 
 
@@ -616,6 +868,7 @@ class SecurityRegistry(DurableObject):
             "CREATE TABLE IF NOT EXISTS approval_keys ("
             "customer TEXT NOT NULL, key_id TEXT NOT NULL, x TEXT NOT NULL, "
             "y TEXT NOT NULL, label TEXT NOT NULL, enrolled_at REAL NOT NULL, "
+            "cred_id TEXT NOT NULL DEFAULT '', "
             "revoked INTEGER NOT NULL DEFAULT 0, "
             "PRIMARY KEY (customer, key_id))")
         self.sql.exec(
@@ -633,6 +886,19 @@ class SecurityRegistry(DurableObject):
         self.sql.exec(
             "CREATE TABLE IF NOT EXISTS customer_state ("
             "customer TEXT PRIMARY KEY, disabled INTEGER NOT NULL)")
+        # Operators upgrading from the WebCrypto approval deployment already
+        # have an approval_keys table without cred_id. CREATE TABLE IF NOT
+        # EXISTS never adds columns, so the passkey enrolment insert would
+        # fail closed on every existing Durable Object. Add the column once;
+        # enrolled WebCrypto rows keep the empty credential id and remain
+        # unusable for passkey ceremonies, which is the intended fail-closed
+        # outcome because only passkeys make approval decisions now.
+        try:
+            self.sql.exec("SELECT cred_id FROM approval_keys LIMIT 0")
+        except Exception:
+            self.sql.exec(
+                "ALTER TABLE approval_keys ADD COLUMN "
+                "cred_id TEXT NOT NULL DEFAULT ''")
 
     def _hits(self, window_key):
         rows = self.sql.exec(
@@ -719,7 +985,7 @@ class SecurityRegistry(DurableObject):
         self._increment(day_key, float(day + 172800))
         return "ok"
 
-    async def enrol_key(self, customer, key_id, x, y, label, token_hash, now):
+    async def enrol_key(self, customer, key_id, x, y, label, token_hash, now, cred_id=""):
         # Single-object storage is serial, so the token consumption and key
         # insertion cannot interleave with another enrolment of the same token.
         rows = self.sql.exec(
@@ -737,14 +1003,14 @@ class SecurityRegistry(DurableObject):
             "VALUES (?, ?, ?)", str(token_hash), str(customer), float(now))
         self.sql.exec(
             "INSERT INTO approval_keys (customer, key_id, x, y, label, "
-            "enrolled_at, revoked) VALUES (?, ?, ?, ?, ?, ?, 0)",
+            "enrolled_at, cred_id, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
             str(customer), str(key_id), str(x), str(y),
-            str(label or "")[:80], float(now))
+            str(label or "")[:80], float(now), str(cred_id or ""))
         return "ok"
 
     async def get_key(self, customer, key_id):
         rows = self.sql.exec(
-            "SELECT x, y, revoked FROM approval_keys "
+            "SELECT x, y, revoked, cred_id FROM approval_keys "
             "WHERE customer = ? AND key_id = ?",
             str(customer), str(key_id)).toArray()
         if len(rows) == 0:
@@ -754,6 +1020,7 @@ class SecurityRegistry(DurableObject):
             "x": str(_col(row, "x", 0)),
             "y": str(_col(row, "y", 1)),
             "revoked": int(_col(row, "revoked", 2)),
+            "cred_id": str(_col(row, "cred_id", 3) or ""),
         }, separators=(",", ":"))
 
     async def has_approval_keys(self, customer):
@@ -912,6 +1179,11 @@ class SecurityRegistry(DurableObject):
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
         try:
+            self._host = ""
+            try:
+                self._host = str(request.headers.get("host") or "")
+            except Exception:
+                self._host = ""
             if request.method == "GET":
                 return Response(
                     _APPROVAL_PAGE,
@@ -948,6 +1220,18 @@ class Default(WorkerEntrypoint):
             return _response({"error": "bad request: unknown request type"})
         except Exception:
             return _response({"error": "remote service error"})
+
+    def _rp_id(self):
+        configured = _env(self.env, "NIXON_REMOTE_RP_ID")
+        if configured:
+            return configured.strip().lower()
+        host = str(getattr(self, "_host", "") or "").strip().lower()
+        # WebAuthn relying-party identifiers are bare domains: the port that
+        # development servers include in the Host header is never part of one.
+        if host.startswith("["):
+            closing = host.find("]")
+            return host[1:closing] if closing > 0 else host
+        return host.split(":", 1)[0]
 
     def _master(self):
         master_hex = _env(self.env, "NIXON_REMOTE_MASTER_SECRET")
@@ -1036,8 +1320,6 @@ class Default(WorkerEntrypoint):
         if (not isinstance(token, str) or len(token) != 64
                 or any(ch not in "0123456789abcdef" for ch in token)):
             return _response({"error": "bad request: malformed enrolment token"})
-        x, y = doc.get("x", ""), doc.get("y", "")
-        proof = doc.get("proof", "")
         label = str(doc.get("label", "") or "")[:80]
         now = time.time()
         index_match = -1
@@ -1048,8 +1330,20 @@ class Default(WorkerEntrypoint):
         if index_match < 0:
             _audit("rejected", customer, "", "enrol-token-invalid")
             return _response({"error": "remote enrolment token invalid"})
-        if not await _ecdsa_verify(
-                x, y, proof, _enrol_proof_message(customer, token)):
+        rp_id = self._rp_id()
+        if not rp_id:
+            return _response({"error": "remote approval relying party is not configured"})
+        try:
+            attestation_raw = _b64url_decode(doc.get("attestation", ""))
+            client_raw = _b64url_decode(doc.get("clientDataJSON", ""))
+        except Exception:
+            _audit("rejected", customer, "", "enrol-malformed")
+            return _response({"error": "bad request: malformed enrolment credential"})
+        try:
+            cred_id, x, y = _parse_attestation(
+                attestation_raw, client_raw,
+                _enrol_proof_message(customer, token), rp_id)
+        except ValueError:
             _audit("rejected", customer, "", "enrol-proof-invalid")
             return _response({"error": "remote enrolment proof invalid"})
         stub = self._security_stub()
@@ -1062,7 +1356,7 @@ class Default(WorkerEntrypoint):
         token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
         try:
             status = await stub.enrol_key(
-                customer, key_id, x, y, label, token_hash, now)
+                customer, key_id, x, y, label, token_hash, now, cred_id)
         except Exception:
             return _response({"error": "remote replay protection unavailable"})
         if status == "token-consumed":
@@ -1092,9 +1386,13 @@ class Default(WorkerEntrypoint):
             return _response({"error": "remote replay protection unavailable"})
         if state != "active":
             return _response({"error": "remote approval key is not active"})
+        rp_id = self._rp_id()
+        if not rp_id:
+            return _response({"error": "remote approval relying party is not configured"})
         message = _pending_message(customer, key_id, ts_value)
-        if not await _ecdsa_verify(
-                key_doc["x"], key_doc["y"], doc.get("signature", ""), message):
+        ok, detail = await _webauthn_verify(key_doc, doc, message, rp_id)
+        if not ok:
+            _audit("rejected", customer, "", "pending-assertion-" + detail)
             return _response({"error": "remote approval signature invalid"})
         try:
             list_json = await stub.list_pending(customer, now)
@@ -1105,6 +1403,13 @@ class Default(WorkerEntrypoint):
         except Exception:
             return _response({"error": "remote service error"})
         return _response({"pending": items})
+
+    async def _pending_response_items(self, stub, customer):
+        try:
+            list_json = await stub.list_pending(customer, time.time())
+            return json.loads(list_json)
+        except Exception:
+            return []
 
     async def _handle_approve(self, doc):
         if self._master() is None:
@@ -1136,11 +1441,14 @@ class Default(WorkerEntrypoint):
             return _response({"error": "remote replay protection unavailable"})
         if state != "active":
             return _response({"error": "remote approval key is not active"})
+        rp_id = self._rp_id()
+        if not rp_id:
+            return _response({"error": "remote approval relying party is not configured"})
         message = _approval_message(
             customer, approval_id, request_hash, decision, ts_value)
-        if not await _ecdsa_verify(
-                key_doc["x"], key_doc["y"], doc.get("signature", ""), message):
-            _audit("rejected", customer, "", "approval-signature-invalid")
+        ok, detail = await _webauthn_verify(key_doc, doc, message, rp_id)
+        if not ok:
+            _audit("rejected", customer, "", "approval-assertion-" + detail)
             return _response({"error": "remote approval signature invalid"})
         try:
             decided = json.loads(await stub.decide_pending(
@@ -1163,7 +1471,10 @@ class Default(WorkerEntrypoint):
             except Exception:
                 function_name = ""
             _audit("approval-denied", customer, function_name)
-            return _response({"denied": True})
+            return _response({
+                "denied": True,
+                "pending": await self._pending_response_items(stub, customer),
+            })
 
         # Approved: execute the stored request now, consuming the nonce and
         # rate/quota budget at execution time rather than submission time.
@@ -1215,7 +1526,10 @@ class Default(WorkerEntrypoint):
             await stub.complete_pending(approval_id, "done", final_json)
         except Exception:
             return _response({"error": "remote replay protection unavailable"})
-        return _response({"approved": True})
+        return _response({
+            "approved": True,
+            "pending": await self._pending_response_items(stub, customer),
+        })
 
     async def _handle_poll(self, doc):
         customer = doc.get("customer", "")
@@ -1712,9 +2026,12 @@ client because they can contain confidential constants or arguments.
 
 Typed TOTP is structurally copyable: anything typed on a malware-controlled
 machine can be captured, and a TOTP code is not bound to the exact request.
-Phone approval removes both weaknesses. The phone keeps a non-extractable
-ECDSA P-256 key in the browser and signs the exact request; nothing reusable
-ever transits the customer machine.
+Phone approval removes both weaknesses. The phone holds a hardware-backed
+passkey (WebAuthn) — on modern phones the private key lives in the Secure
+Enclave / StrongBox and is non-exportable even to the phone's own OS. Every
+check and every decision is a passkey signature requiring biometric or PIN
+user verification, bound to the exact request; nothing reusable ever transits
+the customer machine, and a stolen or unattended phone cannot approve.
 
 Enrolment is per device and uses the single-use tokens in the customer
 provisioning file:
@@ -1728,12 +2045,17 @@ provisioning file:
 
    The token travels in the URL fragment, which browsers never send to the
    server; it is used only by the page running locally on the phone.
-3. The user opens the link on the phone. The page generates a non-extractable
-   key, proves possession, and enrols the public key. Each token enrols
-   exactly one device and then becomes useless.
+3. The user opens the link on the phone. The browser performs a WebAuthn
+   enrolment ceremony: the phone creates a hardware-backed passkey with
+   biometric/PIN user verification, and only the public credential registers
+   with the worker. Each token enrols exactly one device and then becomes
+   useless.
 4. Keep the page bookmarked or pinned on the phone. When the application makes
-   a remote call, the page lists the pending request (function, customer,
-   time, argument preview) and the user approves or denies it.
+   a remote call, the user taps "Check for pending requests" and authenticates;
+   the page lists each pending request (function, customer, time, argument
+   preview) and every approve/deny decision is its own passkey signature.
+   Passkeys never sign silently, so there is no automatic polling: each check
+   and each decision is a deliberate authenticated action.
 
 Approval policy:
 
@@ -1746,12 +2068,31 @@ NIXON_REMOTE_MAX_PENDING=8
 NIXON_REMOTE_TOTP_WITH_APPROVAL=1     # optional defense-in-depth: both layers
 ```
 
+Passkey assertions are bound to the relying-party identifier the browser used
+during enrolment. The worker derives it from the request Host header by
+default, which is correct when the approval page is opened on the worker's
+own domain. If the page is reached through a custom domain or an alias, pin
+the value explicitly so enrolment and approval always agree:
+
+```text
+NIXON_REMOTE_RP_ID={worker_name}.<your-subdomain>.workers.dev
+```
+
 Customers without an enrolled key keep the dual-TOTP path. Once a key exists,
 approval replaces typed codes for that customer because it is strictly
 stronger: it cannot be captured in transit (no secret crosses the customer
-machine), and it is bound to the exact request hash, so a signature for one
-call is useless for any other. The client artifact polls automatically; the
-user experience is "tap approve on the phone" with no typing.
+machine), the passkey never leaves the phone's secure hardware, user
+verification is enforced server-side on every signature, and each signature
+is bound to the exact request hash, so approval of one call is useless for
+any other. The client artifact polls automatically; the user experience is
+"tap approve on the phone" with no typing.
+
+Note: consumer passkeys deliberately do not provide meaningful attestation,
+so the worker verifies signatures, user-verification flags, and relying-party
+binding but cannot prove which authenticator model created a key. Synced
+passkeys (iCloud/Google account sync) inherit those accounts' security;
+requiring hardware security keys instead is a device-policy choice made at
+enrolment time, not something the server can enforce.
 
 Operator administration uses the derived admin secret:
 
