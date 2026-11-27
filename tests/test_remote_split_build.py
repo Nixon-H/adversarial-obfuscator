@@ -100,13 +100,18 @@ def test_remote_split_happens_before_any_payload_consumer(tmp_path):
         _cleanup(args)
 
 
-def test_remote_transform_without_markers_leaves_the_source_alone(tmp_path):
+def test_remote_transform_without_markers_fails_closed(tmp_path):
+    # An operator who explicitly passes --transforms remote for a payload
+    # with no @remote function has misconfigured the build. Shipping the
+    # unsplit source would produce a fully local artefact that looks
+    # remote-protected, so the pipeline must refuse rather than warn.
     path = tmp_path / "plain.py"
     path.write_text("print('plain')\n", encoding="utf-8")
     args = argparse.Namespace(
         tx_remote=True, tx_remote_bundle=str(tmp_path / "bundle.py"))
     args._input_source = str(path)
-    assert _prepare_remote_split_source(args, str(path)) == str(path)
+    with pytest.raises(SystemExit, match="no @remote"):
+        _prepare_remote_split_source(args, str(path))
     assert not os.path.exists(args.tx_remote_bundle)
 
 
@@ -187,3 +192,26 @@ def test_remote_split_fails_closed_when_cloudflare_output_exists(tmp_path):
     args._input_source = source
     with pytest.raises(SystemExit, match="Cloudflare worker"):
         _prepare_remote_split_source(args, source)
+
+
+def test_remote_transform_without_marked_functions_fails_closed(tmp_path):
+    """--transforms remote on a payload with no @remote function must not
+    silently ship a fully local artefact: the operator asked for split
+    execution, so a no-op split is a build error, not a warning."""
+    path = tmp_path / "payload.py"
+    path.write_text(
+        "def main():\n    print('no remote markers here')\n\n"
+        "if __name__ == '__main__':\n    main()\n",
+        encoding="utf-8")
+    parser, _subparsers = build_parser()
+    args = parser.parse_args([
+        "build", str(path), "--transforms", "remote",
+        "remote-bundle=%s" % (tmp_path / "operator_bundle.py"),
+    ])
+    args = apply_unified_specs(args)
+    try:
+        with pytest.raises(SystemExit) as excinfo:
+            _prepare_remote_split_source(args, str(path))
+        assert "no @remote" in str(excinfo.value)
+    finally:
+        _cleanup(args)

@@ -7867,7 +7867,10 @@ def _prepare_remote_split_source(args, source: str) -> str:
     except RemoteError as exc:
         raise SystemExit("--transforms remote failed: %s" % (exc,))
     if not remote_functions:
-        return source
+        raise SystemExit(
+            "--transforms remote failed: payload declares no @remote "
+            "functions; refusing to ship a fully local artefact as a silent "
+            "no-op split")
 
     bundle_path = str(getattr(args, "tx_remote_bundle", "") or "")
     if not bundle_path:
