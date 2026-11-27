@@ -1,0 +1,3 @@
+# The runner attestation binds the exact payload bytes uploaded by the controller.
+# Windows runners must not convert those bytes to CRLF during checkout.
+payload.py text eol=lf

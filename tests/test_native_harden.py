@@ -18,6 +18,7 @@ The second half is the driver wiring: the farm runner must import the module
 and record the result, or none of this executes where it counts.
 """
 import os
+import shutil
 import struct
 import sys
 
@@ -866,6 +867,9 @@ def _probe(guard_flags, dll_chars=0):
     return _pe_with_load_config(guard_flags, dll=dll_chars)
 
 
+@pytest.mark.skipif(
+    shutil.which("llvm-readobj") is None, reason="llvm-readobj not installed"
+)
 def test_guard_flag_bit_names_match_the_authoritative_parser(tmp_path):
     """The CET label on 0x4000 must match what LLVM's parser says it is.
 
