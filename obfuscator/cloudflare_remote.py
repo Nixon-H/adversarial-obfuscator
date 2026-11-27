@@ -590,6 +590,168 @@ def _preview(value, limit=200):
 
 
 
+# ── P-256 / secp256r1 arithmetic ──────────────────────────────────────────
+
+_WPP = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF
+_WPN = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
+_WPGX = 0x6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296
+_WPGY = 0x4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5
+
+
+def _wp_wp_inv(x, m):
+    return pow(x, m - 2, m)
+
+
+def _wp_wp_add(p1, p2):
+    if p1 is None:
+        return p2
+    if p2 is None:
+        return p1
+    x1, y1 = p1
+    x2, y2 = p2
+    if x1 == x2 and (y1 + y2) % _WPP == 0:
+        return None
+    if p1 == p2:
+        lam = (3 * x1 * x1 - 3) * _wp_inv(2 * y1 % _WPP, _WPP) % _WPP
+    else:
+        lam = (y2 - y1) * _wp_inv((x2 - x1) % _WPP, _WPP) % _WPP
+    x3 = (lam * lam - x1 - x2) % _WPP
+    y3 = (lam * (x1 - x3) - y1) % _WPP
+    return (x3, y3)
+
+
+def _wp_wp_mul(k, point):
+    result = None
+    addend = point
+    while k:
+        if k & 1:
+            result = _wp_add(result, addend)
+        addend = _wp_add(addend, addend)
+        k >>= 1
+    return result
+
+
+def _b64u(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def _b64u_dec(text: str) -> bytes:
+    pad = "=".repeat(0) if False else "=" * ((4 - len(text) % 4) % 4)
+    return base64.urlsafe_b64decode(text + pad)
+
+
+def _wp__wp_es256_sign(private_key_b64u: str, message: bytes) -> bytes:
+    """Sign ``message`` with ES256 (ECDSA over P-256 with SHA-256) and return
+    the JWS raw concatenated r||s signature. Uses RFC 6979 deterministic
+    nonces so signatures are reproducible and side-channel-resistant."""
+    d = int.from_bytes(_b64u_dec(private_key_b64u), "big")
+    z = int.from_bytes(hashlib.sha256(message).digest(), "big")
+    # RFC 6979 deterministic k generation
+    x = d.to_bytes(32, "big")
+    h1 = hashlib.sha256(message).digest()
+    v = b"\x01" * 32
+    k = b"\x00" * 32
+    k = _hmac.new(k, v + b"\x00" + x + h1, hashlib.sha256).digest()
+    v = _hmac.new(k, v, hashlib.sha256).digest()
+    k = _hmac.new(k, v + b"\x01" + x + h1, hashlib.sha256).digest()
+    v = _hmac.new(k, v, hashlib.sha256).digest()
+    while True:
+        v = _hmac.new(k, v, hashlib.sha256).digest()
+        candidate = int.from_bytes(v, "big")
+        if 1 <= candidate < _WPN:
+            kk = candidate
+            break
+        k = _hmac.new(k, v + b"\x00", hashlib.sha256).digest()
+        v = _hmac.new(k, v, hashlib.sha256).digest()
+    point = _wp_mul(kk, (_WPGX, _WPGY))
+    r = point[0] % _WPN
+    s = (_wp_inv(kk, _WPN) * (z + r * d)) % _WPN
+    if s > _WPN // 2:  # low-S normalisation (JOSE expectation)
+        s = _WPN - s
+    return r.to_bytes(32, "big") + s.to_bytes(32, "big")
+
+
+def _wp__wp_vapid_jwt(private_key_b64u: str, audience: str, subject: str,
+              lifetime: int = 43200) -> str:
+    """Build a VAPID ES256 JWT for the push service ``audience``."""
+    header = _b64u(json.dumps({"typ": "JWT", "alg": "ES256"},
+                              separators=(",", ":")).encode())
+    now = int(time.time())
+    claims = _b64u(json.dumps(
+        {"aud": audience, "exp": now + lifetime, "sub": subject},
+        separators=(",", ":")).encode())
+    signing_input = (header + "." + claims).encode("ascii")
+    return header + "." + claims + "." + _b64u(_wp_es256_sign(private_key_b64u, signing_input))
+
+
+def send_tickle(endpoint: str, vapid_private_b64u: str, vapid_public_b64u: str,
+                subject: str, ttl: int = 900, timeout: float = 15.0) -> int:
+    """POST an empty-body push to the subscription endpoint. Returns the push
+    service HTTP status. Raises nothing: callers treat non-2xx as a dead or
+    transient subscription and never let push failures affect execution."""
+    parts = urllib.parse.urlparse(endpoint)
+    audience = "%s://%s" % (parts.scheme, parts.netloc)
+    token = _wp_vapid_jwt(vapid_private_b64u, audience, subject)
+    headers = {
+        "TTL": str(int(ttl)),
+        "Content-Length": "0",
+        "Authorization": "vapid t=%s, k=%s" % (token, vapid_public_b64u),
+        "User-Agent": "nixon-remote-approval/1",
+    }
+    request = urllib.request.Request(endpoint, data=b"", method="POST",
+                                     headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return int(response.status)
+    except urllib.error.HTTPError as exc:
+        return int(exc.code)
+
+
+def _webpush_tickle(endpoint, private, public, subject, ttl=900):
+    """POST an empty-body push tickle to one subscription endpoint."""
+    import urllib.parse as _up
+    import urllib.request as _ur
+    parts = _up.urlparse(endpoint)
+    audience = "%s://%s" % (parts.scheme, parts.netloc)
+    token = _wp_vapid_jwt(private, audience, subject)
+    request = _ur.Request(endpoint, data=b"", method="POST", headers={
+        "TTL": str(int(ttl)),
+        "Content-Length": "0",
+        "Authorization": "vapid t=%s, k=%s" % (token, public),
+        "User-Agent": "nixon-remote-approval/1",
+    })
+    try:
+        with _ur.urlopen(request, timeout=8.0) as response:
+            return int(response.status)
+    except Exception as exc:
+        code = getattr(exc, "code", None)
+        if code is not None:
+            return int(code)
+        return 0
+
+
+_SERVICE_WORKER_JS = """/* Nixon remote approval push receiver. Payload-less
+   tickles only: the notification carries no request data. */
+self.addEventListener("push", (event) => {
+  event.waitUntil(self.registration.showNotification("Nixon remote approval", {
+    body: "A remote-execution request is waiting for your approval.",
+    tag: "nixon-approval",
+    renotify: true,
+    data: {url: "./"},
+  }));
+});
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(clients.matchAll({type: "window", includeUncontrolled: true}).then((list) => {
+    for (const client of list) {
+      if (client.url.indexOf("workers.dev") >= 0 && "focus" in client) return client.focus();
+    }
+    return clients.openWindow("./");
+  }));
+});
+"""
+
+
 _APPROVAL_PAGE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -637,6 +799,28 @@ function b64uDec(text) {
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
 }
+async function subscribePush(customer) {
+  try {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    const vapid = "__VAPID_PUBLIC__";
+    if (!vapid) return;
+    if (Notification.permission === "denied") return;
+    if (Notification.permission === "default") {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") return;
+    }
+    const reg = await navigator.serviceWorker.register("sw.js");
+    const pad = vapid + "=".repeat((4 - vapid.length % 4) % 4);
+    const raw = atob(pad.replace(/-/g, "+").replace(/_/g, "/"));
+    const keyBytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) keyBytes[i] = raw.charCodeAt(i);
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true, applicationServerKey: keyBytes});
+    await post({type: "subscribe", version: 1, customer: customer,
+                endpoint: sub.endpoint});
+  } catch (err) { /* push is best-effort: approval works without it */ }
+}
+
 async function post(doc) {
   const res = await fetch(location.pathname, {
     method: "POST", headers: {"Content-Type": "application/json"},
@@ -853,6 +1037,7 @@ async function main() {
     ? " (" + (records.length - valid.length) + " outdated pre-passkey enrolment(s) on this browser are ignored)"
     : "";
   currentRecord = chosen;
+  subscribePush(chosen.customer);
   const keybox = document.getElementById("keybox");
   keybox.hidden = false;
   keybox.textContent = "device: " + (currentRecord.label || "phone")
@@ -1087,6 +1272,35 @@ class SecurityRegistry(DurableObject):
             str(customer), str(key_id))
         return "ok"
 
+    def _push_table(self):
+        self.sql.exec(
+            "CREATE TABLE IF NOT EXISTS push_subs ("
+            "customer TEXT NOT NULL, endpoint TEXT NOT NULL PRIMARY KEY, "
+            "created_at REAL NOT NULL)")
+
+    async def add_push_sub(self, customer, endpoint, now):
+        self._push_table()
+        self.sql.exec(
+            "INSERT OR REPLACE INTO push_subs (customer, endpoint, created_at) "
+            "VALUES (?, ?, ?)", str(customer), str(endpoint), float(now))
+        return "ok"
+
+    async def list_push_subs(self, customer):
+        self._push_table()
+        rows = self.sql.exec(
+            "SELECT endpoint FROM push_subs WHERE customer = ?", str(customer)).toArray()
+        out = []
+        for row in rows:
+            out.append(str(_col(row, "endpoint", 0)))
+        return json.dumps(out, separators=(",", ":"))
+
+    async def del_push_sub(self, customer, endpoint):
+        self._push_table()
+        self.sql.exec(
+            "DELETE FROM push_subs WHERE customer = ? AND endpoint = ?",
+            str(customer), str(endpoint))
+        return "ok"
+
     async def list_keys(self, customer):
         rows = self.sql.exec(
             "SELECT key_id, label, revoked, enrolled_at, cred_id FROM approval_keys "
@@ -1218,8 +1432,23 @@ class Default(WorkerEntrypoint):
             except Exception:
                 self._host = ""
             if request.method == "GET":
+                try:
+                    url_path = str(getattr(request, "url", "") or "")
+                except Exception:
+                    url_path = ""
+                if url_path.split("?")[0].rstrip("/").endswith("/sw.js"):
+                    return Response(
+                        _SERVICE_WORKER_JS,
+                        headers={"Content-Type": "application/javascript; charset=utf-8",
+                                 "Cache-Control": "no-store"})
+                page = _APPROVAL_PAGE
+                vapid_public = _env(self.env, "NIXON_VAPID_PUBLIC")
+                if vapid_public:
+                    page = page.replace("__VAPID_PUBLIC__", vapid_public)
+                else:
+                    page = page.replace("__VAPID_PUBLIC__", "")
                 return Response(
-                    _APPROVAL_PAGE,
+                    page,
                     headers={"Content-Type": "text/html; charset=utf-8",
                              "Cache-Control": "no-store"})
             if request.method != "POST":
@@ -1248,6 +1477,8 @@ class Default(WorkerEntrypoint):
                 return await self._handle_approve(doc)
             if req_type == "poll":
                 return await self._handle_poll(doc)
+            if req_type == "subscribe":
+                return await self._handle_subscribe(doc)
             if req_type == "admin":
                 return await self._handle_admin(doc)
             return _response({"error": "bad request: unknown request type"})
@@ -1564,6 +1795,52 @@ class Default(WorkerEntrypoint):
             "pending": await self._pending_response_items(stub, customer),
         })
 
+    async def _handle_subscribe(self, doc):
+        """Store a push subscription for a customer. Subscriptions are
+        low-value capabilities: pushes are payload-less tickles carrying no
+        information beyond 'something is pending', and the endpoint URL is
+        itself unguessable. Worst-case abuse is a meaningless notification."""
+        if self._master() is None:
+            return _response({"error": "remote approval is not configured"})
+        customer = doc.get("customer", "")
+        endpoint = doc.get("endpoint", "")
+        if not _valid_customer(customer):
+            return _response({"error": "bad request: malformed customer identity"})
+        if not isinstance(endpoint, str) or not endpoint.startswith("https://") or len(endpoint) > 1024:
+            return _response({"error": "bad request: malformed push endpoint"})
+        stub = self._security_stub()
+        if stub is None:
+            return _response({"error": "remote replay protection is not configured"})
+        try:
+            await stub.add_push_sub(customer, endpoint, time.time())
+        except Exception:
+            return _response({"error": "remote replay protection unavailable"})
+        return _response({"subscribed": True})
+
+    async def _send_push_tickles(self, stub, customer):
+        """Fire payload-less tickles to every push subscription of the
+        customer. Push failures never affect execution: dead endpoints are
+        pruned, transient ones expire with the tickle TTL."""
+        private = _env(self.env, "NIXON_VAPID_PRIVATE")
+        public = _env(self.env, "NIXON_VAPID_PUBLIC")
+        if not private or not public:
+            return
+        try:
+            endpoints = json.loads(await stub.list_push_subs(customer))
+        except Exception:
+            return
+        subject = _env(self.env, "NIXON_VAPID_SUBJECT") or "mailto:ops@localhost"
+        for endpoint in endpoints:
+            try:
+                status = _webpush_tickle(endpoint, private, public, subject)
+            except Exception:
+                continue
+            if status in (404, 410):
+                try:
+                    await stub.del_push_sub(customer, endpoint)
+                except Exception:
+                    pass
+
     async def _handle_poll(self, doc):
         customer = doc.get("customer", "")
         approval_id = doc.get("approval_id", "")
@@ -1791,6 +2068,10 @@ class Default(WorkerEntrypoint):
             if created != "ok":
                 return _response({"error": "remote replay protection unavailable"})
             _audit("approval-pending", customer, function)
+            try:
+                await self._send_push_tickles(stub, customer)
+            except Exception:
+                pass
             return _response({
                 "approval_pending": True,
                 "approval_id": approval_id,
