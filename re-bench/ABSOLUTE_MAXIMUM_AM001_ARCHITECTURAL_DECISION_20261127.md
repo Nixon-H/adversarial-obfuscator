@@ -42,14 +42,32 @@ JSON companion.
 These additions are complete within their narrow server-side scope: they can
 separate customer credentials, limit accepted-request abuse, revoke configured
 customer identities, and avoid leaking arguments/secrets through audit or
-implementation exception messages. They do **not** solve the remaining
-architectural boundaries: typed TOTP can still be captured at first use or piggybacked, the
-service cannot prove physical authenticator-device separation, generic
-customer-controlled hosts cannot be strongly attested by this Python artifact,
-unmarked client-side logic remains extractable, and Cloudflare remains inside
-the trust boundary. Request-bound FIDO2/passkey approval is a possible future
-improvement, but it is platform/hardware integration work and is not claimed
-here.
+implementation exception messages.
+
+## Update — request-bound phone approval implemented
+
+The remaining authentication-layer weaknesses identified above were then
+addressed directly. The generated Worker now implements request-bound phone
+approval: customer devices enrol non-extractable WebCrypto ECDSA P-256 keys
+through single-use tokens, authenticated requests park in the Durable Object,
+and execution happens only after the phone signs the exact stored request
+hash. Because no copyable secret transits the customer machine and each
+signature binds one displayed request, typed-code capture and
+request-independent piggybacking are fixed for enrolled customers — the two
+items previously listed as unsolvable within TOTP. Operators additionally gain
+dynamic key revocation and customer disable/enable through an admin endpoint.
+Local Workers-runtime validation with real ECDSA signatures is in
+`ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_APPROVAL_VALIDATION_20261127.md` and its
+JSON companion.
+
+The honest residual set is now smaller and architectural rather than
+implementation-shaped: approval cannot attest the customer host, cannot stop
+a legitimate user from approving a malicious operation, cannot prove physical
+device separation beyond enrolled-key possession, and depends on single-use
+enrolment tokens reaching the intended device. Unmarked client-side logic
+remains extractable — the complete fix for that is marking more functions
+`@remote`, which is a packaging decision rather than new code — and Cloudflare
+remains inside the trust boundary.
 
 ## Original decision
 

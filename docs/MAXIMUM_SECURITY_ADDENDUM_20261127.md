@@ -70,6 +70,11 @@ Runtime configuration:
 | `NIXON_REMOTE_TOTP` | Optional first six-digit authenticator code for controlled non-interactive tests. It expires quickly and must not be treated as a static production secret. |
 | `NIXON_REMOTE_TOTP_SECONDARY` | Optional second independent six-digit authenticator code for controlled non-interactive tests. |
 | `NIXON_REMOTE_TOTP_PROMPT` | When `1`, interactive clients prompt for the Google Authenticator and Microsoft Authenticator codes if no per-call codes were supplied. |
+| `NIXON_REMOTE_APPROVAL_MODE` | Worker-side phone-approval policy: `enrolled` (default; approval required once the customer has an enrolled device key), `required` (fail closed until enrolment), or `off` (typed TOTP only). |
+| `NIXON_REMOTE_APPROVAL_EXPIRY_SECONDS` | Worker-side lifetime of a pending approval request; default 120. |
+| `NIXON_REMOTE_MAX_PENDING` | Worker-side cap on concurrent pending approval requests per customer; default 8. |
+| `NIXON_REMOTE_TOTP_WITH_APPROVAL` | When `1`, typed dual TOTP remains required in addition to phone approval as defense-in-depth. Default off because request-bound approval is strictly stronger than typed codes. |
+| `NIXON_REMOTE_APPROVAL_TIMEOUT` | Client-side ceiling in seconds for approval polling before failing closed; default 150. |
 
 Current operator-bundle limitation: the bundle contains the marked function
 implementations, not arbitrary module-level helper functions or constants.
@@ -81,14 +86,17 @@ rather than silently changing semantics.
 
 Operational boundary: moving a function server-side prevents artifact
 extraction from revealing that function's implementation. Customer-bound
-credentials, static revocation, fixed-window rate limits, daily quotas, TOTP-failure throttling,
-and metadata-only audit events are implemented server-side controls. They limit
+credentials, static and dynamic revocation, fixed-window rate limits, daily
+quotas, TOTP-failure throttling, request-bound phone approval, and
+metadata-only audit events are implemented server-side controls. They limit
 blast radius and abuse, but do not make a compromised endpoint trustworthy.
-Dual TOTP raises oracle-access cost by requiring two fresh server-verified
-factors, but it is not host attestation or request-bound cryptographic
-approval: malware on the customer machine can capture typed codes, piggyback
-on legitimate use, or abuse a valid authenticated window. Unmarked client-side
-logic remains extractable.
+For customers with an enrolled approval device, typed-code capture and
+request-independent piggybacking are fixed: no copyable secret transits the
+customer machine, and the phone's ECDSA signature binds exactly one displayed
+request. Approval still does not prove host integrity, cannot stop a deceived
+user from approving a malicious operation, and relies on single-use enrolment
+tokens being delivered without interception. Unmarked client-side logic
+remains extractable.
 
 Cloudflare deployment boundary: Cloudflare and anyone with access to the
 Cloudflare account are trusted infrastructure. The free tier is suitable for

@@ -8,6 +8,7 @@ import ast
 import json
 import os
 import sys
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -741,3 +742,103 @@ def test_embedded_client_customer_identity_is_not_signed_as_kwargs(monkeypatch):
         SECRET, "pricing_engine", [10, "gold"], body["nonce"],
         body["timestamp"], {})
     assert body["signature"] == expected
+
+
+def test_approval_pending_polls_until_result_and_binds_customer(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    monkeypatch.setenv(CUSTOMER_ENV, "acme")
+    bodies = []
+
+    responses = [
+        b'{"approval_pending": true, "approval_id": "' + b"ab" * 32 + b'"}',
+        b'{"approval_status": "pending"}',
+        b'{"result": 42}',
+    ]
+
+    def opener(_url, body):
+        bodies.append(json.loads(body.decode("utf-8")))
+        return responses.pop(0)
+
+    out = call_remote(
+        "pricing_engine", [1], url="http://127.0.0.1:8787/rpc",
+        secret=SECRET, opener=opener)
+    assert out == 42
+    assert len(bodies) == 3
+    poll = bodies[1]
+    assert poll["type"] == "poll"
+    assert poll["customer"] == "acme"
+    assert poll["approval_id"] == "ab" * 32
+    assert poll["version"] == 1
+    # The initial submission is an ordinary signed request, not a poll.
+    assert "type" not in bodies[0]
+    assert bodies[0]["function"] == "pricing_engine"
+
+
+def test_approval_denied_raises_terminal_error(monkeypatch):
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    monkeypatch.delenv(CUSTOMER_ENV, raising=False)
+    responses = [
+        b'{"approval_pending": true, "approval_id": "' + b"cd" * 32 + b'"}',
+        b'{"error": "remote approval denied"}',
+    ]
+
+    def opener(_url, body):
+        return responses.pop(0)
+
+    caught = ""
+    try:
+        call_remote(
+            "pricing_engine", [1], url="http://127.0.0.1:8787/rpc",
+            secret=SECRET, opener=opener)
+    except RemoteError as exc:
+        caught = str(exc)
+    assert "denied" in caught
+
+
+def test_embedded_client_polls_for_approval_result(monkeypatch):
+    client, _remote = split_module(SOURCE)
+    ns = {}
+    exec(compile(client, "<client>", "exec"), ns)
+
+    import obfuscator.remote_exec as rx
+
+    monkeypatch.setattr(rx.time, "sleep", lambda _seconds: None)
+    monkeypatch.setenv(URL_ENV, "https://relay.invalid/rpc")
+    monkeypatch.setenv(SECRET_ENV, SECRET.hex())
+    monkeypatch.setenv(CUSTOMER_ENV, "acme")
+
+    responses = [
+        {"approval_pending": True, "approval_id": "ef" * 32},
+        {"approval_status": "approved"},
+        {"result": 5},
+    ]
+    bodies = []
+
+    class _Resp:
+        def __init__(self, doc):
+            self._doc = doc
+
+        def read(self):
+            return json.dumps(self._doc).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    real_urlopen = rx.urllib.request.urlopen
+
+    def fake_urlopen(request, timeout=None):
+        bodies.append(json.loads(request.data.decode("utf-8")))
+        return _Resp(responses.pop(0))
+
+    rx.urllib.request.urlopen = fake_urlopen
+    try:
+        assert ns["pricing_engine"](10, "gold") == 5
+    finally:
+        rx.urllib.request.urlopen = real_urlopen
+    assert len(bodies) == 3
+    assert bodies[1]["type"] == "poll"
+    assert bodies[1]["customer"] == "acme"
+    assert bodies[1]["approval_id"] == "ef" * 32

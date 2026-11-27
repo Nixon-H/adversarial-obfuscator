@@ -99,7 +99,7 @@ history of edge-case defects.
 | Flag | Class | What it does | Status |
 |---|---|---|---|
 | `--transforms remote remote-bundle=PATH` | EXEC/REP | Removes every module-level `@remote` function from the client before native compilation, AST mutation, farm upload, or loader embedding; writes the implementation to an owner-only operator bundle | Implemented and validated; opt-in and function-scoped |
-| `--transforms remote remote-bundle=PATH remote-cloudflare=DIR` | EXEC/REP | Additionally writes a deployable Cloudflare Python Worker project containing the operator-side implementations, customer-bound credentials, dual-TOTP verification, replay rejection, revocation, rate limits, quotas, and metadata-only audit events | Implemented and locally validated through `pywrangler dev`; deployment remains operator-controlled |
+| `--transforms remote remote-bundle=PATH remote-cloudflare=DIR` | EXEC/REP | Additionally writes a deployable Cloudflare Python Worker project containing the operator-side implementations, customer-bound credentials, dual-TOTP verification, request-bound phone approval, replay rejection, revocation, rate limits, quotas, and metadata-only audit events | Implemented and locally validated through `pywrangler dev`; deployment remains operator-controlled |
 | `remote-cloudflare-name=NAME` | EXEC/REP | Selects the generated Cloudflare Worker name; defaults to `nixon-remote-service` | Implemented |
 
 This is not obfuscation. It is an architecture change: the client contains a
@@ -154,6 +154,38 @@ KV alone would be eventually consistent and is not used for those security
 invariants. Audit events deliberately omit arguments, keyword arguments,
 nonces, TOTP codes, HMAC secrets, TOTP seeds, and results.
 
+### Request-bound phone approval
+
+Typed TOTP is structurally copyable and not bound to the exact request, so
+the Worker also implements the stronger approval architecture. Each customer
+device enrols through a single-use token using a Worker-served page: the
+phone browser generates a non-extractable ECDSA P-256 key and only the public
+key reaches the server. Once a customer has an enrolled key, remote calls no
+longer execute on submission. The authenticated request is parked in the
+Durable Object, the phone page displays the function, customer, time, and
+argument preview, and the user approves or denies it. Approval signs the exact
+stored request hash; execution, nonce consumption, and quota accounting happen
+only after that signature verifies. The client artifact polls automatically,
+so no codes are typed at all.
+
+This fixes the two structural TOTP weaknesses for enrolled customers: there is
+no typed secret for malware to capture, and a signature for one request is
+useless for any other, so invisible piggybacking requires the user to approve
+each displayed operation. The policy is `NIXON_REMOTE_APPROVAL_MODE` =
+`enrolled` (default), `required`, or `off`; pending lifetime and backlog are
+bounded by `NIXON_REMOTE_APPROVAL_EXPIRY_SECONDS` (default 120) and
+`NIXON_REMOTE_MAX_PENDING` (default 8). Customers without an enrolled key keep
+the dual-TOTP path, and `NIXON_REMOTE_TOTP_WITH_APPROVAL=1` layers both for
+defense-in-depth. Operators can list and revoke device keys and disable or
+enable customers dynamically through the admin endpoint authenticated by the
+master-derived admin secret (`python3 -m obfuscator.cloudflare_remote
+admin-secret`).
+
+Approval does not attest the host and cannot stop a legitimate user from
+approving a malicious operation; it makes every execution individually visible
+and exactly bound, which is the maximum authentication-layer control available
+without hardware attestation.
+
 TOTP/customer inputs are application authentication inputs, not
 remote-function arguments. Protected applications may pass the reserved
 per-call keys `_nx_customer`, `_nx_totp`, and `_nx_totp_secondary`; the
@@ -175,20 +207,34 @@ customer-controlled machine. Because the customer-held derived HMAC secret is
 present in the client environment, it authenticates that customer but is not a
 secrecy boundary; a customer-machine attacker can invoke the service as an
 oracle while valid configuration exists. Customer isolation, quotas, rate
-limits, and revocation limit blast radius but cannot make the endpoint
-trustworthy. Dual TOTP raises oracle-access cost by requiring fresh factors,
-but TOTP is typed and not cryptographically bound to the exact request:
-malware can capture typed codes, race first use, or piggyback on legitimate approval; verified-code-pair replay is limited but first-use capture is not impossible. A future
-FIDO2/passkey design could provide request-bound approval, but it requires
-platform/hardware integration and does not by itself attest the host. The
-server also cannot prove the two TOTP seeds were enrolled on physically
-separate devices. Cloudflare remains trusted infrastructure, and unmarked
-plaintext client-side logic remains extractable. Cloudflare free-tier
-CPU/request limits make the target appropriate for lightweight functions rather
-than heavy computation or high-frequency loops. Validation evidence is in
-`../re-bench/ABSOLUTE_MAXIMUM_AM001_REMOTE_SPLIT_VALIDATION_20261127.md` and
+limits, revocation, and phone approval limit blast radius but cannot make the
+endpoint trustworthy. For enrolled customers, request-bound approval removes
+typed-code capture and request-independent reuse; what remains is that malware
+can spam approval requests (visible and rate-limited), a user can be deceived
+into approving a malicious operation, approval proves phone-key possession
+rather than host integrity, and intercepted unused enrolment tokens could enrol
+an attacker's device until operator audit and key revocation close the window.
+Cloudflare remains trusted infrastructure. Cloudflare free-tier CPU/request
+limits make the target appropriate for lightweight functions rather than heavy
+computation or high-frequency loops. Validation evidence is in
+`../re-bench/ABSOLUTE_MAXIMUM_AM001_REMOTE_SPLIT_VALIDATION_20261127.md`,
 `../re-bench/ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_TOTP_VALIDATION_20261127.md`,
-and `../re-bench/ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_HARDENING_VALIDATION_20261127.md`.
+`../re-bench/ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_HARDENING_VALIDATION_20261127.md`,
+and `../re-bench/ABSOLUTE_MAXIMUM_AM001_CLOUDFLARE_APPROVAL_VALIDATION_20261127.md`.
+
+### Migration guidance: what to move behind `@remote`
+
+The only complete fix for extractable client-side plaintext is execution
+removal. Mark a function `@remote` when it contains a genuinely confidential
+constant, pricing/scoring rule, license decision, or proprietary algorithm
+whose disclosure would matter. Keep it client-side when it is non-sensitive,
+when it must run offline, or when it sits in a tight high-frequency loop where
+network latency and free-tier quotas dominate. Marked functions must be
+self-contained and return small JSON-compatible values; batching several
+decisions into one remote call is usually the right granularity. Functions
+that are merely inconvenient to reverse, rather than truly secret, are often
+better left client-side under the other transforms, because every remote call
+costs latency, quota, and an approval tap when phone approval is enabled.
 
 ---
 
