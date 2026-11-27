@@ -48,7 +48,7 @@ jobs:
       NIXON_LOG_REDIRECT: "0"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # pinned immutable; original actions/checkout@v4
-      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # pinned immutable; original actions/setup-python@v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # pinned immutable; original actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Install build dependencies
