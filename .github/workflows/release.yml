@@ -115,6 +115,15 @@ jobs:
                       "payload_probe_protected.py.build-manifest.json" in files:
                   art = os.path.join(root, "payload_probe_protected.py")
                   break
+          if not art:
+              # Diagnose, don't just fail: report what the build actually
+              # produced so the lane failure names the real defect.
+              found = []
+              for root, _dirs, files in os.walk("."):
+                  for f in files:
+                      if "protected" in f or "manifest" in f:
+                          found.append(os.path.join(root, f))
+              print("build rc was 0; protected/manifest files present:", found[:10])
           assert art, "no artefact produced"
           published = open(art, "rb").read()
           digest = hashlib.sha256(published).hexdigest()

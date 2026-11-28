@@ -45,7 +45,10 @@ jobs:
         # canonical entry point is scripts/build.py (shadow-compiler 2.0.0).
         # Payload is the checked-in examples/hello.py fixture (there is no
         # repo-root payload.py; a missing payload would fail the stage).
-        run: python3 scripts/build.py --payload examples/hello.py --skip relay extras
+        # irgen/llvmgen/encrypt MUST be skipped here: the lane re-runs them
+        # manually in later steps, and a second encrypt hits the key sidecar's
+        # O_EXCL write (FileExistsError: build/encrypted.o.key) -- measured.
+        run: python3 scripts/build.py --payload examples/hello.py --skip irgen llvmgen encrypt relay extras
 
       - name: Stage 2 - IR Compile
         # scripts/build.py stages .build_tmp_<stem>_obfuscated.py and the
