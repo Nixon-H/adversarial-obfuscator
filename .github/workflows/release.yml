@@ -214,6 +214,7 @@ jobs:
           name: release-candidate
           path: |
             accepted_artefact.py
+            accepted_artefact.py.build-manifest.json
             accepted_digest.txt
             acceptance_report.json
           retention-days: 7

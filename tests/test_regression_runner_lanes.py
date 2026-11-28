@@ -202,3 +202,28 @@ def test_stego_flag_is_registered():
          "/nonexistent/probe.py", "--stego"],
         capture_output=True, text=True, timeout=60, cwd=_ROOT)
     assert "unrecognized arguments" not in (r.stderr or "")
+
+
+def test_release_upload_includes_everything_publish_reads():
+    """The publish job re-verifies the accepted artefact chain: it reads
+    accepted_artefact.py.build-manifest.json, but the upload step only
+    shipped the artefact, digest, and report. The manifest never crossed
+    the job boundary -- FileNotFoundError in publish, measured 2026-11-28.
+    Invariant: every accepted_* file the publish verification opens must
+    appear in the upload path list."""
+    import re
+    text = open(os.path.join(_ROOT, ".github", "workflows", "release.yml"),
+                encoding="utf-8").read()
+    upload_block = re.search(
+        r"Upload immutable release artefact.*?path: \|(.*?)\n\s+retention",
+        text, re.S)
+    assert upload_block, "upload step not found"
+    uploaded = set(re.findall(r"(accepted_\S+)", upload_block.group(1)))
+    publish_section = text.split("publish:", 1)[1]
+    reads = set(re.findall(r'open\("(accepted_[^"]+)"', publish_section))
+    reads |= set(re.findall(r"verify_manifest\(\"(accepted_[^\"]+)\"", publish_section))
+    manifest_reads = {r.replace(".py", ".py.build-manifest.json")
+                      if r.endswith(".py") and "manifest" not in r else r
+                      for r in reads}
+    missing = manifest_reads - uploaded
+    assert not missing, f"publish reads files the upload never ships: {missing}"
