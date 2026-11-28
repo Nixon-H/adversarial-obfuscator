@@ -164,7 +164,7 @@ Every option `python3 -m obfuscator.core.pipeline build` accepts, generated from
 `scripts/gen_cli_reference.py` and checked by `tests/test_readme_matches_cli.py`,
 so it cannot drift. Editorial notes are marked where a flag is inert or archived.
 
-**36 options.**
+**37 options.**
 
 ### Input, output and build control
 
@@ -208,6 +208,7 @@ so it cannot drift. Editorial notes are marked where a flag is inert or archived
 | `--python PYTHON` | Python version for GitHub Actions (Defaults to local) |
 | `--resume RESUME` | Resume waiting for a specific GitHub Run ID (skip upload) |
 | `--section-count SECTION_COUNT` | Number of sealed sections when section splitting is on (default 4) |
+| `--section-split` | Section splitting is ON by default; this flag only re-enables it explicitly after --no-section-split |
 | `--tor` | Route build traffic through Tor (default 127.0.0.1:9050; override via --tor-proxy or NIXON_TOR_PROXY) |
 | `--tor-proxy TOR_PROXY` | Tor SOCKS endpoint host:port (default 127.0.0.1:9050; env NIXON_TOR_PROXY) |
 

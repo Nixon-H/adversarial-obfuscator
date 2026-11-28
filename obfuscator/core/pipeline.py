@@ -8288,6 +8288,10 @@ def build_parser():
                             'NIXON_DUMP_RAW=1). Off by default: a normal artifact has '
                             'no such capability')
     build.add_argument('--tls-ca-bundle', help='PEM CA bundle for the emitted key fetch. The artifact verifies the certificate chain AND the hostname against the system trust store plus this CA (it never disables verification)')
+    build.add_argument('--section-split', dest='section_split', action='store_true',
+                       default=True,
+                       help='Section splitting is ON by default; this flag only '
+                            're-enables it explicitly after --no-section-split')
     build.add_argument('--no-section-split', dest='section_split', action='store_false',
                        help='Ship the payload as a single blob instead of N sealed sections (default: sections are on)')
     build.add_argument('--section-count', type=int, default=4, help='Number of sealed sections when section splitting is on (default 4)')
