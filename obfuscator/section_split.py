@@ -740,13 +740,27 @@ def stream_join_sealed(pack: dict, key: bytes,
     joined = stream_join(pack, key)
     if len(joined):
         try:
-            return seal_joined(joined, protect=protect)
+            sealed = seal_joined(joined, protect=protect)
         except Exception:
-            pass
-        protect_after_load(joined, protect=protect)
-    # Empty (or unsealable) payload: no mmap-able region exists, so return
-    # a zero-length sealed view over a placeholder mapping. Loads never
-    # break because of hardening.
+            sealed = None
+        if sealed is not None:
+            # ``joined`` is only the intermediate copy: the sealed mapping
+            # now owns the plaintext, so the temporary does not linger in
+            # the heap after this function returns.
+            joined[:] = b"\x00" * len(joined)
+            return sealed
+        # Hardening/allocating the dedicated mapping must not break the
+        # load. Fall back to a read-only view over the joined bytearray
+        # itself; the data still reaches the caller when mprotect (or the
+        # mapping allocation) is unavailable.
+        readonly = protect_after_load(joined, protect=protect)
+        view = memoryview(joined).toreadonly()
+        sealed = SealedSection(joined, view, len(joined))
+        sealed.readonly = bool(readonly)
+        return sealed
+    # Empty payload: no mmap-able region exists, so return a zero-length
+    # sealed view over a placeholder mapping. Loads never break because of
+    # hardening.
     mapping = _alloc_private(1)
     view = memoryview(mapping)[:0].toreadonly()
     sealed = SealedSection(mapping, view, 0)
@@ -1059,6 +1073,7 @@ LOADER_STREAM_SOURCE = '''def {FUNC}(pack_b85, key):
         # The compression backend is chosen by the first plaintext byte, so
         # it can only be selected once the first section is decrypted.
         dec = None
+        zstd_stream = False
         out = bytearray()
         total = 0
         _per_section = bool(pack.get("per_section"))
@@ -1126,6 +1141,18 @@ LOADER_STREAM_SOURCE = '''def {FUNC}(pack_b85, key):
                         dec = _nx_sbz2.BZ2Decompressor()
                     elif first == 0x02:
                         dec = _nx_slz.LZMADecompressor()
+                    elif first == 0x03:
+                        # zstd is optional (the builder only selects it when
+                        # pyzstd was importable), but when it was selected the
+                        # streaming path must decode the SAME backend rather
+                        # than falling into the legacy-zlib branch.
+                        try:
+                            import pyzstd as _nx_szstd  # type: ignore
+                        except ImportError:
+                            raise ValueError(
+                                "zstd section stream but pyzstd is not installed")
+                        dec = _nx_szstd.ZstdDecompressor()
+                        zstd_stream = True
                     elif first == 0x00:
                         dec = _nx_szl.decompressobj()
                     else:
@@ -1141,11 +1168,18 @@ LOADER_STREAM_SOURCE = '''def {FUNC}(pack_b85, key):
             total += len(part)
         if total != pack["total"]:
             return None
-        # Flush whatever the incremental decompressor is still holding.
-        try:
-            out.extend(dec.flush())
-        except Exception:
-            pass
+        # Finish/validate the stream. zstd's incremental decompressor has no
+        # flush(); its output has already been produced incrementally and the
+        # frame-end bit is the integrity check. The stdlib backends use the
+        # flush shape where they provide one (zlib does; bz2/lzma do not).
+        if zstd_stream:
+            if not getattr(dec, "eof", False):
+                raise ValueError("truncated zstd section stream")
+        else:
+            try:
+                out.extend(dec.flush())
+            except Exception:
+                pass
         return out
     except Exception:
         return None

@@ -119,8 +119,11 @@ def canary_tokens(rng: random.Random, count: int = 3) -> List[str]:
     """
     out = []
     for i in range(count):
-        body = "".join(rng.choice(string.ascii_uppercase) for _ in range(4))
-        out.append("AKIA%s%04dEXAMPLE" % (body, i))
+        # AWS access-key-shaped examples are 20 chars: AKIA + 16 upper/digit
+        # chars. The EXAMPLE suffix accounts for seven of those sixteen, so
+        # the random/digit body must supply the other nine (5 + 4 here).
+        body = "".join(rng.choice(string.ascii_uppercase) for _ in range(5))
+        out.append("AKIA%s%04dEXAMPLE" % (body, i % 10000))
     if count > 0:
         # Was unconditional, so canary_tokens(count=0) still returned one token.
         out.append("bla_canary_synthetic_%08x" % rng.getrandbits(32))
