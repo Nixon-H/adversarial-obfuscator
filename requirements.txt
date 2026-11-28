@@ -11,7 +11,7 @@ numpy==2.2.4; python_version < "3.12"  # Optional — HAS_NUMPY check; legacy fl
 numpy==2.5.5; python_version >= "3.12"  # Optional — HAS_NUMPY check; used if present for numeric obf
 
 # ─── Build (C extension compilation) ─────────────────────────────────────────
-Cython==3.3.1           # C extension compilation (GitHubBuildFarm → .pyd/.so/.dylib)
+Cython==3.3.2           # C extension compilation (GitHubBuildFarm → .pyd/.so/.dylib)
 setuptools==84.2.1       # build backend required by the Cython/setup.py path
                          # (kernel_gen.cythonize_kernel, scripts/phases/phase_pytoc.py)
                          # PINNED, was `>=68.0.0`: a floating floor cannot be
