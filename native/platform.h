@@ -1,6 +1,11 @@
 #ifndef PLATFORM_H
 #define PLATFORM_H
 
+/* size_t is used below; the header must be self-contained so a consumer may
+ * include it first (it previously relied on whoever included it having
+ * already pulled in a definition, and failed to compile standalone). */
+#include <stddef.h>
+
 /* Platform detection */
 #if defined(_WIN32) || defined(_WIN64)
     #define PLATFORM_WINDOWS 1

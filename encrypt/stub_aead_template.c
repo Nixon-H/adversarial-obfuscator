@@ -225,7 +225,18 @@ __attribute__((used, noinline)) static int decrypt_and_jump(u64 base, u64 saved_
     }
     u64 text_only_end = (text_base + text_size + 0xfff) & ~0xfffULL;
     sys_call6(10, text_page, text_only_end - text_page, 5, 0, 0, 0);
-    __asm__ volatile("" : : "r"(key) : "memory");
+    /* Wipe the runtime key and the Poly1305 one-time key before jumping into
+     * the payload: the sidecar key is the artifact's only secret and must not
+     * survive in stack memory past its last use. Volatile byte stores so the
+     * compiler cannot elide the wipes (the empty asm barrier that used to be
+     * here constrained nothing and zeroed nothing). */
+    {
+        volatile u8 *vk = (volatile u8 *)key;
+        for (u64 i = 0; i < sizeof(key); ++i) vk[i] = 0;
+        volatile u8 *vp = (volatile u8 *)poly_key;
+        for (u64 i = 0; i < sizeof(poly_key); ++i) vp[i] = 0;
+    }
+    __asm__ volatile("" : : : "memory");
     typedef int (*entry_fn)(void);
     entry_fn target = (entry_fn)(text_base + entry);
     if (tail) {

@@ -165,23 +165,33 @@ static int simd_dispatch_sse(SimdVmState *vm, const uint8_t *opcodes, size_t num
     size_t pc = vm->pc;
     while (pc < num_opcodes && !vm->halted && vm->regs[14] < num_opcodes) {
         if (pc + 16 <= num_opcodes) {
+            /* Batch-read a 16-byte window anchored at pc. Instructions are
+             * variable-length, so pc must advance by each handler's instruction
+             * length -- the old loop stepped pc one byte per iteration in
+             * lockstep with the window index, re-executing operand bytes as
+             * opcodes and diverging from the scalar semantics on every
+             * multi-byte instruction. The window is re-anchored whenever pc
+             * leaves it; opcode bytes are fetched by their offset from the
+             * anchor, which stays exact across multi-byte advances. */
             __m128i chunk = _mm_loadu_si128((const __m128i*)(opcodes + pc));
             uint8_t temp[16];
             _mm_storeu_si128((__m128i*)temp, chunk);
-
-            for (int j = 0; j < 16 && pc < num_opcodes && !vm->halted; j++, pc++) {
-                uint8_t op = temp[j];
+            size_t base = pc;
+            while (pc - base < 16 && pc < num_opcodes && !vm->halted
+                   && vm->regs[14] < num_opcodes) {
+                uint8_t op = temp[pc - base];
                 op = (op < SIMD_VM_MAX_HANDLERS) ? op : 0;
                 simd_handler_fn handler = vm->handlers[op];
-                if (handler) {
-                    if (pc + handler_operand_bytes[op] > num_opcodes) {
-                        vm->halted = 1;
-                        break;
-                    }
-                    handler(vm->regs, opcodes, pc);
-                } else {
+                if (!handler) {
                     vm->halted = 1;
+                    break;
                 }
+                if (pc + handler_operand_bytes[op] > num_opcodes) {
+                    vm->halted = 1;
+                    break;
+                }
+                int advance = handler(vm->regs, opcodes, pc);
+                pc += (size_t)advance;
             }
         } else {
             uint8_t op = opcodes[pc];
@@ -192,11 +202,11 @@ static int simd_dispatch_sse(SimdVmState *vm, const uint8_t *opcodes, size_t num
                     vm->halted = 1;
                     break;
                 }
-                handler(vm->regs, opcodes, pc);
+                int advance = handler(vm->regs, opcodes, pc);
+                pc += (size_t)advance;
             } else {
                 vm->halted = 1;
             }
-            pc++;
         }
     }
     vm->pc = pc;
