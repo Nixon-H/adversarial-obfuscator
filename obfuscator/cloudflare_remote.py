@@ -46,10 +46,12 @@ from workers import DurableObject, Response, WorkerEntrypoint
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import math
 import struct
 import time
+import urllib.parse
 
 import remote_impl as _remote_impl
 
@@ -474,8 +476,43 @@ def _webauthn_challenge(message):
     return _b64url_encode(hashlib.sha256(bytes(message)).digest())
 
 
-def _check_client_data(client_raw, expected_type, expected_message):
-    """Validate clientDataJSON structure and exact challenge binding."""
+def _valid_client_origin(origin, rp_id):
+    """Validate the exact web origin authorised to use this service's keys.
+
+    WebAuthn scopes credentials by relying-party domain, but the origin check
+    is still mandatory: it prevents a ceremony relayed from an unexpected
+    scheme/host (including a lookalike subdomain deployment) from being accepted
+    by this relying party. Production requires HTTPS; plain HTTP is accepted
+    only for loopback local development, matching the WebAuthn secure-origin
+    exception.
+    """
+    if not isinstance(origin, str) or not origin or len(origin) > 200:
+        return False
+    try:
+        parts = urllib.parse.urlsplit(origin)
+        parts.port  # property access raises ValueError for a malformed port
+    except Exception:
+        return False
+    if parts.query or parts.fragment or parts.path not in ("", "/"):
+        return False
+    if parts.username is not None or parts.password is not None:
+        return False
+    host = str(parts.hostname or "").lower()
+    expected = str(rp_id or "").lower()
+    if not host or not expected or host != expected:
+        return False
+    if parts.scheme == "https":
+        return True
+    if parts.scheme != "http":
+        return False
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host == "localhost"
+
+
+def _check_client_data(client_raw, expected_type, expected_message, rp_id):
+    """Validate clientDataJSON structure, origin, and exact challenge binding."""
     try:
         client = json.loads(bytes(client_raw).decode("utf-8"))
     except Exception:
@@ -484,7 +521,11 @@ def _check_client_data(client_raw, expected_type, expected_message):
         return False
     if client.get("type") != expected_type:
         return False
-    challenge = str(client.get("challenge", ""))
+    if not _valid_client_origin(client.get("origin"), rp_id):
+        return False
+    challenge = client.get("challenge", "")
+    if not isinstance(challenge, str):
+        return False
     return hmac.compare_digest(challenge, _webauthn_challenge(expected_message))
 
 
@@ -497,7 +538,8 @@ def _parse_attestation(attestation_raw, client_raw, expected_message, rp_id):
     the single-use token rather than authenticator provenance. What matters
     is the credential public key, the RP binding and user verification.
     """
-    if not _check_client_data(client_raw, "webauthn.create", expected_message):
+    if not _check_client_data(
+            client_raw, "webauthn.create", expected_message, rp_id):
         raise ValueError("client data")
     try:
         top, end = _cbor_decode(bytes(attestation_raw))
@@ -560,7 +602,8 @@ async def _webauthn_verify(key_doc, doc, expected_message, rp_id):
     flags = auth_data[32]
     if not (flags & 0x01) or not (flags & 0x04):
         return False, "user verification required"
-    if not _check_client_data(client_raw, "webauthn.get", expected_message):
+    if not _check_client_data(
+            client_raw, "webauthn.get", expected_message, rp_id):
         return False, "challenge"
     raw64 = _der_to_raw64(signature_raw)
     if raw64 is None:
@@ -628,11 +671,11 @@ _WPGX = 0x6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296
 _WPGY = 0x4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5
 
 
-def _wp_wp_inv(x, m):
+def _wp_inv(x, m):
     return pow(x, m - 2, m)
 
 
-def _wp_wp_add(p1, p2):
+def _wp_add(p1, p2):
     if p1 is None:
         return p2
     if p2 is None:
@@ -650,7 +693,7 @@ def _wp_wp_add(p1, p2):
     return (x3, y3)
 
 
-def _wp_wp_mul(k, point):
+def _wp_mul(k, point):
     result = None
     addend = point
     while k:
@@ -661,38 +704,39 @@ def _wp_wp_mul(k, point):
     return result
 
 
-def _b64u(raw: bytes) -> str:
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+def _wp_b64u(raw):
+    return base64.urlsafe_b64encode(bytes(raw)).rstrip(b"=").decode("ascii")
 
 
-def _b64u_dec(text: str) -> bytes:
-    pad = "=".repeat(0) if False else "=" * ((4 - len(text) % 4) % 4)
+def _wp_b64u_dec(text):
+    pad = "=" * ((4 - len(text) % 4) % 4)
     return base64.urlsafe_b64decode(text + pad)
 
 
-def _wp__wp_es256_sign(private_key_b64u: str, message: bytes) -> bytes:
-    """Sign ``message`` with ES256 (ECDSA over P-256 with SHA-256) and return
-    the JWS raw concatenated r||s signature. Uses RFC 6979 deterministic
-    nonces so signatures are reproducible and side-channel-resistant."""
-    d = int.from_bytes(_b64u_dec(private_key_b64u), "big")
-    z = int.from_bytes(hashlib.sha256(message).digest(), "big")
-    # RFC 6979 deterministic k generation
+def _wp_es256_sign(private_key_b64u, message):
+    """Sign ``message`` with ES256 and return the JWS raw r||s signature.
+
+    RFC 6979 deterministic nonces avoid a runtime randomness dependency in the
+    Worker and make the signature reproducible for a fixed key and message.
+    """
+    d = int.from_bytes(_wp_b64u_dec(private_key_b64u), "big")
+    z = int.from_bytes(hashlib.sha256(bytes(message)).digest(), "big")
     x = d.to_bytes(32, "big")
-    h1 = hashlib.sha256(message).digest()
+    h1 = hashlib.sha256(bytes(message)).digest()
     v = b"\x01" * 32
     k = b"\x00" * 32
-    k = _hmac.new(k, v + b"\x00" + x + h1, hashlib.sha256).digest()
-    v = _hmac.new(k, v, hashlib.sha256).digest()
-    k = _hmac.new(k, v + b"\x01" + x + h1, hashlib.sha256).digest()
-    v = _hmac.new(k, v, hashlib.sha256).digest()
+    k = hmac.new(k, v + b"\x00" + x + h1, hashlib.sha256).digest()
+    v = hmac.new(k, v, hashlib.sha256).digest()
+    k = hmac.new(k, v + b"\x01" + x + h1, hashlib.sha256).digest()
+    v = hmac.new(k, v, hashlib.sha256).digest()
     while True:
-        v = _hmac.new(k, v, hashlib.sha256).digest()
+        v = hmac.new(k, v, hashlib.sha256).digest()
         candidate = int.from_bytes(v, "big")
         if 1 <= candidate < _WPN:
             kk = candidate
             break
-        k = _hmac.new(k, v + b"\x00", hashlib.sha256).digest()
-        v = _hmac.new(k, v, hashlib.sha256).digest()
+        k = hmac.new(k, v + b"\x00", hashlib.sha256).digest()
+        v = hmac.new(k, v, hashlib.sha256).digest()
     point = _wp_mul(kk, (_WPGX, _WPGY))
     r = point[0] % _WPN
     s = (_wp_inv(kk, _WPN) * (z + r * d)) % _WPN
@@ -701,60 +745,41 @@ def _wp__wp_es256_sign(private_key_b64u: str, message: bytes) -> bytes:
     return r.to_bytes(32, "big") + s.to_bytes(32, "big")
 
 
-def _wp__wp_vapid_jwt(private_key_b64u: str, audience: str, subject: str,
-              lifetime: int = 43200) -> str:
+def _wp_vapid_jwt(private_key_b64u, audience, subject, lifetime=43200):
     """Build a VAPID ES256 JWT for the push service ``audience``."""
-    header = _b64u(json.dumps({"typ": "JWT", "alg": "ES256"},
-                              separators=(",", ":")).encode())
+    header = _wp_b64u(json.dumps({"typ": "JWT", "alg": "ES256"},
+                                 separators=(",", ":")).encode())
     now = int(time.time())
-    claims = _b64u(json.dumps(
+    claims = _wp_b64u(json.dumps(
         {"aud": audience, "exp": now + lifetime, "sub": subject},
         separators=(",", ":")).encode())
     signing_input = (header + "." + claims).encode("ascii")
-    return header + "." + claims + "." + _b64u(_wp_es256_sign(private_key_b64u, signing_input))
+    signature = _wp_es256_sign(private_key_b64u, signing_input)
+    return header + "." + claims + "." + _wp_b64u(signature)
 
 
-def send_tickle(endpoint: str, vapid_private_b64u: str, vapid_public_b64u: str,
-                subject: str, ttl: int = 900, timeout: float = 15.0) -> int:
-    """POST an empty-body push to the subscription endpoint. Returns the push
-    service HTTP status. Raises nothing: callers treat non-2xx as a dead or
-    transient subscription and never let push failures affect execution."""
-    parts = urllib.parse.urlparse(endpoint)
-    audience = "%s://%s" % (parts.scheme, parts.netloc)
-    token = _wp_vapid_jwt(vapid_private_b64u, audience, subject)
-    headers = {
-        "TTL": str(int(ttl)),
-        "Content-Length": "0",
-        "Authorization": "vapid t=%s, k=%s" % (token, vapid_public_b64u),
-        "User-Agent": "nixon-remote-approval/1",
-    }
-    request = urllib.request.Request(endpoint, data=b"", method="POST",
-                                     headers=headers)
+async def _webpush_tickle(endpoint, private, public, subject, ttl=900):
+    """POST an empty-body push tickle to one subscription endpoint.
+
+    Returns the push-service HTTP status, or 0 for a local/transient failure.
+    Push is best-effort by design: every failure is contained here so approval
+    submission remains fail-closed rather than dependent on a push service.
+    The Workers fetch API is required here; raw-socket urllib clients are not
+    available inside the Python Worker isolate.
+    """
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return int(response.status)
-    except urllib.error.HTTPError as exc:
-        return int(exc.code)
-
-
-def _webpush_tickle(endpoint, private, public, subject, ttl=900):
-    """POST an empty-body push tickle to one subscription endpoint."""
-    import urllib.parse as _up
-    import urllib.request as _ur
-    parts = _up.urlparse(endpoint)
-    audience = "%s://%s" % (parts.scheme, parts.netloc)
-    token = _wp_vapid_jwt(private, audience, subject)
-    request = _ur.Request(endpoint, data=b"", method="POST", headers={
-        "TTL": str(int(ttl)),
-        "Content-Length": "0",
-        "Authorization": "vapid t=%s, k=%s" % (token, public),
-        "User-Agent": "nixon-remote-approval/1",
-    })
-    try:
-        with _ur.urlopen(request, timeout=8.0) as response:
-            return int(response.status)
+        from workers import fetch as _workers_fetch
+        parts = urllib.parse.urlparse(endpoint)
+        audience = "%s://%s" % (parts.scheme, parts.netloc)
+        token = _wp_vapid_jwt(private, audience, subject)
+        response = await _workers_fetch(endpoint, method="POST", headers={
+            "TTL": str(int(ttl)),
+            "Authorization": "vapid t=%s, k=%s" % (token, public),
+            "User-Agent": "nixon-remote-approval/1",
+        })
+        return int(response.status)
     except Exception as exc:
-        code = getattr(exc, "code", None)
+        code = getattr(exc, "code", getattr(exc, "status", None))
         if code is not None:
             return int(code)
         return 0
@@ -1779,6 +1804,9 @@ class Default(WorkerEntrypoint):
         stub = self._security_stub()
         if stub is None:
             return _response({"error": "remote replay protection is not configured"})
+        if await self._revoked(customer, stub):
+            _audit("revoked", customer, "", "pending-disabled")
+            return _response({"error": "remote customer access revoked"})
         key_doc, state = await self._active_key(stub, customer, key_id)
         if state == "unavailable":
             return _response({"error": "remote replay protection unavailable"})
@@ -1845,6 +1873,9 @@ class Default(WorkerEntrypoint):
         stub = self._security_stub()
         if policy is None or stub is None:
             return _response({"error": "remote replay protection is not configured"})
+        if await self._revoked(customer, stub):
+            _audit("revoked", customer, "", "approval-disabled")
+            return _response({"error": "remote customer access revoked"})
         key_doc, state = await self._active_key(stub, customer, key_id)
         if state == "unavailable":
             return _response({"error": "remote replay protection unavailable"})
@@ -1901,6 +1932,7 @@ class Default(WorkerEntrypoint):
         args = request_doc.get("args", [])
         kwargs = request_doc.get("kwargs", {})
         nonce = request_doc.get("nonce", "")
+        totp_fingerprint = request_doc.get("totp_fingerprint", "")
         anomalies = decided.get("anomalies") or []
         if anomalies:
             # Alert-only: detection never blocks execution, but every anomalous
@@ -1911,12 +1943,16 @@ class Default(WorkerEntrypoint):
         result_doc = None
         try:
             consume = await stub.check_and_store(
-                nonce, now, customer, policy["rate_limit"], policy["quota"], "", 1)
+                nonce, now, customer, policy["rate_limit"], policy["quota"],
+                str(totp_fingerprint or ""), policy["pair_max_uses"])
         except Exception:
             return _response({"error": "remote replay protection unavailable"})
         if consume == "replayed":
             _audit("rejected", customer, function, "replay")
             result_doc = {"error": "remote request replayed"}
+        elif consume == "totp-replayed":
+            _audit("rejected", customer, function, "totp-replay")
+            result_doc = {"error": "remote authenticator code replayed"}
         elif consume == "rate-limit":
             _audit("rate-limited", customer, function)
             result_doc = {"error": "remote request rate limit exceeded"}
@@ -1990,7 +2026,7 @@ class Default(WorkerEntrypoint):
         subject = _env(self.env, "NIXON_VAPID_SUBJECT") or "mailto:ops@localhost"
         for endpoint in endpoints:
             try:
-                status = _webpush_tickle(endpoint, private, public, subject)
+                status = await _webpush_tickle(endpoint, private, public, subject)
             except Exception:
                 continue
             if status in (404, 410):
@@ -2007,6 +2043,8 @@ class Default(WorkerEntrypoint):
         stub = self._security_stub()
         if stub is None:
             return _response({"error": "remote replay protection is not configured"})
+        if await self._revoked(customer, stub):
+            return _response({"error": "remote customer access revoked"})
         try:
             out = json.loads(await stub.poll_pending(approval_id, customer, time.time()))
         except Exception:
@@ -2207,6 +2245,11 @@ class Default(WorkerEntrypoint):
             stored = dict(doc)
             stored.pop("totp", None)
             stored.pop("totp_secondary", None)
+            if totp_fingerprint:
+                # Store only the HMAC fingerprint, never the short-lived codes.
+                # Approval execution can then enforce the same pair replay limit
+                # that direct execution enforces.
+                stored["totp_fingerprint"] = totp_fingerprint
             try:
                 request_json = json.dumps(
                     stored, allow_nan=False, separators=(",", ":"))
