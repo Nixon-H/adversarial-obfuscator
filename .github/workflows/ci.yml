@@ -218,10 +218,23 @@ jobs:
                              capture_output=True, text=True, timeout=1500)
           assert b.returncode == 0, "build failed: " + (b.stderr or "")[-500:]
           staging = None
+          # The artefact is named after the payload stem (payload_probe.py
+          # builds payload_probe_protected.py), and the manifest check must
+          # name the real sidecar file: ".build-manifest.json" as a bare
+          # membership test can never match anything.
+          art = None
           for root, _dirs, files in os.walk("."):
-              if "payload_protected.py" in files and ".build-manifest.json" in files:
-                  art = os.path.join(root, "payload_protected.py")
+              if "payload_probe_protected.py" in files and \
+                      "payload_probe_protected.py.build-manifest.json" in files:
+                  art = os.path.join(root, "payload_probe_protected.py")
                   break
+          if not art:
+              found = []
+              for root, _dirs, files in os.walk("."):
+                  for f in files:
+                      if "protected" in f or "manifest" in f:
+                          found.append(os.path.join(root, f))
+              print("build rc was 0; protected/manifest files present:", found[:10])
           assert art, "no artefact + manifest produced"
           published = open(art, "rb").read()
           rec("build: signed artefact from clean checkout", True, "%d bytes" % len(published))
