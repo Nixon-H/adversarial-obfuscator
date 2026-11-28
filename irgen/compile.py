@@ -578,6 +578,9 @@ BUILTIN_RETURN_TYPES = {
 }
 
 
+_NoFold = object()
+
+
 class UnresolvedNameError(ValueError):
     """Raised when the IR cannot represent a name in the source.
 
@@ -1353,6 +1356,24 @@ class IrCompiler:
                     exprs[target.id] = stmt.value
         return exprs
 
+    def _fold_pure_constant(self, node):
+        """Evaluate a node made only of constants and pure operators.
+
+        Returns _NoFold for anything else -- names, calls, subscripts,
+        attribute access -- so nothing user-controlled is ever eval'd.
+        """
+        _ok = (ast.Constant, ast.BinOp, ast.UnaryOp, ast.Compare, ast.BoolOp,
+               ast.Expression, ast.Load, ast.operator, ast.unaryop,
+               ast.cmpop, ast.boolop)
+        for child in ast.walk(node):
+            if not isinstance(child, _ok):
+                return _NoFold
+        try:
+            return eval(compile(ast.Expression(node), "<fold>", "eval"),
+                        {"__builtins__": {}}, {})
+        except Exception:
+            return _NoFold
+
     def _record_const_assign(self, stmt):
         """Remember a literal binding, so a closure can read it.
 
@@ -1363,7 +1384,17 @@ class IrCompiler:
         """
         value = stmt.value
         if not isinstance(value, ast.Constant):
-            return
+            # Fold pure constant expressions: transforms emit bindings like
+            # `_nx_opaque = 315 % 2 == 1` whose value is compile-time fixed
+            # but syntactically not a Constant. A closure reading the name
+            # then resolved to nothing and strict mode raised
+            # UnresolvedNameError (shadow-build lane, measured 2026-11-28).
+            # Only nodes made of constants and operators are folded -- no
+            # names, no calls, nothing with side effects.
+            folded = self._fold_pure_constant(value)
+            if folded is _NoFold:
+                return
+            value = ast.Constant(value=folded)
         if not (isinstance(value.value, (int, float, str, bool))
                 or value.value is None):
             return
