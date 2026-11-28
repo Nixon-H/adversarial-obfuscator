@@ -133,11 +133,17 @@ def encrypt_strings(source: str, seed: bytes,
         "static const unsigned char __nx_str_key[] = %s;\n"
         "static void __nx_decrypt_strings(void) {\n" % mkey
     )
-    for idx, (name, ln, _lit, _s, _e) in enumerate(entries):
+    for name, ln, _lit, _s, _e in entries:
+        # The keystream index MUST match the encryption side exactly:
+        # encryption XORs byte i with key[i % len(key)]. The decrypt loop
+        # used to add a per-entry offset ((idx * 7) % len(key)) that
+        # encryption never applied, so every array after the first
+        # decrypted to garbage and the payload's strings were corrupted
+        # at run time.
         decrypt_fn += (
             "    { for (int _i = 0; _i < %d; _i++) %s[_i] ^= "
-            "__nx_str_key[(_i + %d) %% %d]; }\n"
-            % (ln, name, idx * 7 % len(key), len(key))
+            "__nx_str_key[_i %% %d]; }\n"
+            % (ln, name, len(key))
         )
     decrypt_fn += "}\n"
     # Insert the decrypt function AFTER all __pyx_k definitions (it

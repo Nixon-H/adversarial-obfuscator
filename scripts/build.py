@@ -1547,6 +1547,14 @@ in config/default.json.
     # Stage 1.7: Multi-Agent Deception Storylines
     # =======================================================================
 
+    # Stages 1.7-1.10 were indented one level too deep, which nested them
+    # inside the `if opts.speculation_obfuscation` block above: the
+    # multi-agent deception, LLM-fingerprint, reasoning-trap and
+    # function-intent passes only ran when --transforms speculation was
+    # also enabled, and were silently inert otherwise -- including on a
+    # default maximum anti-REA build, which arms them. They are gated by
+    # their own flags and by skip_obfuscate, nothing else.
+    if not opts.skip_obfuscate:
         if opts.multi_agent_deception:
             log("STORYLINES", "Injecting multi-agent deception storylines...")
             try:

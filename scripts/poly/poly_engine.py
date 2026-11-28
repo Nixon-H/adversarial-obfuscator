@@ -151,8 +151,21 @@ __ct = \"{encrypted_b64}\"
 
 if __env_ok:
     __d = base64.b64decode(__ct)
-    __k = hashlib.sha256(__key + b\"{fp}\").digest()
-    __pt = bytes(__d[i] ^ __k[i % len(__k)] for i in range(len(__d)))
+    # Counter-mode keystream, identical to encrypt_for_environment:
+    # key_material is key(32) + iv(16); the stream is sha256(key+iv+counter)
+    # blocks truncated to the ciphertext length. The previous version XORed
+    # with sha256(key_material + fingerprint) repeated every 32 bytes, which
+    # is a DIFFERENT stream than encryption produced -- decryption never
+    # recovered the plaintext, in ANY environment.
+    __k = __key[:32]
+    __iv = __key[32:]
+    __ks = b\"\"
+    __ctr = 0
+    while len(__ks) < len(__d):
+        __ks += hashlib.sha256(__k + __iv + struct.pack(\">Q\", __ctr)).digest()
+        __ctr += 1
+    __ks = __ks[:len(__d)]
+    __pt = bytes(__d[i] ^ __ks[i] for i in range(len(__d)))
 else:
     __d = base64.b64decode(__ct)
     __pt = os.urandom(len(__d))
