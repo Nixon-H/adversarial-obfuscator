@@ -13,7 +13,7 @@ do not commit (orchestrator commits after verification).
 | shard | scope | lines | status | findings |
 |---|---|---|---|---|
 | A1 | obfuscator/core/pipeline.py | 9178 | DONE committed | 11 fixed: http-status-as-success, kill-ladder ordering, unsafe mprotect, wipe-copies-not-live, KeyboardInterrupt swallow, self-check token bypass, non-constant-time HMAC, template re-substitution, hwid fail-open, geofence wiring, mutation fail-open |
-| A2 | obfuscator/core/sources.py | 7721 | QUEUED | - |
+| A2 | obfuscator/core/sources.py | 7721 | DONE committed | 9 fixed: exception-flow capture, crypto downgrade, OP_HASH stale operand, Shamir NameError, non-ASCII MIME, fragmented string corruption, ORAM OOB, hwid binding broken paths |
 | A3 | obfuscator/core/transforms.py + utils.py | 5952 | QUEUED | - |
 | A4 | obfuscator/cloudflare_remote.py + remote_exec.py + webpush.py | ~4400 | QUEUED | - |
 | A5 | obfuscator/: section_split, anti_rea, native_harden, driver_blocklist, vm_dispatch | ~4900 | QUEUED | - |
