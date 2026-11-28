@@ -44,7 +44,7 @@ pytest-benchmark==5.3.1    # bench_* suites (benchmark fixture)
 # soundness, vm_correctness, watermark_survivability, etc. — 15 modules
 # import z3 via scripts/metrics/resilience.py and scripts/validation/)
 # ─────────────────────────────────────────────────────────────────────────────
-z3-solver==5.1.0.0       # scripts/metrics/resilience.py, scripts/validation/*
+z3-solver==5.4.1.0       # scripts/metrics/resilience.py, scripts/validation/*
 #   No additional third-party deps beyond the above.
 #   All other imports (hashlib, base64, ctypes, marshal, lzma, struct, etc.)
 #   are Python stdlib — no pip needed.
