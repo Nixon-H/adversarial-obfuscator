@@ -1,0 +1,18 @@
+ci:
+  - changed-files:
+      - any-glob-to-any-file: ['.github/workflows/**', 'scripts/ci/**', 'Makefile']
+security:
+  - changed-files:
+      - any-glob-to-any-file: ['encrypt/**', 'obfuscator/key*', 'obfuscator/cloudflare_remote.py', 'runtime/**', 'relay/**']
+irgen:
+  - changed-files:
+      - any-glob-to-any-file: ['irgen/**', 'llvmgen/**']
+docs:
+  - changed-files:
+      - any-glob-to-any-file: ['docs/**', '*.md']
+tests:
+  - changed-files:
+      - any-glob-to-any-file: ['tests/**']
+benchmark:
+  - changed-files:
+      - any-glob-to-any-file: ['re-bench/**']

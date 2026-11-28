@@ -1,0 +1,26 @@
+name: OSSF Scorecard
+on:
+  schedule:
+    - cron: '22 5 * * 3'
+  push:
+    branches: [master]
+  workflow_dispatch:
+permissions:
+  security-events: write
+  contents: read
+  id-token: write
+jobs:
+  analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v4 immutable pin
+        with:
+          persist-credentials: false
+      - uses: ossf/scorecard-action@62b2cac7ed8198b15735ed49ab1e5cf35480ba46  # v2 immutable pin
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: false
+      - uses: github/codeql-action/upload-sarif@74c1aea9df7c0f02e9b7bfe4a8935abf2e5e3aa6  # v3 immutable pin
+        with:
+          sarif_file: results.sarif
