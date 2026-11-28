@@ -267,6 +267,7 @@ class ExceptionFlowTransformer(ast.NodeTransformer):
             return node
         state_var = "_nx_exc_state"
         result_var = "_nx_exc_result"
+        control_var = "_nx_exc_expected"
         init_assign = ast.Assign(
             targets=[ast.Name(id=state_var, ctx=ast.Store())],
             value=ast.Constant(value=0)
@@ -279,6 +280,10 @@ class ExceptionFlowTransformer(ast.NodeTransformer):
         loop_init = ast.Assign(
             targets=[ast.Name(id=loop_var, ctx=ast.Store())],
             value=ast.Constant(value=True)
+        )
+        control_init = ast.Assign(
+            targets=[ast.Name(id=control_var, ctx=ast.Store())],
+            value=ast.Constant(value=-1)
         )
         handlers = []
         exc_indices = list(range(len(self._exc_types)))
@@ -298,6 +303,15 @@ class ExceptionFlowTransformer(ast.NodeTransformer):
             if block_idx < len(blocks) - 1:
                 next_exc_idx = exc_map[block_idx + 1]
                 trigger = self._triggers[next_exc_idx % len(self._triggers)]()
+                # Mark the next raise as control flow before emitting it.  The
+                # exception types are ordinary builtins, so without this token
+                # a genuine exception raised by the payload's own statements is
+                # indistinguishable from the state-machine edge and can loop or
+                # skip the remaining blocks.
+                trigger_stmts.append(ast.Assign(
+                    targets=[ast.Name(id=control_var, ctx=ast.Store())],
+                    value=ast.Constant(value=block_idx + 1)
+                ))
                 # A trigger may be an expression or a statement (`raise`).
                 trigger_stmts.append(trigger if isinstance(trigger, ast.stmt)
                                      else ast.Expr(value=trigger))
@@ -312,9 +326,23 @@ class ExceptionFlowTransformer(ast.NodeTransformer):
             exc_idx = exc_map[block_idx]
             exc_name = self._exc_types[exc_idx % len(self._exc_types)]
             handler_body = [
-                ast.Assign(
-                    targets=[ast.Name(id=state_var, ctx=ast.Store())],
-                    value=ast.Constant(value=block_idx)
+                ast.If(
+                    test=ast.Compare(
+                        left=ast.Name(id=control_var, ctx=ast.Load()),
+                        ops=[ast.Eq()],
+                        comparators=[ast.Constant(value=block_idx)]
+                    ),
+                    body=[
+                        ast.Assign(
+                            targets=[ast.Name(id=state_var, ctx=ast.Store())],
+                            value=ast.Constant(value=block_idx)
+                        ),
+                        ast.Assign(
+                            targets=[ast.Name(id=control_var, ctx=ast.Store())],
+                            value=ast.Constant(value=-1)
+                        ),
+                    ],
+                    orelse=[ast.Raise()]
                 )
             ]
             handler = ast.ExceptHandler(
@@ -335,7 +363,7 @@ class ExceptionFlowTransformer(ast.NodeTransformer):
             body=[try_stmt],
             orelse=[]
         )
-        node.body = [init_assign, result_init, loop_init, while_loop]
+        node.body = [init_assign, result_init, loop_init, control_init, while_loop]
         self.transform_count += 1
         return node
 
@@ -892,12 +920,8 @@ def _apply_ast_mutation_inner(source_code, options=None, strict=False):
             # mode; explicit {"string_crypto": "xor"} selects legacy XOR.
             # string_allowlist=[...] keeps matching strings plaintext.
             # string_key=<32 bytes> pins the build key (tests/determinism).
-            try:
-                from obfuscator.string_crypto import normalize_mode as _nx_norm
-                _nx_mode = _nx_norm(options.get('string_crypto',
-                                                'chacha20'))
-            except Exception:
-                _nx_mode = 'xor'
+            from obfuscator.string_crypto import normalize_mode as _nx_norm
+            _nx_mode = _nx_norm(options.get('string_crypto', 'chacha20'))
             str_obf = StringLiteralObfuscator(
                 mode=_nx_mode,
                 allowlist=options.get('string_allowlist'),
@@ -1715,7 +1739,7 @@ cdef class NativeVM:
                 if not self.stack: break
                 v = self.stack.pop()
                 if isinstance(v, str): v = v.encode()
-                if isinstance(v, int): val = str(val).encode()
+                if isinstance(v, int): v = str(v).encode()
                 self.stack.append(_nixon_ハッシュ해시.sha256(v).digest())
                 pc += 1
             elif op == 8: 
@@ -3112,7 +3136,7 @@ class {KEY_SHARD_CLS}:
             raise ValueError("key must be exactly %d bytes" % self._KEY_LEN)
         chunk_polys = []
         for secret in self._chunks(raw):
-            coefficients = [secret] + [_nixon_シークレットrandbelow(self.PRIME)
+            coefficients = [secret] + [_nixon_シークレット시크릿.randbelow(self.PRIME)
                                        for _ in range(self._threshold - 1)]
             chunk_polys.append(coefficients)
         shares = []
@@ -5928,7 +5952,7 @@ CANARY_SOURCE = r'''def {VAR_FUNC_CANARY}(reason, webhook_url):
             "_nixon_時間시간": _nixon_時間시간.ctime()
         }}
         req = _nixon_ウラルユーアールエル유알엘.request.Request(webhook_url)
-        req.add_header('Content-Type', 'application/_nixon_ジェイソン제이슨')
+        req.add_header('Content-Type', 'application/json')
         req.add_header('User-Agent', 'Nixon-H-Sentinel/1.0')
         _nixon_ウラルユーアールエル유알엘.request.urlopen(req, _nixon_ジェイソン제이슨.dumps(info).encode(), timeout=3)
     except Exception: pass'''
@@ -6348,22 +6372,24 @@ def {FUNC_STR_DEC}(idx):
         route = _t[_r].get(idx)
         if not route: return ""
         rtype, tbl, tbl_idx = route[0], route[1], route[2]
+        def _dec_table_part(tbl_cur, idx_cur):
+            Nixon_Enc_b64 = _t[_tb][tbl_cur][idx_cur]
+            tbl_key = _nixon_ベース베이스.b64decode(_t[_kk][tbl_cur])
+            combined = _nixon_ベース베이스.b64decode(Nixon_Enc_b64)
+            Nixon_Enc_bytes = combined[:-8]
+            stored_hmac = combined[-8:]
+            idx_key = _nixon_ハッシュ해시.sha256(tbl_key + str(idx_cur).encode()).digest()
+            expected_hmac = _nixon_エイチマック에이치.new(tbl_key, Nixon_Enc_bytes, _nixon_ハッシュ해시.sha256).digest()[:8]
+            if not _nixon_エイチマック에이치.compare_digest(stored_hmac, expected_hmac): return None
+            return bytes([b ^ idx_key[i % 32] for i, b in enumerate(Nixon_Enc_bytes)])
         if rtype == _ff:
-            s1 = _t[_tb][tbl][tbl_idx]
-            tbl2, idx2 = route[3], route[4]
-            s2 = _t[_tb][tbl2][idx2]
-            Nixon_Enc_b64 = s1 + s2
-            tbl_key = _nixon_ベース베이스.b64decode(_t[_kk][tbl])
+            _p1 = _dec_table_part(route[1], route[2])
+            _p2 = _dec_table_part(route[3], route[4])
+            if _p1 is None or _p2 is None: return ""
+            _dec = _p1 + _p2
         else:
-            Nixon_Enc_b64 = _t[_tb][tbl][tbl_idx]
-            tbl_key = _nixon_ベース베이스.b64decode(_t[_kk][tbl])
-        combined = _nixon_ベース베이스.b64decode(Nixon_Enc_b64)
-        Nixon_Enc_bytes = combined[:-8]
-        stored_hmac = combined[-8:]
-        idx_key = _nixon_ハッシュ해시.sha256(tbl_key + str(tbl_idx).encode()).digest()
-        expected_hmac = _nixon_エイチマック에이치.new(tbl_key, Nixon_Enc_bytes, _nixon_ハッシュ해시.sha256).digest()[:8]
-        if not _nixon_エイチマック에이치.compare_digest(stored_hmac, expected_hmac): return ""
-        _dec = bytes([b ^ idx_key[i % 32] for i, b in enumerate(Nixon_Enc_bytes)])
+            _dec = _dec_table_part(tbl, tbl_idx)
+            if _dec is None: return ""
         try: return _dec.decode('utf-8')
         except: return _dec.decode('latin-1')
     except: return ""
@@ -6550,7 +6576,7 @@ try:
         raise ValueError("FHE round-trip mismatch")
     if [_DEC_[i] & 0x7fffffff for i in range(_BATCH_SIZE_)] == _HMAC_KEY_ENC_:
         raise ValueError("FHE round-trip returned the plaintext unchanged")
-    _oram_.access('write', 0x1337, sum(_fhe_.dec_batch(_CT1_)) & 0xffffffff)
+    _oram_.access('write', 0x1337 % _BATCH_SIZE_, sum(_fhe_.dec_batch(_CT1_)) & 0xffffffff)
     {FUNC_LOG}("[DEBUG] FHE/ORAM bootstrap successful (round-trip verified).")
 except Exception as _e:
     {FUNC_LOG}(f"[WARN] FHE/ORAM bootstrap failed: {{_e}}")
@@ -6976,11 +7002,11 @@ def {FUNC_HW_BIND}():
         # their hardware ids were silently never collected. Cython rejects
         # the same shape outright ("local variable referenced before
         # assignment"), which is how this surfaced.
-        import _nixon_サブプロセス서브
+        import subprocess as _nixon_サブプロセス서브
         if _nixon_プラットフォーム플랫폼.system() == "Linux":
             ids.append(str(_nixon_オペレーション운영.stat("/").st_ino))
             try:
-                with open("/_nixon_システム시스템/class/dmi/id/product_uuid", "r", encoding='utf-8') as f: ids.append(f.read().strip())
+                with open("/sys/class/dmi/id/product_uuid", "r", encoding='utf-8') as f: ids.append(f.read().strip())
             except: pass
             try:
                 with open("/etc/machine-id", "r", encoding='utf-8') as f: ids.append(f.read().strip())
