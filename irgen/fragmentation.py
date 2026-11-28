@@ -304,6 +304,15 @@ def fragment_pipeline(
     for func in ir_module.functions:
         if func.name in target_functions:
             fragments, meta = fragment_function(ir_module, func.name, num_fragments, seed)
+            # The current fragment constructor does not yet migrate the
+            # original instruction slices into the fragment bodies.  Dropping
+            # the original function in that state replaces real code with
+            # empty routines, so fail closed and keep the intact function.
+            fragments_are_materialized = bool(fragments) and all(
+                any(block.instructions for block in frag.blocks) for frag in fragments)
+            if not fragments_are_materialized:
+                result.functions.append(func)
+                continue
             coordinator = generate_coordinator(fragments, meta, seed)
             ftable = generate_function_pointer_table(fragments, coordinator.name)
             for f in fragments:

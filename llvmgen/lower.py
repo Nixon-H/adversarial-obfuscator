@@ -254,9 +254,23 @@ class NixonIRParser:
         self._string_counter = 0
 
     def _remove_comments(self, line: str) -> str:
-        idx = line.find(";")
-        if idx >= 0:
-            line = line[:idx]
+        """Strip comments while preserving semicolons inside quoted strings."""
+        in_string = False
+        escaped = False
+        for idx, ch in enumerate(line):
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == ";":
+                line = line[:idx]
+                break
         return line.strip()
 
     def _next_line(self) -> str | None:
@@ -588,10 +602,18 @@ class NixonIRParser:
             return {"result": result, "opcode": "phi", "type": vtype, "incoming": incoming}
 
         if opcode == "select":
-            cond = parts[1]
-            vtype = _parse_type(parts[2])
-            tval = parts[3].rstrip(",")
-            fval = parts[4].rstrip(",") if len(parts) > 4 else ""
+            if len(parts) >= 7 and parts[1] == "i1":
+                # Standard LLVM spelling: select i1 %c, i32 %a, i32 %b
+                cond = parts[2].rstrip(",")
+                vtype = _parse_type(parts[3])
+                tval = parts[4].rstrip(",")
+                fval = parts[6].rstrip(",")
+            else:
+                # Legacy project spelling: select %c i32 %a %b
+                cond = parts[1]
+                vtype = _parse_type(parts[2])
+                tval = parts[3].rstrip(",")
+                fval = parts[4].rstrip(",") if len(parts) > 4 else ""
             if result:
                 var_types[result] = vtype
             return {"result": result, "opcode": "select", "type": vtype,
@@ -829,7 +851,7 @@ def _emit_instruction(instr: dict) -> str:
         tval = _value_ref(instr["true_val"])
         fval = _value_ref(instr["false_val"])
         t = instr["type"]
-        return f"{result_prefix}select {t} {cond}, {t} {tval}, {t} {fval}"
+        return f"{result_prefix}select i1 {cond}, {t} {tval}, {t} {fval}"
 
     if opcode in CONVERSION_OPS:
         val = _value_ref(instr["value"])
@@ -887,7 +909,9 @@ def _renumber_function(func: dict) -> None:
     do not consume a number.
     """
     mapping: dict[str, str] = {}
-    counter = 0
+    # Unnamed numeric parameters consume the first LLVM value numbers.
+    counter = sum(1 for p in func.get("params", [])
+                  if isinstance(p.get("name"), str) and _UNNAMED_VALUE.match(p["name"]))
     for block in func.get("blocks", []):
         for instr in block.get("instructions", []):
             result = instr.get("result")

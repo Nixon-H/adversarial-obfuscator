@@ -76,8 +76,8 @@ def annotate_oram_variables(source: str, variables: list[str]) -> str:
                     if lineno is not None and lineno not in modified_lines:
                         idx = lineno - 1
                         if idx < len(lines):
-                            stripped = lines[idx].rstrip("\n")
-                            if _ORAM_ANNOTATION_PREFIX not in stripped:
+                            stripped = lines[idx].rstrip("\r\n")
+                            if _ORAM_ANNOTATION_PREFIX not in stripped and not stripped.rstrip().endswith("\\"):
                                 lines[idx] = stripped + f"  {_ORAM_ANNOTATION_PREFIX} {target.id}\n"
                                 modified_lines.add(lineno)
 
@@ -87,8 +87,8 @@ def annotate_oram_variables(source: str, variables: list[str]) -> str:
                 if lineno is not None and lineno not in modified_lines:
                     idx = lineno - 1
                     if idx < len(lines):
-                        stripped = lines[idx].rstrip("\n")
-                        if _ORAM_ANNOTATION_PREFIX not in stripped:
+                        stripped = lines[idx].rstrip("\r\n")
+                        if _ORAM_ANNOTATION_PREFIX not in stripped and not stripped.rstrip().endswith("\\"):
                             lines[idx] = stripped + f"  {_ORAM_ANNOTATION_PREFIX} {node.target.id}\n"
                             modified_lines.add(lineno)
 
@@ -99,8 +99,8 @@ def annotate_oram_variables(source: str, variables: list[str]) -> str:
                     if lineno is not None and lineno not in modified_lines:
                         idx = lineno - 1
                         if idx < len(lines):
-                            stripped = lines[idx].rstrip("\n")
-                            if _ORAM_ANNOTATION_PREFIX not in stripped:
+                            stripped = lines[idx].rstrip("\r\n")
+                            if _ORAM_ANNOTATION_PREFIX not in stripped and not stripped.rstrip().endswith("\\"):
                                 lines[idx] = stripped + f"  {_ORAM_ANNOTATION_PREFIX} {arg.arg}\n"
                                 modified_lines.add(lineno)
 

@@ -191,14 +191,17 @@ def test_boolop_has_a_phi_with_one_entry_per_predecessor():
     """
     source = "def f(a, b):\n    return a and b\n"
     llvm = lower(source)
-    assert "phi i1" in llvm
-    # "and": when the left side is false the result is false.
-    assert re.search(r"phi i1 \[0, %\w+\]", llvm), llvm
+    # Python bool operators return operand VALUES, not coerced booleans:
+    # ``a and b`` yields ``a`` when a is falsy, otherwise ``b`` -- so the
+    # phi is typed at the operand width (i32), and the short-circuit
+    # incoming value is the loaded ``a`` itself, not the constant 0.
+    assert "phi i32" in llvm
+    assert re.search(r"phi i32 \[%\d+, %\w+\], \[%\d+, %\w+\]", llvm), llvm
 
     source = "def f(a, b):\n    return a or b\n"
     llvm = lower(source)
-    # "or": when the left side is true the result is true.
-    assert re.search(r"phi i1 \[1, %\w+\]", llvm), llvm
+    assert "phi i32" in llvm
+    assert re.search(r"phi i32 \[%\d+, %\w+\], \[%\d+, %\w+\]", llvm), llvm
 
 
 def test_phi_survives_the_optimizer():
@@ -214,9 +217,9 @@ def test_phi_survives_the_optimizer():
     module = compiler.compile(ast.parse("def f(a, b):\n    return a and b\n"))
     optimized = optimize(module, level=2)
     text = str(optimized)
-    assert "phi i1" in text, text
+    assert "phi i32" in text, text
     # Every value the phi names must still be defined.
-    for m in re.finditer(r"phi i1 \[([^,\]]+), label (\w+)\]", text):
+    for m in re.finditer(r"phi i32 \[([^,\]]+), label (\w+)\]", text):
         value = m.group(1).strip()
         assert f"{value} =" in text, (value, text)
 
