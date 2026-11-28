@@ -153,3 +153,40 @@ def test_blocked_decision_does_not_require_artefact(tmp_path):
     import inspect
     sig = inspect.signature(ai_bench.blocked_before_workspace)
     assert sig is not None  # existence pin; behaviour covered in test_ai_benchmark_harness
+
+
+# ── 5. section-split registration + shadow-build lane structure ────────
+
+def test_section_split_positive_form_registered():
+    """Only --no-section-split existed; the deep-matrix lanes pass the
+    positive form explicitly and died on 'unrecognized arguments'."""
+    import subprocess
+    r = subprocess.run(
+        [sys.executable, "-m", "obfuscator.core.pipeline", "build",
+         "/nonexistent/probe.py", "--section-split", "--section-count", "2"],
+        capture_output=True, text=True, timeout=60, cwd=_ROOT)
+    assert "unrecognized arguments" not in (r.stderr or "")
+
+
+def test_shadow_build_stage1_skips_manual_stages():
+    """Stage 1 must not run irgen/llvmgen/encrypt: the lane re-runs them in
+    later steps, and a second encrypt hits the key sidecar's O_EXCL write
+    (FileExistsError: build/encrypted.o.key)."""
+    import re
+    yml = open(os.path.join(_ROOT, ".github/workflows/shadow-build.yml"), encoding="utf-8").read()
+    m = re.search(r"scripts/build\.py --payload examples/hello\.py --skip ([^\n]+)", yml)
+    assert m, "stage 1 invocation not found"
+    skips = m.group(1).split()
+    for stage in ("irgen", "llvmgen", "encrypt"):
+        assert stage in skips, \
+            "stage 1 must skip %s (the lane runs it manually later)" % stage
+
+
+def test_newly_registered_flags_stay_documented():
+    """Doc-completeness is enforced by test_maximum_doc_completeness; this
+    pins the regeneration workflow invariant: CLI.md must be in sync."""
+    import subprocess
+    r = subprocess.run(
+        [sys.executable, "scripts/gen_cli_reference.py", "--check"],
+        capture_output=True, text=True, timeout=60, cwd=_ROOT)
+    assert r.returncode == 0, "docs/CLI.md is stale; regenerate with --write"
