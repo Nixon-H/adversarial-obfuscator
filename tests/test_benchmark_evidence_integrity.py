@@ -2,10 +2,8 @@
 import base64
 import importlib.util
 import json
-import types
 from pathlib import Path
 
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -233,7 +231,6 @@ def test_native_blob_probe_decodes_current_nxs1_counter_mode(tmp_path):
 
 def test_runtime_probe_redacts_exact_runtime_secret_values():
     mod = load_module('audit_d2_runtime_probe', 're-bench/tools/runtime_probe.py')
-    sec = tmp = ROOT / 'tests' / '.audit-d2-nonexistent'
     assert mod.redact_sensitive_text('abc shard123456 abc', ['shard123456']) == 'abc <redacted-runtime-secret> abc'
 
 
