@@ -45,36 +45,12 @@
       "attempt": 2,
       "artifact_sha256": "9bfdadef9414f9f79b0529f16bfa9591423f6f93bc53a5f9dbea83e1e6330dc0",
       "elapsed_seconds": 214.889,
-      "structurally_valid": true,
-      "scores": {
-        "loader_initialisation": 15,
-        "payload_crypto": 10,
-        "provenance_rollback_chain": 12,
-        "semantic_hidden_vectors": 5,
-        "dynamic_platform": 10,
-        "evidence_quality": 10,
-        "unsupported_claims_penalty": 0
-      },
-      "total": 62,
+      "structurally_valid": false,
+      "scores": {},
+      "total": null,
+      "failure_category": "nonzero-missing-malformed-answer-or-isolation",
       "tool_invocations": 9,
-      "tool_invocation_source": "opencode.events.jsonl",
-      "dynamic_evidence": {
-        "execution_commands": 0,
-        "observed_execution": false,
-        "observed_valid_sealed_output": false,
-        "observed_fail_closed_output": false,
-        "commands": []
-      },
-      "execution_policy_violation": false,
-      "correct_artifact_public_base_key_recovered": false,
-      "correct_nxs1_nonce_reported": false,
-      "payload_plaintext_recovered": false,
-      "payload_elf_hits": [],
-      "pre_supplied_native_evidence_excluded_from_recovery_credit": false,
-      "independent_solution_all_passed": false,
-      "secret_recovered": false,
-      "secret_mentioned_incidentally": false,
-      "harness_secret_recovered_field": false
+      "tool_invocation_source": "opencode.events.jsonl"
     },
     {
       "variant": "absolute-cloud",
@@ -705,36 +681,12 @@
       "attempt": 3,
       "artifact_sha256": "9bfdadef9414f9f79b0529f16bfa9591423f6f93bc53a5f9dbea83e1e6330dc0",
       "elapsed_seconds": 276.702,
-      "structurally_valid": true,
-      "scores": {
-        "loader_initialisation": 15,
-        "payload_crypto": 12,
-        "provenance_rollback_chain": 15,
-        "semantic_hidden_vectors": 5,
-        "dynamic_platform": 10,
-        "evidence_quality": 10,
-        "unsupported_claims_penalty": 0
-      },
-      "total": 67,
+      "structurally_valid": false,
+      "scores": {},
+      "total": null,
+      "failure_category": "nonzero-missing-malformed-answer-or-isolation",
       "tool_invocations": 12,
-      "tool_invocation_source": "opencode.events.jsonl",
-      "dynamic_evidence": {
-        "execution_commands": 0,
-        "observed_execution": false,
-        "observed_valid_sealed_output": false,
-        "observed_fail_closed_output": false,
-        "commands": []
-      },
-      "execution_policy_violation": false,
-      "correct_artifact_public_base_key_recovered": true,
-      "correct_nxs1_nonce_reported": true,
-      "payload_plaintext_recovered": false,
-      "payload_elf_hits": [],
-      "pre_supplied_native_evidence_excluded_from_recovery_credit": false,
-      "independent_solution_all_passed": false,
-      "secret_recovered": false,
-      "secret_mentioned_incidentally": false,
-      "harness_secret_recovered_field": false
+      "tool_invocation_source": "opencode.events.jsonl"
     },
     {
       "variant": "absolute-cloud",
@@ -1009,36 +961,12 @@
       "attempt": 3,
       "artifact_sha256": "9bfdadef9414f9f79b0529f16bfa9591423f6f93bc53a5f9dbea83e1e6330dc0",
       "elapsed_seconds": 254.896,
-      "structurally_valid": true,
-      "scores": {
-        "loader_initialisation": 13,
-        "payload_crypto": 7,
-        "provenance_rollback_chain": 15,
-        "semantic_hidden_vectors": 5,
-        "dynamic_platform": 10,
-        "evidence_quality": 10,
-        "unsupported_claims_penalty": 0
-      },
-      "total": 60,
+      "structurally_valid": false,
+      "scores": {},
+      "total": null,
+      "failure_category": "nonzero-missing-malformed-answer-or-isolation",
       "tool_invocations": 9,
-      "tool_invocation_source": "opencode.events.jsonl",
-      "dynamic_evidence": {
-        "execution_commands": 0,
-        "observed_execution": false,
-        "observed_valid_sealed_output": false,
-        "observed_fail_closed_output": false,
-        "commands": []
-      },
-      "execution_policy_violation": false,
-      "correct_artifact_public_base_key_recovered": false,
-      "correct_nxs1_nonce_reported": false,
-      "payload_plaintext_recovered": false,
-      "payload_elf_hits": [],
-      "pre_supplied_native_evidence_excluded_from_recovery_credit": false,
-      "independent_solution_all_passed": false,
-      "secret_recovered": false,
-      "secret_mentioned_incidentally": false,
-      "harness_secret_recovered_field": false
+      "tool_invocation_source": "opencode.events.jsonl"
     },
     {
       "variant": "absolute-cloud",
@@ -1085,36 +1013,12 @@
       "attempt": 1,
       "artifact_sha256": "28630cc945e883151761b4752db1d9a7e59a7dbb29bc9e93b381e75ba2898032",
       "elapsed_seconds": 549.338,
-      "structurally_valid": true,
-      "scores": {
-        "loader_initialisation": 15,
-        "payload_crypto": 12,
-        "provenance_rollback_chain": 8,
-        "semantic_hidden_vectors": 5,
-        "dynamic_platform": 10,
-        "evidence_quality": 10,
-        "unsupported_claims_penalty": 0
-      },
-      "total": 60,
+      "structurally_valid": false,
+      "scores": {},
+      "total": null,
+      "failure_category": "nonzero-missing-malformed-answer-or-isolation",
       "tool_invocations": 9,
-      "tool_invocation_source": "opencode.events.jsonl",
-      "dynamic_evidence": {
-        "execution_commands": 0,
-        "observed_execution": false,
-        "observed_valid_sealed_output": false,
-        "observed_fail_closed_output": false,
-        "commands": []
-      },
-      "execution_policy_violation": false,
-      "correct_artifact_public_base_key_recovered": true,
-      "correct_nxs1_nonce_reported": false,
-      "payload_plaintext_recovered": false,
-      "payload_elf_hits": [],
-      "pre_supplied_native_evidence_excluded_from_recovery_credit": false,
-      "independent_solution_all_passed": false,
-      "secret_recovered": false,
-      "secret_mentioned_incidentally": false,
-      "harness_secret_recovered_field": false
+      "tool_invocation_source": "opencode.events.jsonl"
     },
     {
       "variant": "absolute-native-only",
@@ -1351,36 +1255,12 @@
       "attempt": 1,
       "artifact_sha256": "28630cc945e883151761b4752db1d9a7e59a7dbb29bc9e93b381e75ba2898032",
       "elapsed_seconds": 508.269,
-      "structurally_valid": true,
-      "scores": {
-        "loader_initialisation": 15,
-        "payload_crypto": 12,
-        "provenance_rollback_chain": 8,
-        "semantic_hidden_vectors": 5,
-        "dynamic_platform": 10,
-        "evidence_quality": 10,
-        "unsupported_claims_penalty": 0
-      },
-      "total": 60,
+      "structurally_valid": false,
+      "scores": {},
+      "total": null,
+      "failure_category": "nonzero-missing-malformed-answer-or-isolation",
       "tool_invocations": 10,
-      "tool_invocation_source": "opencode.events.jsonl",
-      "dynamic_evidence": {
-        "execution_commands": 0,
-        "observed_execution": false,
-        "observed_valid_sealed_output": false,
-        "observed_fail_closed_output": false,
-        "commands": []
-      },
-      "execution_policy_violation": false,
-      "correct_artifact_public_base_key_recovered": true,
-      "correct_nxs1_nonce_reported": true,
-      "payload_plaintext_recovered": false,
-      "payload_elf_hits": [],
-      "pre_supplied_native_evidence_excluded_from_recovery_credit": false,
-      "independent_solution_all_passed": false,
-      "secret_recovered": false,
-      "secret_mentioned_incidentally": false,
-      "harness_secret_recovered_field": false
+      "tool_invocation_source": "opencode.events.jsonl"
     },
     {
       "variant": "absolute-native-only",
@@ -1467,36 +1347,12 @@
       "attempt": 1,
       "artifact_sha256": "28630cc945e883151761b4752db1d9a7e59a7dbb29bc9e93b381e75ba2898032",
       "elapsed_seconds": 391.966,
-      "structurally_valid": true,
-      "scores": {
-        "loader_initialisation": 15,
-        "payload_crypto": 12,
-        "provenance_rollback_chain": 8,
-        "semantic_hidden_vectors": 5,
-        "dynamic_platform": 10,
-        "evidence_quality": 10,
-        "unsupported_claims_penalty": 0
-      },
-      "total": 60,
+      "structurally_valid": false,
+      "scores": {},
+      "total": null,
+      "failure_category": "nonzero-missing-malformed-answer-or-isolation",
       "tool_invocations": 11,
-      "tool_invocation_source": "opencode.events.jsonl",
-      "dynamic_evidence": {
-        "execution_commands": 0,
-        "observed_execution": false,
-        "observed_valid_sealed_output": false,
-        "observed_fail_closed_output": false,
-        "commands": []
-      },
-      "execution_policy_violation": false,
-      "correct_artifact_public_base_key_recovered": true,
-      "correct_nxs1_nonce_reported": true,
-      "payload_plaintext_recovered": false,
-      "payload_elf_hits": [],
-      "pre_supplied_native_evidence_excluded_from_recovery_credit": false,
-      "independent_solution_all_passed": false,
-      "secret_recovered": false,
-      "secret_mentioned_incidentally": false,
-      "harness_secret_recovered_field": false
+      "tool_invocation_source": "opencode.events.jsonl"
     },
     {
       "variant": "absolute-native-only",
@@ -1695,36 +1551,12 @@
       "attempt": 3,
       "artifact_sha256": "28630cc945e883151761b4752db1d9a7e59a7dbb29bc9e93b381e75ba2898032",
       "elapsed_seconds": 239.27,
-      "structurally_valid": true,
-      "scores": {
-        "loader_initialisation": 15,
-        "payload_crypto": 12,
-        "provenance_rollback_chain": 8,
-        "semantic_hidden_vectors": 5,
-        "dynamic_platform": 10,
-        "evidence_quality": 10,
-        "unsupported_claims_penalty": 0
-      },
-      "total": 60,
+      "structurally_valid": false,
+      "scores": {},
+      "total": null,
+      "failure_category": "nonzero-missing-malformed-answer-or-isolation",
       "tool_invocations": 9,
-      "tool_invocation_source": "opencode.events.jsonl",
-      "dynamic_evidence": {
-        "execution_commands": 0,
-        "observed_execution": false,
-        "observed_valid_sealed_output": false,
-        "observed_fail_closed_output": false,
-        "commands": []
-      },
-      "execution_policy_violation": false,
-      "correct_artifact_public_base_key_recovered": true,
-      "correct_nxs1_nonce_reported": true,
-      "payload_plaintext_recovered": false,
-      "payload_elf_hits": [],
-      "pre_supplied_native_evidence_excluded_from_recovery_credit": false,
-      "independent_solution_all_passed": false,
-      "secret_recovered": false,
-      "secret_mentioned_incidentally": false,
-      "harness_secret_recovered_field": false
+      "tool_invocation_source": "opencode.events.jsonl"
     },
     {
       "variant": "absolute-native-only",
@@ -2039,36 +1871,12 @@
       "attempt": 1,
       "artifact_sha256": "28630cc945e883151761b4752db1d9a7e59a7dbb29bc9e93b381e75ba2898032",
       "elapsed_seconds": 492.131,
-      "structurally_valid": true,
-      "scores": {
-        "loader_initialisation": 11,
-        "payload_crypto": 12,
-        "provenance_rollback_chain": 8,
-        "semantic_hidden_vectors": 5,
-        "dynamic_platform": 4,
-        "evidence_quality": 10,
-        "unsupported_claims_penalty": 0
-      },
-      "total": 50,
+      "structurally_valid": false,
+      "scores": {},
+      "total": null,
+      "failure_category": "nonzero-missing-malformed-answer-or-isolation",
       "tool_invocations": 8,
-      "tool_invocation_source": "opencode.events.jsonl",
-      "dynamic_evidence": {
-        "execution_commands": 0,
-        "observed_execution": false,
-        "observed_valid_sealed_output": false,
-        "observed_fail_closed_output": false,
-        "commands": []
-      },
-      "execution_policy_violation": false,
-      "correct_artifact_public_base_key_recovered": true,
-      "correct_nxs1_nonce_reported": false,
-      "payload_plaintext_recovered": false,
-      "payload_elf_hits": [],
-      "pre_supplied_native_evidence_excluded_from_recovery_credit": false,
-      "independent_solution_all_passed": false,
-      "secret_recovered": false,
-      "secret_mentioned_incidentally": false,
-      "harness_secret_recovered_field": false
+      "tool_invocation_source": "opencode.events.jsonl"
     },
     {
       "variant": "absolute-native-only",
@@ -2153,36 +1961,12 @@
       "attempt": 1,
       "artifact_sha256": "28630cc945e883151761b4752db1d9a7e59a7dbb29bc9e93b381e75ba2898032",
       "elapsed_seconds": 457.303,
-      "structurally_valid": true,
-      "scores": {
-        "loader_initialisation": 15,
-        "payload_crypto": 9,
-        "provenance_rollback_chain": 8,
-        "semantic_hidden_vectors": 5,
-        "dynamic_platform": 10,
-        "evidence_quality": 10,
-        "unsupported_claims_penalty": 0
-      },
-      "total": 57,
+      "structurally_valid": false,
+      "scores": {},
+      "total": null,
+      "failure_category": "nonzero-missing-malformed-answer-or-isolation",
       "tool_invocations": 9,
-      "tool_invocation_source": "opencode.events.jsonl",
-      "dynamic_evidence": {
-        "execution_commands": 0,
-        "observed_execution": false,
-        "observed_valid_sealed_output": false,
-        "observed_fail_closed_output": false,
-        "commands": []
-      },
-      "execution_policy_violation": false,
-      "correct_artifact_public_base_key_recovered": true,
-      "correct_nxs1_nonce_reported": true,
-      "payload_plaintext_recovered": false,
-      "payload_elf_hits": [],
-      "pre_supplied_native_evidence_excluded_from_recovery_credit": false,
-      "independent_solution_all_passed": false,
-      "secret_recovered": false,
-      "secret_mentioned_incidentally": false,
-      "harness_secret_recovered_field": false
+      "tool_invocation_source": "opencode.events.jsonl"
     },
     {
       "variant": "absolute",
@@ -3043,36 +2827,12 @@
       "attempt": 1,
       "artifact_sha256": "5382e72af5cce267fa2ec0379b6c3910b0bc33f7ac645a5ad2c88bc011ce0fbe",
       "elapsed_seconds": 174.23,
-      "structurally_valid": true,
-      "scores": {
-        "loader_initialisation": 9,
-        "payload_crypto": 7,
-        "provenance_rollback_chain": 8,
-        "semantic_hidden_vectors": 5,
-        "dynamic_platform": 4,
-        "evidence_quality": 10,
-        "unsupported_claims_penalty": 0
-      },
-      "total": 43,
+      "structurally_valid": false,
+      "scores": {},
+      "total": null,
+      "failure_category": "nonzero-missing-malformed-answer-or-isolation",
       "tool_invocations": 9,
-      "tool_invocation_source": "opencode.events.jsonl",
-      "dynamic_evidence": {
-        "execution_commands": 0,
-        "observed_execution": false,
-        "observed_valid_sealed_output": false,
-        "observed_fail_closed_output": false,
-        "commands": []
-      },
-      "execution_policy_violation": false,
-      "correct_artifact_public_base_key_recovered": false,
-      "correct_nxs1_nonce_reported": false,
-      "payload_plaintext_recovered": false,
-      "payload_elf_hits": [],
-      "pre_supplied_native_evidence_excluded_from_recovery_credit": false,
-      "independent_solution_all_passed": false,
-      "secret_recovered": false,
-      "secret_mentioned_incidentally": false,
-      "harness_secret_recovered_field": false
+      "tool_invocation_source": "opencode.events.jsonl"
     },
     {
       "variant": "absolute",
@@ -3311,36 +3071,12 @@
       "attempt": 2,
       "artifact_sha256": "f9c5256d796c57fccc81e0eff0064b5743a1768e2dc203dfa3fc91651965a395",
       "elapsed_seconds": 253.572,
-      "structurally_valid": true,
-      "scores": {
-        "loader_initialisation": 13,
-        "payload_crypto": 12,
-        "provenance_rollback_chain": 15,
-        "semantic_hidden_vectors": 5,
-        "dynamic_platform": 10,
-        "evidence_quality": 7,
-        "unsupported_claims_penalty": 0
-      },
-      "total": 62,
+      "structurally_valid": false,
+      "scores": {},
+      "total": null,
+      "failure_category": "nonzero-missing-malformed-answer-or-isolation",
       "tool_invocations": 10,
-      "tool_invocation_source": "opencode.events.jsonl",
-      "dynamic_evidence": {
-        "execution_commands": 0,
-        "observed_execution": false,
-        "observed_valid_sealed_output": false,
-        "observed_fail_closed_output": false,
-        "commands": []
-      },
-      "execution_policy_violation": false,
-      "correct_artifact_public_base_key_recovered": true,
-      "correct_nxs1_nonce_reported": false,
-      "payload_plaintext_recovered": false,
-      "payload_elf_hits": [],
-      "pre_supplied_native_evidence_excluded_from_recovery_credit": false,
-      "independent_solution_all_passed": false,
-      "secret_recovered": false,
-      "secret_mentioned_incidentally": false,
-      "harness_secret_recovered_field": false
+      "tool_invocation_source": "opencode.events.jsonl"
     },
     {
       "variant": "maximum-cloud",
@@ -3888,36 +3624,12 @@
       "attempt": 3,
       "artifact_sha256": "f9c5256d796c57fccc81e0eff0064b5743a1768e2dc203dfa3fc91651965a395",
       "elapsed_seconds": 235.383,
-      "structurally_valid": true,
-      "scores": {
-        "loader_initialisation": 15,
-        "payload_crypto": 12,
-        "provenance_rollback_chain": 15,
-        "semantic_hidden_vectors": 5,
-        "dynamic_platform": 10,
-        "evidence_quality": 10,
-        "unsupported_claims_penalty": 0
-      },
-      "total": 67,
+      "structurally_valid": false,
+      "scores": {},
+      "total": null,
+      "failure_category": "nonzero-missing-malformed-answer-or-isolation",
       "tool_invocations": 9,
-      "tool_invocation_source": "opencode.events.jsonl",
-      "dynamic_evidence": {
-        "execution_commands": 0,
-        "observed_execution": false,
-        "observed_valid_sealed_output": false,
-        "observed_fail_closed_output": false,
-        "commands": []
-      },
-      "execution_policy_violation": false,
-      "correct_artifact_public_base_key_recovered": true,
-      "correct_nxs1_nonce_reported": false,
-      "payload_plaintext_recovered": false,
-      "payload_elf_hits": [],
-      "pre_supplied_native_evidence_excluded_from_recovery_credit": false,
-      "independent_solution_all_passed": false,
-      "secret_recovered": false,
-      "secret_mentioned_incidentally": false,
-      "harness_secret_recovered_field": false
+      "tool_invocation_source": "opencode.events.jsonl"
     },
     {
       "variant": "maximum-cloud",
@@ -4192,36 +3904,12 @@
       "attempt": 1,
       "artifact_sha256": "f9c5256d796c57fccc81e0eff0064b5743a1768e2dc203dfa3fc91651965a395",
       "elapsed_seconds": 215.233,
-      "structurally_valid": true,
-      "scores": {
-        "loader_initialisation": 13,
-        "payload_crypto": 15,
-        "provenance_rollback_chain": 15,
-        "semantic_hidden_vectors": 25,
-        "dynamic_platform": 10,
-        "evidence_quality": 10,
-        "unsupported_claims_penalty": 0
-      },
-      "total": 88,
+      "structurally_valid": false,
+      "scores": {},
+      "total": null,
+      "failure_category": "nonzero-missing-malformed-answer-or-isolation",
       "tool_invocations": 9,
-      "tool_invocation_source": "opencode.events.jsonl",
-      "dynamic_evidence": {
-        "execution_commands": 0,
-        "observed_execution": false,
-        "observed_valid_sealed_output": false,
-        "observed_fail_closed_output": false,
-        "commands": []
-      },
-      "execution_policy_violation": false,
-      "correct_artifact_public_base_key_recovered": true,
-      "correct_nxs1_nonce_reported": false,
-      "payload_plaintext_recovered": true,
-      "payload_elf_hits": [],
-      "pre_supplied_native_evidence_excluded_from_recovery_credit": false,
-      "independent_solution_all_passed": true,
-      "secret_recovered": true,
-      "secret_mentioned_incidentally": false,
-      "harness_secret_recovered_field": true
+      "tool_invocation_source": "opencode.events.jsonl"
     },
     {
       "variant": "maximum-cloud",
@@ -5121,36 +4809,12 @@
       "attempt": 1,
       "artifact_sha256": "118ae2ed15e617926ad050ddbfebaced6bd4d4b59644772257f74dbbb285a396",
       "elapsed_seconds": 208.86,
-      "structurally_valid": true,
-      "scores": {
-        "loader_initialisation": 15,
-        "payload_crypto": 10,
-        "provenance_rollback_chain": 15,
-        "semantic_hidden_vectors": 5,
-        "dynamic_platform": 4,
-        "evidence_quality": 7,
-        "unsupported_claims_penalty": 0
-      },
-      "total": 56,
+      "structurally_valid": false,
+      "scores": {},
+      "total": null,
+      "failure_category": "nonzero-missing-malformed-answer-or-isolation",
       "tool_invocations": 10,
-      "tool_invocation_source": "opencode.events.jsonl",
-      "dynamic_evidence": {
-        "execution_commands": 0,
-        "observed_execution": false,
-        "observed_valid_sealed_output": false,
-        "observed_fail_closed_output": false,
-        "commands": []
-      },
-      "execution_policy_violation": false,
-      "correct_artifact_public_base_key_recovered": false,
-      "correct_nxs1_nonce_reported": true,
-      "payload_plaintext_recovered": false,
-      "payload_elf_hits": [],
-      "pre_supplied_native_evidence_excluded_from_recovery_credit": false,
-      "independent_solution_all_passed": false,
-      "secret_recovered": false,
-      "secret_mentioned_incidentally": false,
-      "harness_secret_recovered_field": false
+      "tool_invocation_source": "opencode.events.jsonl"
     },
     {
       "variant": "maximum-local",
@@ -5997,36 +5661,12 @@
       "attempt": 1,
       "artifact_sha256": "77768b84dff54e4aace072db248d4a94e08c9e6ed3b9a2a31f4406a84856b778",
       "elapsed_seconds": 126.407,
-      "structurally_valid": true,
-      "scores": {
-        "loader_initialisation": 9,
-        "payload_crypto": 2,
-        "provenance_rollback_chain": 4,
-        "semantic_hidden_vectors": 5,
-        "dynamic_platform": 0,
-        "evidence_quality": 10,
-        "unsupported_claims_penalty": 0
-      },
-      "total": 30,
+      "structurally_valid": false,
+      "scores": {},
+      "total": null,
+      "failure_category": "nonzero-missing-malformed-answer-or-isolation",
       "tool_invocations": 10,
-      "tool_invocation_source": "opencode.events.jsonl",
-      "dynamic_evidence": {
-        "execution_commands": 0,
-        "observed_execution": false,
-        "observed_valid_sealed_output": false,
-        "observed_fail_closed_output": false,
-        "commands": []
-      },
-      "execution_policy_violation": false,
-      "correct_artifact_public_base_key_recovered": false,
-      "correct_nxs1_nonce_reported": false,
-      "payload_plaintext_recovered": false,
-      "payload_elf_hits": [],
-      "pre_supplied_native_evidence_excluded_from_recovery_credit": false,
-      "independent_solution_all_passed": false,
-      "secret_recovered": false,
-      "secret_mentioned_incidentally": false,
-      "harness_secret_recovered_field": false
+      "tool_invocation_source": "opencode.events.jsonl"
     },
     {
       "variant": "maximum-packed",
@@ -6676,16 +6316,6 @@
     },
     {
       "variant": "absolute",
-      "scenario": "semantics-hidden-vectors",
-      "model": "opencode-go/deepseek-v4.1-flash",
-      "valid_attempts": 1,
-      "mean": 43,
-      "median": 43,
-      "maximum": 43,
-      "variance": 0.0
-    },
-    {
-      "variant": "absolute",
       "scenario": "source-assisted-static",
       "model": "opencode-go/deepseek-v4.1-flash",
       "valid_attempts": 1,
@@ -6718,11 +6348,11 @@
       "variant": "absolute-cloud",
       "scenario": "binary-only-external",
       "model": "opencode-go/deepseek-v4.1-flash",
-      "valid_attempts": 3,
-      "mean": 65.33333333333333,
-      "median": 67,
+      "valid_attempts": 2,
+      "mean": 67,
+      "median": 67.0,
       "maximum": 67,
-      "variance": 5.555555555555555
+      "variance": 0
     },
     {
       "variant": "absolute-cloud",
@@ -6788,11 +6418,11 @@
       "variant": "absolute-cloud",
       "scenario": "native-module-extraction",
       "model": "opencode-go/deepseek-v4.1-flash",
-      "valid_attempts": 2,
-      "mean": 66,
-      "median": 66.0,
-      "maximum": 67,
-      "variance": 1
+      "valid_attempts": 1,
+      "mean": 65,
+      "median": 65,
+      "maximum": 65,
+      "variance": 0.0
     },
     {
       "variant": "absolute-cloud",
@@ -6848,11 +6478,11 @@
       "variant": "absolute-cloud",
       "scenario": "static-analysis-only",
       "model": "opencode-go/deepseek-v4.1-flash",
-      "valid_attempts": 3,
-      "mean": 64,
-      "median": 65,
+      "valid_attempts": 2,
+      "mean": 66,
+      "median": 66.0,
       "maximum": 67,
-      "variance": 8.666666666666666
+      "variance": 1
     },
     {
       "variant": "absolute-cloud",
@@ -6868,9 +6498,9 @@
       "variant": "absolute-native-only",
       "scenario": "binary-only-external",
       "model": "opencode-go/deepseek-v4.1-flash",
-      "valid_attempts": 3,
+      "valid_attempts": 2,
       "mean": 60,
-      "median": 60,
+      "median": 60.0,
       "maximum": 60,
       "variance": 0
     },
@@ -6898,21 +6528,21 @@
       "variant": "absolute-native-only",
       "scenario": "ghidra-dynamic",
       "model": "opencode-go/deepseek-v4.1-flash",
-      "valid_attempts": 3,
-      "mean": 57.666666666666664,
-      "median": 60,
+      "valid_attempts": 2,
+      "mean": 56.5,
+      "median": 56.5,
       "maximum": 60,
-      "variance": 10.88888888888889
+      "variance": 12.25
     },
     {
       "variant": "absolute-native-only",
       "scenario": "ghidra-static",
       "model": "opencode-go/deepseek-v4.1-flash",
-      "valid_attempts": 3,
-      "mean": 59,
-      "median": 60,
+      "valid_attempts": 2,
+      "mean": 58.5,
+      "median": 58.5,
       "maximum": 60,
-      "variance": 2
+      "variance": 2.25
     },
     {
       "variant": "absolute-native-only",
@@ -6928,9 +6558,9 @@
       "variant": "absolute-native-only",
       "scenario": "loader-initialization-order",
       "model": "opencode-go/deepseek-v4.1-flash",
-      "valid_attempts": 3,
+      "valid_attempts": 2,
       "mean": 60,
-      "median": 60,
+      "median": 60.0,
       "maximum": 60,
       "variance": 0
     },
@@ -6998,31 +6628,21 @@
       "variant": "absolute-native-only",
       "scenario": "static-analysis-only",
       "model": "opencode-go/deepseek-v4.1-flash",
-      "valid_attempts": 3,
-      "mean": 54.333333333333336,
-      "median": 56,
+      "valid_attempts": 2,
+      "mean": 56.5,
+      "median": 56.5,
       "maximum": 57,
-      "variance": 9.555555555555555
-    },
-    {
-      "variant": "absolute-native-only",
-      "scenario": "unprivileged-local",
-      "model": "opencode-go/deepseek-v4.1-flash",
-      "valid_attempts": 1,
-      "mean": 57,
-      "median": 57,
-      "maximum": 57,
-      "variance": 0.0
+      "variance": 0.25
     },
     {
       "variant": "maximum-cloud",
       "scenario": "binary-only-external",
       "model": "opencode-go/deepseek-v4.1-flash",
-      "valid_attempts": 3,
-      "mean": 62.333333333333336,
-      "median": 62,
+      "valid_attempts": 2,
+      "mean": 62.5,
+      "median": 62.5,
       "maximum": 64,
-      "variance": 1.5555555555555556
+      "variance": 2.25
     },
     {
       "variant": "maximum-cloud",
@@ -7078,11 +6698,11 @@
       "variant": "maximum-cloud",
       "scenario": "loader-initialization-order",
       "model": "opencode-go/deepseek-v4.1-flash",
-      "valid_attempts": 3,
-      "mean": 66,
-      "median": 67,
+      "valid_attempts": 2,
+      "mean": 65.5,
+      "median": 65.5,
       "maximum": 67,
-      "variance": 2
+      "variance": 2.25
     },
     {
       "variant": "maximum-cloud",
@@ -7132,16 +6752,6 @@
       "mean": 64,
       "median": 64,
       "maximum": 64,
-      "variance": 0.0
-    },
-    {
-      "variant": "maximum-cloud",
-      "scenario": "source-assisted-static",
-      "model": "opencode-go/deepseek-v4.1-flash",
-      "valid_attempts": 1,
-      "mean": 88,
-      "median": 88,
-      "maximum": 88,
       "variance": 0.0
     },
     {
@@ -7243,16 +6853,6 @@
       "median": 67,
       "maximum": 67,
       "variance": 8
-    },
-    {
-      "variant": "maximum-local",
-      "scenario": "pack-layout-sections",
-      "model": "opencode-go/deepseek-v4.1-flash",
-      "valid_attempts": 1,
-      "mean": 56,
-      "median": 56,
-      "maximum": 56,
-      "variance": 0.0
     },
     {
       "variant": "maximum-local",
@@ -7378,11 +6978,11 @@
       "variant": "maximum-packed",
       "scenario": "loader-initialization-order",
       "model": "opencode-go/deepseek-v4.1-flash",
-      "valid_attempts": 3,
-      "mean": 32.333333333333336,
-      "median": 30,
+      "valid_attempts": 2,
+      "mean": 33.5,
+      "median": 33.5,
       "maximum": 37,
-      "variance": 10.88888888888889
+      "variance": 12.25
     },
     {
       "variant": "maximum-packed",
@@ -7466,6 +7066,6 @@
     }
   ],
   "completed_records": 174,
-  "structurally_valid": 171,
+  "structurally_valid": 156,
   "scoring_note": "dimension keyword checks measure reconstruction content; semantic hidden-vector credit is independently validated and never inferred from prose"
 }
