@@ -142,6 +142,11 @@ def _collect_holders(key_holders):
             return []
         if isinstance(key_holders, dict):
             return [key_holders]
+        if isinstance(key_holders, (bytearray, memoryview)):
+            # A buffer is itself iterable over byte integers.  Treating it as
+            # an iterable of holders therefore turns every byte into a separate
+            # non-wipeable object and leaves the key material untouched.
+            return [key_holders]
         return list(key_holders)
     except Exception:
         return []

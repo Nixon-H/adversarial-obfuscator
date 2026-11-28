@@ -105,6 +105,9 @@ def missing_loader_symbols(path: str) -> list:
     """
     exported = _exported_symbols(path)
     if not exported:
-        # nm unavailable: say nothing rather than guess.
-        return []
+        # nm unavailable or produced no usable symbol table: fail closed.
+        # An empty return has the contract meaning "backend is live", so using
+        # it for "could not inspect" would falsely report the accelerated
+        # backend while the loader may actually fall back to no-op Python.
+        return list(LOADER_SYMBOLS)
     return [s for s in LOADER_SYMBOLS if s not in exported]

@@ -164,10 +164,12 @@ def verify_record(dist_name):
         if not dig or rel.endswith(".pyc") or rel.startswith("__pycache__"):
             continue
         verdict = _record_digest(dig, size, os.path.join(root, rel))
-        if verdict is None:
-            continue
         checked += 1
-        if not verdict:
+        if verdict is not True:
+            # Missing/unreadable files and RECORD rows this verifier cannot
+            # authenticate must fail closed. Treating them as absent evidence
+            # let an attacker delete a module and leave the integrity report
+            # green.
             failed += 1
             bad.append(rel)
     return {"checked": checked, "failed": failed, "bad": bad[:10]}

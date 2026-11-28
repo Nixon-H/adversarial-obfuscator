@@ -212,6 +212,12 @@ class ContextCollapseObfuscator(ast.NodeTransformer):
                         and isinstance(body[0].value, ast.Constant)
                         and isinstance(body[0].value.value, str)):
                     self._skip_ids.add(id(body[0].value))
+            # A `case "literal":` pattern must stay a literal: replacing it
+            # with a decoder call makes the emitted match statement invalid.
+            if hasattr(ast, "pattern") and isinstance(node, ast.pattern):
+                for part in ast.walk(node):
+                    if isinstance(part, ast.Constant):
+                        self._skip_ids.add(id(part))
             if isinstance(node, (ast.Assign, ast.AugAssign)):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 for t in targets:

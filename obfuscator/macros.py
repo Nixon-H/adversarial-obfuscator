@@ -72,6 +72,46 @@ def _replace_is_obfuscated_tokens(source: str) -> str:
 _GET_HWID_RE = re.compile(r"(?<![A-Za-z0-9_.])GET_HWID\s*\(\s*\)")
 
 
+def _replace_get_hwid_calls(source: str, hwid: str) -> str:
+    """Replace real ``GET_HWID()`` Call nodes, never text inside strings.
+
+    The former regex rewrite could not distinguish a macro call from the same
+    characters inside a string literal or comment, so it corrupted payload
+    data while expanding macros.  AST positions are byte offsets, so perform
+    the splice on the UTF-8 byte stream and decode afterwards.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source
+    spans = []
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "GET_HWID"
+                and not node.args and not node.keywords
+                and node.end_lineno is not None
+                and node.end_col_offset is not None):
+            spans.append((node.lineno, node.col_offset,
+                          node.end_lineno, node.end_col_offset))
+    if not spans:
+        return source
+    data = source.encode("utf-8")
+    lines = data.splitlines(keepends=True)
+    starts = [0]
+    for line in lines:
+        starts.append(starts[-1] + len(line))
+
+    def _pos(line_no, col):
+        return starts[line_no - 1] + col
+
+    replacement = repr(hwid).encode("utf-8")
+    for start_line, start_col, end_line, end_col in sorted(spans, reverse=True):
+        data = (data[:_pos(start_line, start_col)] + replacement
+                + data[_pos(end_line, end_col):])
+    return data.decode("utf-8")
+
+
 def apply_macros(source: str, *, hwid: str = "", trial: str = "") -> str:
     """String-level transform for build-time macros.
 
@@ -90,7 +130,7 @@ def apply_macros(source: str, *, hwid: str = "", trial: str = "") -> str:
     except SyntaxError:
         return source
     out = _replace_is_obfuscated_tokens(source)
-    out = _GET_HWID_RE.sub(repr(hwid), out)
+    out = _replace_get_hwid_calls(out, hwid)
     return out
 
 

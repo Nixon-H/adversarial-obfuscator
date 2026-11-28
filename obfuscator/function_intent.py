@@ -100,17 +100,13 @@ class FunctionIntentObfuscator(ast.NodeTransformer):
                 self._call_sites.setdefault(node.func.id, []).append(node)
         self.visit(tree)
         ast.fix_missing_locations(tree)
-        # Cython resolves names at COMPILE time, so a module-level call that
-        # appears before the callee's `def` is rejected with
-        # "undeclared name not builtin" -- even though Python runs it fine,
-        # because the call happens after the module finished loading.  The
-        # `--package all` native build died on exactly this
-        # (`NameError: name '_nx_op_4cbd757e' is not defined` at import).
-        # Hoisting every module-level function definition above the other
-        # statements is semantics-preserving (all module-level functions are
-        # bound before any other statement runs) and makes the module
-        # compilable.
-        self._hoist_function_defs(tree)
+        # Do NOT hoist function definitions. Decorators, default arguments,
+        # duplicate definitions and module introspection all execute in source
+        # order, so moving defs earlier is not semantics-preserving even
+        # though it can help Cython compile forward references. Correctness of
+        # the Python artifact takes precedence; a native backend that cannot
+        # model Python's definition order must reject or lower that module
+        # rather than changing it here.
         return tree
 
     @staticmethod

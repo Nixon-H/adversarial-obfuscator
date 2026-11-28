@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import secrets
 import shutil
+import stat
 import tempfile
 import time
 
@@ -130,50 +131,53 @@ def secure_unlink(path: str, passes: int = 3) -> bool:
     """Overwrite *path* with ``os.urandom`` *passes* times then unlink.
 
     Returns True on success, False on any error (including missing file).
+    The overwrite uses the same open file descriptor throughout; checking the
+    path with stat() and only then opening it would let an attacker swap in a
+    symlink between the two operations and make the wipe overwrite the target.
     """
     try:
         if not isinstance(path, str) or not path:
             return False
-        try:
-            size = os.path.getsize(path)
-        except OSError:
-            return False
-        # Refuse to operate on directories / non-regular files.
-        try:
-            if not os.path.isfile(path) or os.path.islink(path):
-                # For symlinks: just unlink the link without overwriting
-                # the target? Spec says overwrite file then unlink; safest
-                # for a symlink is to unlink the link itself.
-                if os.path.islink(path):
-                    os.unlink(path)
-                    return True
-                return False
-        except OSError:
-            return False
-        if size > 0:
+        # A path that is already a symlink is unlinked rather than followed.
+        if os.path.islink(path):
             try:
-                f = open(path, "r+b")
+                os.unlink(path)
+                return True
             except OSError:
                 return False
+        flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            fd = os.open(path, flags)
+        except OSError:
+            return False
+        try:
             try:
+                st = os.fstat(fd)
+            except OSError:
+                return False
+            if not stat.S_ISREG(st.st_mode):
+                return False
+            size = st.st_size
+            if size > 0:
                 for _ in range(max(0, int(passes))):
-                    f.seek(0)
+                    os.lseek(fd, 0, os.SEEK_SET)
                     remaining = size
                     # Write in bounded chunks to avoid huge allocations.
                     while remaining > 0:
                         chunk = os.urandom(min(remaining, 1024 * 1024))
-                        f.write(chunk)
-                        remaining -= len(chunk)
-                    f.flush()
+                        written = os.write(fd, chunk)
+                        if written <= 0:
+                            raise OSError("short write during secure unlink")
+                        remaining -= written
                     try:
-                        os.fsync(f.fileno())
+                        os.fsync(fd)
                     except OSError:
                         pass
-            finally:
-                try:
-                    f.close()
-                except OSError:
-                    pass
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         os.unlink(path)
         return True
     except Exception:
@@ -248,7 +252,19 @@ def _nx_secure_write(data, suffix="", prefix="_nx_"):
                     raise OSError("short write")
                 _nx_total += _nx_n
             _nx_os.fsync(_nx_fd)
-        finally:
+        except BaseException:
+            try:
+                _nx_os.close(_nx_fd)
+            except OSError:
+                pass
+            try:
+                # A partial write can already contain secret material; never
+                # leave it behind in the shared temporary directory.
+                _nx_os.unlink(_nx_path)
+            except OSError:
+                pass
+            raise
+        else:
             _nx_os.close(_nx_fd)
         try:
             _nx_os.chmod(_nx_path, 0o600)
