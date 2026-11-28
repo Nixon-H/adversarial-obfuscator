@@ -262,10 +262,10 @@ impl CloudflareClient {
     }
 
     pub async fn test_endpoint(&self, url: &str, target_url: &str) -> Result<TestResult> {
-        let full_url = format!("{}?url={}", url, target_url);
         let resp = self
             .http_client
-            .get(&full_url)
+            .get(url)
+            .query(&[("url", target_url)])
             .send()
             .await
             .context("Failed to test endpoint")?;
@@ -537,6 +537,13 @@ pub async fn cmd_list() -> Result<()> {
     Ok(())
 }
 
+fn lossy_preview(body: &[u8], max_chars: usize) -> String {
+    String::from_utf8_lossy(body)
+        .chars()
+        .take(max_chars)
+        .collect()
+}
+
 pub async fn cmd_test_http(url: String, target: Option<String>) -> Result<()> {
     let target_url = target.unwrap_or_else(|| "https://ifconfig.me/ip".to_string());
 
@@ -547,8 +554,7 @@ pub async fn cmd_test_http(url: String, target: Option<String>) -> Result<()> {
         .timeout(std::time::Duration::from_secs(45))
         .build()?;
 
-    let full_url = format!("{}?url={}", url, target_url);
-    let resp = client.get(&full_url).send().await?;
+    let resp = client.get(&url).query(&[("url", target_url.as_str())]).send().await?;
 
     let status = resp.status();
     let body = resp.bytes().await?;
@@ -573,8 +579,7 @@ pub async fn cmd_test_http(url: String, target: Option<String>) -> Result<()> {
     } else {
         println!("Request failed! Status: {}", status);
         if !body.is_empty() {
-            let text = String::from_utf8_lossy(&body);
-            println!("    Body: {}", &text[..text.len().min(500)]);
+            println!("    Body: {}", lossy_preview(&body, 500));
         }
     }
 
@@ -716,4 +721,77 @@ fn merge_service_lists(
     let mut result: Vec<ServiceRecord> = map.into_values().collect();
     result.sort_by(|a, b| a.name.cmp(&b.name));
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(future)
+    }
+
+    #[test]
+    fn endpoint_target_is_percent_encoded_as_one_query_value() {
+        block_on(async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .unwrap();
+            let addr = listener.local_addr().unwrap();
+            let request_task = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut chunk = [0u8; 4096];
+                while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    let count = socket.read(&mut chunk).await.unwrap();
+                    if count == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&chunk[..count]);
+                }
+                socket
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .await
+                    .unwrap();
+                String::from_utf8(request).unwrap()
+            });
+
+            let client = CloudflareClient::new(
+                "fixture-token".to_string(),
+                "fixture-account".to_string(),
+                None,
+            );
+            let target = "https://example.test/path?a=1&b=two words#fragment";
+            let endpoint = format!("http://{addr}/proxy?existing=1");
+            let result = client.test_endpoint(&endpoint, target).await.unwrap();
+            assert!(result.success);
+
+            let request = request_task.await.unwrap();
+            let request_line = request.lines().next().unwrap();
+            let path = request_line.split_whitespace().nth(1).unwrap();
+            let (_, query) = path.split_once('?').unwrap();
+            let params: HashMap<String, String> = url::form_urlencoded::parse(query.as_bytes())
+                .into_owned()
+                .collect();
+            assert_eq!(params.get("existing").map(String::as_str), Some("1"));
+            assert_eq!(params.get("url").map(String::as_str), Some(target));
+        });
+    }
+
+    #[test]
+    fn lossy_preview_does_not_split_utf8_or_panic() {
+        let mut body = vec![b'a'; 499];
+        body.extend_from_slice("é".as_bytes());
+        body.extend_from_slice(&[b'b'; 20]);
+        let preview = lossy_preview(&body, 500);
+        assert_eq!(preview.chars().count(), 500);
+        assert!(preview.ends_with('é'));
+    }
 }

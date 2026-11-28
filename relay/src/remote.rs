@@ -432,6 +432,7 @@ struct WorkerOutput {
     status: std::process::ExitStatus,
 }
 
+#[cfg(not(unix))]
 fn read_worker_pipe(mut pipe: impl Read, limit: usize) -> std::io::Result<(Vec<u8>, bool)> {
     let mut output = Vec::new();
     let mut buffer = [0u8; 8192];
@@ -454,8 +455,279 @@ fn read_worker_pipe(mut pipe: impl Read, limit: usize) -> std::io::Result<(Vec<u
     Ok((output, overflow))
 }
 
+#[cfg(unix)]
+fn set_pipe_nonblocking(fd: std::os::unix::io::RawFd) -> Result<(), String> {
+    // The fd is owned by the caller's pipe object and outlives these two
+    // calls. fcntl only reads and updates that open file description's flags;
+    // it does not create aliasing or touch memory through the raw fd.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags == -1 {
+        return Err(format!(
+            "worker pipe status read failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    if unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1 {
+        return Err(format!(
+            "worker pipe nonblocking setup failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+struct WorkerPipeCapture {
+    output: Vec<u8>,
+    overflow: bool,
+    limit: usize,
+}
+
+#[cfg(unix)]
+impl WorkerPipeCapture {
+    fn new(limit: usize) -> Self {
+        Self {
+            output: Vec::new(),
+            overflow: false,
+            limit,
+        }
+    }
+}
+
+#[cfg(unix)]
+fn read_worker_pipe_once(
+    pipe: &mut impl Read,
+    capture: &mut WorkerPipeCapture,
+) -> std::io::Result<bool> {
+    let mut buffer = [0u8; 8192];
+    match pipe.read(&mut buffer) {
+        Ok(0) => Ok(false),
+        Ok(count) => {
+            let room = capture.limit.saturating_sub(capture.output.len());
+            let keep = room.min(count);
+            capture.output.extend_from_slice(&buffer[..keep]);
+            if keep < count {
+                capture.overflow = true;
+            }
+            Ok(true)
+        }
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock
+            ) =>
+        {
+            Ok(false)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(unix)]
+fn drain_worker_pipes_after_exit(
+    stdout: &mut impl Read,
+    stdout_capture: &mut WorkerPipeCapture,
+    stderr: &mut impl Read,
+    stderr_capture: &mut WorkerPipeCapture,
+) -> Result<(), String> {
+    // Bytes written by the direct child are already in the pipes when
+    // try_wait reports exit. Drain what is immediately available, but do not
+    // wait for EOF: a forked grandchild can inherit the pipe and hold it open.
+    // Once a pipe overflows there is no need to consume further bytes: the
+    // stdout overflow already determines the error result, and stderr excess
+    // is deliberately discarded. That bounds this loop by the configured
+    // capture limits even if a continuously writing descendant holds the pipe
+    // open. The iteration ceiling is a defence-in-depth bound for the same
+    // condition; each iteration can consume one full buffer from each pipe.
+    let max_iterations = stdout_capture
+        .limit
+        .max(stderr_capture.limit)
+        .saturating_div(8192)
+        .saturating_add(2);
+    for _ in 0..max_iterations {
+        let stdout_progress = if stdout_capture.overflow {
+            false
+        } else {
+            read_worker_pipe_once(stdout, stdout_capture)
+                .map_err(|error| format!("worker stdout failed: {error}"))?
+        };
+        let stderr_progress = if stderr_capture.overflow {
+            false
+        } else {
+            read_worker_pipe_once(stderr, stderr_capture)
+                .map_err(|error| format!("worker stderr failed: {error}"))?
+        };
+        if !stdout_progress && !stderr_progress {
+            break;
+        }
+    }
+    Ok(())
+}
+
 /// Run a worker with concurrent stdin/stdout/stderr I/O, a hard deadline and
 /// bounded captured output. On timeout the direct child is killed and reaped.
+#[cfg(unix)]
+fn run_worker(
+    program: &str,
+    args: &[&str],
+    payload: &[u8],
+    deadline: Duration,
+    stdout_limit: usize,
+    stderr_limit: usize,
+) -> Result<WorkerOutput, String> {
+    use std::os::unix::io::AsRawFd;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("worker spawn failed: {error}"))?;
+
+    let mut stdin = match child.stdin.take() {
+        Some(pipe) => Some(pipe),
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("worker stdin unavailable".to_string());
+        }
+    };
+    let mut stdout = match child.stdout.take() {
+        Some(pipe) => pipe,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("worker stdout unavailable".to_string());
+        }
+    };
+    let mut stderr = match child.stderr.take() {
+        Some(pipe) => pipe,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("worker stderr unavailable".to_string());
+        }
+    };
+
+    let nonblocking_setup = stdin.as_ref().map_or(Ok(()), |pipe| {
+        set_pipe_nonblocking(pipe.as_raw_fd())
+    })
+    .and_then(|_| set_pipe_nonblocking(stdout.as_raw_fd()))
+    .and_then(|_| set_pipe_nonblocking(stderr.as_raw_fd()));
+    if let Err(message) = nonblocking_setup {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(message);
+    }
+
+    let started = Instant::now();
+    let mut written = 0usize;
+    let mut stdin_error = None;
+    let mut stdout_capture = WorkerPipeCapture::new(stdout_limit);
+    let mut stderr_capture = WorkerPipeCapture::new(stderr_limit);
+    if payload.is_empty() {
+        // Close stdin immediately so a worker that reads to EOF can start.
+        stdin = None;
+    }
+
+    let status = loop {
+        if started.elapsed() >= deadline {
+            let _ = child.kill();
+            match child.wait() {
+                Ok(_) => {}
+                Err(error) => return Err(format!("worker reap failed: {error}")),
+            }
+            return Err("worker deadline exceeded".to_string());
+        }
+
+        if let Some(pipe) = stdin.as_mut() {
+            if written < payload.len() {
+                match pipe.write(&payload[written..]) {
+                    Ok(0) => {
+                        stdin_error = Some(std::io::Error::new(
+                            std::io::ErrorKind::WriteZero,
+                            "worker stdin accepted zero bytes",
+                        ));
+                        stdin = None;
+                    }
+                    Ok(count) => {
+                        written += count;
+                        if written == payload.len() {
+                            stdin = None;
+                        }
+                    }
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            std::io::ErrorKind::Interrupted
+                                | std::io::ErrorKind::WouldBlock
+                        ) => {}
+                    Err(error) => {
+                        stdin_error = Some(error);
+                        stdin = None;
+                    }
+                }
+            } else {
+                stdin = None;
+            }
+        }
+
+        if let Err(error) = read_worker_pipe_once(&mut stdout, &mut stdout_capture) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("worker stdout failed: {error}"));
+        }
+        if let Err(error) = read_worker_pipe_once(&mut stderr, &mut stderr_capture) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("worker stderr failed: {error}"));
+        }
+
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                // The direct child cannot consume more input. Close our write
+                // end, then drain only bytes already available in the pipes.
+                drop(stdin.take());
+                drain_worker_pipes_after_exit(
+                    &mut stdout,
+                    &mut stdout_capture,
+                    &mut stderr,
+                    &mut stderr_capture,
+                )?;
+                break status;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(1)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("worker wait failed: {error}"));
+            }
+        }
+    };
+
+    if let Some(error) = stdin_error {
+        return Err(format!("worker stdin failed: {error}"));
+    }
+    if written < payload.len() {
+        return Err("worker stdin failed: child exited before consuming the request".to_string());
+    }
+    if stdout_capture.overflow {
+        return Err(format!(
+            "worker stdout limit exceeded ({stdout_limit} bytes)"
+        ));
+    }
+    Ok(WorkerOutput {
+        stdout: stdout_capture.output,
+        stderr: stderr_capture.output,
+        status,
+    })
+}
+
+/// Run a worker with concurrent stdin/stdout/stderr I/O, a hard deadline and
+/// bounded captured output. On timeout the direct child is killed and reaped.
+#[cfg(not(unix))]
 fn run_worker(
     program: &str,
     args: &[&str],
@@ -1286,6 +1558,28 @@ sys.stdout.buffer.write(registry.handle(sys.stdin.buffer.read()))
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("deadline"));
         assert!(start.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worker_does_not_wait_on_pipe_inheriting_grandchildren() {
+        let script = "import os,time,sys\npid=os.fork()\nif pid == 0:\n    time.sleep(2)\n    os._exit(0)\nsys.stdout.buffer.write(b'ok')\nsys.stdout.buffer.flush()\n";
+        let start = std::time::Instant::now();
+        let output = run_worker(
+            "python3",
+            &["-c", script],
+            b"",
+            std::time::Duration::from_secs(5),
+            1024,
+            1024,
+        );
+        assert!(output.is_ok(), "{:?}", output.err());
+        assert_eq!(output.unwrap().stdout, b"ok");
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(1),
+            "worker waited for a grandchild-held pipe: {:?}",
+            start.elapsed()
+        );
     }
 
     #[test]
