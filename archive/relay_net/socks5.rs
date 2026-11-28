@@ -38,12 +38,19 @@ pub async fn socks5_handshake(
         anyhow::bail!("invalid SOCKS version: {}", socks_version);
     }
 
-    if auth_method_count > 0 {
-        let mut auth_methods = vec![0u8; auth_method_count];
+    let mut auth_methods = vec![0u8; auth_method_count];
+    stream
+        .read_exact(&mut auth_methods)
+        .await
+        .context("failed to read auth methods")?;
+
+    if !auth_methods.contains(&0x00) {
         stream
-            .read_exact(&mut auth_methods)
+            .write_all(&[0x05, 0xff])
             .await
-            .context("failed to read auth methods")?;
+            .context("failed to write SOCKS5 method rejection")?;
+        stream.flush().await.ok();
+        anyhow::bail!("client did not offer no-auth authentication");
     }
 
     stream
@@ -155,4 +162,55 @@ pub fn socks5_success_response(_request: &Socks5Request) -> Vec<u8> {
 
 pub fn socks5_failure_response(error_code: u8) -> Vec<u8> {
     vec![0x05, error_code, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(future)
+    }
+
+    #[test]
+    fn rejects_clients_that_do_not_offer_no_auth() {
+        block_on(async {
+            let (mut client, mut server) = tokio::io::duplex(64);
+            let server_task = tokio::spawn(async move { socks5_handshake(&mut server).await });
+
+            client.write_all(&[0x05, 0x01, 0x02]).await.unwrap();
+            let mut selection = [0u8; 2];
+            client.read_exact(&mut selection).await.unwrap();
+            assert_eq!(selection, [0x05, 0xff]);
+
+            let err = server_task.await.unwrap().unwrap_err();
+            assert!(err.to_string().contains("did not offer no-auth"));
+        });
+    }
+
+    #[test]
+    fn accepts_no_auth_when_the_client_offers_it() {
+        block_on(async {
+            let (mut client, mut server) = tokio::io::duplex(64);
+            let server_task = tokio::spawn(async move { socks5_handshake(&mut server).await });
+
+            client.write_all(&[0x05, 0x01, 0x00]).await.unwrap();
+            let mut selection = [0u8; 2];
+            client.read_exact(&mut selection).await.unwrap();
+            assert_eq!(selection, [0x05, 0x00]);
+
+            client
+                .write_all(&[0x05, 0x01, 0x00, 0x01, 1, 2, 3, 4, 0, 80])
+                .await
+                .unwrap();
+            let request = server_task.await.unwrap().unwrap();
+            assert_eq!(request.host, "1.2.3.4");
+            assert_eq!(request.port, 80);
+        });
+    }
 }

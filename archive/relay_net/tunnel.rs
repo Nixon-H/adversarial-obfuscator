@@ -234,15 +234,16 @@ async fn handle_connection(mut stream: TcpStream, cfg: Arc<GatewayConfig>) -> Re
         && cfg.cf_hostnames.iter().any(|h| h == &request.host)
     { cfg.cf_override_ip.clone() } else { request.host.clone() };
 
-    let mut ws = match connect_ws(&cfg.ws_url, &cfg.api_key, cfg.handshake_timeout).await {
-        Ok(ws) => ws,
-        Err(_) if cfg.fallback_enabled => {
-            connect_ws(&cfg.fallback_ws_url, &cfg.fallback_api_key, cfg.handshake_timeout).await?
-        }
+    let (mut ws, tunnel_password) = match connect_ws(&cfg.ws_url, &cfg.api_key, cfg.handshake_timeout).await {
+        Ok(ws) => (ws, cfg.socks_password.as_str()),
+        Err(_) if cfg.fallback_enabled => (
+            connect_ws(&cfg.fallback_ws_url, &cfg.fallback_api_key, cfg.handshake_timeout).await?,
+            cfg.fallback_password.as_str(),
+        ),
         Err(e) => anyhow::bail!("Connection failed: {}", e),
     };
 
-    send_connect(&mut ws, &target_host, request.port, &cfg.socks_password).await?;
+    send_connect(&mut ws, &target_host, request.port, tunnel_password).await?;
     wait_for_ack(&mut ws, cfg.handshake_timeout).await?;
 
     let resp = socks5_success_response(&request);
@@ -259,4 +260,89 @@ pub async fn test_socks_endpoint(url: &str, host: &str, port: u16, password: &st
     wait_for_ack(&mut ws, timeout).await?;
     println!("[+] SOCKS endpoint OK: connected to {}:{} via {}", host, port, url);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(future)
+    }
+
+    #[test]
+    fn fallback_tunnel_uses_fallback_password() {
+        block_on(async {
+            let fallback_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let fallback_addr = fallback_listener.local_addr().unwrap();
+            let fallback_task = tokio::spawn(async move {
+                let (stream, _) = fallback_listener.accept().await.unwrap();
+                let mut websocket = tokio_tungstenite::accept_async(stream).await.unwrap();
+                let connect_message = match websocket.next().await.unwrap().unwrap() {
+                    Message::Text(text) => text,
+                    other => panic!("unexpected fallback connect message: {other:?}"),
+                };
+                websocket
+                    .send(Message::Text("{\"type\":\"ready\"}".to_string()))
+                    .await
+                    .unwrap();
+                connect_message
+            });
+
+            let unused_primary = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let primary_addr = unused_primary.local_addr().unwrap();
+            drop(unused_primary);
+
+            let socks_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let socks_addr = socks_listener.local_addr().unwrap();
+            let gateway = Arc::new(GatewayConfig {
+                service_name: "fixture".to_string(),
+                ws_url: format!("ws://{primary_addr}"),
+                api_key: String::new(),
+                socks_password: "primary-fixture-password".to_string(),
+                bind_host: "127.0.0.1".to_string(),
+                bind_port: None,
+                cf_override_ip: String::new(),
+                cf_hostnames: Vec::new(),
+                fallback_enabled: true,
+                fallback_ws_url: format!("ws://{fallback_addr}"),
+                fallback_api_key: String::new(),
+                fallback_password: "fallback-fixture-password".to_string(),
+                handshake_timeout: Duration::from_secs(2),
+                retry_buffer_size: 1024,
+            });
+            let connection_task = tokio::spawn(async move {
+                let (stream, _) = socks_listener.accept().await.unwrap();
+                handle_connection(stream, gateway).await
+            });
+
+            let mut client = TcpStream::connect(socks_addr).await.unwrap();
+            client.write_all(&[0x05, 0x01, 0x00]).await.unwrap();
+            let mut selection = [0u8; 2];
+            client.read_exact(&mut selection).await.unwrap();
+            assert_eq!(selection, [0x05, 0x00]);
+            let host = b"example.com";
+            let mut request = vec![0x05, 0x01, 0x00, 0x03, host.len() as u8];
+            request.extend_from_slice(host);
+            request.extend_from_slice(&80u16.to_be_bytes());
+            client.write_all(&request).await.unwrap();
+            let mut socks_reply = [0u8; 10];
+            client.read_exact(&mut socks_reply).await.unwrap();
+            assert_eq!(socks_reply[1], 0x00);
+
+            let connect_message = fallback_task.await.unwrap();
+            let connect_json: serde_json::Value = serde_json::from_str(&connect_message).unwrap();
+            assert_eq!(
+                connect_json["password"].as_str(),
+                Some("fallback-fixture-password")
+            );
+            drop(client);
+            let _ = tokio::time::timeout(Duration::from_secs(2), connection_task).await;
+        });
+    }
 }
