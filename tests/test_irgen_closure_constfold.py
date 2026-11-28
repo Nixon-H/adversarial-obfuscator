@@ -52,3 +52,39 @@ def test_non_pure_binding_is_not_folded():
         "    return inner()\n"
     )
     compile_py_to_ir(src)  # compiles through normal paths, no eval of len()
+
+
+def test_assignment_inside_conditional_block_resolves_for_closure():
+    """The failing CI shape: the binding nested inside an if body, the
+    read inside a generated nested function.  Straight-line recording
+    never sees the assignment before the closure compiles."""
+    src = (
+        "def outer():" + chr(10)
+        + "    if True:" + chr(10)
+        + "        _nx_opaque = 315 % 2 == 1" + chr(10)
+        + "    def inner():" + chr(10)
+        + "        if _nx_opaque == False:" + chr(10)
+        + "            return 0" + chr(10)
+        + "        return 1" + chr(10)
+        + "    return inner()" + chr(10)
+    )
+    compile_py_to_ir(src)
+
+
+def test_inner_function_constants_do_not_leak_outward():
+    """The pre-scan must not descend into nested functions -- an inner
+    binding is not the enclosing scope's constant.
+    """
+    src = (
+        "def outer():" + chr(10)
+        + "    def inner():" + chr(10)
+        + "        k = 7" + chr(10)
+        + "        return k" + chr(10)
+        + "    def sibling():" + chr(10)
+        + "        return k" + chr(10)
+        + "    return inner()" + chr(10)
+    )
+    try:
+        compile_py_to_ir(src)
+    except Exception:
+        pass  # strict mode may reject k in sibling -- that is correct

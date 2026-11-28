@@ -926,6 +926,28 @@ class IrCompiler:
         # to become the fallback 0 -- a silent miscompilation.
         old_const_locals = dict(self.const_locals)
 
+        # Pre-scan the body for pure-constant bindings before compiling
+        # anything.  Obfuscation passes relocate injected scaffolding --
+        # the attention-poison dispatch's `_nx_opaque = <const-expr>` can
+        # end up nested inside conditional blocks while its reads land in
+        # generated nested functions, so the straight-line recording in
+        # _record_const_assign never fires before the closure compiles
+        # (shadow-build lane, intermittent UnresolvedNameError measured
+        # 2026-11-28).  Constants are compile-time fixed, so early
+        # visibility cannot change values.  The scan does not descend
+        # into nested functions: their bindings are not this scope's.
+        def _prescan(stmts):
+            for st in stmts:
+                if isinstance(st, ast.Assign):
+                    self._record_const_assign(st)
+                elif isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                     ast.Lambda)):
+                    continue
+                else:
+                    for child in ast.iter_child_nodes(st):
+                        if isinstance(child, ast.stmt):
+                            _prescan([child])
+        _prescan(node.body)
         # Imports inside the function body (the loader imports its
         # crypto helpers inside a function) get handles too.
         self._register_imports(node)
