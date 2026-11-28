@@ -1,6 +1,5 @@
 """Regression: payload mid-run failure inside the native module must surface
 the real error, not the false 'ran no payload' fatal."""
-import re
 
 def test_exec_module_records_payload_error():
     src = open("obfuscator/core/pipeline.py").read()
