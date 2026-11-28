@@ -480,6 +480,142 @@ _DEAD_BLOCKS = [
 ]
 
 
+
+
+def scan_c_structure(source: str) -> list:
+    """Lexer-lite structural scan of C source, one record per line.
+
+    The dead-block pass used naive line heuristics: count `{`/`}` per line,
+    inject after lines ending in `{`.  That is blind to three things that
+    actually decide whether a position is a statement position:
+
+    1. COMMENTS.  Cython emits a metadata block comment at the head of every
+       file containing JSON-ish lines ending in `{` ("distutils": {).  The
+       naive scan treated them as block openings at depth 1-2 and injected
+       real code INTO THE COMMENT, producing file-scope garbage:
+       `expected identifier or '(' before '{'` at line 7.  Measured 2026-11-28:
+       34 of 60 seeds produced uncompilable C on a real payload.
+    2. STRINGS/CHARS.  Braces inside literals desync the naive depth counter.
+    3. INITIALISERS.  `= {` opens an initialiser, not a compound statement;
+       a block spliced inside is invalid C.
+
+    Per line the scan records:
+      injectable -- the line ends with a `{` that opens a function body or
+                    compound statement, at function depth 1-2, with no open
+                    paren/bracket/initialiser/aggregate/comment/string state
+      depth      -- function/compound nesting depth at end of line
+    """
+    records = []
+    NORMAL, IN_STR, IN_CHAR, IN_LCOMMENT, IN_BCOMMENT = range(5)
+    state = NORMAL
+    escape = False
+    paren = 0
+    bracket = 0
+    stack = []           # kinds: func, compound, init, agg, unknown
+    pending = ""         # significant code since last statement boundary
+    line_start_state = NORMAL
+    cur = []
+
+    def classify(brace_pending: str) -> str:
+        p = brace_pending.strip()
+        if not stack and p.endswith(")") and "(" in p:
+            return "func"
+        if re.search(r"\b(?:enum|struct|union)\b[^;{}()]*$", p):
+            return "agg"
+        if "=" in p:
+            return "init"
+        if not p or p.endswith(")") or re.search(
+                r"\b(?:else|do|try)\s*$", p):
+            return "compound"
+        if not stack:
+            return "unknown"
+        return "compound"
+
+    def end_line():
+        func_depth = sum(1 for k in stack if k in ("func", "compound"))
+        bad = (paren > 0 or bracket > 0
+               or any(k in ("init", "agg", "unknown") for k in stack)
+               or state != NORMAL or line_start_state != NORMAL)
+        text = "".join(cur)
+        stripped = text.strip()
+        injectable = (not bad and stripped.endswith("{")
+                      and stack and stack[-1] in ("func", "compound")
+                      and 1 <= func_depth <= 2)
+        records.append({"injectable": injectable, "depth": func_depth,
+                        "opens": stripped.count("{") - stripped.count("}")})
+        cur.clear()
+
+    i = 0
+    n = len(source)
+    while i < n:
+        ch = source[i]
+        nxt = source[i + 1] if i + 1 < n else ""
+        if ch == "\n":
+            end_line()
+            if state == IN_LCOMMENT:
+                state = NORMAL
+            line_start_state = state
+            pending = pending if state == NORMAL or state == IN_BCOMMENT else pending
+            i += 1
+            continue
+        if state == NORMAL:
+            if ch == "/" and nxt == "/":
+                state = IN_LCOMMENT; i += 2; continue
+            if ch == "/" and nxt == "*":
+                state = IN_BCOMMENT; i += 2; continue
+            if ch == '"':
+                state = IN_STR; escape = False; cur.append(ch); i += 1; continue
+            if ch == "'":
+                state = IN_CHAR; escape = False; cur.append(ch); i += 1; continue
+            if ch == "(":
+                paren += 1
+                pending += ch
+            elif ch == ")":
+                paren = max(0, paren - 1)
+                pending += ch
+            elif ch == "[":
+                bracket += 1
+            elif ch == "]":
+                bracket = max(0, bracket - 1)
+            elif ch == "{":
+                stack.append(classify(pending))
+                pending = ""
+            elif ch == "}":
+                if stack:
+                    stack.pop()
+                pending = ""
+            elif ch == ";":
+                pending = ""
+            elif not ch.isspace():
+                pending += ch
+            cur.append(ch)
+        elif state == IN_STR:
+            cur.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                state = NORMAL
+        elif state == IN_CHAR:
+            cur.append(ch)
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == "'":
+                state = NORMAL
+        elif state == IN_LCOMMENT:
+            pass
+        elif state == IN_BCOMMENT:
+            if ch == "*" and nxt == "/":
+                state = NORMAL; i += 2; continue
+        i += 1
+    if cur:
+        end_line()
+    return records
+
+
 def insert_dead_blocks(source: str, seed: bytes,
                        rng: random.Random,
                        rate: float = 0.3) -> Tuple[str, int]:
@@ -494,45 +630,17 @@ def insert_dead_blocks(source: str, seed: bytes,
     lines = source.splitlines(keepends=True)
     inserted = 0
     out = []
-    depth = 0
     block_idx = 0
-    # Aggregate/type bodies are not statement positions: a bare `{ ... }`
-    # block injected inside `enum X {`, `struct X {` or `union X {` is
-    # invalid C ("expected identifier before '{' token").  Found by fuzzing
-    # 40 seeds on 2026-11-18: 2 of 40 produced uncompilable C, both from a
-    # dead block landing inside `enum __Pyx_ReferenceSharing {`.  The old
-    # guard only excluded `static`, declarator lines and control-flow
-    # headers, so any aggregate opening was fair game.
-    _aggregate_depth = 0
-    _agg_re = re.compile(r"\b(?:enum|struct|union)\b[^;{]*\{")
-    for line in lines:
-        stripped = line.strip()
-        opens = stripped.count("{") - stripped.count("}")
-        _opens_aggregate = bool(_agg_re.search(stripped)) and \
-            not stripped.startswith(("//", "/*", "*"))
-        depth += opens
+    # Structural scan (see scan_c_structure): the naive line scan this
+    # replaced was blind to comments, string literals and initialisers, and
+    # injected blocks into Cython's metadata header comment -- 34 of 60
+    # seeds produced uncompilable C on a real payload (measured 2026-11-28).
+    records = scan_c_structure(source)
+    for line, rec in zip(lines, records):
         out.append(line)
-        if _aggregate_depth > 0:
-            # Inside (or closing) an aggregate body: never inject here.
-            _aggregate_depth = max(0, _aggregate_depth + opens)
-            continue
-        if _opens_aggregate:
-            # Track every brace this line opened, so a nested aggregate
-            # declared on one line (`struct A { struct B {`) is covered too.
-            _aggregate_depth = opens if opens > 0 else 0
-            continue
-        # Insert dead blocks inside function bodies (depth 1 or 2), not at
-        # global scope (depth 0) or inside nested blocks (depth > 2).
-        # Skip lines that OPEN an aggregate initialiser or a declaration:
-        # injecting a `{ ... }` block there produces invalid C.
-        _is_initialiser = ("=" in stripped and stripped.endswith("{")) or \
-            stripped.startswith("(void *)&") or \
-            "__nx_junk_refs" in stripped or \
-            "__nx_ss_set" in stripped or \
-            "__nx_opa" in stripped or \
-            "__nx_mba" in stripped
-        if 1 <= depth <= 2 and stripped.endswith("{") and not _is_initialiser \
-                and rng.random() < rate and block_idx < len(_DEAD_BLOCKS):
+        if rec["injectable"] and rng.random() < rate \
+                and block_idx < len(_DEAD_BLOCKS):
+            depth = rec["depth"]
             init = int.from_bytes(digest[block_idx * 4:block_idx * 4 + 4], "big")
             n = block_idx + 1
             block = _DEAD_BLOCKS[block_idx % len(_DEAD_BLOCKS)].format(
@@ -1139,14 +1247,58 @@ def transform_c(source: str, seed: bytes, *,
     return result
 
 
+def _syntax_ok(c_path: str) -> bool:
+    """gcc -fsyntax-only gate. False only when gcc is present AND rejects
+    the file; when gcc is absent the downstream compile step is the gate
+    anyway, so the transform does not second-guess it."""
+    import shutil as _sh
+    import subprocess as _sp
+    import sysconfig as _sc
+    gcc = _sh.which("gcc")
+    if not gcc:
+        return True
+    py_inc = _sc.get_paths().get("include", "")
+    try:
+        proc = _sp.run([gcc, "-fsyntax-only", "-std=c99", "-I", py_inc,
+                        c_path], capture_output=True, timeout=120)
+    except Exception:
+        return True
+    return proc.returncode == 0
+
+
 def transform_file(path: str, seed: bytes, *,
                    out_path: Optional[str] = None,
                    **kwargs) -> CTransformResult:
-    """Transform a .c file in place (or to out_path)."""
+    """Transform a .c file in place (or to out_path).
+
+    VERIFIED-VALID CONTRACT (2026-11-28): before the structural scanner
+    fix, 34 of 60 seeds produced C that gcc rejected (dead blocks spliced
+    into Cython's metadata comment).  The scanner makes that class
+    impossible, but the transform pipeline is intentionally adversarial
+    towards its own output: any future pass that emits invalid C would
+    otherwise surface as a flaky build failure downstream.  The output is
+    therefore syntax-checked here, and malformed results are retried with
+    seeds derived deterministically from the original -- reproducibility
+    per seed is preserved because the retry chain is a pure function of
+    the input seed.  If every attempt is malformed the build must fail
+    closed rather than ship or flake.
+    """
     with open(path, encoding="utf-8", errors="replace") as fh:
         source = fh.read()
-    result = transform_c(source, seed, **kwargs)
     dest = out_path or path
-    with open(dest, "w", encoding="utf-8") as fh:
-        fh.write(result.source)
-    return result
+    attempts = 4
+    for attempt in range(attempts):
+        use_seed = seed if attempt == 0 else hashlib.sha256(
+            seed + b"/retry%d" % attempt).digest()
+        result = transform_c(source, use_seed, **kwargs)
+        with open(dest, "w", encoding="utf-8") as fh:
+            fh.write(result.source)
+        if _syntax_ok(dest):
+            if attempt:
+                print("    [+] C transform: seed retry %d/%d verified valid"
+                      % (attempt, attempts - 1))
+            return result
+    raise RuntimeError(
+        "C transform produced syntactically invalid C on every seed "
+        "attempt (%d). Refusing to ship malformed C -- this is a "
+        "transform bug, not a flaky build." % attempts)

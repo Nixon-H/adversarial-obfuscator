@@ -136,3 +136,76 @@ def test_transform_correctness_all_transforms():
     assert result.junk_injected > 0
     # The transformed source must still contain the function definition.
     assert "__pyx_f_1f" in result.source or "static int" in result.source
+
+
+def test_transform_valid_c_across_seeded_fuzz(tmp_path):
+    """Regression for the 2026-11-28 malformed-C class: the dead-block pass
+    spliced blocks into Cython's metadata header comment because the line
+    scan had no comment/string/initialiser awareness -- 34/60 seeds failed
+    on real payload output.  This fuzz uses the same comment-heavy shapes:
+    a header comment with bracey JSON-ish lines, bracey string literals,
+    and a multi-line initialiser.  Every seed must yield valid C."""
+    import subprocess, sysconfig
+    bracey = (
+        "/* BEGIN: metadata\n"
+        "{\n"
+        "    \"pkg\": {\n"
+        "        \"src\": [\"x.py\"]\n"
+        "    },\n"
+        "}\n"
+        "END: metadata */\n"
+        "static const char *msg = \"brace } inside string {\";\n"
+        "static int arr[3] = {\n"
+        "    1,\n"
+        "    2,\n"
+        "    3,\n"
+        "};\n"
+    )
+    src = bracey + CYX_C
+    py_inc = sysconfig.get_paths().get("include", "")
+    bad = []
+    for i in range(12):
+        seed = ("regression-%d" % i).encode()
+        result = transform_c(src, seed)
+        out = tmp_path / ("fuzz%d.c" % i)
+        out.write_text(result.source, encoding="utf-8")
+        proc = subprocess.run(
+            ["gcc", "-fsyntax-only", "-std=c99", "-I", py_inc, str(out)],
+            capture_output=True, text=True, timeout=60)
+        if proc.returncode != 0:
+            bad.append((i, proc.stderr[:200]))
+    assert not bad, "malformed C on seeds: %s" % bad
+
+
+def test_scan_c_structure_ignores_comment_braces():
+    """The metadata comment must yield no injectable positions even though
+    it is full of lines ending in `{`."""
+    from scripts.c_transform import scan_c_structure
+    comment = (
+        "/* BEGIN\n"
+        "{\n"
+        "    \"distutils\": {\n"
+        "}\n"
+        "END */\n"
+    )
+    recs = scan_c_structure(comment)
+    assert not any(r["injectable"] for r in recs)
+
+
+def test_scan_c_structure_ignores_string_braces():
+    """A `}` inside a string literal must not desync depth."""
+    from scripts.c_transform import scan_c_structure
+    src = (
+        "static int f(void) {\n"
+        "    const char *s = \"}\";\n"
+        "    if (1) {\n"
+        "        return 1;\n"
+        "    }\n"
+        "    return 0;\n"
+        "}\n"
+    )
+    recs = scan_c_structure(src)
+    # line 2 (`if (1) {`) must be seen at depth 2, injectable -- if the
+    # string's `}` desynced depth it would read depth 1 or negative.
+    assert recs[2]["injectable"] is True
+    assert recs[2]["depth"] == 2
