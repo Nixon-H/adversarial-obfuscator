@@ -368,10 +368,7 @@ def materialize_final_answer_json(ws,ev):
         if len(lines)>=3 and lines[-1].strip().startswith('```'):
             candidate='\n'.join(lines[1:-1]).strip()
     if not candidate.startswith('{'):
-        start=candidate.find('{')
-        end=candidate.rfind('}')
-        if start>=0 and end>start:
-            candidate=candidate[start:end+1]
+        return {'materialized':False,'source':'final-text-not-single-json-object'}
     try:
         obj=json.loads(candidate)
     except Exception:

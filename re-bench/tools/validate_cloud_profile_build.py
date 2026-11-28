@@ -47,7 +47,10 @@ def runtime_control(artifact,secrets_dir):
         'NIXON_PROVENANCE_PUBKEY':(secrets_dir/'provenance.public.hex').read_text().strip(),
         'NIXON_LICENCE':str((secrets_dir/'runtime.licence').resolve()),
     })
-    for label,useenv in [('with_secrets',env),('without_secrets',dict(os.environ))]:
+    without=dict(os.environ)
+    for key in ('NX_SEAL_SHARD','NX_TABLE_SHARD','NIXON_LICENCE','NIXON_PROVENANCE_PUBKEY'):
+        without.pop(key,None)
+    for label,useenv in [('with_secrets',env),('without_secrets',without)]:
         try:
             p=subprocess.run([sys.executable,str(artifact.resolve())],env=useenv,text=True,capture_output=True,timeout=30,cwd=tempfile.mkdtemp(prefix='cloud-profile-control-'))
             res[label]={'returncode':p.returncode,'stdout_sha256':hashlib.sha256(p.stdout.encode()).hexdigest(),'stdout_len':len(p.stdout),'stderr_len':len(p.stderr),'timeout':False}

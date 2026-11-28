@@ -69,11 +69,14 @@ def call(prompt, timeout=900, retries=3):
 def extract_json(text):
     if not text:
         return None
-    for m in re.finditer(r"\{.*\}", text, re.S):
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", text):
         try:
-            return json.loads(m.group(0))
+            value, _end = decoder.raw_decode(text[match.start():])
         except json.JSONDecodeError:
             continue
+        if isinstance(value, dict):
+            return value
     return None
 
 

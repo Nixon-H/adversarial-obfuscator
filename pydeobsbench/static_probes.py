@@ -250,6 +250,12 @@ def probe_native_blob(artefact_path, target=None):
                 platform_key, b64 = k, v
                 break
 
+    licence_bound = bool(re.search(r'_NX_LICENCE_BOUND\s*=\s*True\b', text))
+    if licence_bound:
+        return {"probe": "native_blob", "applicable": True,
+                "found": True, "derived": False,
+                "reason": "licence-bound (blob key needs the runtime token)"}
+
     s0m = re.search(r'_BLOB_S0\s*=\s*"([^"]+)"', text)
     s1m = re.search(r'_BLOB_S1\s*=\s*"([^"]+)"', text)
     bidm = re.search(r'_NX_BUILD_ID\s*=\s*"([^"]+)"', text)
@@ -282,7 +288,21 @@ def probe_native_blob(artefact_path, target=None):
             return {"probe": "native_blob", "applicable": True,
                     "found": True, "derived": False,
                     "error": "blob codec: %s" % str(exc)[:80]}
-    plain = bytes(b ^ key[i % len(key)] for i, b in enumerate(packed))
+    if packed.startswith(b"NXS1"):
+        if len(packed) < 20:
+            return {"probe": "native_blob", "applicable": True,
+                    "found": True, "derived": False,
+                    "error": "truncated NXS1 stream envelope"}
+        nonce = packed[4:20]
+        ciphertext = packed[20:]
+        stream = bytearray()
+        counter = 0
+        while len(stream) < len(ciphertext):
+            stream.extend(hashlib.sha256(key + nonce + counter.to_bytes(8, "big")).digest())
+            counter += 1
+        plain = bytes(c ^ k for c, k in zip(ciphertext, stream[:len(ciphertext)]))
+    else:
+        plain = bytes(b ^ key[i % len(key)] for i, b in enumerate(packed))
     if plain[:4] != b"\x7fELF":
         return {"probe": "native_blob", "applicable": True,
                 "found": True, "derived": True, "valid_object": False,

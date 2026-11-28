@@ -213,7 +213,7 @@ def main():
  endpoint_dir=Path('/home/nixon/absmax-sandbox-endpoints')
  endpoint_rows=[]
  endpoint_family_rows={}
- for family,names in {'opencode':['evm.sock','opencode-mitm.sock','opencode-connect.sock'],'tokenharbor':['evm.sock','tokenharbor.sock'],'kern':['evm.sock','kern.sock']}.items():
+ for family,names in {'opencode':['evm.sock','opencode-mitm.sock','opencode-connect.sock'],'opencode-go':['evm.sock','opencode-go.sock'],'tokenharbor':['evm.sock','tokenharbor.sock'],'kern':['evm.sock','kern.sock']}.items():
   family_dir=endpoint_dir/family
   rows=[]
   for name in names:
@@ -224,9 +224,10 @@ def main():
     rows.append({'name':name,'source_exists':(endpoint_src/name).exists(),'link_exists':(family_dir/name).exists(),'inode_match':False})
   entries=sorted(x.name for x in family_dir.iterdir()) if family_dir.exists() else []
   forbidden={
-   'opencode':{'tokenharbor.sock','kern.sock'},
-   'tokenharbor':{'opencode-mitm.sock','opencode-connect.sock','kern.sock'},
-   'kern':{'opencode-mitm.sock','opencode-connect.sock','tokenharbor.sock'},
+   'opencode':{'opencode-go.sock','tokenharbor.sock','kern.sock'},
+   'opencode-go':{'opencode-mitm.sock','opencode-connect.sock','tokenharbor.sock','kern.sock'},
+   'tokenharbor':{'opencode-mitm.sock','opencode-connect.sock','opencode-go.sock','kern.sock'},
+   'kern':{'opencode-mitm.sock','opencode-connect.sock','opencode-go.sock','tokenharbor.sock'},
   }[family]
   endpoint_family_rows[family]={
    'entries':entries,

@@ -209,6 +209,10 @@ class Handler(BaseHTTPRequestHandler):
             except Exception: errbody=b'{"error":"upstream error"}'
             self.send_response(status)
             self.send_header('Content-Type',e.headers.get('Content-Type','application/json'))
+            errbody,error_redactions,error_labels=redact_bytes_detailed(errbody)
+            response_redactions+=error_redactions
+            for label,count in error_labels.items():
+                response_redaction_labels[label]=response_redaction_labels.get(label,0)+count
             self.send_header('Content-Length',str(len(errbody)))
             self.send_header('Connection','close')
             self.end_headers(); self.wfile.write(errbody); sent=len(errbody)

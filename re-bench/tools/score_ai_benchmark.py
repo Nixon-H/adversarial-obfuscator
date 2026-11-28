@@ -309,6 +309,9 @@ def score_result(d):
                   not execution_policy_violation and
                   not tool_call_limit_exceeded and
                   not val.get('host_credential_leak_detected') and
+                  not d.get('provider_error') and
+                  not (d.get('provider_retry_errors') or []) and
+                  not d.get('harness_error') and
                   not (d.get('workspace_violations') or []))
     if not structural:
         provider_error = d.get('provider_error') or {}
