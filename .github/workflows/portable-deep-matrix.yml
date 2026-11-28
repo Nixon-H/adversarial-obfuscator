@@ -138,8 +138,12 @@ jobs:
           # --stego is back. It was dropped when the artefact printed nothing,
           # which turned out to be two real encoder bugs (a double-escaped ZWS
           # character and a Latin-1/UTF-8 mix-up), both now fixed.
-          - label: stego
-            args: "--stego"
+          # REMOVED 2026-11-28: the stego lane can never pass here. --stego is
+          # a feature of the obfuscator.core.pipeline entry point; it does not
+          # exist in scripts/build.py at all (zero references), and even if it
+          # parsed, a stego artefact emits an image carrier and prints nothing,
+          # so the output comparison would report a harness failure, not a
+          # product result. Stego coverage belongs with the pipeline entry.
           - label: pin-structure
             args: "--pin-structure"
           - label: strict-detections

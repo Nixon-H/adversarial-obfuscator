@@ -3,7 +3,6 @@
 Each test pins the exact mechanism of a bug that CI caught and local
 runs did not, so none of them can silently come back.
 """
-import io
 import os
 import sys
 
