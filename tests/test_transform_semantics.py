@@ -6,7 +6,6 @@ fragment that demonstrated the original semantic defect.
 
 import ast
 import email.utils
-import os
 import subprocess
 import sys
 import tarfile

@@ -30,7 +30,6 @@ import shutil
 import stat
 import subprocess
 import sys
-import textwrap
 
 import pytest
 
