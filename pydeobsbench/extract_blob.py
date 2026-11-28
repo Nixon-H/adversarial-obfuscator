@@ -69,7 +69,21 @@ def main():
         if not b64:
             continue
         packed = base64.b64decode(b64)
-        plain = bytes(b ^ key[i % len(key)] for i, b in enumerate(packed))
+        if packed.startswith(b"NXS1"):
+            if len(packed) < 20:
+                print("%s: truncated NXS1 stream envelope" % plat)
+                rc = 1
+                continue
+            nonce = packed[4:20]
+            ciphertext = packed[20:]
+            stream = bytearray()
+            counter = 0
+            while len(stream) < len(ciphertext):
+                stream.extend(hashlib.sha256(key + nonce + counter.to_bytes(8, "big")).digest())
+                counter += 1
+            plain = bytes(c ^ k for c, k in zip(ciphertext, stream[:len(ciphertext)]))
+        else:
+            plain = bytes(b ^ key[i % len(key)] for i, b in enumerate(packed))
         p = os.path.join(outdir, plat + os.path.splitext(art)[1].replace(".py", ".so"))
         with open(p, "wb") as fh:
             fh.write(plain)

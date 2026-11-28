@@ -25,7 +25,24 @@ EXTRA_EVIDENCE_ROOTS=[
  Path('/home/nixon/absmax-opencode-state-opencode-go-smoke'),
  Path('/home/nixon/absmax-ai-workspaces-profile-matrix-go-v12'),
  Path('/home/nixon/absmax-opencode-state-profile-matrix-go-v12'),
+ Path('/home/nixon/absmax-ai-workspaces-deepseek-smoke-v1'),
+ Path('/home/nixon/absmax-ai-workspaces-deepseek-smoke-v2'),
+ Path('/home/nixon/absmax-ai-workspaces-deepseek-smoke-v3'),
+ Path('/home/nixon/absmax-ai-workspaces-deepseek-smoke-v4'),
+ Path('/home/nixon/absmax-opencode-state-deepseek-smoke-v1'),
+ Path('/home/nixon/absmax-opencode-state-deepseek-smoke-v2'),
+ Path('/home/nixon/absmax-opencode-state-deepseek-smoke-v3'),
+ Path('/home/nixon/absmax-opencode-state-deepseek-smoke-v4'),
+ Path('/home/nixon/absmax-ai-workspaces-profile-matrix-deepseek-local-v12'),
+ Path('/home/nixon/absmax-opencode-state-profile-matrix-deepseek-local-v12'),
+ Path('/home/nixon/absmax-ai-workspaces-profile-matrix-deepseek-cloud-v13'),
+ Path('/home/nixon/absmax-opencode-state-profile-matrix-deepseek-cloud-v13'),
 ]
+
+def license_secret_scan_values():
+    """Licence/runtime exact values and licence-derived keys covered by the scan."""
+    return [(label,val) for val,label in rbc.collect_license_derived_secrets() if val]
+
 
 def main():
  raw_secrets=[]
@@ -47,9 +64,7 @@ def main():
    honey=(sec/'honey.secret.hex').read_text().strip()
    if honey:raw_secrets.append(('nx_honey_secret',honey))
   except Exception:pass
- for val,label in rbc.collect_license_derived_secrets():
-  if val and label in {'licence-customer-mask','licence-effective-native-key','licence-operator-mask','licence-effective-native-key-operator'}:
-   raw_secrets.append((label,val))
+ raw_secrets.extend(license_secret_scan_values())
  # The scanner must audit the same host/provider credential values that the
  # redactor handles. Earlier exact-only scans did not independently verify these
  # environment values or their JSON/base64/hex representations.
