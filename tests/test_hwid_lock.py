@@ -10,7 +10,7 @@ from obfuscator.hwid_lock import derive_hwid_key, lock_payload, unlock_payload
 
 def test_roundtrip():
     pack = lock_payload(b"hello world", "HWID-1")
-    assert set(pack) == {"salt", "nonce", "data"}
+    assert {"salt", "nonce", "data", "mac"} <= set(pack)
     assert unlock_payload(pack, "HWID-1") == b"hello world"
 
 
