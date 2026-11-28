@@ -18,7 +18,7 @@ do not commit (orchestrator commits after verification).
 | A4 | obfuscator/cloudflare_remote.py + remote_exec.py + webpush.py | ~4400 | QUEUED | - |
 | A5 | obfuscator/: section_split, anti_rea, native_harden, driver_blocklist, vm_dispatch | ~4900 | QUEUED | - |
 | A6 | obfuscator/: all remaining files | ~31000total-claimed | QUEUED | - |
-| C1 | native/*.c *.h (excl payload.h) + encrypt/ | ~3600 | RUNNING | - |
+| C1 | native/*.c *.h (excl payload.h) + encrypt/ | ~3600 | DONE committed | 5 fixed: sa_flags uninit, rlim fail-open, SSE dispatch divergence, key not wiped, platform.h self-containment |
 | R1 | runtime/src/*.rs (Rust crate) | 6875 | QUEUED | - |
 | R2 | archive/relay_net/*.rs + relay/ | ~4000 | QUEUED | - |
 | D1 | irgen/ + llvmgen/ + vm/ | ~15900 | QUEUED | - |
