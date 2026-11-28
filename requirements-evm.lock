@@ -800,9 +800,9 @@ py-evm==0.12.1b1 \
     --hash=sha256:015ebc8dd95925030be87ce4b3fd31e3c70df626c5ad8665fb06cd611c73eb68 \
     --hash=sha256:7bcd9935a3ac2989c8f068b2006f136189281ebc6e279663405cb2c5397ed890
     # via -r requirements-evm.txt
-py-solc-x==2.0.5 \
-    --hash=sha256:2d8440d2be8a5577137fb2313ee211b5b35f36c4c922f274192d34f401616e83 \
-    --hash=sha256:d6c24b699a7db8f7bf731f32dcfe8c43d7ea9d181191b2a3b7cb5e60395dd449
+py-solc-x==2.1.0 \
+    --hash=sha256:4bf45aa96c29ed0a3654dcb6951f0f14c648d2be3f938260babbbd1ace6dde04 \
+    --hash=sha256:aa78ea0ae6df87729280532400d7529a3d881dbe4e77db27ea173a7ce6329a05
     # via -r requirements-evm.txt
 pycryptodome==3.24.1 \
     --hash=sha256:0003d83a044639d3f7442bb3282db83ab8cf0b3977bb44d4018aacc2f901e839 \

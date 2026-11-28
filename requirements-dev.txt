@@ -14,4 +14,4 @@ ruff==0.17.6
 # workflow, because yaml.safe_load accepts duplicates and GitHub does not.
 # Hash-pinned through requirements-dev.lock; PyYAML is dev-only but still
 # artifact-verified because CI parses workflow security policy with it.
-pyyaml==6.0.2
+pyyaml==6.0.4
