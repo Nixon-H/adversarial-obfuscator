@@ -1251,7 +1251,7 @@ def recursive_package(initial_source, final_output, layers=100, zip_count=0, bin
         size_kb = len(current_code.encode('utf-8')) / 1024
         if i % 10 == 0: gc.collect()
         print(f"  [+] Layer {i} ({enc_choice}) [{mode_str}]: {size_kb:.2f} KB")
-    with open(final_output, 'w', encoding='utf-8') as f: f.write(current_code)
+    with open(final_output, 'w', encoding='utf-8', newline="") as f: f.write(current_code)
     print(f"[SUCCESS] Packed payload generated: {final_output}")
     print(f"Total size: {os.path.getsize(final_output)/1024:.2f} KB")
     return current_code.encode('utf-8')

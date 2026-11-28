@@ -120,6 +120,14 @@ def probe(flag):
 def catalogue():
     entries = []
     for name, meta in sorted(collect().items()):
+        if name in ("--exclude-rea-bio", "--exclude-rea-cognitive",
+                    "--exclude-rea-compliance", "--exclude-rea-all"):
+            # These are documented in comments but never registered with
+            # argparse: the parser rejects them and the lane fails on
+            # "unrecognized arguments" before building anything.
+            entries.append({"flag": name, "kind": "excluded",
+                            "why": "documented but not implemented in the parser"})
+            continue
         bool_flag = meta["action"] in ("store_true", "store_false", "count")
         if name in HARNESS_OWNED:
             entries.append({"flag": name, "kind": "excluded",

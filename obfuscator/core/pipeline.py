@@ -2054,7 +2054,7 @@ def build_local_cython(source_content, target_python=None, ast_opts=None):
         # "UnicodeEncodeError: 'latin-1' codec can't encode characters".
         if not source_content.startswith("#"):
             source_content = "# -*- coding: utf-8 -*-\n" + source_content
-        with open(src_path, "w", encoding="utf-8") as f:
+        with open(src_path, "w", encoding="utf-8", newline="") as f:
             f.write(source_content)
         # §4 ENFORCEMENT TRAVELS WITH THE BLOB (2026-11-19). The loader
         # dlopens the module and calls nx_apply_protections() BEFORE the
@@ -6163,7 +6163,7 @@ def build_project(args):
             except Exception:
                 pass
             args._tmp_hybrid_loader = loader_path
-            with open(loader_path, 'w', encoding='utf-8') as f:
+            with open(loader_path, 'w', encoding='utf-8', newline="") as f:
                 f.write(hybrid_loader_src)
             # Keep the SOURCE, not just the path: the temp file is deleted
             # before the artefact move step, and the sectioned build needs
@@ -6651,7 +6651,7 @@ def _VERIFY_INTEGRITY():
                 % (os.path.splitext(os.path.basename(
                     getattr(args, "_original_source", base_out_path)))[0],
                    "_dbg" if is_debug else ""))
-            with open(_hy_out, "w", encoding="utf-8") as _hy_fh:
+            with open(_hy_out, "w", encoding="utf-8", newline="") as _hy_fh:
                 _hy_fh.write(_hybrid_src)
             generated_files_map[suffix] = _hy_out
             t.success(value="Hybrid loader (sectioned)")
@@ -7929,7 +7929,7 @@ def _prepare_remote_split_source(args, source: str) -> str:
         os.chmod(client_path, 0o600)
     except OSError:
         pass
-    with open(client_path, "w", encoding="utf-8") as fh:
+    with open(client_path, "w", encoding="utf-8", newline="") as fh:
         fh.write(client_source)
     args._tmp_remote_client = client_path
     args._remote_operator_bundle = bundle_path
@@ -8254,6 +8254,19 @@ def build_parser():
                        help="Counter-REA shields are ON by default at maximum: "
                             "there is no enable flag. Pass this only to LOWER "
                             "the intensity (stealth or balanced)")
+    build.add_argument('--exclude-rea', dest='anti_rea_exclude_bait',
+                       action='store_true',
+                       help="Turn off all three anti-REA bait layers "
+                            "(compliance, cognitive, classifier)")
+    build.add_argument('--exclude-rea-bio', dest='anti_rea_exclude_bio',
+                       action='store_true',
+                       help="Turn off only the classifier-bait anti-REA layer")
+    build.add_argument('--exclude-rea-cognitive', dest='anti_rea_exclude_cognitive',
+                       action='store_true',
+                       help="Turn off only the cognitive-armor anti-REA layer")
+    build.add_argument('--exclude-rea-compliance', dest='anti_rea_exclude_compliance',
+                       action='store_true',
+                       help="Turn off only the compliance-bait anti-REA layer")
     build.add_argument('--fast', dest='strict_detections', action='store_false',
                        help="Make the environment detections WARN instead of "
                             "kill (the one thing this changes: measured, the "
@@ -8864,7 +8877,7 @@ def main():
                         _dest2 = os.path.join(
                             dist_dir, "%s_protected%s.py"
                             % (_stem2, "_dbg" if _dbg2 else ""))
-                        with open(_dest2, "w", encoding="utf-8") as _dfh2:
+                        with open(_dest2, "w", encoding="utf-8", newline="") as _dfh2:
                             _dfh2.write(_hl_src2)
                     _hl_write_ok = True
                     UI._out(" %sℹ Sectioned artefact: hybrid loader written "
@@ -9093,7 +9106,7 @@ def main():
             # residue pass and the opt-level ladder included).
             obfuscated = build_pipeline(source, extra_options=opts)
             if args.output:
-                with open(args.output, 'w', encoding='utf-8') as f:
+                with open(args.output, 'w', encoding='utf-8', newline="") as f:
                     f.write(obfuscated)
                 print(f"[+] Obfuscated output written to: {args.output}")
             else:
