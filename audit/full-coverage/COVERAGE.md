@@ -14,7 +14,7 @@ do not commit (orchestrator commits after verification).
 |---|---|---|---|---|
 | A1 | obfuscator/core/pipeline.py | 9178 | DONE committed | 11 fixed: http-status-as-success, kill-ladder ordering, unsafe mprotect, wipe-copies-not-live, KeyboardInterrupt swallow, self-check token bypass, non-constant-time HMAC, template re-substitution, hwid fail-open, geofence wiring, mutation fail-open |
 | A2 | obfuscator/core/sources.py | 7721 | DONE committed | 9 fixed: exception-flow capture, crypto downgrade, OP_HASH stale operand, Shamir NameError, non-ASCII MIME, fragmented string corruption, ORAM OOB, hwid binding broken paths |
-| A3 | obfuscator/core/transforms.py + utils.py | 5952 | QUEUED | - |
+| A3 | obfuscator/core/transforms.py + utils.py | 5952 | DONE committed | 25 fixed: dataclass fields dropped, fstring/fstring lookup, import ordering, builtin shadowing x4, namespace pollution x3, opaque-predicate shadow, reflective splitting, match-pattern rewrite, mutable defaults, zero-arg super, flattener collisions, Constant(list) AST, purity-proof holes, retry-after, parse_ts, pack naming, xz loader corruption+members |
 | A4 | obfuscator/cloudflare_remote.py + remote_exec.py + webpush.py | ~4400 | QUEUED | - |
 | A5 | obfuscator/: section_split, anti_rea, native_harden, driver_blocklist, vm_dispatch | ~4900 | QUEUED | - |
 | A6 | obfuscator/: all remaining files | ~31000total-claimed | QUEUED | - |
