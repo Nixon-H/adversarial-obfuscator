@@ -1,6 +1,5 @@
-use crate::memguard::{checked_page_size, checked_range_end, round_up_to_page};
+use crate::memguard::{checked_page_size, checked_range_end, round_up_to_page, scrub_memory};
 use crate::platform::PagePerm;
-use std::ptr;
 
 pub struct ExecGuard {
     ptr: *mut u8,
@@ -30,16 +29,16 @@ impl ExecGuard {
             return Err("mmap failed for ExecGuard buffer".to_string());
         }
 
-        let result1 = crate::platform::protect_pages(alloc_ptr, guard, PagePerm::None);
+        let result1 = unsafe { crate::platform::protect_pages(alloc_ptr, guard, PagePerm::None) };
         if result1.is_err() {
-            crate::platform::free_pages(alloc_ptr, total);
+            unsafe { crate::platform::free_pages(alloc_ptr, total) };
             return Err("mprotect to PROT_NONE failed on leading guard page".to_string());
         }
 
         let last_guard = unsafe { alloc_ptr.add(guard + aligned_size) };
-        let result2 = crate::platform::protect_pages(last_guard, guard, PagePerm::None);
+        let result2 = unsafe { crate::platform::protect_pages(last_guard, guard, PagePerm::None) };
         if result2.is_err() {
-            crate::platform::free_pages(alloc_ptr, total);
+            unsafe { crate::platform::free_pages(alloc_ptr, total) };
             return Err("mprotect to PROT_NONE failed on trailing guard page".to_string());
         }
 
@@ -56,7 +55,7 @@ impl ExecGuard {
     }
 
     pub fn prepare_execution(&mut self) -> Result<(), String> {
-        let result = crate::platform::protect_pages(self.ptr, self.aligned_len, PagePerm::ReadExec);
+        let result = unsafe { crate::platform::protect_pages(self.ptr, self.aligned_len, PagePerm::ReadExec) };
         if result.is_err() {
             return Err("mprotect to R-X failed".to_string());
         }
@@ -66,22 +65,22 @@ impl ExecGuard {
 
     pub fn complete_execution(&mut self) {
         let result1 =
-            crate::platform::protect_pages(self.ptr, self.aligned_len, PagePerm::ReadWrite);
+            unsafe { crate::platform::protect_pages(self.ptr, self.aligned_len, PagePerm::ReadWrite) };
         if result1.is_err() {
             // Without write access the buffer cannot be scrubbed, but it must
             // not be left executable-and-dirty either: revoke exec so the
             // failure path degrades to inaccessible, not to R-X residue.
-            let _ = crate::platform::protect_pages(self.ptr, self.aligned_len, PagePerm::None);
+            let _ = unsafe { crate::platform::protect_pages(self.ptr, self.aligned_len, PagePerm::None) };
             self.original_prot = PagePerm::None;
             return;
         }
         self.original_prot = PagePerm::ReadWrite;
 
         unsafe {
-            ptr::write_bytes(self.ptr, 0u8, self.len);
+            scrub_memory(self.ptr, self.len);
         }
 
-        let _ = crate::platform::protect_pages(self.ptr, self.aligned_len, PagePerm::None);
+        let _ = unsafe { crate::platform::protect_pages(self.ptr, self.aligned_len, PagePerm::None) };
         self.original_prot = PagePerm::None;
     }
 
@@ -126,18 +125,19 @@ impl ExecGuard {
 
 impl Drop for ExecGuard {
     fn drop(&mut self) {
-        if crate::platform::protect_pages(self.ptr, self.aligned_len, PagePerm::ReadWrite).is_ok() {
+        if unsafe { crate::platform::protect_pages(self.ptr, self.aligned_len, PagePerm::ReadWrite) }.is_ok() {
             unsafe {
-                ptr::write_bytes(self.ptr, 0u8, self.len);
+                scrub_memory(self.ptr, self.len);
             }
         }
-        crate::platform::free_pages(self.alloc_ptr, self.alloc_len);
+        unsafe { crate::platform::free_pages(self.alloc_ptr, self.alloc_len) };
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ptr;
     use std::fs;
 
     fn read_proc_maps() -> Vec<(usize, usize, String)> {

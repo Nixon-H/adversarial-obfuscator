@@ -127,45 +127,142 @@ pub fn verify_merkle_proof(text_section: &[u8], expected_root: &[u8; 32]) -> boo
     constant_time_eq(&actual_root, expected_root)
 }
 
+fn read_u16_le(data: &[u8], off: usize) -> Option<u16> {
+    Some(u16::from_le_bytes(data.get(off..off.checked_add(2)?)?.try_into().ok()?))
+}
+fn read_u32_le(data: &[u8], off: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(data.get(off..off.checked_add(4)?)?.try_into().ok()?))
+}
+fn read_u64_le(data: &[u8], off: usize) -> Option<u64> {
+    Some(u64::from_le_bytes(data.get(off..off.checked_add(8)?)?.try_into().ok()?))
+}
+
+/// Parse the PT_LOAD layout and `.text` bytes from an ELF file image.
+///
+/// The layout intentionally matches scripts/ledger_proof.py byte-for-byte:
+/// for every PT_LOAD, vaddr and memsz are serialized as little-endian u64
+/// followed by flags as little-endian u32. This is a static ELF property and
+/// therefore remains meaningful under ASLR, unlike live /proc/self/maps
+/// addresses.
+fn parse_elf_layout_and_text(data: &[u8]) -> Option<(Vec<(u64, u64, u32)>, Vec<u8>)> {
+    if data.len() < 52 || data.get(..4)? != b"\x7fELF" {
+        return None;
+    }
+    let is64 = data[4] == 2;
+    if data[4] != 1 && data[4] != 2 || data[5] != 1 {
+        return None;
+    }
+    let (phoff, phentsize, phnum, shoff, shentsize, shnum, shstrndx) = if is64 {
+        if data.len() < 64 { return None; }
+        (
+            read_u64_le(data, 32)? as usize,
+            read_u16_le(data, 54)? as usize,
+            read_u16_le(data, 56)? as usize,
+            read_u64_le(data, 40)? as usize,
+            read_u16_le(data, 58)? as usize,
+            read_u16_le(data, 60)? as usize,
+            read_u16_le(data, 62)? as usize,
+        )
+    } else {
+        (
+            read_u32_le(data, 28)? as usize,
+            read_u16_le(data, 42)? as usize,
+            read_u16_le(data, 44)? as usize,
+            read_u32_le(data, 32)? as usize,
+            read_u16_le(data, 46)? as usize,
+            read_u16_le(data, 48)? as usize,
+            read_u16_le(data, 50)? as usize,
+        )
+    };
+    let min_phentsize = if is64 { 56 } else { 32 };
+    let min_shentsize = if is64 { 64 } else { 40 };
+    if phentsize < min_phentsize || shentsize < min_shentsize || shstrndx >= shnum {
+        return None;
+    }
+
+    let mut segments = Vec::new();
+    for i in 0..phnum {
+        let off = phoff.checked_add(i.checked_mul(phentsize)?)?;
+        if is64 {
+            let p_type = read_u32_le(data, off)?;
+            if p_type == 1 {
+                segments.push((
+                    read_u64_le(data, off.checked_add(16)?)?,
+                    read_u64_le(data, off.checked_add(40)?)?,
+                    read_u32_le(data, off.checked_add(4)?)?,
+                ));
+            }
+        } else {
+            let p_type = read_u32_le(data, off)?;
+            if p_type == 1 {
+                segments.push((
+                    read_u32_le(data, off.checked_add(8)?)? as u64,
+                    read_u32_le(data, off.checked_add(20)?)? as u64,
+                    read_u32_le(data, off.checked_add(24)?)?,
+                ));
+            }
+        }
+    }
+
+    let strtab_hdr = shoff.checked_add(shstrndx.checked_mul(shentsize)?)?;
+    let (strtab_off, strtab_size) = if is64 {
+        (
+            read_u64_le(data, strtab_hdr.checked_add(24)?)? as usize,
+            read_u64_le(data, strtab_hdr.checked_add(32)?)? as usize,
+        )
+    } else {
+        (
+            read_u32_le(data, strtab_hdr.checked_add(16)?)? as usize,
+            read_u32_le(data, strtab_hdr.checked_add(20)?)? as usize,
+        )
+    };
+    let strtab = data.get(strtab_off..strtab_off.checked_add(strtab_size)?)?;
+
+    let mut text = None;
+    for i in 0..shnum {
+        let sh = shoff.checked_add(i.checked_mul(shentsize)?)?;
+        let name_off = read_u32_le(data, sh)? as usize;
+        let name_bytes = strtab.get(name_off..)?;
+        let nul = name_bytes.iter().position(|b| *b == 0)?;
+        if &name_bytes[..nul] != b".text" {
+            continue;
+        }
+        let (text_off, text_size) = if is64 {
+            (
+                read_u64_le(data, sh.checked_add(24)?)? as usize,
+                read_u64_le(data, sh.checked_add(32)?)? as usize,
+            )
+        } else {
+            (
+                read_u32_le(data, sh.checked_add(16)?)? as usize,
+                read_u32_le(data, sh.checked_add(20)?)? as usize,
+            )
+        };
+        text = Some(data.get(text_off..text_off.checked_add(text_size)?)?.to_vec());
+        break;
+    }
+    Some((segments, text?))
+}
+
+fn memory_layout_hash_for_image(data: &[u8]) -> Option<[u8; 32]> {
+    let (segments, _) = parse_elf_layout_and_text(data)?;
+    let mut layout = Vec::with_capacity(segments.len() * 20);
+    for (vaddr, memsz, flags) in segments {
+        layout.extend_from_slice(&vaddr.to_le_bytes());
+        layout.extend_from_slice(&memsz.to_le_bytes());
+        layout.extend_from_slice(&flags.to_le_bytes());
+    }
+    Some(sha256(&layout))
+}
+
 pub fn verify_memory_layout(proof: &IntegrityProof) -> bool {
-    let maps = match fs::read_to_string("/proc/self/maps") {
-        Ok(m) => m,
+    let image = match fs::read("/proc/self/exe") {
+        Ok(image) => image,
         Err(_) => return false,
     };
-    let mut layout_data = Vec::new();
-    for line in maps.lines() {
-        let cols: Vec<&str> = line.splitn(5, ' ').collect();
-        if cols.len() < 5 {
-            continue;
-        }
-        let perms = cols[1];
-        if !perms.contains('x') {
-            continue;
-        }
-        let path = cols[4].trim();
-        if path.is_empty() || path.starts_with('[') {
-            continue;
-        }
-        let addrs: Vec<&str> = cols[0].split('-').collect();
-        if addrs.len() != 2 {
-            continue;
-        }
-        let start = match usize::from_str_radix(addrs[0], 16) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-        let end = match usize::from_str_radix(addrs[1], 16) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        let flags: u32 = (if perms.contains('r') { 4 } else { 0 })
-            | (if perms.contains('w') { 2 } else { 0 })
-            | (if perms.contains('x') { 1 } else { 0 });
-        layout_data.extend_from_slice(&(start as u64).to_ne_bytes());
-        layout_data.extend_from_slice(&((end - start) as u64).to_ne_bytes());
-        layout_data.extend_from_slice(&flags.to_ne_bytes());
-    }
-    let actual_hash = sha256(&layout_data);
+    let Some(actual_hash) = memory_layout_hash_for_image(&image) else {
+        return false;
+    };
     constant_time_eq(&actual_hash, &proof.memory_layout_hash)
 }
 
@@ -181,26 +278,9 @@ pub fn full_integrity_check(text_section: &[u8], proof: &IntegrityProof) -> bool
 }
 
 pub fn load_text_section() -> Option<Vec<u8>> {
-    let maps = fs::read_to_string("/proc/self/maps").ok()?;
-    for line in maps.lines() {
-        let cols: Vec<&str> = line.splitn(5, ' ').collect();
-        if cols.len() < 5 || cols[1] != "r-xp" {
-            continue;
-        }
-        let path = cols[4].trim();
-        if path.is_empty() || path.starts_with('[') {
-            continue;
-        }
-        let addrs: Vec<&str> = cols[0].split('-').collect();
-        if addrs.len() != 2 {
-            continue;
-        }
-        let start = usize::from_str_radix(addrs[0], 16).ok()?;
-        let end = usize::from_str_radix(addrs[1], 16).ok()?;
-        let slice = unsafe { std::slice::from_raw_parts(start as *const u8, end - start) };
-        return Some(slice.to_vec());
-    }
-    None
+    let image = fs::read("/proc/self/exe").ok()?;
+    let (_, text) = parse_elf_layout_and_text(&image)?;
+    Some(text)
 }
 
 pub fn derive_decryption_key(key: &[u8; 32], proof: &IntegrityProof) -> [u8; 32] {
@@ -282,6 +362,26 @@ mod tests {
         let proof = compute_text_proof(data);
         assert!(verify_merkle_proof(data, &proof.merkle_root));
         assert!(constant_time_eq(&sha256(data), &proof.text_hash));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn test_full_integrity_check_current_exe_matches_static_elf_proof() {
+        // Regression: the old implementation hashed live ASLR addresses and
+        // the first executable mapping, so a correct build-time proof could
+        // never verify. The proof format is static ELF data and must match
+        // bytes parsed from /proc/self/exe.
+        let text = load_text_section().expect("current test executable has .text");
+        let image = fs::read("/proc/self/exe").expect("read current executable");
+        let mut proof = compute_text_proof(&text);
+        proof.memory_layout_hash =
+            memory_layout_hash_for_image(&image).expect("parse ELF layout");
+        assert!(verify_memory_layout(&proof));
+        assert!(full_integrity_check(&text, &proof));
+
+        let mut tampered = text.clone();
+        tampered[0] ^= 1;
+        assert!(!full_integrity_check(&tampered, &proof));
     }
 
     #[test]

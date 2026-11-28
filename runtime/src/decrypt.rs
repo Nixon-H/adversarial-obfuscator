@@ -70,7 +70,10 @@ fn expand_key(key: &[u8; 32]) -> [u32; 60] {
     for i in 8..60 {
         let mut temp = w[i - 1];
         if i % 8 == 0 {
-            temp = sub_word(rot_word(temp)) ^ (RCON[i / 8 - 1] as u32);
+            // Rcon is XORed into the most-significant byte of the big-endian
+            // state word. Leaving it in the low byte silently produces a
+            // non-AES key schedule.
+            temp = sub_word(rot_word(temp)) ^ ((RCON[i / 8 - 1] as u32) << 24);
         } else if i % 8 == 4 {
             temp = sub_word(temp);
         }
@@ -97,14 +100,15 @@ fn sub_bytes(state: &mut [u32; 4]) {
 }
 
 fn shift_rows(state: &mut [u32; 4]) {
-    let s0 = state[0];
-    let s1 = state[1];
-    let s2 = state[2];
-    let s3 = state[3];
-    state[0] = (s0 & 0xFF00_FFFF) | ((s1 >> 16) & 0xFF) << 16;
-    state[1] = (s1 & 0xFFFF_00FF) | ((s2 >> 8) & 0xFF) << 8;
-    state[2] = (s2 & 0xFFFF_FF00) | (s3 & 0xFF);
-    state[3] = (s3 & 0x00FF_FFFF) | ((s0 >> 24) & 0xFF) << 24;
+    // state[i] is column i, with bytes ordered [row0, row1, row2, row3]
+    // from the most-significant byte downward. AES ShiftRows rotates row r
+    // left by r columns: new column j comes from columns j, j+1, j+2, j+3
+    // (modulo 4) for rows 0, 1, 2, 3 respectively.
+    let b = state.map(|word| word.to_be_bytes());
+    state[0] = u32::from_be_bytes([b[0][0], b[1][1], b[2][2], b[3][3]]);
+    state[1] = u32::from_be_bytes([b[1][0], b[2][1], b[3][2], b[0][3]]);
+    state[2] = u32::from_be_bytes([b[2][0], b[3][1], b[0][2], b[1][3]]);
+    state[3] = u32::from_be_bytes([b[3][0], b[0][1], b[1][2], b[2][3]]);
 }
 
 fn mix_columns(state: &mut [u32; 4]) {
@@ -328,6 +332,46 @@ mod tests {
             *b = byte;
         }
         out
+    }
+
+    fn test_hex(input: &str) -> Vec<u8> {
+        assert_eq!(input.len() % 2, 0);
+        (0..input.len() / 2)
+            .map(|i| u8::from_str_radix(&input[2 * i..2 * i + 2], 16).expect("hex byte"))
+            .collect()
+    }
+
+    #[test]
+    fn aes256_encrypt_block_matches_nist_vector() {
+        // NIST FIPS-197 AES-256 example key/input/output.
+        let key: [u8; 32] = test_hex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+            .try_into()
+            .expect("32-byte key");
+        let plaintext: [u8; 16] = test_hex("00112233445566778899aabbccddeeff")
+            .try_into()
+            .expect("16-byte block");
+        let expected = test_hex("8ea2b7ca516745bfeafc49904b496089");
+        let expanded = expand_key(&key);
+        assert_eq!(aes_256_encrypt_block(&plaintext, &expanded), expected.as_slice());
+    }
+
+    #[test]
+    fn aes256_ctr_matches_nist_sp800_38a() {
+        // NIST SP 800-38A F.5.3, first two AES-256 CTR blocks.
+        let key: [u8; 32] = test_hex("603deb1015ca71be2b73aef0857d77811f352c073b6108d72d9810a30914dff4")
+            .try_into()
+            .expect("32-byte key");
+        let iv: [u8; 16] = test_hex("f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff")
+            .try_into()
+            .expect("16-byte counter");
+        let mut data = test_hex(
+            "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51",
+        );
+        aes_256_ctr_decrypt(&mut data, &key, &iv);
+        assert_eq!(
+            data,
+            test_hex("601ec313775789a5b7a7f504bbf3d228f443e3ca4d62b59aca84e990cacaf5c5")
+        );
     }
 
     #[cfg(target_arch = "x86_64")]

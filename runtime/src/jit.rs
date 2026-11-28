@@ -1,4 +1,4 @@
-use crate::memguard::{checked_page_size, round_up_to_page, ScrubOnDrop};
+use crate::memguard::{checked_page_size, round_up_to_page, scrub_memory, ScrubOnDrop};
 use crate::platform::PagePerm;
 use std::collections::HashMap;
 use std::ptr;
@@ -47,9 +47,9 @@ fn unregister_alloc(ptr: *mut u8) -> Option<usize> {
 
 fn wipe_and_unmap(ptr: *mut u8, size: usize) {
     unsafe {
-        ptr::write_bytes(ptr, 0u8, size);
+        scrub_memory(ptr, size);
+        crate::platform::free_pages(ptr, size);
     }
-    crate::platform::free_pages(ptr, size);
 }
 
 fn allocate_executable(size: usize) -> Result<(*mut u8, usize), String> {
@@ -64,12 +64,12 @@ fn allocate_executable(size: usize) -> Result<(*mut u8, usize), String> {
     if ptr.is_null() {
         return Err("mmap failed for JIT page".to_string());
     }
-    if crate::platform::protect_pages(ptr, alloc_size, PagePerm::ReadWriteExec).is_err() {
-        crate::platform::free_pages(ptr, alloc_size);
+    if unsafe { crate::platform::protect_pages(ptr, alloc_size, PagePerm::ReadWriteExec) }.is_err() {
+        unsafe { crate::platform::free_pages(ptr, alloc_size) };
         return Err("mprotect failed to set RWX".to_string());
     }
     if let Err(error) = register_alloc(ptr, alloc_size) {
-        crate::platform::free_pages(ptr, alloc_size);
+        unsafe { crate::platform::free_pages(ptr, alloc_size) };
         return Err(error);
     }
     Ok((ptr, alloc_size))
@@ -322,125 +322,16 @@ pub unsafe fn execute_template(
     Ok(result)
 }
 
-/// Apply a seeded random permutation to register encodings in x86_64 machine code.
+/// Legacy hook for register-allocation randomization.
+///
+/// This function deliberately leaves `block` unchanged. Rewriting register
+/// fields in a raw byte stream requires a complete instruction decoder and a
+/// dataflow/ABI-aware allocator. The prior byte scanner lost synchronization
+/// at immediates, remapped RSP/RBP, and therefore corrupted ordinary machine
+/// code. Correct execution takes precedence over polymorphism until callers
+/// supply instruction-boundary and liveness metadata.
 pub fn randomize_register_allocation(block: &mut [u8], seed: u64) {
-    let mut perm: [u8; 8] = [0, 1, 2, 3, 4, 5, 6, 7];
-    let mut rng = seed;
-    let mut i: usize = 7;
-    while i > 0 {
-        let j = (rng % (i as u64 + 1)) as usize;
-        rng = rng
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        perm.swap(i, j);
-        i = i.wrapping_sub(1);
-    }
-
-    let len = block.len();
-    let mut pos = 0;
-    while pos < len {
-        let mut rex: u8 = 0;
-        let mut rex_pos: isize = -1;
-        let mut p = pos;
-
-        while p < len {
-            let b = block[p];
-            if (b & 0xF0) == 0x40 && b != 0x40 {
-                rex = b;
-                rex_pos = p as isize;
-                p += 1;
-            } else {
-                break;
-            }
-        }
-        if p >= len {
-            break;
-        }
-
-        let opcode = block[p];
-        let opcode_pos = p;
-        p += 1;
-
-        if opcode == 0x0F && p < len {
-            p += 1;
-        }
-
-        if opcode >= 0x50 && opcode <= 0x5F {
-            let reg = (opcode - 0x50) | (if rex & 0x01 != 0 { 8 } else { 0 });
-            if (reg as usize) < perm.len() {
-                let new_reg = perm[reg as usize];
-                let new_rex_b = (new_reg & 0x08) != 0;
-                let new_opcode = 0x50 + (new_reg & 0x07);
-                if rex_pos >= 0 {
-                    block[opcode_pos] = new_opcode;
-                    let mut new_rex: u8 = 0x40;
-                    if rex & 0x08 != 0 {
-                        new_rex |= 0x08;
-                    }
-                    if new_rex_b {
-                        new_rex |= 0x01;
-                    }
-                    block[rex_pos as usize] = new_rex;
-                } else {
-                    block[opcode_pos] = new_opcode;
-                }
-            }
-            continue;
-        }
-
-        if p >= len {
-            break;
-        }
-
-        let modrm = block[p];
-        let mod_bits = modrm >> 6;
-        let old_reg = ((modrm >> 3) & 0x07) | (if rex & 0x04 != 0 { 8 } else { 0 });
-        let old_rm = (modrm & 0x07) | (if rex & 0x01 != 0 { 8 } else { 0 });
-
-        if (old_reg as usize) < perm.len() && (old_rm as usize) < perm.len() {
-            let new_reg = perm[old_reg as usize];
-            let new_rm = perm[old_rm as usize];
-
-            let new_modrm = (mod_bits << 6) | ((new_reg & 0x07) << 3) | (new_rm & 0x07);
-            block[p] = new_modrm;
-
-            let new_rex_r = (new_reg & 0x08) != 0;
-            let new_rex_b = (new_rm & 0x08) != 0;
-            if rex_pos >= 0 {
-                let mut new_rex: u8 = 0x40;
-                if rex & 0x08 != 0 {
-                    new_rex |= 0x08;
-                }
-                if new_rex_r {
-                    new_rex |= 0x04;
-                }
-                if new_rex_b {
-                    new_rex |= 0x01;
-                }
-                if new_rex != rex {
-                    block[rex_pos as usize] = new_rex;
-                }
-            }
-        }
-
-        let has_sib = mod_bits != 3 && old_rm & 0x07 == 4;
-        let mut skip = 1;
-        if has_sib {
-            skip += 1;
-        }
-        skip += match mod_bits {
-            1 => 1,
-            2 => 4,
-            _ => {
-                if mod_bits == 0 && old_rm & 0x07 == 5 {
-                    4
-                } else {
-                    0
-                }
-            }
-        };
-        pos = p + skip;
-    }
+    let _ = (block, seed);
 }
 
 /// Insert diverse functional NOP sequences at random safe positions.
@@ -476,16 +367,16 @@ pub fn insert_functional_nops(block: &mut Vec<u8>, count: usize, seed: u64) {
         if block.is_empty() {
             break;
         }
-        let idx = (rng as usize) % block.len();
-        rng = rng
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
+        // The only universally known instruction boundary in an opaque byte
+        // vector is offset zero. Prepending a semantically neutral NOP keeps
+        // every original relative displacement intact; inserting at a random
+        // byte offset can split an instruction or immediate and corrupt code.
         let tmpl_idx = (rng as usize) % nop_templates.len();
         rng = rng
             .wrapping_mul(6364136223846793005)
             .wrapping_add(1442695040888963407);
         let nop_bytes = nop_templates[tmpl_idx];
-        block.splice(idx..idx, nop_bytes.iter().cloned());
+        block.splice(0..0, nop_bytes.iter().cloned());
         if block.len() > 65536 {
             break;
         }
@@ -655,12 +546,12 @@ mod tests {
     }
 
     #[test]
-    fn test_randomize_register_allocation_identity() {
+    fn test_randomize_register_allocation_is_conservative() {
         let mut code = vec![0x48, 0x89, 0xd0]; // mov rax, rdx
         let original = code.clone();
         randomize_register_allocation(&mut code, 0);
         assert_eq!(code.len(), original.len());
-        assert_ne!(code, original);
+        assert_eq!(code, original);
     }
 
     #[test]
@@ -678,6 +569,17 @@ mod tests {
         let original_len = block.len();
         insert_functional_nops(&mut block, 3, 1234);
         assert!(block.len() > original_len);
+    }
+
+    #[test]
+    fn test_insert_functional_nops_preserves_original_suffix() {
+        // Regression: random insertion used to land inside instructions or
+        // immediates. All original bytes must remain contiguous at the tail.
+        let original = vec![0x48, 0xc7, 0xc0, 0x50, 0x89, 0x48, 0x31, 0xc3];
+        let mut block = original.clone();
+        insert_functional_nops(&mut block, 4, 1234);
+        assert!(block.len() > original.len());
+        assert_eq!(&block[block.len() - original.len()..], &original[..]);
     }
 
     #[test]

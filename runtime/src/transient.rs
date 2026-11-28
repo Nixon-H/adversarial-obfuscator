@@ -1,6 +1,5 @@
-use crate::memguard::{checked_page_range, checked_page_size};
+use crate::memguard::{checked_page_range, checked_page_size, scrub_memory};
 use crate::platform::PagePerm;
-use std::ptr;
 use std::thread::{self, JoinHandle};
 
 static GLOBAL_REGISTRY: std::sync::Mutex<Option<Vec<(u64, usize)>>> = std::sync::Mutex::new(None);
@@ -41,6 +40,8 @@ impl TransientExecManager {
     /// # Safety
     /// The caller must guarantee that `[addr, addr + size)` is valid, uniquely
     /// writable for the duration of the call, and will not be used afterward.
+    /// Because permissions are page-granular, no other live allocation may
+    /// share any page spanned by the range.
     pub unsafe fn erase_block(addr: u64, size: usize) {
         if size == 0 {
             return;
@@ -65,8 +66,7 @@ impl TransientExecManager {
             return;
         }
         unsafe {
-            let p = addr as *mut u8;
-            ptr::write_bytes(p, 0u8, size);
+            scrub_memory(addr as *mut u8, size);
         }
         let _ =
             crate::platform::protect_pages(aligned_start as *mut u8, aligned_len, PagePerm::None);
@@ -143,6 +143,7 @@ pub fn wipe_registry_on_exit() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ptr;
 
     fn alloc_page() -> (*mut u8, usize) {
         let ps = checked_page_size().expect("valid page size");
@@ -204,7 +205,7 @@ mod tests {
         }
         let mgr = TransientExecManager::new();
         unsafe { mgr.erase_previous_block(ptr as u64, ps) };
-        crate::platform::free_pages(ptr, ps);
+        unsafe { crate::platform::free_pages(ptr, ps) };
     }
 
     #[test]
@@ -219,7 +220,7 @@ mod tests {
             ptr::write_bytes(ptr, 0x42u8, ps);
         }
         unsafe { __transient_block_entry(1, ptr as u64, ps) };
-        crate::platform::free_pages(ptr, ps);
+        unsafe { crate::platform::free_pages(ptr, ps) };
     }
 
     #[test]

@@ -141,7 +141,13 @@ pub fn alloc_pages(size: usize) -> *mut u8 {
     }
 }
 
-pub fn free_pages(ptr: *mut u8, _size: usize) {
+/// Unmap/free a page allocation.
+///
+/// # Safety
+/// `ptr` must be the exact base of a live allocation previously returned by
+/// [`alloc_pages`], `size` must be that allocation's size, and the mapping
+/// must not be used after this call.
+pub unsafe fn free_pages(ptr: *mut u8, _size: usize) {
     if ptr.is_null() {
         return;
     }
@@ -155,7 +161,13 @@ pub fn free_pages(ptr: *mut u8, _size: usize) {
     }
 }
 
-pub fn protect_pages(ptr: *mut u8, size: usize, perm: PagePerm) -> Result<(), ()> {
+/// Change permissions on a page-aligned memory range.
+///
+/// # Safety
+/// The caller must own/control every affected page and must ensure that no
+/// live reference, guard page, or unrelated mapping is invalidated. On Unix
+/// the range start must satisfy `mprotect` alignment requirements.
+pub unsafe fn protect_pages(ptr: *mut u8, size: usize, perm: PagePerm) -> Result<(), ()> {
     if ptr.is_null() || size == 0 {
         return Err(());
     }

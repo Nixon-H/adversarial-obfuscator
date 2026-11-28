@@ -53,9 +53,11 @@ pub fn detect_cpu_generation() -> CpuGeneration {
     #[cfg(target_arch = "x86_64")]
     {
         let vendor = core::arch::x86_64::__cpuid(0);
-        let is_intel = vendor.ebx == 0x6C65746E
+        // CPUID leaf-0 vendor words are little-endian chunks of
+        // "GenuineIntel": EBX="Genu", EDX="ineI", ECX="ntel".
+        let is_intel = vendor.ebx == 0x756E6547
             && vendor.edx == 0x49656E69
-            && vendor.ecx == 0x6E657470;
+            && vendor.ecx == 0x6C65746E;
         let is_amd = vendor.ebx == 0x68747541
             && vendor.edx == 0x69746E65
             && vendor.ecx == 0x444D4163;
@@ -213,6 +215,17 @@ mod tests {
             k[i] = i as u8;
         }
         k
+    }
+
+    #[test]
+    fn test_intel_vendor_constants_match_cpuid_encoding() {
+        // Regression: EBX/ECX had been swapped with byte patterns that never
+        // spell "GenuineIntel", so every Intel CPU was classified Unknown.
+        let genuine = *b"GenuineIntel";
+        let ebx = u32::from_le_bytes(genuine[0..4].try_into().unwrap());
+        let edx = u32::from_le_bytes(genuine[4..8].try_into().unwrap());
+        let ecx = u32::from_le_bytes(genuine[8..12].try_into().unwrap());
+        assert_eq!((ebx, edx, ecx), (0x756E6547, 0x49656E69, 0x6C65746E));
     }
 
     #[test]

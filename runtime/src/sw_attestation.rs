@@ -210,31 +210,45 @@ impl AttestationEngine {
     }
 
     pub fn start(self: &std::sync::Arc<Self>) {
-        self.running.store(true, Ordering::SeqCst);
-        // Start the loop on THIS engine. The former implementation leaked a
-        // freshly constructed engine into a thread, so the MemoryWatch the
-        // caller had registered was never the one being checked.
-        let engine = std::sync::Arc::clone(self);
-        std::thread::spawn(move || {
-            engine.attestation_loop();
-        });
-    }
-
-    fn attestation_loop(&self) {
-        while self.running.load(Ordering::Relaxed) {
-            let delay_ms = {
-                let t = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos();
-                ((t % 4000) + 1000) as u64
-            };
-            std::thread::sleep(std::time::Duration::from_micros(delay_ms));
-
-            if !self.memory_watch.verify_all() {
-                crate::selfdestruct::scrub_and_exit(1);
-            }
+        // At most one monitor thread. A repeated start must not spawn
+        // additional loops that all share the same MemoryWatch.
+        if self
+            .running
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return;
         }
+        // Capture a Weak, not an Arc. Holding a strong reference in the thread
+        // creates a reference cycle: the engine can never be dropped, so Drop
+        // can never clear `running` and the thread lives until process exit.
+        let weak_engine = std::sync::Arc::downgrade(self);
+        std::thread::spawn(move || {
+            while let Some(engine) = weak_engine.upgrade() {
+                if !engine.running.load(Ordering::Relaxed) {
+                    break;
+                }
+                let delay_ms = {
+                    let t = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos();
+                    ((t % 4000) + 1000) as u64
+                };
+                drop(engine);
+                std::thread::sleep(std::time::Duration::from_micros(delay_ms));
+
+                let Some(engine) = weak_engine.upgrade() else {
+                    break;
+                };
+                if !engine.running.load(Ordering::Relaxed) {
+                    break;
+                }
+                if !engine.memory_watch.verify_all() {
+                    crate::selfdestruct::scrub_and_exit(1);
+                }
+            }
+        });
     }
 
     pub fn handle_challenge(&self, challenge: &[u8]) -> Vec<u8> {

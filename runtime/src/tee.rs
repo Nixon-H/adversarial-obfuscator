@@ -1,4 +1,4 @@
-use crate::memguard::{checked_page_size, round_up_to_page, scrub_slice, ScrubOnDrop};
+use crate::memguard::{checked_page_size, round_up_to_page, scrub_memory, scrub_slice, ScrubOnDrop};
 use crate::platform::PagePerm;
 use crate::sw_attestation::AttestationEngine;
 #[cfg(feature = "sgx")]
@@ -130,9 +130,9 @@ impl TeePartition {
             return Err("mmap failed to allocate enclave region".to_string());
         }
 
-        let prot_result = crate::platform::protect_pages(ptr, alloc_size, PagePerm::ReadWrite);
+        let prot_result = unsafe { crate::platform::protect_pages(ptr, alloc_size, PagePerm::ReadWrite) };
         if prot_result.is_err() {
-            crate::platform::free_pages(ptr, alloc_size);
+            unsafe { crate::platform::free_pages(ptr, alloc_size) };
             return Err("mprotect failed to set enclave region permissions".to_string());
         }
 
@@ -181,18 +181,11 @@ impl TeePartition {
                 .to_string()
         })?;
         let _key_guard = unsafe { ScrubOnDrop::new(key.as_mut_ptr(), key.len()) };
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let mut iv_material = Vec::with_capacity(32 + 32 + 16);
-        iv_material.extend_from_slice(&key);
-        iv_material.extend_from_slice(&self.measurement);
-        iv_material.extend_from_slice(&now.to_le_bytes());
-        let _iv_material_guard =
-            unsafe { ScrubOnDrop::new(iv_material.as_mut_ptr(), iv_material.len()) };
-        let iv_hash = sha256_digest(&iv_material);
-        let iv: [u8; 16] = iv_hash[..16].try_into().expect("sha256 gives 16 bytes");
+        // CTR requires a unique IV for every message under this sealing key.
+        // Time-only derivation can repeat within one clock tick; use the OS
+        // CSPRNG and fail closed if it is unavailable.
+        let mut iv = [0u8; 16];
+        crate::random::fill_random(&mut iv)?;
 
         let mut sealed = data.to_vec();
         crate::decrypt::aes_256_ctr_decrypt(&mut sealed, &key, &iv);
@@ -332,10 +325,10 @@ impl Drop for TeePartition {
         }
         if !self.region_ptr.is_null() && self.region_len > 0 {
             unsafe {
-                ptr::write_bytes(self.region_ptr, 0u8, self.region_len);
+                scrub_memory(self.region_ptr, self.region_len);
             }
             let _ = crate::platform::unlock_pages(self.region_ptr as *const u8, self.region_len);
-            crate::platform::free_pages(self.region_ptr, self.region_len);
+            unsafe { crate::platform::free_pages(self.region_ptr, self.region_len) };
         }
     }
 }
@@ -526,6 +519,17 @@ mod tests {
         assert!(sealed.len() > original.len());
         let unsealed = tee.unseal_data(&sealed).unwrap();
         assert_eq!(unsealed, original);
+    }
+
+    #[test]
+    fn test_seal_same_plaintext_twice_uses_different_iv() {
+        let mut tee = TeePartition::new(TeeType::None);
+        tee.set_software_seal_key(test_seal_key());
+        tee.init_enclave(b"nonce-test").expect("init");
+        let first = tee.seal_data(b"same plaintext").expect("seal first");
+        let second = tee.seal_data(b"same plaintext").expect("seal second");
+        assert_ne!(&first[32..48], &second[32..48]);
+        assert_ne!(first, second);
     }
 
     #[test]
