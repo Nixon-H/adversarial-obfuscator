@@ -129,17 +129,42 @@ class AdaptiveRewriter:
         rename_map: dict[str, str] = {}
         local_funcs: dict[str, set[str]] = {}
         method_names: set[str] = set()
+        # Homoglyph substitution is not injective on a source file that already
+        # contains the target script: ASCII "a" and pre-existing Cyrillic "а"
+        # would both land on the same identifier and two distinct variables
+        # would collapse into one.  Track every identifier-like spelling in the
+        # input and decline any candidate that is already occupied.
+        occupied: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                occupied.add(node.id)
+            elif isinstance(node, ast.arg):
+                occupied.add(node.arg)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                   ast.ClassDef)):
+                occupied.add(node.name)
+            elif isinstance(node, ast.Attribute):
+                occupied.add(node.attr)
+            elif isinstance(node, ast.keyword) and node.arg:
+                occupied.add(node.arg)
+
+        def _record(name: str) -> None:
+            if name in self.BUILTIN_NAMES or name in rename_map:
+                return
+            candidate = _repl(name)
+            if candidate != name and candidate not in occupied:
+                rename_map[name] = candidate
+                occupied.add(candidate)
+
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if node.name not in self.BUILTIN_NAMES:
-                    rename_map[node.name] = _repl(node.name)
+                _record(node.name)
                 args = (list(getattr(node.args, "posonlyargs", []))
                         + list(node.args.args)
                         + list(getattr(node.args, "kwonlyargs", [])))
                 local_funcs[node.name] = {a.arg for a in args}
             if isinstance(node, ast.arg):
-                if node.arg not in self.BUILTIN_NAMES:
-                    rename_map[node.arg] = _repl(node.arg)
+                _record(node.arg)
             if isinstance(node, ast.ClassDef):
                 for stmt in node.body:
                     if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):

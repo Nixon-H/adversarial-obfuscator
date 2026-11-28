@@ -30,8 +30,8 @@ def _names_imported_from(tree, module_stem):
             # `from pkg._mod import x` (module "pkg._mod")
             if not (mod == module_stem or mod.endswith("." + module_stem)):
                 continue
-            if level == 0 and mod != module_stem:
-                continue
+            # Both absolute package forms (`pkg._mod`) and direct/relative
+            # forms (`_mod`, `._mod`) are accepted by the prefix check above.
             for alias in node.names:
                 if alias.name == "*":
                     continue

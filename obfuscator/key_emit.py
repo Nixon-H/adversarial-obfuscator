@@ -151,10 +151,13 @@ def emit_key_loader(share0_b64: str, share1_b64: str, build_id: str,
     # b64 alphabet has no quotes/backslashes: safe inside "..." literals.
     # Newlines/CRs are rejected too: b64decode() silently ignores them,
     # but they would break the emitted "..." literal (source injection).
+    decoded = []
     for chunk in (share0_b64, share1_b64):
-        base64.b64decode(chunk)  # fail fast on malformed shares
+        decoded.append(base64.b64decode(chunk, validate=True))  # fail fast on malformed shares
         if '"' in chunk or "\\" in chunk or "\n" in chunk or "\r" in chunk:
             raise ValueError("share contains unsafe characters")
+    if len(decoded[0]) != len(decoded[1]):
+        raise ValueError("share length mismatch")
     if '"' in build_id or "\\" in build_id or "\n" in build_id or "\r" in build_id:
         raise ValueError("build_id contains unsafe characters")
     salt = str(customer_salt or "")

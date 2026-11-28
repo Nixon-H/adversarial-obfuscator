@@ -161,6 +161,41 @@ def _op_class(op: str) -> "str | None":
     return None
 
 
+def _bound_names(tree: ast.AST) -> set:
+    """Conservatively collect every name bound anywhere in ``tree``.
+
+    Bare-call lowering is only valid when the callee really resolves to the
+    builtin.  A parameter, assignment, import, def/class statement, except-as
+    target, or pattern capture with the same spelling shadows that builtin.
+    Resolving Python's full nested-scope rules here would duplicate the
+    compiler; using the union of all binding sites is deliberately
+    conservative (it may decline a rewrite, but it must never change which
+    object a source program calls).
+    """
+    bound = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, ast.alias):
+            if node.asname:
+                bound.add(node.asname)
+            elif node.name:
+                bound.add(node.name.split(".", 1)[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchAs) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchStar) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            bound.add(node.rest)
+    return bound
+
+
 class _LoweringRewriter(ast.NodeTransformer):
     """Rewrite covered call sites to ``_nxk_*`` kernel calls.
 
@@ -308,6 +343,11 @@ def lower_source(source: str, families) -> tuple[str, int]:
                      "JoinedStr", "FormattedValue", "AugAssign")
     )
     tree = ast.parse(source)
+    shadowed = _bound_names(tree)
+    call_ops = frozenset(
+        op for op in call_ops
+        if "." in op or op not in shadowed
+    )
     rw = _LoweringRewriter(active, call_ops)
     tree = rw.visit(tree)
     ast.fix_missing_locations(tree)

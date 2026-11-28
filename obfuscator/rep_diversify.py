@@ -137,19 +137,6 @@ class RepDiversifier(ast.NodeTransformer):
             return ast.parse(
                 '"' + "".join("\\x%02x" % ord(c) for c in s) + '"',
                 mode="eval").body
-        if choice < 0.7:
-            # chr() concatenation.
-            try:
-                s.encode("ascii")
-            except UnicodeEncodeError:
-                return None
-            parts = [ast.Call(func=ast.Name(id="chr", ctx=ast.Load()),
-                              args=[ast.Constant(value=ord(c))], keywords=[])
-                     for c in s]
-            node = parts[0]
-            for p in parts[1:]:
-                node = ast.BinOp(left=node, op=ast.Add(), right=p)
-            return node
         if choice < 0.85:
             # join-of-fragments.
             parts = [ast.Constant(value=c) for c in s]
@@ -167,44 +154,12 @@ class RepDiversifier(ast.NodeTransformer):
             mode="eval").body
 
     # -- R2: exact expression rewrites -------------------------------------
-    def visit_Compare(self, node):
-        self.generic_visit(node)
-        if (self.expr_rewrite and len(node.ops) == 1
-                and type(node.ops[0]) in _CMP_FLIP
-                and self.rng.random() < 0.5):
-            flipped = _CMP_FLIP[type(node.ops[0])]()
-            self.stats["exprs"] += 1
-            return ast.copy_location(
-                ast.Compare(left=node.comparators[0], ops=[flipped],
-                            comparators=[node.left]), node)
-        return node
-
-    def visit_BoolOp(self, node):
-        self.generic_visit(node)
-        # De Morgan over pure operands only (side-effect order preserved).
-        if (self.expr_rewrite and len(node.values) == 2
-                and all(_is_pure(v) for v in node.values)
-                and self.rng.random() < 0.5):
-            self.stats["exprs"] += 1
-            neg = [ast.UnaryOp(op=ast.Not(), operand=v) for v in node.values]
-            inner = ast.BoolOp(op=ast.Or() if isinstance(node.op, ast.And)
-                               else ast.And(), values=neg)
-            return ast.copy_location(
-                ast.UnaryOp(op=ast.Not(), operand=inner), node)
-        return node
-
-    def visit_UnaryOp(self, node):
-        self.generic_visit(node)
-        # not not x -> bool(x): identical coercion for every value.
-        if (self.expr_rewrite and isinstance(node.op, ast.Not)
-                and isinstance(node.operand, ast.UnaryOp)
-                and isinstance(node.operand.op, ast.Not)):
-            self.stats["exprs"] += 1
-            return ast.copy_location(
-                ast.Call(func=ast.Name(id="bool", ctx=ast.Load()),
-                         args=[node.operand.operand], keywords=[]), node)
-        return node
-
+    # Comparison flipping changes evaluation order for effectful operands;
+    # De Morgan is not value-preserving because Python `and`/`or` return one
+    # of their operands rather than a bool; `not not x -> bool(x)` is wrong
+    # when `bool` is shadowed. The historical rewrites therefore were not
+    # exact despite the old comments. They are deliberately left as no-ops:
+    # declining an unsafe rewrite is always permitted for an obfuscator.
     # -- R3: fragmentation --------------------------------------------------
     def visit_List(self, node):
         self.generic_visit(node)

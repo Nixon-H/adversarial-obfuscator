@@ -382,8 +382,13 @@ def sign_pe(data, cert_path, key_path, password=None, description=""):
                            WIN_CERT_TYPE_PKCS_SIGNED_DATA) + signature + b"\x00" * pad
 
     out = bytearray(data)
-    cert_offset = len(out)
-    out.extend(b"\x00" * ((8 - cert_offset % 8) % 8))
+    # The security directory must point at the FIRST byte of WIN_CERTIFICATE,
+    # not at the alignment padding that may precede it.  Taking the offset
+    # before padding leaves it unaligned for PE images whose length is not
+    # already a multiple of eight; the resulting file cannot even pass this
+    # module's own layout validation.
+    cert_offset = len(out) + ((8 - len(out) % 8) % 8)
+    out.extend(b"\x00" * (cert_offset - len(out)))
     out.extend(win_cert)
     struct.pack_into("<II", out, layout["sec_entry"], cert_offset, len(win_cert))
     struct.pack_into("<I", out, layout["checksum_off"],
