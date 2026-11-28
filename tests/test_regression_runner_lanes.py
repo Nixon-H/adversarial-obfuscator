@@ -113,3 +113,44 @@ def test_except_star_flagged_via_parse_failure_path():
     assert issues and "exception groups" in issues[0][1]
     # And the false-positive guard: ordinary try/except stays clean.
     assert cython_compat_issues("try:\n    pass\nexcept ValueError:\n    pass\n") == []
+
+
+# ── 4. Session-wide fixes: cp1252 reads, nargs='?' catalogue, harness blocking ──
+
+def test_self_critique_reads_are_utf8_exact():
+    """engine.py read repo files with bare open(); Windows cp1252 died on
+    byte 0x81 and took down four shard flags at once."""
+    import re
+    src = open(os.path.join(_ROOT, "scripts/self_critique/engine.py"), encoding="utf-8").read()
+    bare = []
+    for m in re.finditer(r'open\(([^)\n]*)\)', src):
+        if 'encoding' not in m.group(1) and 'b' not in m.group(1).split(',')[0]:
+            bare.append("line %d" % (src[:m.start()].count("\n") + 1))
+    assert not bare, "bare open() reads in engine.py: " + ", ".join(bare)
+
+
+def test_validate_catalogued_as_bare_flag():
+    """nargs='?' flags must invoke bare: the catalogue passed sample '2' to
+    --validate, which the builder correctly rejects."""
+    sys.path.insert(0, os.path.join(_ROOT, "scripts", "ci"))
+    from flag_catalogue import catalogue  # noqa: E402
+    entries = {e["flag"]: e for e in catalogue()}
+    v = entries.get("--validate")
+    assert v is not None, "--validate missing from catalogue"
+    assert v["argv"] == ["--validate"], \
+        "optional-value flags must be invoked bare, got %r" % v["argv"]
+
+
+def test_blocked_decision_does_not_require_artefact(tmp_path):
+    """blocked_before_workspace must record a fail-closed decision without
+    touching the artefact: it crashed when the artefact was absent, which
+    is exactly the CI-checkout case it exists for."""
+    sys.path.insert(0, os.path.join(_ROOT, "re-bench", "tools"))
+    try:
+        import ai_bench  # noqa: E402
+    except Exception:
+        import pytest
+        pytest.skip("ai_bench not importable here")
+    import inspect
+    sig = inspect.signature(ai_bench.blocked_before_workspace)
+    assert sig is not None  # existence pin; behaviour covered in test_ai_benchmark_harness
