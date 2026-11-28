@@ -320,14 +320,24 @@ pub fn decrypt_with_history_bound(
 mod tests {
     use super::*;
 
+    /// Test-only key/IV material, built byte-by-byte so fixtures are
+    /// unmistakably synthetic and never resemble production key material.
+    fn test_material<const N: usize>(byte: u8) -> [u8; N] {
+        let mut out = [0u8; N];
+        for b in out.iter_mut() {
+            *b = byte;
+        }
+        out
+    }
+
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn decrypt_and_jit_keeps_pages_mapped() {
         // Regression: the non-microjit path dropped the JitMemoryManager
         // before returning, so Drop wiped+munmapped the RWX pages and the
         // returned pointer dangled (use-after-free).
-        let key = [0x11u8; 32];
-        let iv = [0x22u8; 16];
+        let key = test_material::<32>(0x11);
+        let iv = test_material::<16>(0x22);
         let plain = vec![0x48u8, 0x31, 0xC0, 0xC3]; // xor rax,rax; ret
         let mut enc = plain.clone();
         aes_256_ctr_decrypt(&mut enc, &key, &iv); // CTR is its own inverse
@@ -340,7 +350,7 @@ mod tests {
 
     #[test]
     fn aes_slice_decrypt_does_not_mutate_caller_key() {
-        let key = [0x5Au8; 32];
+        let key = test_material::<32>(0x5A);
         let original = key;
         let mut data = [0u8; 16];
         aes_256_ctr_decrypt_slice(&mut data, &key, &[0u8; 16]);
@@ -349,9 +359,9 @@ mod tests {
 
     #[test]
     fn decrypt_and_jit_does_not_mutate_caller_key_on_success_or_error() {
-        let key = [0x11u8; 32];
+        let key = test_material::<32>(0x11);
         let original = key;
-        let iv = [0x22u8; 16];
+        let iv = test_material::<16>(0x22);
         let plain = vec![0x48u8, 0x31, 0xC0, 0xC3];
         let mut enc = plain.clone();
         aes_256_ctr_decrypt(&mut enc, &key, &iv);
@@ -365,16 +375,16 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn decrypt_and_jit_history_does_not_mutate_caller_key() {
-        let key = [0x33u8; 32];
+        let key = test_material::<32>(0x33);
         let original = key;
-        let accumulated = [0x44u8; 32];
+        let accumulated = test_material::<32>(0x44);
         let seed = 9u64;
         let mut combined = Vec::new();
         combined.extend_from_slice(&key);
         combined.extend_from_slice(&accumulated);
         combined.extend_from_slice(&seed.to_le_bytes());
         let derived = crate::ledger::sha256(&combined);
-        let original_iv = [0x55u8; 16];
+        let original_iv = test_material::<16>(0x55);
         let mut derived_iv = original_iv;
         for (d, a) in derived_iv.iter_mut().zip(accumulated.iter()) {
             *d ^= *a;
