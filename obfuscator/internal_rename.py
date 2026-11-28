@@ -396,19 +396,22 @@ class _UsageScanner(ast.NodeVisitor):
         attr = node.attr
         if attr in self.name_to_classes:
             owners = self.name_to_classes[attr]
-            if not (set(self.class_stack) & owners):
-                # Use outside every owning class body.  That is external
-                # UNLESS the receiver is a proven non-escaping local
-                # instance of one of the owning classes (`rec = C();
-                # rec.m()` inside main): the renamer rewrites that
-                # attribute too, so it proves nothing about outside code.
-                _recv_ok = False
-                if isinstance(node.value, ast.Name):
+            # Position inside the owning class is not enough. `obj.m` in a
+            # method body may be a duck-typed object of another class, while
+            # the renamer rewrites every `.m` attribute regardless of
+            # receiver. Only a same-class self/cls receiver, or a proven
+            # non-escaping local instance of an owning class, is internal.
+            _recv_ok = False
+            if isinstance(node.value, ast.Name):
+                if (node.value.id in _SELF_NAMES and self.class_stack
+                        and self.class_stack[-1] in owners):
+                    _recv_ok = True
+                else:
                     _cls = self.local_instances.get(node.value.id)
                     if _cls and _cls in owners:
                         _recv_ok = True
-                if not _recv_ok:
-                    self.external_attr.add(attr)
+            if not _recv_ok:
+                self.external_attr.add(attr)
         self._in_attr_value += 1
         self.visit(node.value)
         self._in_attr_value -= 1
@@ -449,6 +452,20 @@ class _UsageScanner(ast.NodeVisitor):
                 # cannot prove which attribute is referenced -> every
                 # candidate method name is tainted (conservative).
                 self.dynamic_refs.update(self.name_to_classes.keys())
+        self.generic_visit(node)
+
+    def visit_Subscript(self, node):
+        # type: (ast.Subscript) -> None
+        # vars(C)["m"], a mapping returned from vars(obj), or any other
+        # string-keyed lookup is a dynamic reference the attribute rewrite
+        # cannot update. The class/method proof cannot prove the mapping's
+        # origin in general, so a matching string key conservatively taints
+        # the method name exactly as getattr(..., "m") does.
+        slice_node = node.slice
+        if (isinstance(slice_node, ast.Constant)
+                and isinstance(slice_node.value, str)
+                and slice_node.value in self.name_to_classes):
+            self.dynamic_refs.add(slice_node.value)
         self.generic_visit(node)
 
 

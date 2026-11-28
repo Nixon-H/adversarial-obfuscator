@@ -174,9 +174,14 @@ def _inject_module_dead_code(
     count: int,
     patterns: list[str],
 ) -> None:
-    pos = _count_imports(tree)
-    if pos == 0 and tree.body:
-        pos = 0
+    # Insert after the module docstring, every __future__ import, and then
+    # the leading regular import block. The old raw count started at body[0];
+    # with a docstring it returned zero and put executable try blocks before
+    # both the docstring and `from __future__`, a guaranteed SyntaxError.
+    from obfuscator.core.ast_prologue import module_prologue_index
+    pos = module_prologue_index(tree)
+    while pos < len(tree.body) and isinstance(tree.body[pos], (ast.Import, ast.ImportFrom)):
+        pos += 1
     for _ in range(count):
         tmpl = rng.choice(patterns)
         kwargs = _random_kwargs(tmpl, rng)
@@ -324,12 +329,11 @@ def _inject_prompt_strings(
                     injected += 1
                     continue
 
-        # Regular string literals
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if (len(node.value) > 15 and rng.random() < 0.15
-                    and not _is_seal_literal(node.value)):
-                node.value = prompts[injected] + " | " + node.value
-                injected += 1
+        # Regular executable string literals are deliberately NOT rewritten:
+        # prefixing prose changes the program's observable behavior (output,
+        # keys, SQL, paths, formats). Prompt payloads belong in docstrings or
+        # inert constants; the fallback below emits them without corrupting
+        # live data.
 
     if injected < count:
         # Every remaining literal was a sealed blob, so the prompt cannot

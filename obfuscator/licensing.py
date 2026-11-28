@@ -574,7 +574,12 @@ def save_token(token: str, path: str) -> str:
             os.fchmod(fd, 0o600)
         except (AttributeError, OSError):
             os.chmod(tmp, 0o600)
-        os.write(fd, (token + "\n").encode("utf-8"))
+        data = memoryview((token + "\n").encode("utf-8"))
+        while data:
+            written = os.write(fd, data)
+            if written <= 0:
+                raise OSError("short write while saving licence token")
+            data = data[written:]
         os.fsync(fd)
     finally:
         os.close(fd)

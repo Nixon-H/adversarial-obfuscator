@@ -61,6 +61,18 @@ _TAG_CONST = 0x07
 _TAG_SEQ = 0x08
 
 
+def _encode_text(value: str) -> bytes:
+    # Python str can contain lone surrogates (including strings produced by
+    # \uXXXX escapes and filenames using surrogateescape). marshal round-trips
+    # those code objects, so the marshal replacement must too. surrogatepass
+    # is still strict for every other malformed UTF-8 sequence.
+    return value.encode("utf-8", "surrogatepass")
+
+
+def _decode_text(value: bytes) -> str:
+    return value.decode("utf-8", "surrogatepass")
+
+
 def _encode_uvarint(n: int) -> bytes:
     if n < 0:
         raise ValueError("uvarint must be >= 0")
@@ -167,7 +179,7 @@ def _dumps_const(w: _Writer, value: object) -> None:
     elif isinstance(value, bytes):
         w.u8(_TAG_BYTES); w.blob(value)
     elif isinstance(value, str):
-        w.u8(_TAG_STR); w.blob(value.encode("utf-8"))
+        w.u8(_TAG_STR); w.blob(_encode_text(value))
     elif isinstance(value, types.CodeType):
         _dumps_code(w, value)
     elif isinstance(value, tuple):
@@ -201,9 +213,9 @@ def _dumps_code(w: _Writer, co: types.CodeType) -> None:
     for tup in (co.co_names, co.co_varnames, co.co_freevars, co.co_cellvars):
         w.varint(len(tup))
         for s in tup:
-            w.blob(s.encode("utf-8"))
-    w.blob(co.co_filename.encode("utf-8"))
-    w.blob(co.co_name.encode("utf-8"))
+            w.blob(_encode_text(s))
+    w.blob(_encode_text(co.co_filename))
+    w.blob(_encode_text(co.co_name))
     w.varint(co.co_firstlineno)
     w.blob(co.co_linetable)
     w.blob(getattr(co, "co_exceptiontable", b""))
@@ -235,13 +247,13 @@ def _loads_const(r: _Reader) -> object:
     if tag == _TAG_INT:
         return r.zigzag()
     if tag == _TAG_FLOAT:
-        return float(r.blob().decode("utf-8"))
+        return float(_decode_text(r.blob()))
     if tag == _TAG_COMPLEX:
-        return complex(r.blob().decode("utf-8"))
+        return complex(_decode_text(r.blob()))
     if tag == _TAG_BYTES:
         return r.blob()
     if tag == _TAG_STR:
-        return r.blob().decode("utf-8")
+        return _decode_text(r.blob())
     if tag == _TAG_CODE:
         return _loads_code(r, tag_already=True)
     if tag == _TAG_SEQ:
@@ -276,14 +288,14 @@ def _loads_code(r: _Reader, tag_already: bool = False) -> types.CodeType:
 
     def _str_tuple() -> tuple[str, ...]:
         n = r.varint()
-        return tuple(r.blob().decode("utf-8") for _ in range(n))
+        return tuple(_decode_text(r.blob()) for _ in range(n))
 
     names = _str_tuple()
     varnames = _str_tuple()
     freevars = _str_tuple()
     cellvars = _str_tuple()
-    filename = r.blob().decode("utf-8")
-    name = r.blob().decode("utf-8")
+    filename = _decode_text(r.blob())
+    name = _decode_text(r.blob())
     firstlineno = r.varint()
     linetable = r.blob()
     exceptiontable = r.blob()
