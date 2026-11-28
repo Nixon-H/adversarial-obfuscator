@@ -12,10 +12,11 @@
 name: "CodeQL Advanced"
 
 on:
-  pull_request:
-    branches: [ "master" ]
-  schedule:
-    - cron: '39 7 * * 2'
+  # Reusable workflow ONLY: the single invoker is all-checks.yml, which
+  # runs it once per push (and weekly via its own schedule). Direct
+  # triggers here uploaded analyses under a second configuration
+  # (.github/workflows/codeql.yml:analyze vs all-checks.yml:analyze),
+  # which is what the "Code scanning configuration error" banner meant.
   workflow_call:
 
 jobs:
