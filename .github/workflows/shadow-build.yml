@@ -56,6 +56,14 @@ jobs:
         # stem (hello) is part of the path the later stages read.
         run: python3 -m irgen build/hello_obfuscated.py -o build/program.ir
 
+      - name: Capture failing irgen input
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # pinned immutable; original actions/upload-artifact@v4
+        with:
+          name: irgen-failing-shape
+          path: build/hello_obfuscated.py
+          retention-days: 5
+
       - name: Stage 3 - LLVM Codegen
         # NOTE: llvmgen takes -O/--ollvm-passes (bcf/fla/sub...), not bare
         # --bcf/--fla/--sub flags.
