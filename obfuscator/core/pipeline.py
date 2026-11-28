@@ -1096,7 +1096,8 @@ def process_file_safe(args):
                 decoded_source = raw_source.decode('utf-8')
                 mutated_source, _ = apply_ast_mutation(decoded_source, ast_opts, strict=True)
                 raw_source = mutated_source.encode('utf-8')
-            except Exception: pass
+            except Exception as _mut_exc:
+                return ('error', src, 'AST mutation failed: %s' % (_mut_exc,))
             header = b"# NIXON_HEADER \n" 
             swizzled_body = swizzle_bytecode(raw_source, bytes(swizzle_key))
             with open(dest, "wb") as f: f.write(header + swizzled_body)
@@ -1850,7 +1851,11 @@ class CloudflareDeployer:
                     data=body, method='PUT',
                     headers={"Authorization": f"Bearer {self.api_token}",
                              "Content-Type": "text/plain"}
-                ):
+                ) as _resp:
+                    if not (200 <= int(getattr(_resp, "status", 0) or 0) < 300):
+                        raise ValueError(
+                            "Cloudflare licence write returned HTTP %s"
+                            % (getattr(_resp, "status", "<none>"),))
                     t.success(f"Authorized {hwid_hash[:8]}")
                     return True
             except ValueError as _url_err:
@@ -1941,8 +1946,11 @@ export default {
                 data=body.encode(), method='PUT',
                 headers={"Authorization": f"Bearer {self.api_token}",
                          "Content-Type": f"multipart/form-data; boundary={boundary}"}
-            ):
-                pass
+            ) as _resp:
+                if not (200 <= int(getattr(_resp, "status", 0) or 0) < 300):
+                    raise ValueError(
+                        "Cloudflare worker deploy returned HTTP %s"
+                        % (getattr(_resp, "status", "<none>"),))
             sub=self._req("GET","workers/subdomain")
             if sub:
                  subd=sub['result']['subdomain']
@@ -2502,6 +2510,25 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         except Exception:
             pass
     _phase4_suffix += ("_NX_KOD_ARMED = %r\n" % (bool(kod),))
+    # Kill ladder (V10 single failure path): every enforcement gate in the
+    # emitted loader funnels through _nx_kill (wipe + silent exit 137).
+    # Emitted ONCE, BEFORE the first gate that can call it: Python resolves
+    # the name when the gate executes, so defining it later turned an armed
+    # expiry/snapshot/stdlib failure into a NameError instead of the wipe+exit
+    # path. Best-effort emission is not acceptable here; a ladder import
+    # failure stops the build.
+    try:
+        from obfuscator.kill_ladder import emit_kill_snippet as _kl_emit
+        from obfuscator.core.sources import VARS as _VARS_kill
+        _phase4_suffix += _kl_emit(
+                        alert_fn=_VARS_kill["FUNC_TRIGGER_ALERT"]) + "\n"
+    except SystemExit:
+        raise
+    except Exception as _kl_exc:
+        # Fail closed: _nx_kill is the single failure path every gate
+        # above funnels into; shipping without it turns armed gates into
+        # runtime NameErrors.
+        raise SystemExit("kill-ladder emission failed: %s" % (_kl_exc,))
     # Expiry and geo gates (benchmark 2026-11-17, access-gate matrix): both
     # were wired ONLY into the packed loader's build context, so on the
     # SECTIONED path (the default) --access expire=... and
@@ -2736,23 +2763,6 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
             raise SystemExit("stdlib gate emission failed: %s" % (_sa_exc,))
     else:
         _phase4_suffix += "_NX_STDLIB_GATE = \"DISABLED\"\n"
-    # Kill ladder (V10 single failure path): every enforcement gate in the
-    # emitted loader funnels through _nx_kill (wipe + silent exit 137).
-    # Emitted ONCE, AFTER the integrity gates above (they call _nx_kill)
-    # and BEFORE the trial/watermark gates below; best-effort so a ladder
-    # import failure can never break builds.
-    try:
-        from obfuscator.kill_ladder import emit_kill_snippet as _kl_emit
-        from obfuscator.core.sources import VARS as _VARS_kill
-        _phase4_suffix += _kl_emit(
-                        alert_fn=_VARS_kill["FUNC_TRIGGER_ALERT"]) + "\n"
-    except SystemExit:
-        raise
-    except Exception as _kl_exc:
-        # Fail closed: _nx_kill is the single failure path every gate
-        # above funnels into; shipping without it turns armed gates into
-        # runtime NameErrors.
-        raise SystemExit("kill-ladder emission failed: %s" % (_kl_exc,))
     # Runtime anti-rollback is emitted only for real pipeline builds that
     # supply a monotonic protection level. Direct generator use in tests keeps
     # its previous deterministic shape when no level is supplied.
@@ -3434,48 +3444,16 @@ def _exec_fallback():
                         pass
                     raise ValueError("section join failed")
                 compressed = bytearray(_joined)
-                # RO-AFTER-LOAD, WIRED (finding AI-BIN-001, 2026-11-24).
-                #
-                # section_split.py documented and tested a read-only-after-load
-                # capability (protect_after_load / seal_joined /
-                # stream_join_sealed) that re-mprotects the joined plaintext
-                # PROT_READ, and NOTHING in the shipped loader called it. Grep
-                # across obfuscator/ found zero production callers: the
-                # mitigation was implemented, described as present, and
-                # unreachable. A documented control nobody invokes is worse than
-                # an undocumented gap, because it stops the next person looking.
-                #
-                # This is the one place the whole cleartext payload is
-                # contiguous in memory before exec, so it is the right place and
-                # the only one that matters. Best-effort by contract: if mprotect
-                # is unavailable (no libc, hardened kernel, odd platform) the
-                # load proceeds exactly as before -- hardening must never break
-                # a legitimate artefact.
-                try:
-                    import ctypes as _nx_ro_ct
-                    _nx_ro_libc = _nx_ro_ct.CDLL(None, use_errno=True)
-                    if _nx_ro_libc.mprotect is None:
-                        raise AttributeError("no mprotect")
-                    _nx_ro_addr = id(compressed) + 32
-                    _nx_ro_pagesize = 4096
-                    try:
-                        _nx_ro_pagesize = _nx_ro_libc.getpagesize()
-                    except Exception:
-                        pass
-                    _nx_ro_start = _nx_ro_addr - (_nx_ro_addr % _nx_ro_pagesize)
-                    _nx_ro_len = (len(compressed) + (_nx_ro_addr % _nx_ro_pagesize)
-                                  + _nx_ro_pagesize - 1)
-                    _nx_ro_len -= _nx_ro_len % _nx_ro_pagesize
-                    if _nx_ro_len > 0 and _nx_ro_libc.mprotect(
-                            _nx_ro_ct.c_void_p(_nx_ro_start),
-                            _nx_ro_ct.c_size_t(_nx_ro_len), 1) != 0:
-                        raise OSError("mprotect refused")
-                    globals()["_NX_PAYLOAD_RO"] = True
-                except Exception:
-                    # Never fatal: the payload still runs. The flag records
-                    # whether the mitigation actually took effect, so a
-                    # diagnostic can tell "not applied" from "applied".
-                    globals()["_NX_PAYLOAD_RO"] = False
+                # RO-after-load is deliberately not attempted here.  The
+                # previous implementation mprotect'ed pages derived from
+                # id(bytearray)+32, which is not the object data pointer on
+                # any supported Python and can cover the object header or
+                # unrelated pymalloc pages.  When it "worked" it made parts of
+                # the interpreter heap read-only and crashed the loader; when
+                # it did not, it only looked like a mitigation.  There is no
+                # safe way to page-protect one arbitrary CPython object, so
+                # the flag records that the mitigation is absent.
+                globals()["_NX_PAYLOAD_RO"] = False
         else:
             encrypted = bytearray(base64.b85decode(FALLBACK_BLOB))
             compressed = bytearray(_xor_decrypt(bytes(encrypted), _NX_EFF_KEY))
@@ -3624,15 +3602,15 @@ def _exec_fallback():
         _nx_wipe(raw)
     except BaseException as e:
         try:
-            _nx_wipe(bytearray(encrypted))
+            _nx_wipe(encrypted)
         except Exception:
             pass
         try:
-            _nx_wipe(bytearray(compressed))
+            _nx_wipe(compressed)
         except Exception:
             pass
         try:
-            _nx_wipe(bytearray(raw))
+            _nx_wipe(raw)
         except Exception:
             pass
         # The payload's OWN exit code must survive (benchmark 2026-11-17,
@@ -3641,7 +3619,7 @@ def _exec_fallback():
         # for CI gates, --fail flags and shell scripts that branch on the
         # status.  SystemExit is control flow, not an error: wipe, then
         # re-raise it untouched.  KeyboardInterrupt likewise propagates.
-        if isinstance(e, SystemExit):
+        if isinstance(e, (SystemExit, KeyboardInterrupt)):
             raise
         # §4 exception-path leak: the loader installs a quiet excepthook
         # (see the snippet above) so an uncaught traceback does not print host
@@ -4413,6 +4391,13 @@ def _nx_self_check():
         value = s.split(b" = ", 1)[1]
         return (len(value) >= 2 and value.startswith(b'"')
                 and value.endswith(b'"') and b'"' not in value[1:-1])
+    def _nx_token_slot_line(l):
+        s = l.rstrip()
+        if not s.startswith(b"_NX_SELF_TOK = "):
+            return False
+        value = s.split(b" = ", 1)[1]
+        return (len(value) >= 2 and value.startswith(b'"')
+                and value.endswith(b'"') and b'"' not in value[1:-1])
     filtered_lines = [l for l in lines
                       if _NX_SELF_CK.encode() not in l
                       and _NX_SELF_HM.encode() not in l
@@ -4425,7 +4410,7 @@ def _nx_self_check():
                       # root and every signed build dies at startup -- measured
                       # exactly that (rc 137, "merkle expected=... got=...").
                       and not _nx_slot_line(l)
-                      and (not _NX_SELF_TOK or _NX_SELF_TOK.encode() not in l)]
+                      and (not _NX_SELF_TOK or not _nx_token_slot_line(l))]
     content = b"".join(filtered_lines)
     chunks = [content[i:i+1024] for i in range(0, len(content), 1024)]
     hashes = [_nx_self_sha.sha256(b).hexdigest() for b in chunks]
@@ -4440,7 +4425,7 @@ def _nx_self_check():
     import hmac as _nx_self_mac
     sig = _nx_self_mac.new(bytes.fromhex(_NX_SELF_HK), content,
                            _nx_self_sha.sha256).hexdigest()
-    if sig != _NX_SELF_HM:
+    if not _nx_self_mac.compare_digest(sig, _NX_SELF_HM):
         _nx_self_fail("hmac expected=%s got=%s"
                       % (str(_NX_SELF_HM)[:16], str(sig)[:16]))
     # ANTI-PATCHING (measured bypass, 2026-11-18): this function used to be
@@ -4668,22 +4653,40 @@ def _nx_self_check():
     assert "__NX_SELF_CHECK_DEFS__" not in loader_template and \
         "__NX_SELF_CHECK_CALL__" not in loader_template, \
         "stale self-check marker in the hybrid loader template"
-    loader_src = (
-        loader_template
-        .replace("__LOCAL_TOKEN_SEARCH__", _local_token_search)
-        .replace("__NX_CHAIN_OWNER_DEF__", _chain_owner_def)
-        .replace("__NX_NATIVE_ONLY_GUARD__",
-                 "True" if native_only else "False")
-        .replace("{build_id}", build_id)
-        .replace("{customer_salt}", _customer_salt)
-        .replace("{licence_token_hash}", str(licence_token_hash or ""))
-        .replace("{licence_bound}", "1" if licence_bound else "0")
-        .replace("{licence_chain}", "1" if licence_chain else "0")
-        .replace("{operator_bound}", "1" if _operator_bound else "0")
-        .replace("{share0}", _s0)
-        .replace("{share1}", _s1)
-        .replace("{fallback_blob_val}", fallback_blob_val)
-    )
+    # Substitute every scalar placeholder in ONE pass.  The old chained
+    # .replace() calls re-scanned text inserted by earlier replacements, so a
+    # build id or customer salt containing a later placeholder token (for
+    # example ``{share0}``) was rewritten a second time -- corrupting the key
+    # derivation or injecting template text.  Values inserted inside quoted
+    # Python string literals are escaped for that context; code fragments are
+    # left verbatim.
+    def _nx_dq_escape(value):
+        # Braces become unicode escapes as well: the literal characters are
+        # valid data inside the value, but leaving them verbatim makes the
+        # stale-placeholder assertions below unable to tell data from an
+        # unsubstituted template token.
+        return (json.dumps(str(value), ensure_ascii=True)[1:-1]
+                .replace("{", "\\u007b").replace("}", "\\u007d"))
+
+    _loader_replacements = {
+        "__LOCAL_TOKEN_SEARCH__": _local_token_search,
+        "__NX_CHAIN_OWNER_DEF__": _chain_owner_def,
+        "__NX_NATIVE_ONLY_GUARD__": "True" if native_only else "False",
+        "{build_id}": _nx_dq_escape(build_id),
+        "{customer_salt}": _nx_dq_escape(_customer_salt),
+        "{licence_token_hash}": _nx_dq_escape(str(licence_token_hash or "")),
+        "{licence_bound}": "1" if licence_bound else "0",
+        "{licence_chain}": "1" if licence_chain else "0",
+        "{operator_bound}": "1" if _operator_bound else "0",
+        "{share0}": _nx_dq_escape(_s0),
+        "{share1}": _nx_dq_escape(_s1),
+        "{fallback_blob_val}": _nx_dq_escape(fallback_blob_val),
+    }
+    _loader_sub_re = re.compile(
+        "|".join(re.escape(_k) for _k in sorted(
+            _loader_replacements, key=len, reverse=True)))
+    loader_src = _loader_sub_re.sub(
+        lambda _m: _loader_replacements[_m.group(0)], loader_template)
     assert "{customer_salt}" not in loader_src, "stale customer salt placeholder"
     assert "{licence_bound}" not in loader_src, "stale licence_bound placeholder"
     assert "{licence_chain}" not in loader_src, "stale licence_chain placeholder"
@@ -5143,10 +5146,17 @@ def _stamp_hybrid_selfcheck(src_text, hmac_secret_hex, token_hash=""):
         value = s.split(b" = ", 1)[1]
         return (len(value) >= 2 and value.startswith(b'"')
                 and value.endswith(b'"') and b'"' not in value[1:-1])
+    def _hash_token_slot_line(line):
+        s = line.rstrip()
+        if not s.startswith(b"_NX_SELF_TOK = "):
+            return False
+        value = s.split(b" = ", 1)[1]
+        return (len(value) >= 2 and value.startswith(b'"')
+                and value.endswith(b'"') and b'"' not in value[1:-1])
     lines_for_hash = []
     for line in script_bytes.splitlines(keepends=True):
         if ck_slot in line or hm_slot in line or b"_NX_CFI_SEQ = " in line \
-                or (tok and tok in line):
+                or (tok and _hash_token_slot_line(line)):
             continue
         # §1 PROVENANCE: exclude only the exact slot assignment shape, so
         # appended code on a live line that mentions the slot is hashed.
@@ -5199,13 +5209,20 @@ def _stamp_hybrid_selfcheck(src_text, hmac_secret_hex, token_hash=""):
         value = b.split(b" = ", 1)[1]
         return (len(value) >= 2 and value.startswith(b'"')
                 and value.endswith(b'"') and b'"' not in value[1:-1])
+    def _rt_token_slot_line(l):
+        b = (l if isinstance(l, bytes) else l.encode("utf-8")).rstrip()
+        if not b.startswith(b"_NX_SELF_TOK = "):
+            return False
+        value = b.split(b" = ", 1)[1]
+        return (len(value) >= 2 and value.startswith(b'"')
+                and value.endswith(b'"') and b'"' not in value[1:-1])
     # Mirror the RUNTIME filter exactly: exclude only the exact slot
     # assignment shape, so appended code on a slot line is hashed.
     rt_keep = [l for l in out.splitlines(keepends=True)
                if root.encode("utf-8") not in l and hm.encode("utf-8") not in l
                and b"_NX_CFI_SEQ = " not in l
                and not _rt_slot_line(l)
-               and (not tok or tok not in l)]
+               and (not tok or not _rt_token_slot_line(l))]
     if b"".join(rt_keep) != content:
         raise RuntimeError(
             "hybrid self-check filter mismatch: the build hashed %d lines "
@@ -5299,6 +5316,11 @@ def _verify_build_licence_document(document, public_key_hex, args):
 
 def build_project(args):
     source = args.source
+    if bool(getattr(args, 'hwid_lock', False)) and not str(
+            getattr(args, 'hwid', '') or ''):
+        raise SystemExit(
+            "--access hwid-lock requires --access hwid=...; refusing "
+            "to ship an unlocked artefact")
     if getattr(args, 'public', False):
         UI.warn('--public is a deprecated legacy alias; disposable farm repositories are deleted by default (use --keep-farm-repo to retain one for debugging)')
     # §7 dependency pinning, checked on the environment that BUILDS the
@@ -5976,8 +5998,9 @@ def build_project(args):
                             _lock_pack = _lock_payload(bytecode_data, _w_hwid)
                             bytecode_data = _json_hl.dumps(_lock_pack, sort_keys=True).encode('utf-8')
                         except Exception as _hl_err:
-                            try: UI.warn(f"HWID-lock failed: {_hl_err} (continuing unlocked)")
-                            except Exception: print(f" [!] HWID-lock failed: {_hl_err} (continuing unlocked)")
+                            raise SystemExit(
+                                "HWID-lock failed: %s; refusing to ship an "
+                                "unlocked artefact" % (_hl_err,))
                     # Batch-2 compress contest (additive): best-of-N backends at
                     # the FALLBACK_BLOB choke point. Envelope = backend-ID byte
                     # + compressed bytes; loader handles the prefix, legacy
@@ -6417,7 +6440,8 @@ def _VERIFY_INTEGRITY():
         KEY_SHARD_GATE_CODE, bool(ast_options['key_shard_urls']))
     ast_options['geofence_gate_code'] = _render_gate(
         GEOFENCE_GATE_CODE,
-        bool(ast_options['allowed_countries'] or ast_options['blocked_countries']))
+        bool(ast_options['allowed_countries'] or ast_options['blocked_countries']
+             or ast_options['allowed_regions'] or ast_options['blocked_regions']))
     # The protection ladder applies to the loader build too, so both
     # CLIs resolve a level the same way.  Without --opt-level the
     # transform set above is unchanged (the loader build has always
@@ -6750,7 +6774,12 @@ def _VERIFY_INTEGRITY():
                          mutated_source = mutated_source.replace("_NX_PART_FALLBACK_BLOB_PLACEHOLDER", args._real_fallback_blob)
                     secure_map_str = repr(secure_map)
                     raw_source = mutated_source.encode('utf-8')
-                except Exception: pass
+                except SystemExit:
+                    raise
+                except Exception as _pack_mut_exc:
+                    raise SystemExit(
+                        "payload obfuscation failed: %s; refusing to ship "
+                        "untransformed source" % (_pack_mut_exc,))
                 header = b"# NIXON_HEADER \n" 
                 swizzled_body = swizzle_bytecode(raw_source, bytes(swizzle_key))
                 with open(dest, "wb") as f: f.write(header + swizzled_body)
@@ -7307,7 +7336,7 @@ def _VERIFY_INTEGRITY():
                 'nn_obfuscation_source': NN_OBFUSCATION_SOURCE,
                 'blockchain_license_source': BLOCKCHAIN_LICENSE_SOURCE if ast_options.get('blockchain_rpc') else '',
                 'runtime_mutation_source': RUNTIME_MUTATION_SOURCE,
-                'geofence_source': GEOFENCE_SOURCE if (ast_options.get('allowed_countries') or ast_options.get('blocked_countries')) else '',
+                'geofence_source': GEOFENCE_SOURCE if (ast_options.get('allowed_countries') or ast_options.get('blocked_countries') or ast_options.get('allowed_regions') or ast_options.get('blocked_regions')) else '',
                 'hw_perf_fingerprint_source': HW_PERF_FINGERPRINT_SOURCE,
                 'key_shard_source': KEY_SHARD_SOURCE if ast_options.get('key_shard_urls') else '',
                 'VAR_CODE_SIGN_CLS': VARS["CODE_SIGN_CLS"],
