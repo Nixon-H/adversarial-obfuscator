@@ -123,7 +123,12 @@ class EnvironmentalPolyEngine:
         profile = self.get_environment_profile()
         os_name = profile["os"]
         adapted = self._os_specific_mba(value, os_name)
-        adapted = (adapted ^ hash(profile["fingerprint"])) & 0xFFFFFFFF
+        # hash() of a str is randomized per process (PYTHONHASHSEED), so the
+        # adaptation differed across runs even with the same seed and the
+        # same environment -- useless for a reproducible encode/decode pair.
+        # Derive the mixing value deterministically from the hex fingerprint.
+        fp_mix = int(profile["fingerprint"], 16) & 0xFFFFFFFF
+        adapted = (adapted ^ fp_mix) & 0xFFFFFFFF
         explanation = f"os={os_name} fingerprint={profile['fingerprint']}"
         return adapted, explanation
 

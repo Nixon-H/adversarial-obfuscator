@@ -62,10 +62,15 @@ def executable_segment(path: str) -> bytes:
         raise ValueError(f"{path} is not an ELF binary")
     is64 = data[4] == 2
     if is64:
+        # ELF64: e_phoff@0x20(8), e_phentsize@0x36(2), e_phnum@0x38(2)
         e_phoff = struct.unpack_from("<Q", data, 0x20)[0]
+        e_phentsize, e_phnum = struct.unpack_from("<HH", data, 0x36)
     else:
-        e_phoff = struct.unpack_from("<I", data, 0x20)[0]
-    e_phentsize, e_phnum = struct.unpack_from("<HH", data, 0x36)
+        # ELF32: e_phoff@0x1C(4), e_phentsize@0x2A(2), e_phnum@0x2C(2).
+        # These used to be read at the ELF64 offsets, so every 32-bit
+        # binary was parsed from its e_shoff/e_flags words instead.
+        e_phoff = struct.unpack_from("<I", data, 0x1C)[0]
+        e_phentsize, e_phnum = struct.unpack_from("<HH", data, 0x2A)
 
     for i in range(e_phnum):
         off = e_phoff + i * e_phentsize
