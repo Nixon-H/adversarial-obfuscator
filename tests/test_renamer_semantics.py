@@ -320,8 +320,15 @@ def test_module_binding_use_agreement():
             elif isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef,
                                    _ast.ClassDef)):
                 bound.add(node.name)
-        if "uuid" in bound:
+        # The sandbox template exists in either shape: the old
+        # `import uuid` binding shape, or the namespace-clean
+        # `__import__('uuid')` inline shape (audit A3: plain imports
+        # rebound user module-scope names). Detect either one.
+        template_present = ("uuid" in bound or "__import__('uuid')" in code
+                            or '__import__("uuid")' in code)
+        if template_present:
             seen_template = True
+        if "uuid" in bound:
             # uuid/multiprocessing uses must keep their spelling.
             assert "uuid.getnode" in code, seed
             loads = {n.id for n in _ast.walk(tree)

