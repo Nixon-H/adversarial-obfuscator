@@ -74,7 +74,9 @@ _MACHO_FILETYPES = {
     2: "execute",       # MH_EXECUTE
     6: "dylib",         # MH_DYLIB
     8: "bundle",        # MH_BUNDLE
-    11: "dylib_stub",   # MH_DSYM is 10, this is 11
+    9: "dylib_stub",    # MH_DYLIB_STUB
+    10: "dsym",         # MH_DSYM
+    11: "kext_bundle",  # MH_KEXT_BUNDLE
 }
 
 #: CodeDirectory / cs_blob flags relevant to Hardened Runtime.
@@ -145,10 +147,14 @@ DLL_CHARS_GUARD_CF = 0x00004000
 #: field layout rather than assumed: the naive 0x70 this module first used is
 #: the CFCheckFunctionPointer, so it read zero and would have reported every
 #: object's GuardFlags as 0. Verified against the windows-sys binding layout.
+#: The 32-bit structure uses 32-bit address fields, so its GuardFlags sit at
+#: 0x58 instead (llvm/Object/COFF.h coff_load_configuration32).
 LOAD_CONFIG_GUARD_FLAGS_OFFSET = 0x90
+LOAD_CONFIG_GUARD_FLAGS_OFFSET32 = 0x58
 
 
-def _read_guard_flags(data, num_sections, section_table, lc_va, lc_size):
+def _read_guard_flags(data, num_sections, section_table, lc_va, lc_size,
+                      guard_flags_offset=LOAD_CONFIG_GUARD_FLAGS_OFFSET):
     """GuardFlags from the load config, or 0 when it cannot be located.
 
     The data directory stores an RVA, so it must be translated through the
@@ -159,7 +165,7 @@ def _read_guard_flags(data, num_sections, section_table, lc_va, lc_size):
     re-derived it as ``opt - 16 + 2``, which reads the wrong offset and produced
     a garbage GuardFlags (0xE020B) that looked plausible.
     """
-    if lc_size < LOAD_CONFIG_GUARD_FLAGS_OFFSET + 4:
+    if lc_size < guard_flags_offset + 4:
         return 0
     try:
         for index in range(min(num_sections, 96)):
@@ -175,7 +181,7 @@ def _read_guard_flags(data, num_sections, section_table, lc_va, lc_size):
             if vaddr <= lc_va < vaddr + max(vsize, raw_size):
                 file_offset = raw_ptr + (lc_va - vaddr)
                 return struct.unpack_from(
-                    "<I", data, file_offset + LOAD_CONFIG_GUARD_FLAGS_OFFSET)[0]
+                    "<I", data, file_offset + guard_flags_offset)[0]
     except (struct.error, IndexError):
         return 0
     return 0
@@ -578,7 +584,9 @@ def verify_pe_bytes(data):
                 # validate indirect calls against. That is a weaker state than
                 # full CFG, and reporting only "cfg_data present" would hide it.
                 out["cfg_guard_flags"] = _read_guard_flags(
-                    data, num_sections, opt + opt_size, lc_va, lc_size)
+                    data, num_sections, opt + opt_size, lc_va, lc_size,
+                    LOAD_CONFIG_GUARD_FLAGS_OFFSET if magic == 0x20B
+                    else LOAD_CONFIG_GUARD_FLAGS_OFFSET32)
                 flags = out["cfg_guard_flags"]
                 out["cfg_instrumented"] = bool(flags & PE_GUARD_CF_INSTRUMENTED)
                 out["cfg_function_table"] = bool(

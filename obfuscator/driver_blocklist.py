@@ -611,8 +611,12 @@ def get_file_version(path):
             if not _ver.VerQueryValueW(_buf, "\\", _ct.byref(_ptr),
                                        _ct.byref(_len)):
                 return None
-            _ffi = _ct.cast(_ptr, _ct.POINTER(_ct.c_ulong * 4)).contents
-            _ms, _ls = int(_ffi[0]), int(_ffi[1])
+            # VS_FIXEDFILEINFO starts with two DWORDs that are NOT the file
+            # version: dwSignature and dwStrucVersion. The version words are
+            # the third and fourth DWORDs (and DWORD is uint32 everywhere,
+            # including under a wide-ulong Unix ctypes used by tests).
+            _ffi = _ct.cast(_ptr, _ct.POINTER(_ct.c_uint32 * 4)).contents
+            _ms, _ls = int(_ffi[2]), int(_ffi[3])
             return "%d.%d.%d.%d" % (_ms >> 16, _ms & 0xFFFF,
                                     _ls >> 16, _ls & 0xFFFF)
         except Exception:

@@ -28,8 +28,9 @@ Eligibility (conservative allowlist; everything else untouched):
 
 Soundness conditions (each enforced by construction + tests):
 - Desugared For-range is exactly equivalent (init/end/step temps).
-- AND/OR evaluate both sides: operands are pure (no calls possible
-  after eligibility filter), so eager == short-circuit observably.
+- AND/OR short-circuit exactly like CPython and return the deciding operand;
+  even call-free operands can raise (for example division by zero), so eager
+  evaluation would be observable.
 - Division/modulo/power use the identical Python operators.
 - Docstring preserved as wrapper docstring.
 - Signature (name, params, defaults) preserved exactly.
@@ -45,7 +46,8 @@ import random
 OPS = ("CONST", "LOAD", "STORE", "ADD", "SUB", "MUL", "DIV", "MOD",
        "POW", "NEG", "NOT", "EQ", "NE", "LT", "LE", "GT", "GE",
        "IS", "ISNOT", "AND", "OR", "JMP", "JMP_FALSE", "POP", "RETURN",
-       "RANGE", "ITER_NEXT", "BUILD_TUPLE", "UNPACK", "BUILD_LIST")
+       "RANGE", "ITER_NEXT", "BUILD_TUPLE", "UNPACK", "BUILD_LIST",
+       "IADD", "ISUB", "IMUL", "IDIV", "IMOD", "IPOW")
 
 
 class _Unsupported(Exception):
@@ -184,10 +186,39 @@ class _Compiler:
                 # never silent miscompilation).
                 raise _Unsupported("unary %s" % type(node.op).__name__)
         elif isinstance(node, ast.BoolOp):
-            for v in node.values:
-                self.compile_expr(v)
-            for _ in node.values[1:]:
-                self.emit("AND" if isinstance(node.op, ast.And) else "OR")
+            # Short-circuit with the OPERAND as the result, exactly like
+            # CPython. The first eager version evaluated every operand: even
+            # without calls that is observable (`False and 1/0` must return
+            # False, not raise). One hidden slot is enough: whenever control
+            # jumps to the shared result load, every later write to that slot
+            # was skipped, so the slot still holds the deciding operand.
+            is_and = isinstance(node.op, ast.And)
+            tmp = self.slot("<vm-bool-operand>")
+            result_jumps = []
+            values = list(node.values)
+            for value in values[:-1]:
+                self.compile_expr(value)
+                self.emit("STORE", tmp)
+                self.emit("LOAD", tmp)
+                jfalse = self.emit("JMP_FALSE", None)
+                if is_and:
+                    # False decides the result; true falls through to the
+                    # next operand.
+                    result_jumps.append(jfalse)
+                else:
+                    # True decides the result. False continues at the next
+                    # operand (the instruction after this unconditional jump).
+                    jtrue = self.emit("JMP", None)
+                    self.patch(jfalse, len(self.code))
+                    result_jumps.append(jtrue)
+            self.compile_expr(values[-1])
+            jend = self.emit("JMP", None)
+            result_pos = len(self.code)
+            self.emit("LOAD", tmp)
+            end_pos = len(self.code)
+            self.patch(jend, end_pos)
+            for pos in result_jumps:
+                self.patch(pos, result_pos)
         elif isinstance(node, ast.Compare) and len(node.ops) == 1:
             _cop = {"Eq": "EQ", "NotEq": "NE", "Lt": "LT", "LtE": "LE",
                     "Gt": "GT", "GtE": "GE", "Is": "IS",
@@ -252,9 +283,9 @@ class _Compiler:
                 raise _Unsupported("augassign op")
             self.emit("LOAD", self.slot(node.target.id))
             self.compile_expr(node.value)
-            self.emit({"Add": "ADD", "Sub": "SUB", "Mult": "MUL",
-                       "Div": "DIV", "Mod": "MOD",
-                       "Pow": "POW"}[type(node.op).__name__])
+            self.emit({"Add": "IADD", "Sub": "ISUB", "Mult": "IMUL",
+                       "Div": "IDIV", "Mod": "IMOD",
+                       "Pow": "IPOW"}[type(node.op).__name__])
             self.emit("STORE", self.slot(node.target.id))
         elif isinstance(node, ast.Return):
             if node.value is not None:
@@ -348,10 +379,12 @@ def _check_loads_resolve(func):
     RANGE/ITER_NEXT, never slot-loaded).
     """
     assigned = set()
+    body_assigned = set()
     for node in ast.walk(func):
         if isinstance(node, ast.Name) and isinstance(
                 node.ctx, (ast.Store, ast.Del)):
             assigned.add(node.id)
+            body_assigned.add(node.id)
         if isinstance(node, ast.arg):
             assigned.add(node.arg)
     # For-target names are assigned by the loop itself.
@@ -360,6 +393,7 @@ def _check_loads_resolve(func):
             parts = _for_range_parts(node)
             if parts is not None:
                 assigned.add(parts[0])
+                body_assigned.add(parts[0])
     params = {a.arg for a in list(func.args.posonlyargs) + list(func.args.args)}
     allowed = set(assigned) | set(params)
     range_callees = set()
@@ -370,11 +404,17 @@ def _check_loads_resolve(func):
                 range_callees.add(id(callee))
     for node in ast.walk(func):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-            if node.id in allowed or node.id in ("True", "False", "None"):
-                continue
             # range() callees of valid For headers execute natively
             # (RANGE op), never through slots: exempt those exact nodes.
+            # A body assignment to `range` makes the name function-local in
+            # CPython, while the generated wrapper keeps VM locals in slots;
+            # resolving it there would still reach the builtin/parameter and
+            # miscompile the loop. That shape is unsupported instead.
             if node.id == "range" and id(node) in range_callees:
+                if node.id in body_assigned:
+                    raise _Unsupported("local range shadows builtin")
+                continue
+            if node.id in allowed or node.id in ("True", "False", "None"):
                 continue
             raise _Unsupported("unresolved load %s" % node.id)
 
@@ -419,20 +459,28 @@ def _code_table(code):
     return "(%s,)" % ", ".join(parts)
 
 
+def _slot_name_table(slots):
+    """Slot-indexed variable-name tuple for accurate unbound-local errors."""
+    out = ["<slot>"] * len(slots)
+    for name, index in slots.items():
+        out[index] = str(name)
+    return tuple(out)
+
+
 def _signature(params, defaults, n_posonly):
     """Rebuild the exact def-line signature (names + defaults + /)."""
     out = list(params)
-    if n_posonly and n_posonly < len(params):
-        out.insert(n_posonly, "/")
-    elif n_posonly and n_posonly == len(params):
-        out.append("/")
-    sig = ", ".join(out)
     if defaults:
-        parts = sig.split(", ")
+        first_default = len(params) - len(defaults)
         for i, d in enumerate(defaults):
-            parts[len(parts) - len(defaults) + i] += "=" + d
-        sig = ", ".join(parts)
-    return sig
+            out[first_default + i] += "=" + d
+    # "/" is a marker, not a parameter. Insert it only after defaults have
+    # been attached by parameter index; the previous split-then-count method
+    # treated the marker as a parameter and produced `/=10` for pos-only
+    # defaults, so those functions silently stayed unvirtualized.
+    if n_posonly:
+        out.insert(n_posonly, "/")
+    return ", ".join(out)
 
 
 def _match_unpack_text(source):
@@ -474,6 +522,12 @@ def emit_vm_a(func_name, params, defaults, n_posonly, slots, code,
         ("DIV", "_b=_stack.pop();_a=_stack.pop();_stack.append(_a/_b)"),
         ("MOD", "_b=_stack.pop();_a=_stack.pop();_stack.append(_a%_b)"),
         ("POW", "_b=_stack.pop();_a=_stack.pop();_stack.append(_a**_b)"),
+        ("IADD", "_b=_stack.pop();_a=_stack.pop();_stack.append(_nx_vmop.iadd(_a,_b))"),
+        ("ISUB", "_b=_stack.pop();_a=_stack.pop();_stack.append(_nx_vmop.isub(_a,_b))"),
+        ("IMUL", "_b=_stack.pop();_a=_stack.pop();_stack.append(_nx_vmop.imul(_a,_b))"),
+        ("IDIV", "_b=_stack.pop();_a=_stack.pop();_stack.append(_nx_vmop.itruediv(_a,_b))"),
+        ("IMOD", "_b=_stack.pop();_a=_stack.pop();_stack.append(_nx_vmop.imod(_a,_b))"),
+        ("IPOW", "_b=_stack.pop();_a=_stack.pop();_stack.append(_nx_vmop.ipow(_a,_b))"),
         ("NEG", "_stack.append(-_stack.pop())"),
         ("NOT", "_stack.append(not _stack.pop())"),
         ("EQ", "_b=_stack.pop();_a=_stack.pop();_stack.append(_a==_b)"),
@@ -492,7 +546,10 @@ def emit_vm_a(func_name, params, defaults, n_posonly, slots, code,
                 for op, stmt in branches]
     body = "\n".join([
         "        if _op == %d: _t=_code[_pc][1];_stack.append(_t[0]^_t[1] if type(_t) is tuple and len(_t)==2 and type(_t[0]) is int and type(_t[1]) is int else _t);_pc+=1  # CONST" % encoding["CONST"],
-        "        elif _op == %d: _stack.append(_slots[_code[_pc][1]]); _pc+=1  # LOAD" % encoding["LOAD"],
+        "        elif _op == %d:" % encoding["LOAD"],
+        "            _v=_slots[_code[_pc][1]]",
+        "            if _v is _missing: raise UnboundLocalError(_unbound(_slotnames[_code[_pc][1]]))",
+        "            _stack.append(_v); _pc+=1",
         "        elif _op == %d: _slots[_code[_pc][1]]=_stack.pop(); _pc+=1  # STORE" % encoding["STORE"],
     ] + shuffled + [
         "        elif _op == %d: _pc=_code[_pc][1]  # JMP" % encoding["JMP"],
@@ -520,11 +577,19 @@ def emit_vm_a(func_name, params, defaults, n_posonly, slots, code,
     doc_line = '    """%s"""\n' % doc.replace('"""', '"') if doc else ""
     _vm_src = (
         "def %s(%s):\n%s"
-        "    _slots=[None]*%d\n%s\n"
+        "    import sys as _nx_sys\n"
+        "    import operator as _nx_vmop\n"
+        "    def _unbound(_name):\n"
+        "        if _nx_sys.version_info >= (3, 11):\n"
+        "            return f\"cannot access local variable {_name!r} where it is not associated with a value\"\n"
+        "        return f\"local variable {_name!r} referenced before assignment\"\n"
+        "    _missing=object()\n"
+        "    _slotnames=%r\n"
+        "    _slots=[_missing]*%d\n%s\n"
         "    _stack=[]\n    _code=%s\n    _n=len(_code)\n    _pc=0\n    _ret=None\n"
         "    while _pc<_n:\n        _op=_code[_pc][0]\n%s\n    return _ret\n"
     ) % (func_name, _signature(params, defaults, n_posonly), doc_line,
-         nslots, inits, _code_table(code), body)
+         _slot_name_table(slots), nslots, inits, _code_table(code), body)
     return _match_unpack_text(_vm_src)
 
 
@@ -547,7 +612,9 @@ def emit_vm_b(func_name, params, defaults, n_posonly, slots, code,
         "        _t=_c[_p][1]\n"
         "        _k.append(_t[0]^_t[1] if type(_t) is tuple and len(_t)==2 and type(_t[0]) is int and type(_t[1]) is int else _t)\n        return _p+1",
         "    def _h_load(st):\n        _s,_k,_c,_p,_r=st\n"
-        "        _k.append(_s[_c[_p][1]])\n        return _p+1",
+        "        _v=_s[_c[_p][1]]\n"
+        "        if _v is _missing: raise UnboundLocalError(_unbound(_slotnames[_c[_p][1]]))\n"
+        "        _k.append(_v)\n        return _p+1",
         "    def _h_store(st):\n        _s,_k,_c,_p,_r=st\n"
         "        _s[_c[_p][1]]=_k.pop()\n        return _p+1",
         "    def _h_neg(st):\n        _s,_k,_c,_p,_r=st\n"
@@ -562,6 +629,15 @@ def emit_vm_b(func_name, params, defaults, n_posonly, slots, code,
         "        elif _w=='div': _k.append(_a/_b)\n"
         "        elif _w=='mod': _k.append(_a%_b)\n"
         "        else: _k.append(_a**_b)\n"
+        "        return _p+1",
+        "    def _h_inplace(st, _w):\n        _s,_k,_c,_p,_r=st\n"
+        "        _b=_k.pop();_a=_k.pop()\n"
+        "        if _w=='add': _k.append(_nx_vmop.iadd(_a,_b))\n"
+        "        elif _w=='sub': _k.append(_nx_vmop.isub(_a,_b))\n"
+        "        elif _w=='mul': _k.append(_nx_vmop.imul(_a,_b))\n"
+        "        elif _w=='div': _k.append(_nx_vmop.itruediv(_a,_b))\n"
+        "        elif _w=='mod': _k.append(_nx_vmop.imod(_a,_b))\n"
+        "        else: _k.append(_nx_vmop.ipow(_a,_b))\n"
         "        return _p+1",
         "    def _h_cmp(st, _w):\n        _s,_k,_c,_p,_r=st\n"
         "        _b=_k.pop();_a=_k.pop()\n"
@@ -614,6 +690,8 @@ def emit_vm_b(func_name, params, defaults, n_posonly, slots, code,
     ]
     for op in ("ADD", "SUB", "MUL", "DIV", "MOD", "POW"):
         table.append((op, None))  # per-op closures below
+    for op in ("IADD", "ISUB", "IMUL", "IDIV", "IMOD", "IPOW"):
+        table.append((op, None))
     for op in cmp_ops:
         table.append((op, None))
     table.append(("AND", None))
@@ -628,6 +706,11 @@ def emit_vm_b(func_name, params, defaults, n_posonly, slots, code,
                  "MOD": "mod", "POW": "pow"}[op]
             tlines.append("        %d: (lambda st,_w=%r: _h_arith(st,_w)),"
                           % (encoding[op], w))
+        elif op in ("IADD", "ISUB", "IMUL", "IDIV", "IMOD", "IPOW"):
+            w = {"IADD": "add", "ISUB": "sub", "IMUL": "mul",
+                 "IDIV": "div", "IMOD": "mod", "IPOW": "pow"}[op]
+            tlines.append("        %d: (lambda st,_w=%r: _h_inplace(st,_w)),"
+                          % (encoding[op], w))
         elif op in cmp_which:
             tlines.append("        %d: (lambda st,_w=%r: _h_cmp(st,_w)),"
                           % (encoding[op], cmp_which[op]))
@@ -638,7 +721,15 @@ def emit_vm_b(func_name, params, defaults, n_posonly, slots, code,
     doc_line = '    """%s"""\n' % doc.replace('"""', '"') if doc else ""
     _vm_src = (
         "def %s(%s):\n%s"
-        "    _slots=[None]*%d\n%s\n"
+        "    import sys as _nx_sys\n"
+        "    import operator as _nx_vmop\n"
+        "    def _unbound(_name):\n"
+        "        if _nx_sys.version_info >= (3, 11):\n"
+        "            return f\"cannot access local variable {_name!r} where it is not associated with a value\"\n"
+        "        return f\"local variable {_name!r} referenced before assignment\"\n"
+        "    _missing=object()\n"
+        "    _slotnames=%r\n"
+        "    _slots=[_missing]*%d\n%s\n"
         "    _stack=[]\n    _code=%s\n    _ret=[None]\n"
         "%s\n"
         "    _handlers={\n%s\n    }\n"
@@ -651,8 +742,8 @@ def emit_vm_b(func_name, params, defaults, n_posonly, slots, code,
         "        _st[3]=_h(_st)\n"
         "    return _ret[0]\n"
     ) % (func_name, _signature(params, defaults, n_posonly), doc_line,
-         nslots, inits, _code_table(code), "\n".join(defs),
-         "\n".join(tlines))
+         _slot_name_table(slots), nslots, inits, _code_table(code),
+         "\n".join(defs), "\n".join(tlines))
     return _match_unpack_text(_vm_src)
 
 
