@@ -143,17 +143,17 @@ def replace_error_messages(ast_tree: ast.Module,
     result = transformer.visit(ast_tree)
     ast.fix_missing_locations(result)
 
-    try:
-        target = codes_path
-        if target is None:
-            out_dir = os.path.join(os.getcwd(), "build")
-            target = (os.path.join(out_dir, "error_codes.json")
-                      if os.path.isdir(out_dir) else None)
-        if target:
-            with open(target, "w") as f:
-                json.dump(error_codes, f, indent=2)
-    except Exception:
-        pass
+    target = codes_path
+    if target is None:
+        out_dir = os.path.join(os.getcwd(), "build")
+        target = (os.path.join(out_dir, "error_codes.json")
+                  if os.path.isdir(out_dir) else None)
+    if target:
+        # The inverse map is the only way to decode the stripped artifact.
+        # A write failure must be loud; silently dropping it used to leave a
+        # transformed artifact whose E0001-style diagnostics were unreadable.
+        with open(target, "w") as f:
+            json.dump(error_codes, f, indent=2)
 
     return result
 
@@ -280,17 +280,35 @@ def encode_sensitive_strings(
     replacements: dict[ast.Constant, str] = {}
     encoded_map: dict[str, tuple[list[bytes], list[bytes]]] = {}
 
+    # Constants inside an f-string or a match pattern are not ordinary
+    # expression positions: replacing one with a Name either makes the AST
+    # non-unparsable/non-compilable (JoinedStr) or changes pattern syntax.
+    # Leave those literals plaintext rather than miscompiling the payload.
+    structurally_protected: set[int] = set()
+    pattern_type = getattr(ast, "pattern", None)
+    for parent in ast.walk(ast_tree):
+        is_pattern = pattern_type is not None and isinstance(parent, pattern_type)
+        if isinstance(parent, ast.JoinedStr) or is_pattern:
+            for sub in ast.walk(parent):
+                if isinstance(sub, ast.Constant):
+                    structurally_protected.add(id(sub))
+
     for entry in protocol_strings:
         node = entry["node"]
         s = entry["string"]
-        if not isinstance(node, ast.Constant):
+        if not isinstance(node, ast.Constant) or id(node) in structurally_protected:
             continue
         _derive_string_key(seed, string_index, len(s))
-        frag_size = max(4, len(s) // 3)
+        # Split BYTES, not str characters, and cap every fragment at the
+        # 64-byte maximum blake2b digest. The old character split could make
+        # fragments longer than 64 bytes; zip() then silently discarded the
+        # tail of every such fragment during both encryption and decryption.
+        encoded = s.encode("utf-8")
+        frag_size = min(64, max(4, len(encoded) // 3))
         fragments: list[bytes] = []
         frag_keys: list[bytes] = []
-        for start in range(0, len(s), frag_size):
-            frag = s[start : start + frag_size].encode("utf-8")
+        for start in range(0, len(encoded), frag_size):
+            frag = encoded[start : start + frag_size]
             frag_key = _derive_string_key(
                 seed + struct.pack(">I", string_index), start, len(frag)
             )
@@ -402,41 +420,15 @@ def obfuscate_algorithmic_constants(ast_tree: ast.Module) -> ast.Module:
         def visit_Constant(self, node: ast.Constant) -> ast.AST:
             if isinstance(node.value, int) and node.value in obfuscations:
                 encoded, mask = obfuscations[node.value]
-                mask_low = mask & 0xFFFFFFFF
-                mask_high = (mask >> 32) & 0xFFFFFFFF
-                encoded_low = encoded & 0xFFFFFFFF
-                encoded_high = (encoded >> 32) & 0xFFFFFFFF
-
-                runtime_mask = ast.BinOp(
-                    left=ast.BinOp(
-                        left=ast.Constant(value=mask_low),
-                        op=ast.BitXor(),
-                        right=ast.BinOp(
-                            left=ast.Constant(value=mask_high),
-                            op=ast.LShift(),
-                            right=ast.Constant(value=32),
-                        ),
-                    ),
-                    op=ast.BitXor(),
-                    right=ast.BinOp(
-                        left=ast.Constant(value=encoded_high),
-                        op=ast.LShift(),
-                        right=ast.Constant(value=32),
-                    ),
-                )
-
+                # Reconstruct exactly the value that was encoded above:
+                # encoded = constant ^ mask, so constant = encoded ^ mask.
+                # The former low/high expression cancelled the wrong halves
+                # and, for a 32-bit constant, ORed the mask's high half back
+                # into the result.
                 reconstructed = ast.BinOp(
-                    left=ast.BinOp(
-                        left=ast.Constant(value=encoded_low),
-                        op=ast.BitXor(),
-                        right=runtime_mask,
-                    ),
+                    left=ast.Constant(value=encoded),
                     op=ast.BitXor(),
-                    right=ast.BinOp(
-                        left=ast.Constant(value=encoded_high),
-                        op=ast.LShift(),
-                        right=ast.Constant(value=32),
-                    ),
+                    right=ast.Constant(value=mask),
                 )
 
                 return reconstructed
@@ -554,7 +546,11 @@ def wrap_library_calls(
     result = transformer.visit(ast_tree)
 
     if isinstance(result, ast.Module):
-        result.body = wrappers + result.body
+        # Wrapper definitions are module prologue code. They must not move
+        # ahead of the module docstring or a __future__ import; doing so made
+        # otherwise-valid payloads fail to compile.
+        from obfuscator.core.ast_prologue import insert_module_prologue
+        insert_module_prologue(result, wrappers)
 
     ast.fix_missing_locations(result)
     return result

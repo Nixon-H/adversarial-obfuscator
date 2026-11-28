@@ -53,6 +53,8 @@ U64_MOD = 0xFFFFFFFFFFFFFFFF + 1
 
 
 def affine_encode(x: int, A: int, b: int) -> int:
+    if not isinstance(x, int) or x < 0 or x > 0xFFFFFFFFFFFFFFFF:
+        raise ValueError("affine encoding supports unsigned 64-bit integers only")
     return (A * x + b) & 0xFFFFFFFFFFFFFFFF
 
 
@@ -71,6 +73,8 @@ _AFFINE_HELPER_SRC = (
     "    def encode(x, A, b):\n"
     "        if not isinstance(x, int):\n"
     "            raise TypeError('affine encoding supports integer variables only')\n"
+    "        if x < 0 or x > 0xFFFFFFFFFFFFFFFF:\n"
+    "            raise ValueError('affine encoding supports unsigned 64-bit integers only')\n"
     "        return (A * x + b) & 0xFFFFFFFFFFFFFFFF\n"
     "    @staticmethod\n"
     "    def decode(x_enc, A, b):\n"
@@ -106,12 +110,51 @@ def encode_variables_affine(
     # produced wrong values (audit round 2).  Leave those variables
     # plaintext instead of miscompiling them.
     unsupported_aug: set[str] = set()
+    unsupported_bindings: set[str] = set()
+
+    def _target_names(target):
+        return {n.id for n in ast.walk(target) if isinstance(n, ast.Name)}
+
     for node in ast.walk(ast_tree):
         if (isinstance(node, ast.AugAssign)
                 and isinstance(node.target, ast.Name)
                 and not isinstance(node.op, (ast.Add, ast.Sub))):
             unsupported_aug.add(node.target.id)
-    variables = [v for v in variables if v not in unsupported_aug]
+        # This pass only rewrites simple single-target Assign statements.
+        # Other binding forms either dropped co-targets (`x = y = 1`) or left
+        # every encoded use pointing at an x_enc binding that never existed
+        # (`x: int = 1`, parameters, loop/with/except targets, global and
+        # nonlocal declarations). Treat them as opaque and leave the variable
+        # plaintext rather than miscompiling it.
+        if isinstance(node, ast.Assign) and len(node.targets) != 1:
+            for target in node.targets:
+                unsupported_bindings.update(_target_names(target))
+        elif isinstance(node, (ast.AnnAssign, ast.For, ast.AsyncFor,
+                               ast.With, ast.AsyncWith, ast.ExceptHandler,
+                               ast.Delete, ast.Global, ast.Nonlocal)):
+            if isinstance(node, ast.AnnAssign):
+                unsupported_bindings.update(_target_names(node.target))
+            elif isinstance(node, (ast.For, ast.AsyncFor)):
+                unsupported_bindings.update(_target_names(node.target))
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                for item in node.items:
+                    if item.optional_vars is not None:
+                        unsupported_bindings.update(_target_names(item.optional_vars))
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                unsupported_bindings.add(node.name)
+            elif isinstance(node, ast.Delete):
+                for target in node.targets:
+                    unsupported_bindings.update(_target_names(target))
+            elif isinstance(node, (ast.Global, ast.Nonlocal)):
+                unsupported_bindings.update(node.names)
+        elif isinstance(node, ast.arg):
+            unsupported_bindings.add(node.arg)
+        elif isinstance(node, ast.comprehension):
+            unsupported_bindings.update(_target_names(node.target))
+        elif isinstance(node, ast.NamedExpr):
+            unsupported_bindings.update(_target_names(node.target))
+    unsupported = unsupported_aug | unsupported_bindings
+    variables = [v for v in variables if v not in unsupported]
 
     params: dict[str, tuple[int, int]] = {}
     for v in variables:
@@ -231,21 +274,98 @@ def split_value(
 
     part_names = [f"{variable}_part_{i}" for i in range(num_parts)]
 
+    # Only simple single-target assignments can be rewritten without changing
+    # Python's binding semantics. Anything else stays wholly plaintext; an
+    # encoded read without the corresponding encoded write is a NameError.
+    unsafe = False
+    for _node in ast.walk(ast_tree):
+        if isinstance(_node, ast.Assign) and len(_node.targets) != 1:
+            if any(isinstance(t, ast.Name) and t.id == variable for t in _node.targets):
+                unsafe = True
+        elif isinstance(_node, ast.AnnAssign) and isinstance(_node.target, ast.Name) \
+                and _node.target.id == variable:
+            unsafe = True
+        elif isinstance(_node, (ast.For, ast.AsyncFor)) and any(
+                isinstance(n, ast.Name) and n.id == variable for n in ast.walk(_node.target)):
+            unsafe = True
+        elif isinstance(_node, (ast.With, ast.AsyncWith)):
+            for _item in _node.items:
+                if _item.optional_vars is not None and any(
+                        isinstance(n, ast.Name) and n.id == variable
+                        for n in ast.walk(_item.optional_vars)):
+                    unsafe = True
+        elif isinstance(_node, ast.arg) and _node.arg == variable:
+            unsafe = True
+        elif isinstance(_node, ast.comprehension) and any(
+                isinstance(n, ast.Name) and n.id == variable for n in ast.walk(_node.target)):
+            unsafe = True
+        elif isinstance(_node, (ast.Global, ast.Nonlocal)) and variable in _node.names:
+            unsafe = True
+    if unsafe:
+        return ast_tree
+
+    # The RHS is evaluated exactly once into a temporary. The old transform
+    # deep-copied it into every part extraction, so `x = f()` called f once
+    # per split part.
+    used_names = {n.id for n in ast.walk(ast_tree) if isinstance(n, ast.Name)}
+    tmp_name = "_nx_split_rhs_" + variable
+    while tmp_name in used_names:
+        tmp_name += "_"
+
     class SplitTransformer(ast.NodeTransformer):
-        def visit_Assign(self, node: ast.Assign) -> ast.Assign:
+        def visit_Assign(self, node: ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == variable:
+                    # Rewrite prior encoded reads inside the RHS first (`x =
+                    # x + 1` reads the previous parts), then evaluate the RHS
+                    # once into the temporary.
+                    node = self.generic_visit(node)
                     rhs = node.value
-
-                    parts_assign: list[ast.stmt] = []
-                    for i, (pn, mask) in enumerate(zip(part_names, masks)):
-                        shift = shifts[i]
-                        field_mask = (1 << widths[i]) - 1
-                        rhs_copy = copy.deepcopy(rhs)
+                    range_check = ast.If(
+                        test=ast.UnaryOp(
+                            op=ast.Not(),
+                            operand=ast.BoolOp(
+                                op=ast.And(),
+                                values=[
+                                    ast.Compare(
+                                        left=ast.Name(id=tmp_name, ctx=ast.Load()),
+                                        ops=[ast.GtE()],
+                                        comparators=[ast.Constant(value=0)],
+                                    ),
+                                    ast.Compare(
+                                        left=ast.Name(id=tmp_name, ctx=ast.Load()),
+                                        ops=[ast.LtE()],
+                                        comparators=[ast.Constant(value=0xFFFFFFFFFFFFFFFF)],
+                                    ),
+                                ],
+                            ),
+                        ),
+                        body=[ast.Raise(
+                            exc=ast.Call(
+                                func=ast.Name(id="ValueError", ctx=ast.Load()),
+                                args=[ast.Constant(
+                                    value="split_value supports unsigned 64-bit integers only")],
+                                keywords=[],
+                            ),
+                            cause=None,
+                        )],
+                        orelse=[],
+                    )
+                    statements: list[ast.stmt] = [
+                        ast.Assign(
+                            targets=[ast.Name(id=tmp_name, ctx=ast.Store())],
+                            value=rhs,
+                        ),
+                        range_check,
+                    ]
+                    for pn, mask in zip(part_names, masks):
+                        shift = shifts[part_names.index(pn)]
+                        field_mask = (1 << widths[part_names.index(pn)]) - 1
+                        rhs_read = ast.Name(id=tmp_name, ctx=ast.Load())
                         if shift:
                             field = ast.BinOp(
                                 left=ast.BinOp(
-                                    left=rhs_copy,
+                                    left=rhs_read,
                                     op=ast.RShift(),
                                     right=ast.Constant(value=shift),
                                 ),
@@ -255,7 +375,7 @@ def split_value(
                         else:
                             # Last part: low bits, unshifted.
                             field = ast.BinOp(
-                                left=rhs_copy,
+                                left=rhs_read,
                                 op=ast.BitAnd(),
                                 right=ast.Constant(value=field_mask),
                             )
@@ -265,16 +385,15 @@ def split_value(
                             right=ast.Constant(value=mask),
                         )
 
-                        assign = ast.Assign(
+                        statements.append(ast.Assign(
                             targets=[ast.Name(id=pn, ctx=ast.Store())],
                             value=extract,
-                        )
-                        parts_assign.append(assign)
-                    return parts_assign[0] if len(parts_assign) == 1 else ast.If(
-                        test=ast.Constant(value=True),
-                        body=parts_assign,
-                        orelse=[],
-                    )
+                        ))
+                    # Do not leave a whole unsplit copy of the value bound
+                    # after the parts have been derived.
+                    statements.append(ast.Delete(
+                        targets=[ast.Name(id=tmp_name, ctx=ast.Del())]))
+                    return statements
             return self.generic_visit(node)
 
         def visit_Name(self, node: ast.Name) -> ast.Name:
@@ -352,13 +471,20 @@ def _build_reconstruction(part_names: list[str], masks: list[int]) -> ast.AST:
 
 # ─── 3. MBA State Encoding ──────────────────────────────────────────────────
 
-def _mba_chain_wrap(expr: ast.AST, depth: int = 2) -> ast.AST:
-    """Wrap an expression in nested MBA identities to block AI simplification."""
+def _mba_chain_wrap(expr: ast.AST, depth: int = 2, rng=None) -> ast.AST:
+    """Wrap an expression in nested MBA identities to block AI simplification.
+
+    ``rng`` is caller-supplied so a seeded obfuscation pipeline remains
+    reproducible; without it this preserves the legacy process-global random
+    behaviour for direct callers.
+    """
     import random as _rnd
+    if rng is None:
+        rng = _rnd
     current = expr
     for _ in range(depth):
-        choice = _rnd.randint(0, 5)
-        K = _rnd.randint(1000, 9999999)
+        choice = rng.randint(0, 5)
+        K = rng.randint(1000, 9999999)
         if choice == 0:
             current = ast.BinOp(
                 left=ast.BinOp(left=current, op=ast.Add(), right=ast.Constant(value=K)),
@@ -372,7 +498,7 @@ def _mba_chain_wrap(expr: ast.AST, depth: int = 2) -> ast.AST:
         elif choice == 2:
             current = ast.UnaryOp(op=ast.Invert(), operand=ast.UnaryOp(op=ast.Invert(), operand=current))
         elif choice == 3:
-            nK = _rnd.randint(1, 9999999)
+            nK = rng.randint(1, 9999999)
             notK = ast.UnaryOp(op=ast.Invert(), operand=ast.Constant(value=nK))
             current = ast.BinOp(
                 left=ast.BinOp(left=current, op=ast.BitAnd(), right=ast.Constant(value=nK)),
@@ -380,7 +506,7 @@ def _mba_chain_wrap(expr: ast.AST, depth: int = 2) -> ast.AST:
                 right=ast.BinOp(left=current, op=ast.BitAnd(), right=notK),
             )
         elif choice == 4:
-            nK = _rnd.randint(100, 9999999)
+            nK = rng.randint(100, 9999999)
             notK = ast.UnaryOp(op=ast.Invert(), operand=ast.Constant(value=nK))
             current = ast.BinOp(
                 left=ast.BinOp(left=current, op=ast.BitOr(), right=ast.Constant(value=nK)),
@@ -388,7 +514,7 @@ def _mba_chain_wrap(expr: ast.AST, depth: int = 2) -> ast.AST:
                 right=ast.BinOp(left=current, op=ast.BitOr(), right=notK),
             )
         elif choice == 5:
-            K = _rnd.randint(2, min(9999, 99999))
+            K = rng.randint(2, min(9999, 99999))
             current = ast.BinOp(
                 left=ast.BinOp(left=current, op=ast.Mult(), right=ast.Constant(value=K)),
                 op=ast.FloorDiv(), right=ast.Constant(value=K),
@@ -454,7 +580,8 @@ def mba_encode_value(value: int, seed: bytes, context: str) -> ast.Expr:
         right=sub_expr,
     )
 
-    return _mba_chain_wrap(final, depth=_random.randint(1, 2))
+    rng = _random.Random(bytes(seed) + context.encode("utf-8", "surrogatepass"))
+    return _mba_chain_wrap(final, depth=rng.randint(1, 2), rng=rng)
 
 
 # ─── 4. Affine State Encoder (for VM state) ──────────────────────────────────
@@ -574,6 +701,7 @@ def _mba_pipeline(tree: ast.Module, variables: list[str], seed: bytes) -> ast.Mo
     class MBAValueTransformer(ast.NodeTransformer):
         def __init__(self):
             self._var_index = 0
+            self._rng = _random.Random(bytes(seed))
 
         def visit_Assign(self, node: ast.Assign) -> ast.Assign:
             for target in node.targets:
@@ -588,7 +716,7 @@ def _mba_pipeline(tree: ast.Module, variables: list[str], seed: bytes) -> ast.Mo
                     # original constant, so substituting it would still
                     # miscompile. Wrap the original RHS in MBA identities
                     # (semantics-preserving) instead.
-                    node.value = _mba_chain_wrap(copy.deepcopy(rhs), depth=2)
+                    node.value = _mba_chain_wrap(copy.deepcopy(rhs), depth=2, rng=self._rng)
                     self._var_index += 1
                     return node
             return node

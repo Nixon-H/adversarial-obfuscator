@@ -16,6 +16,7 @@ Monitor semantics -- no kill path unless NIXON_KOD is armed).
 """
 
 import json
+import math
 
 SIGNALS = [
     ("cpuid_hypervisor", 25),
@@ -80,7 +81,11 @@ def score(findings: dict[str, bool]) -> tuple[int, int, float]:
 
 
 def verdict(percent: float, threshold: float = 50.0) -> str:
-    """Return 'VM' if percent >= threshold else 'CLEAN'."""
+    """Return 'VM' if percent >= threshold else 'CLEAN'.
+
+    A non-finite percentage or threshold is not a clean host: NaN otherwise
+    makes every comparison false and +inf makes the gate unreachable.
+    """
     try:
         p = float(percent)
     except Exception:
@@ -88,6 +93,10 @@ def verdict(percent: float, threshold: float = 50.0) -> str:
     try:
         t = float(threshold)
     except Exception:
+        t = 50.0
+    if not math.isfinite(p):
+        return "VM"
+    if not math.isfinite(t):
         t = 50.0
     return "VM" if p >= t else "CLEAN"
 
@@ -127,6 +136,8 @@ def emit_loader_snippet(threshold: float = 50.0, armed: bool = False) -> str:
     no kill - KOD default-OFF).
     """
     thr = float(threshold)
+    if not math.isfinite(thr):
+        raise ValueError("VM threshold must be finite")
     weights_json = json.dumps(_SUBSET_WEIGHTS, sort_keys=True)
     from obfuscator.kill_ladder import emit_kill_snippet as _kl_emit
     _kl_src = _kl_emit()
