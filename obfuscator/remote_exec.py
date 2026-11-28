@@ -366,6 +366,8 @@ def call_remote(function: str, args: list, kwargs: Optional[dict] = None, *,
             ceiling = float(os.environ.get(APPROVAL_TIMEOUT_ENV, "") or 150.0)
         except (TypeError, ValueError):
             ceiling = 150.0
+        if not math.isfinite(ceiling):
+            ceiling = 150.0
         deadline = time.time() + max(5.0, ceiling)
         while True:
             if time.time() >= deadline:
@@ -439,7 +441,14 @@ class RemoteRegistry:
             self._seen_nonces[nonce] = current
             if function not in self._functions:
                 raise RemoteError("unknown remote function %r" % (function,))
-            result = self._functions[function](*args, **kwargs)
+            try:
+                result = self._functions[function](*args, **kwargs)
+            except Exception:
+                # Implementation exception text can contain confidential
+                # constants or argument values. Match the Cloudflare worker's
+                # generic failure instead of shipping those details back to
+                # the client the implementation is meant to be hidden from.
+                return json.dumps({"error": "remote function failed"}).encode("utf-8")
             return json.dumps({"result": result}, allow_nan=False).encode("utf-8")
         except RemoteError as exc:
             return json.dumps({"error": str(exc)}).encode("utf-8")
@@ -646,6 +655,8 @@ def _nx_call_remote(function, args, kwargs):
         try:
             ceiling = float(_nx_os.environ.get("NIXON_REMOTE_APPROVAL_TIMEOUT", "") or 150.0)
         except (TypeError, ValueError):
+            ceiling = 150.0
+        if not _nx_math.isfinite(ceiling):
             ceiling = 150.0
         deadline = _nx_time.time() + max(5.0, ceiling)
         while True:

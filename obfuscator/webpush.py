@@ -13,6 +13,8 @@ import hashlib
 import hmac as _hmac
 import json
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 
 # ── P-256 / secp256r1 arithmetic ──────────────────────────────────────────
@@ -114,22 +116,21 @@ def send_tickle(endpoint: str, vapid_private_b64u: str, vapid_public_b64u: str,
     """POST an empty-body push to the subscription endpoint. Returns the push
     service HTTP status. Raises nothing: callers treat non-2xx as a dead or
     transient subscription and never let push failures affect execution."""
-    parts = urllib.parse.urlparse(endpoint)
-    audience = "%s://%s" % (parts.scheme, parts.netloc)
-    token = vapid_jwt(vapid_private_b64u, audience, subject)
-    headers = {
-        "TTL": str(int(ttl)),
-        "Content-Length": "0",
-        "Authorization": "vapid t=%s, k=%s" % (token, vapid_public_b64u),
-        "User-Agent": "nixon-remote-approval/1",
-    }
-    request = urllib.request.Request(endpoint, data=b"", method="POST",
-                                     headers=headers)
     try:
+        parts = urllib.parse.urlparse(endpoint)
+        audience = "%s://%s" % (parts.scheme, parts.netloc)
+        token = vapid_jwt(vapid_private_b64u, audience, subject)
+        headers = {
+            "TTL": str(int(ttl)),
+            "Content-Length": "0",
+            "Authorization": "vapid t=%s, k=%s" % (token, vapid_public_b64u),
+            "User-Agent": "nixon-remote-approval/1",
+        }
+        request = urllib.request.Request(endpoint, data=b"", method="POST",
+                                         headers=headers)
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return int(response.status)
     except urllib.error.HTTPError as exc:
         return int(exc.code)
-
-
-import urllib.parse  # noqa: E402  (kept at bottom to keep the crypto block compact)
+    except Exception:
+        return 0
