@@ -82,8 +82,14 @@ NX_EXPORT int nx_apply_protections(void)
 #if defined(__linux__)
     {
         struct rlimit rl;
+        /* rlim_max must be 0, not RLIM_INFINITY: raising the hard limit to
+         * INFINITY fails with EPERM whenever the inherited hard limit is
+         * finite (systemd units, containers, ulimit -c), and the whole
+         * enforcement then silently does not apply.  Lowering the hard limit
+         * to 0 always succeeds and is irreversible, which is exactly what
+         * anti-dump wants. */
         rl.rlim_cur = 0;
-        rl.rlim_max = RLIM_INFINITY;
+        rl.rlim_max = 0;
         if (prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) == 0) applied |= 1;
         if (setrlimit(RLIMIT_CORE, &rl) == 0) applied |= 2;
     }
@@ -91,7 +97,7 @@ NX_EXPORT int nx_apply_protections(void)
     {
         struct rlimit rl;
         rl.rlim_cur = 0;
-        rl.rlim_max = RLIM_INFINITY;
+        rl.rlim_max = 0;
         if (setrlimit(RLIMIT_CORE, &rl) == 0) applied |= 2;
         if (ptrace(PT_DENY_ATTACH, 0, (caddr_t)0, 0) == 0) applied |= 4;
     }
@@ -110,6 +116,10 @@ NX_EXPORT int nx_apply_protections(void)
         struct sigaction fatal;
         fatal.sa_handler = nixon_fatal_handler;
         sigemptyset(&fatal.sa_mask);
+        /* sa_flags must be zeroed: it is passed to the kernel verbatim, and
+         * uninitialised stack garbage can set SA_RESETHAND (one-shot handler),
+         * SA_SIGINFO (wrong handler signature) or worse. */
+        fatal.sa_flags = 0;
         sigaction(SIGABRT, &fatal, 0);
         sigaction(SIGSEGV, &fatal, 0);
         sigaction(SIGILL, &fatal, 0);
