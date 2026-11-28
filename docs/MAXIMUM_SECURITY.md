@@ -127,6 +127,8 @@ include:
 `--opt-level 5` and `--section-split` in the old "maximum-security" recipe were
 therefore **redundant**: both are already the default on this path. The recipe's
 real additions were `--section-count 6`, `--anti-rea-level maximum`,
+
+The four `--exclude-rea` switches disable bait layers selectively: `--exclude-rea` turns off all three (compliance, cognitive, classifier); `--exclude-rea-bio`, `--exclude-rea-cognitive` and `--exclude-rea-compliance` each turn off one layer. They exist for measuring what each layer contributes; a production artefact should keep all three on.
 `--access trial=7d`, and `--watermark`. It did not mention the licence gate, which is
 the strongest key binding.
 

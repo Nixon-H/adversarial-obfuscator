@@ -164,7 +164,7 @@ Every option `python3 -m obfuscator.core.pipeline build` accepts, generated from
 `scripts/gen_cli_reference.py` and checked by `tests/test_readme_matches_cli.py`,
 so it cannot drift. Editorial notes are marked where a flag is inert or archived.
 
-**32 options.**
+**36 options.**
 
 ### Input, output and build control
 
@@ -188,6 +188,10 @@ so it cannot drift. Editorial notes are marked where a flag is inert or archived
 |---|---|
 | `--anti-rea` | Counter-REA shields: architecture-mirage chaff, canary credentials, evidence-contract poison, a decoy call graph and high-salience bait procedures (ON by default) |
 | `--anti-rea-level {stealth,balanced,maximum}` | Counter-REA shields are ON by default at maximum: there is no enable flag. Pass this only to LOWER the intensity (stealth or balanced) |
+| `--exclude-rea` | Turn off all three anti-REA bait layers (compliance, cognitive, classifier) |
+| `--exclude-rea-bio` | Turn off only the classifier-bait anti-REA layer |
+| `--exclude-rea-cognitive` | Turn off only the cognitive-armor anti-REA layer |
+| `--exclude-rea-compliance` | Turn off only the compliance-bait anti-REA layer |
 
 ### Licensing, binding, watermarking and provenance
 
