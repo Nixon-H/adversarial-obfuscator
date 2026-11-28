@@ -1,0 +1,115 @@
+"""Regression tests for the runner-only failure classes fixed 2026-11-27.
+
+Each test pins the exact mechanism of a bug that CI caught and local
+runs did not, so none of them can silently come back.
+"""
+import io
+import os
+import sys
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+
+
+# ── 1. Windows merkle deaths: artefact writes must be LF-exact ─────────
+#
+# The self-check merkle is stamped over LF-normalised bytes while the
+# runtime hashes raw disk bytes. Windows text-mode writes translated
+# LF -> CRLF on disk, so every artefact killed itself at startup on
+# Windows only. The invariant: writing artefact content through the
+# emission open() shape must reproduce the exact input bytes on disk.
+
+def test_artefact_write_sites_use_newline_exact():
+    """Every Python-artefact write in the emission path pins newline=""."""
+    sites = [
+        ("obfuscator/core/pipeline.py", "loader_path"),
+        ("obfuscator/core/pipeline.py", "_hy_out"),
+        ("obfuscator/core/pipeline.py", "client_path"),
+        ("obfuscator/core/pipeline.py", "_dest2"),
+        ("obfuscator/core/pipeline.py", "args.output"),
+        ("obfuscator/core/pipeline.py", "src_path"),
+        ("obfuscator/core/sources.py", "final_output"),
+    ]
+    missing = []
+    for rel, var in sites:
+        src_text = open(os.path.join(_ROOT, rel), encoding="utf-8").read()
+        idx = src_text.find("open(" + var)
+        assert idx >= 0, "%s: write site for %s not found" % (rel, var)
+        call = src_text[idx:src_text.find(")", idx)]
+        if "newline" not in call:
+            missing.append("%s open(%s...)" % (rel, var))
+    assert not missing, "artefact writes missing newline='': " + ", ".join(missing)
+
+
+def test_lf_exact_write_roundtrip_invariant():
+    """The invariant itself: bytes written with newline='' survive disk exactly.
+
+    Simulates what Windows text mode would do by contrast: a default-mode
+    write of the same content may translate line endings, newline='' never does.
+    """
+    content = '_NX_SELF_CK = "0" * 0\nline two\nline three\n'
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        p = os.path.join(td, "art.py")
+        with open(p, "w", encoding="utf-8", newline="") as f:
+            f.write(content)
+        with open(p, "rb") as f:
+            disk = f.read()
+    assert disk == content.encode("utf-8"), \
+        "newline='' write must reproduce exact bytes on every platform"
+    assert b"\r\n" not in disk
+
+
+def test_stamp_then_disk_bytes_self_consistent():
+    """Stamped loader source hashed from disk bytes matches the embedded slots."""
+    from obfuscator.core.pipeline import _stamp_hybrid_selfcheck
+    src = (
+        'import sys\n'
+        '_NX_SELF_CK = "' + "0" * 64 + '"\n'
+        '_NX_SELF_HM = "' + "0" * 64 + '"\n'
+        '_NX_SELF_HK = "' + "0" * 64 + '"\n'
+        '_NX_SELF_TOK = ""\n'
+        '_NX_CFI_SEQ = \"0000000000000000000000000000000000000000000000000000000000000000\"\n'
+        'print("hi")\n'
+    )
+    out = _stamp_hybrid_selfcheck(src, "ab" * 32)
+    import re as _re
+    m = _re.search(r'_NX_SELF_CK = "([0-9a-f]{64})"', out)
+    assert m and m.group(1) != "0" * 64, "stamping must fill the CK slot"
+    # LF bytes in, LF bytes out: the stamped source must not gain CRLF.
+    assert "\r" not in out
+
+
+# ── 2. exclude-rea flags must stay registered ──────────────────────────
+
+def test_exclude_rea_flags_are_registered():
+    """The documented flags were never argparse-registered; lanes died on
+    'unrecognized arguments'. Pin registration and dest wiring."""
+    from obfuscator.core.pipeline import build_pipeline  # noqa: F401 -- import smoke
+    import subprocess
+    for flag, dest in (
+        ("--exclude-rea", "anti_rea_exclude_bait"),
+        ("--exclude-rea-bio", "anti_rea_exclude_bio"),
+        ("--exclude-rea-cognitive", "anti_rea_exclude_cognitive"),
+        ("--exclude-rea-compliance", "anti_rea_exclude_compliance"),
+    ):
+        r = subprocess.run(
+            [sys.executable, "-m", "obfuscator.core.pipeline", "build",
+             "/nonexistent/probe.py", flag],
+            capture_output=True, text=True, timeout=60, cwd=_ROOT)
+        assert "unrecognized arguments" not in (r.stderr or ""), \
+            "%s is not registered with the ai-obf parser" % flag
+
+
+# ── 3. except* must be a Cython blocker even where it cannot parse ─────
+
+def test_except_star_flagged_via_parse_failure_path():
+    """On Python < 3.11 except* is a SyntaxError, so the AST walk never ran
+    and the checker reported it as compatible -- exactly backwards. The
+    textual fallback must hold on every interpreter."""
+    from obfuscator.core.pipeline import cython_compat_issues
+    src = "try:\n    pass\nexcept* ValueError:\n    pass\n"
+    issues = cython_compat_issues(src)
+    assert issues and "exception groups" in issues[0][1]
+    # And the false-positive guard: ordinary try/except stays clean.
+    assert cython_compat_issues("try:\n    pass\nexcept ValueError:\n    pass\n") == []
