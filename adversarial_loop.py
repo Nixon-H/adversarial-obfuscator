@@ -289,22 +289,22 @@ def apply_improvements(knobs: KnobState) -> int:
     lo2 = max(1, knobs.mba_dataflow_depth // 2)
     hi2 = knobs.mba_dataflow_depth
     changes += _replace_in_file(DATAFLOW,
-        "depth=_random.randint(1, 2)",
-        f"depth=_random.randint({lo2}, {hi2})")
+        "depth=rng.randint(1, 2)",
+        f"depth=rng.randint({lo2}, {hi2})")
 
-    # 4. MBA dataflow K ranges (uses _rnd, not random)
+    # 4. MBA dataflow K ranges (the encoder-local RNG parameter is named rng)
     changes += _replace_in_file(DATAFLOW,
-        "_rnd.randint(1000, 9999999)",
-        f"_rnd.randint(1000, {knobs.mba_dataflow_K_max})")
+        "rng.randint(1000, 9999999)",
+        f"rng.randint(1000, {knobs.mba_dataflow_K_max})")
     changes += _replace_in_file(DATAFLOW,
-        "_rnd.randint(1, 9999999)",
-        f"_rnd.randint(1, {knobs.mba_dataflow_K_max})")
+        "rng.randint(1, 9999999)",
+        f"rng.randint(1, {knobs.mba_dataflow_K_max})")
     changes += _replace_in_file(DATAFLOW,
-        "_rnd.randint(100, 9999999)",
-        f"_rnd.randint(100, {knobs.mba_dataflow_K_max})")
+        "rng.randint(100, 9999999)",
+        f"rng.randint(100, {knobs.mba_dataflow_K_max})")
     changes += _replace_in_file(DATAFLOW,
-        "_rnd.randint(2, min(9999, 99999))",
-        f"_rnd.randint(2, min(9999, {knobs.mba_dataflow_K_max//100}))")
+        "rng.randint(2, min(9999, 99999))",
+        f"rng.randint(2, min(9999, {knobs.mba_dataflow_K_max//100}))")
 
     # 5. Opaque predicate probability (current values in transforms.py: both
     #    sites use 0.60). Replace the LONGER pattern first: the short one is a

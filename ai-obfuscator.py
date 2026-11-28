@@ -19,6 +19,7 @@ import argparse
 import ast
 import re
 import sys
+import tokenize
 from pathlib import Path
 
 # Optional: attempt to use HuggingFace transformers for local LLM
@@ -130,6 +131,24 @@ class _ClassInfo:
         self.methods = {}
 
 
+def _method_binding_kind(node):
+    """Classify the descriptor binding of a method conservatively."""
+    if not node.decorator_list:
+        return "instance"
+    if len(node.decorator_list) != 1:
+        return "unknown"
+    decorator = node.decorator_list[0]
+    if not isinstance(decorator, ast.Name):
+        return "unknown"
+    if decorator.id == "classmethod":
+        return "class"
+    if decorator.id == "staticmethod":
+        return "static"
+    if decorator.id == "property":
+        return "instance"
+    return "unknown"
+
+
 class _BindingCollector(ast.NodeVisitor):
     """Collect conservative, lexical proofs for internal call targets."""
 
@@ -140,6 +159,7 @@ class _BindingCollector(ast.NodeVisitor):
         self.classes = {}
         self.signatures = {}
         self.original_names = {}
+        self.attribute_uses = []
 
     def _bind(self, name, value):
         if name:
@@ -184,12 +204,11 @@ class _BindingCollector(ast.NodeVisitor):
             params.append(node.args.kwarg)
         self._enter(node, "function", owner_class, params)
         if owner_class is not None and params:
-            decorators = {d.id for d in node.decorator_list
-                          if isinstance(d, ast.Name)}
             first = params[0].arg
-            if "classmethod" in decorators:
+            binding_kind = _method_binding_kind(node)
+            if binding_kind == "class":
                 self.scope.bindings[first] = {("class", owner_class.node)}
-            elif "staticmethod" not in decorators:
+            elif binding_kind == "instance":
                 self.scope.bindings[first] = {("instance", owner_class.node)}
         for statement in node.body:
             self.visit(statement)
@@ -233,6 +252,10 @@ class _BindingCollector(ast.NodeVisitor):
         self.original_names[id(node)] = node.id
         if isinstance(node.ctx, (ast.Store, ast.Del)):
             self._unknown(node.id)
+
+    def visit_Attribute(self, node):
+        self.attribute_uses.append((node, self.scope))
+        self.generic_visit(node)
 
     def _assign(self, target, value):
         if isinstance(target, ast.Name):
@@ -408,6 +431,50 @@ class _BindingCollector(ast.NodeVisitor):
                         name not in scope.globals and name not in scope.nonlocals:
                     scope.bindings.setdefault(name, set()).add(
                         ("unknown", None))
+
+        # A method accessed through its class is an ordinary function until
+        # proven otherwise.  It may be called with a duck-typed receiver, so the
+        # first parameter is not evidence of the owning class unless this call
+        # visibly passes a compatible instance.
+        parents = {}
+        for parent in ast.walk(self.root.node):
+            for child in ast.iter_child_nodes(parent):
+                parents[child] = parent
+        unsafe_methods = set()
+        for attribute, use_scope in self.attribute_uses:
+            owner_value = self._value(attribute.value, use_scope)
+            if owner_value is None or owner_value[0] != "class":
+                continue
+            owner_class = owner_value[1]
+            method = self.method(owner_class, attribute.attr)
+            if method is None or _method_binding_kind(method) != "instance":
+                continue
+            parent = parents.get(attribute)
+            explicitly_bound = False
+            if isinstance(parent, ast.Call) and parent.func is attribute and parent.args:
+                receiver_class = self._class_for(parent.args[0], use_scope)
+                if receiver_class is not None and \
+                        owner_class in set(self.class_lineage(receiver_class)):
+                    explicitly_bound = True
+            if not explicitly_bound:
+                unsafe_methods.add(method)
+        method_scopes = {scope.node: scope for scope in self.scopes}
+        for method in unsafe_methods:
+            scope = method_scopes.get(method)
+            if scope is None:
+                continue
+            params = (list(method.args.posonlyargs) + list(method.args.args)
+                      + list(method.args.kwonlyargs))
+            if method.args.vararg is not None:
+                params.append(method.args.vararg)
+            if method.args.kwarg is not None:
+                params.append(method.args.kwarg)
+            if not params:
+                continue
+            values = scope.bindings.get(params[0].arg)
+            if values and any(value[0] == "instance" for value in values):
+                values.add(("unknown", None))
+
         for scope in self.scopes:
             for target, _value in scope.attribute_assignments:
                 class_node = self._class_for(target.value, scope)
@@ -434,6 +501,14 @@ class _BindingCollector(ast.NodeVisitor):
 
     def method(self, class_node, name):
         for candidate in self.class_lineage(class_node):
+            method = self.classes[candidate].methods.get(name)
+            if method is not None:
+                return method
+        return None
+
+    def method_after(self, class_node, name):
+        lineage = list(self.class_lineage(class_node))
+        for candidate in lineage[1:]:
             method = self.classes[candidate].methods.get(name)
             if method is not None:
                 return method
@@ -519,6 +594,11 @@ class ObfuscatedNameRenamer(ast.NodeTransformer):
             if value[0] == "class":
                 return self.analysis.method(value[1], "__init__")
         if isinstance(node, ast.Attribute):
+            if isinstance(node.value, ast.Call) and \
+                    isinstance(node.value.func, ast.Name) and \
+                    node.value.func.id == "super" and not node.value.args and \
+                    self._classes:
+                return self.analysis.method_after(self._classes[-1].node, node.attr)
             class_node = self._class_for(node.value)
             if class_node is not None:
                 return self.analysis.method(class_node, node.attr)
@@ -596,6 +676,16 @@ class ObfuscatedNameRenamer(ast.NodeTransformer):
             keyword.arg is not None and self._rename_keyword(node, keyword.arg)
             for keyword in node.keywords
         ]
+        if isinstance(node.func, ast.Name) and \
+                node.func.id in {"getattr", "setattr", "hasattr", "delattr"} and \
+                not self.analysis._lookup(node.func.id, self._scopes[-1]) and \
+                len(node.args) >= 2 and \
+                isinstance(node.args[1], ast.Constant) and \
+                isinstance(node.args[1].value, str):
+            class_node = self._class_for(node.args[0])
+            if class_node is not None and \
+                    self.analysis.has_member(class_node, node.args[1].value):
+                node.args[1].value = self._map(node.args[1].value)
         node.func = self.visit(node.func)
         for argument in node.args:
             self.visit(argument)
@@ -720,11 +810,14 @@ def _load_llm(model_path: str = None, model_name: str = "gpt2", device: str = "c
             p = Path(model_path)
             if p.exists():
                 tokenizer = AutoTokenizer.from_pretrained(str(p), local_files_only=True)
-                model = AutoModelForCausalLM.from_pretrained(str(p))
+                model = AutoModelForCausalLM.from_pretrained(str(p), local_files_only=True)
                 return (tokenizer, model)
         # Fallback: load from hub
         tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=not download_if_missing)
-        model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto" if device != "cpu" else None)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            local_files_only=not download_if_missing,
+            device_map="auto" if device != "cpu" else None)
         return (tokenizer, model)
     except Exception:
         return None
@@ -747,7 +840,8 @@ def _generate_with_llm(tokenizer, model, prompt: str, max_new_tokens: int = 1024
             do_sample=True,
             pad_token_id=tokenizer.eos_token_id,
         )
-    text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    input_length = inputs["input_ids"].shape[-1]
+    text = tokenizer.decode(outputs[0][input_length:], skip_special_tokens=True)
     return text
 
 ###############################
@@ -770,16 +864,16 @@ def main():
         print(f"Input file not found: {input_path}", file=sys.stderr)
         sys.exit(2)
 
-    with open(input_path, "r", encoding="utf-8", errors="ignore") as f:
+    with tokenize.open(input_path) as f:
         src = f.read()
 
     # If no transformers, or user explicitly disables, run Path A (ASCII only)
     if not TRANSFORMERS_AVAILABLE:
         deobf = deobfuscate_offline_ascii(src)
-        if args.out:
-            Path(args.out).write_text(deobf, encoding="utf-8")
-        else:
+        if args.dry_run or not args.out:
             print(deobf)
+        else:
+            Path(args.out).write_text(deobf, encoding="utf-8")
         return
 
     # Try to load a local model
@@ -788,10 +882,10 @@ def main():
     if llm is None:
         # Fallback to Path A
         deobf = deobfuscate_offline_ascii(src)
-        if args.out:
-            Path(args.out).write_text(deobf, encoding="utf-8")
-        else:
+        if args.dry_run or not args.out:
             print(deobf)
+        else:
+            Path(args.out).write_text(deobf, encoding="utf-8")
         return
 
     tokenizer, model = llm
