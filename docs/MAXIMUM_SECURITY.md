@@ -482,6 +482,8 @@ BY the build now (no separate build-farm step): it runs after the local
 blob, the per-OS blobs are merged into the loader, and a farm failure
 degrades to bytecode fallback on the other OSes — the local blob is
 unaffected.
+`--stego` is the standalone form of the package option: `--package stego` and `--stego` both enable the zero-width-steganography variant (the artefact source hidden in Unicode whitespace, self-decoding at run time). The standalone flag exists because the deep-matrix lanes address flags one at a time.
+
 **`stego` conflicts with the cloud build** (enforced, exit 1) — that is why
 it is absent from `--package` here.
 

@@ -190,3 +190,15 @@ def test_newly_registered_flags_stay_documented():
         [sys.executable, "scripts/gen_cli_reference.py", "--check"],
         capture_output=True, text=True, timeout=60, cwd=_ROOT)
     assert r.returncode == 0, "docs/CLI.md is stale; regenerate with --write"
+
+
+def test_stego_flag_is_registered():
+    """stego was plumbed end-to-end (package parsing, emission at line 7675)
+    but unreachable: no argparse registration anywhere. The deep-matrix lane
+    authors knew it should exist; the flag is now real."""
+    import subprocess
+    r = subprocess.run(
+        [sys.executable, "-m", "obfuscator.core.pipeline", "build",
+         "/nonexistent/probe.py", "--stego"],
+        capture_output=True, text=True, timeout=60, cwd=_ROOT)
+    assert "unrecognized arguments" not in (r.stderr or "")

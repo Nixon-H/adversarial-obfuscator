@@ -8288,6 +8288,10 @@ def build_parser():
                             'NIXON_DUMP_RAW=1). Off by default: a normal artifact has '
                             'no such capability')
     build.add_argument('--tls-ca-bundle', help='PEM CA bundle for the emitted key fetch. The artifact verifies the certificate chain AND the hostname against the system trust store plus this CA (it never disables verification)')
+    build.add_argument('--stego', dest='stego', action='store_true',
+                       help='Also emit a zero-width-steganography variant: the '
+                            'artefact source hidden in Unicode whitespace '
+                            'characters, self-decoding at run time')
     build.add_argument('--section-split', dest='section_split', action='store_true',
                        default=True,
                        help='Section splitting is ON by default; this flag only '

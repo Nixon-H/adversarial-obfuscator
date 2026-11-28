@@ -164,7 +164,7 @@ Every option `python3 -m obfuscator.core.pipeline build` accepts, generated from
 `scripts/gen_cli_reference.py` and checked by `tests/test_readme_matches_cli.py`,
 so it cannot drift. Editorial notes are marked where a flag is inert or archived.
 
-**37 options.**
+**38 options.**
 
 ### Input, output and build control
 
@@ -228,6 +228,7 @@ so it cannot drift. Editorial notes are marked where a flag is inert or archived
 | `--package OPT [OPT ...]` | Packaging and mode. All options: native = Cython compile (the payload becomes a per-OS native blob: .pyd/.so/.dylib) keeping the bytecode fallback; native-only = same with no fallback; cloud = auto-build (cf); platform=github = build farm (the only implemented one; matrix builds win/linux/mac Cython blobs); layers=N = recursive packaging layers; zips=N = ZIP wrapper count; stego = hide the payload inside an image; portable = no native core, run anywhere; all (or everything) = every LOCAL packaging option: layers=25 zips=3 stego. The cloud compile (native/compile/cloud) is NOT part of all: it needs build-farm credentials and conflicts with stego — add it explicitly for cloud builds |
 | `--pin-structure` | Pin the EMITTER-ONLY draws (encoding order, slot picks, names, VM op-map) so two builds share a structure. Debugging aid; key material is not pinned, so artefacts are not byte-identical. **Structure only.** Pins emitter draws and the build timestamp; key material is not pinned, so artefacts are not byte-identical. |
 | `--private-key PRIVATE_KEY` | Deployment key |
+| `--stego` | Also emit a zero-width-steganography variant: the artefact source hidden in Unicode whitespace characters, self-decoding at run time |
 | `--strict-detections` | Make the loader's environment detections (sandbox, emulator, debugger frame, geo-fence, licence) terminate the artifact instead of only perturbing it (ON by default; use --fast to opt out) |
 | `--tls-ca-bundle TLS_CA_BUNDLE` | PEM CA bundle for the emitted key fetch. The artifact verifies the certificate chain AND the hostname against the system trust store plus this CA (it never disables verification) |
 | `--transforms OPT [OPT ...]` | Extra protection passes on the payload before packing (off by default). Options: data = data-layout obfuscation, data-level=N (1-3), function-intent = rename functions by what they do, speculation = speculation-resistant code, remote = remove every module-level @remote function from the client artefact, remote-bundle=PATH = write the operator-side implementations required by remote (required when @remote functions are present), remote-cloudflare=DIR = also write a deployable customer-bound dual-TOTP Cloudflare Python Worker project with replay/quota controls, remote-cloudflare-name=NAME = override its worker name. struct stays native-pipeline only (it configures the LLVM/IR flow). string-key-env=NAME = derive the string-seal key from environment variable NAME (hex shard) instead of shipping it in the artefact, so the artefact alone cannot be decrypted offline (the shard must be present at BOTH build and run time; without it the default inline key lets an analyst call the shipped decoder and recover every string) |
