@@ -61,13 +61,15 @@ class TypeHintStripper(ast.NodeTransformer):
         self.generic_visit(node)
         return node
     def visit_AnnAssign(self, node):
+        # An annotation directly in a class body is a FIELD, not a hint:
+        # `@dataclass` reads exactly those statements to synthesise __init__.
+        # That is true for `x: int` and for `x: int = 1` alike; rewriting the
+        # valued form to a plain assignment drops it from __annotations__ and
+        # the constructor loses the parameter. Anywhere else it is a hint and
+        # can go.
+        if getattr(self, "_class_body_depth", 0):
+            return node
         if node.value is None:
-            # A bare annotation directly in a class body is a FIELD, not a hint:
-            # `@dataclass` reads exactly those statements to synthesise
-            # __init__. Deleting them leaves a class whose constructor takes no
-            # arguments. Anywhere else it is a hint and can go.
-            if getattr(self, "_class_body_depth", 0):
-                return node
             return None
         return ast.Assign(targets=[node.target], value=node.value, type_comment=None)
 
@@ -111,19 +113,18 @@ class TypeHintStripper(ast.NodeTransformer):
         return node
 class FStringLowering(ast.NodeTransformer):
     def visit_JoinedStr(self, node):
+        # Do not approximate formatted values. f"{x}" invokes the format
+        # protocol without a global/builtin name lookup; neither str(x) nor
+        # format(x, "") is equivalent when the object defines __format__ or
+        # the module shadows those names. Since Python has no lower-level
+        # expression form with exactly that semantics, the only correct
+        # lowering is no lowering for a JoinedStr containing a FormattedValue.
+        if any(isinstance(value, ast.FormattedValue) for value in node.values):
+            return node
         new_values = []
         for value in node.values:
             if isinstance(value, ast.Constant):
                 new_values.append(value)
-            elif isinstance(value, ast.FormattedValue):
-                if value.format_spec is not None or value.conversion != -1:
-                    return node
-                call_str = ast.Call(
-                    func=ast.Name(id='str', ctx=ast.Load()),
-                    args=[value.value],
-                    keywords=[]
-                )
-                new_values.append(call_str)
         if not new_values:
             return ast.Constant(value="")
         result = new_values[0]
@@ -180,6 +181,95 @@ def _scope_declared_names(tree):
     for node in ast.walk(tree):
         if isinstance(node, (ast.Nonlocal,)):
             names.update(node.names)
+    return names
+
+
+def _module_bound_names(tree):
+    """Names bound at module scope, without descending into nested scopes.
+
+    The renamer needs this to distinguish `global builtin_name` used only to
+    READ a builtin from the same declaration used with a real module-level
+    binding. Over-counting is safe (it only makes a rename conservative), but
+    function/class bodies must not count: their locals are not module bindings.
+    """
+    names = set()
+
+    class _Collector(ast.NodeVisitor):
+        def visit_FunctionDef(self, node):
+            names.add(node.name)
+
+        def visit_AsyncFunctionDef(self, node):
+            names.add(node.name)
+
+        def visit_ClassDef(self, node):
+            names.add(node.name)
+
+        def visit_Import(self, node):
+            for alias in node.names:
+                names.add(alias.asname or alias.name.split(".")[0])
+
+        def visit_ImportFrom(self, node):
+            for alias in node.names:
+                if alias.name != "*":
+                    names.add(alias.asname or alias.name)
+
+        def visit_Name(self, node):
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                names.add(node.id)
+
+        def visit_ExceptHandler(self, node):
+            if node.name:
+                names.add(node.name)
+            self.generic_visit(node)
+
+        def visit_MatchAs(self, node):
+            if node.name:
+                names.add(node.name)
+            self.generic_visit(node)
+
+        def visit_MatchStar(self, node):
+            if node.name:
+                names.add(node.name)
+            self.generic_visit(node)
+
+        def visit_MatchMapping(self, node):
+            if node.rest:
+                names.add(node.rest)
+            self.generic_visit(node)
+
+    _Collector().visit(tree)
+    return names
+
+
+def _all_bound_names(tree):
+    """Every statically visible binding name, in any scope.
+
+    This is deliberately conservative: when a transform cannot resolve a name
+    to the builtin with certainty, treating every binding as a shadow is safe.
+    """
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            names.add(node.id)
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name != "*":
+                    names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchAs) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchStar) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.add(node.rest)
     return names
 
 
@@ -400,6 +490,29 @@ class SymbolRenamer(ast.NodeTransformer):
         with open(filepath + '.renamelog', 'w', encoding='utf-8') as f:
             for old, new in self._rename_log:
                 f.write(f"{old} -> {new}\n")
+
+    def visit_Module(self, node):
+        """Reserve bindings before traversal so order cannot split def/use.
+
+        Imports often textually follow the functions that use them (the use is
+        valid because the call happens after import). Reserving an import only
+        when its statement is reached is then too late: the earlier use has
+        already been renamed and the binding never catches up. The same module
+        pre-pass records module-scope bindings for the `global` builtin-shadow
+        distinction in visit_Global.
+        """
+        self._module_bindings = _module_bound_names(node)
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Import):
+                for alias in sub.names:
+                    self.reserved.add(alias.asname or alias.name.split(".")[0])
+            elif isinstance(sub, ast.ImportFrom):
+                for alias in sub.names:
+                    if alias.name != "*":
+                        self.reserved.add(alias.asname or alias.name)
+        self.generic_visit(node)
+        return node
+
     def visit_FunctionDef(self, node):
         # A nested `def` keeps its name (closures are preserved by design), so
         # its name must be RESERVED as well -- otherwise a reference to it in an
@@ -662,19 +775,13 @@ class SymbolRenamer(ast.NodeTransformer):
     def visit_Nonlocal(self, node):
         if self.current_function in self.protected_functions:
             return node
-        # A `nonlocal` naming a BUILTIN must keep its spelling. `nonlocal hash`
-        # is legal only because an enclosing scope shadows `hash`; renaming the
-        # declaration without renaming that shadowing binding produces
-        # "no binding for nonlocal '_nx_...'" and the module will not compile.
-        # Same family as the builtin names in the function table (round 143): a
-        # builtin is not a binding a renamer may invent one for.
         # A `nonlocal` target must match a binding in an ENCLOSING scope, and
         # this renamer does not rename parameters -- so renaming the declaration
-        # alone desynchronises the pair ("no binding for nonlocal"). Leaving the
-        # declaration alone is correct, but reserving the name here is too late:
-        # `visit_Name` may already have renamed a USE inside the same function.
-        # That ordering dependency is why this is a partial fix and why
-        # `_next_gen` still fails in the gate.
+        # alone desynchronises the pair ("no binding for nonlocal"). A builtin
+        # NAME is not special here: `nonlocal copyright` is valid only when an
+        # enclosing scope really binds `copyright`, and that binding is renamed
+        # through the same mapping. Keeping only the declaration verbatim split
+        # exactly that pair.
         # A nonlocal target is either (a) a parameter of an ENCLOSING
         # function - parameters are never renamed, so the declaration must
         # stay verbatim or the pair desynchronises ("no binding for
@@ -688,21 +795,32 @@ class SymbolRenamer(ast.NodeTransformer):
             enclosing_params |= _params
         kept = set()
         for n in node.names:
-            if (hasattr(builtins, n) or n in self.reserved
-                    or n in enclosing_params):
+            if n in self.reserved or n in enclosing_params:
                 kept.add(n)
         node.names = [n if n in kept else self.get_new_name(n) for n in node.names]
         return node
     def visit_Global(self, node):
         if self.current_function in self.protected_functions:
             return node
-        # Global targets MUST be renamed: module-level names are renamed, so the
-        # declaration has to follow or `global COUNT` stops matching `COUNT = 0`.
-        # That is the opposite of `nonlocal`, whose targets are parameters and
-        # class attributes that this renamer deliberately leaves alone.
-        import builtins
-        node.names = [
-            n if hasattr(builtins, n) else self.get_new_name(n) for n in node.names]
+        # Global targets that correspond to module-level bindings MUST be
+        # renamed: module-level names are renamed, so the declaration has to
+        # follow or `global COUNT` stops matching `COUNT = 0`. A builtin name
+        # with NO module-level binding is different: `global copyright` may be
+        # used only to read builtins.copyright, and inventing a new global for
+        # it turns that read into NameError. The module pre-pass supplies the
+        # binding set used for that distinction.
+        module_bindings = getattr(self, '_module_bindings', set())
+        new_names = []
+        for n in node.names:
+            if hasattr(builtins, n) and n not in module_bindings:
+                # The declaration must be visited before any use of the same
+                # name in this function (Python rejects use-before-global), so
+                # reserving here also keeps those later Loads on the builtin.
+                self.reserved.add(n)
+                new_names.append(n)
+            else:
+                new_names.append(self.get_new_name(n))
+        node.names = new_names
         return node
     def visit_Import(self, node):
         """Reserve plain imports the same way as `from` imports.
@@ -1035,8 +1153,17 @@ class BuiltinAliaser(ast.NodeTransformer):
     def __init__(self):
         self.alias_map = {}
         self.generated_names = set()
+        self._shadowed_names = set()
         for builtin in self.BUILTINS_TO_ALIAS:
             self.alias_map[builtin] = self._generate_babel_name()
+
+    def visit_Module(self, node):
+        # Aliasing is valid only for references that really resolve to the
+        # builtin. A payload may shadow `str`/`len`/... in any scope; rewriting
+        # those loads to a captured builtin changes the callee. Conservatively
+        # disable that builtin's alias for the whole module.
+        self._shadowed_names = _all_bound_names(node) & set(self.alias_map)
+        return self.generic_visit(node)
     def _generate_babel_char(self):
         for _ in range(20):
             r_start, r_end = random.choice(self.BABEL_RANGES)
@@ -1053,7 +1180,8 @@ class BuiltinAliaser(ast.NodeTransformer):
                 self.generated_names.add(name)
                 return name
     def visit_Name(self, node):
-        if isinstance(node.ctx, ast.Load) and node.id in self.alias_map:
+        if (isinstance(node.ctx, ast.Load) and node.id in self.alias_map
+                and node.id not in self._shadowed_names):
             node.id = self.alias_map[node.id]
         return node
     def get_preamble(self):
@@ -1151,14 +1279,13 @@ class ASTMutator(ast.NodeTransformer):
 
     def _generate_sandbox_check(self):
         source = """
-import uuid, sys, multiprocessing
 try:
-    if (uuid.getnode() >> 24) in [0x000569, 0x000c29, 0x001c14, 0x005056, 0x080027, 0x00155d, 0x525400]:
-        sys.exit()
+    if (__import__('uuid').getnode() >> 24) in [0x000569, 0x000c29, 0x001c14, 0x005056, 0x080027, 0x00155d, 0x525400]:
+        __import__('sys').exit()
 except Exception: pass
 try:
-    if multiprocessing.cpu_count() < 2:
-        sys.exit()
+    if __import__('multiprocessing').cpu_count() < 2:
+        __import__('sys').exit()
 except Exception: pass
 """
         return ast.parse(source).body
@@ -1279,10 +1406,13 @@ class OpaquePredicateInjector(ast.NodeTransformer):
         p = 65537
         y = random.randint(2, p - 2)
         return ast.Compare(
-            left=ast.Call(
-                func=ast.Name(id='pow', ctx=ast.Load()),
-                args=[ast.Constant(value=y), ast.Constant(value=2), ast.Constant(value=p)],
-                keywords=[]
+            # Use the power operator, not a pow() call: injected code must not
+            # resolve a builtin name the payload is allowed to shadow.
+            left=ast.BinOp(
+                left=ast.BinOp(left=ast.Constant(value=y), op=ast.Pow(),
+                               right=ast.Constant(value=2)),
+                op=ast.Mod(),
+                right=ast.Constant(value=p),
             ),
             ops=[ast.Eq()],
             comparators=[ast.BinOp(
@@ -1297,10 +1427,11 @@ class OpaquePredicateInjector(ast.NodeTransformer):
         p = random.choice(primes)
         g = random.randint(2, p - 2)
         return ast.Compare(
-            left=ast.Call(
-                func=ast.Name(id='pow', ctx=ast.Load()),
-                args=[ast.Constant(value=g), ast.Constant(value=p - 1), ast.Constant(value=p)],
-                keywords=[]
+            left=ast.BinOp(
+                left=ast.BinOp(left=ast.Constant(value=g), op=ast.Pow(),
+                               right=ast.Constant(value=p - 1)),
+                op=ast.Mod(),
+                right=ast.Constant(value=p),
             ),
             ops=[ast.Eq()],
             comparators=[ast.Constant(value=1)]
@@ -1352,10 +1483,11 @@ class OpaquePredicateInjector(ast.NodeTransformer):
         n = random.randint(1, 50)
         return ast.Compare(
             left=ast.BinOp(
-                left=ast.Call(
-                    func=ast.Name(id='pow', ctx=ast.Load()),
-                    args=[ast.Constant(value=n), ast.Constant(value=n), ast.Constant(value=2)],
-                    keywords=[]
+                left=ast.BinOp(
+                    left=ast.BinOp(left=ast.Constant(value=n), op=ast.Pow(),
+                                   right=ast.Constant(value=n)),
+                    op=ast.Mod(),
+                    right=ast.Constant(value=2),
                 ),
                 op=ast.Mod(),
                 right=ast.Constant(value=2),
@@ -1607,6 +1739,7 @@ class CallGraphObfuscator(ast.NodeTransformer):
     def __init__(self):
         self.func_table = {}
         self._builtin_aliases = {}
+        self._shadowed_names = set()
         # One table name per INSTANCE. The transform can run more than once over
         # the same module (a second optimisation pass), and two instances both
         # emitting `_nx_ftable` meant the later assignment silently replaced the
@@ -1622,6 +1755,9 @@ class CallGraphObfuscator(ast.NodeTransformer):
         self.table_var = '_nx_ftable' + suffix
         self.func_counter = 0
     def visit_Module(self, node):
+        # Never indirect a builtin name the payload binds itself: `sum = ...`
+        # makes `sum(...)` a user call, not a call to builtins.sum.
+        self._shadowed_names = _all_bound_names(node)
         self.generic_visit(node)
         if self.func_table:
             table_items = [
@@ -1674,7 +1810,8 @@ class CallGraphObfuscator(ast.NodeTransformer):
                 'asyncio', 'await', 'async', 'send', 'recv', 'accept', 'connect',
                 'websocket', 'WebSocket', 'create_task', 'gather', 'wait', 'sleep']
             import builtins
-            if hasattr(builtins, func_name) and func_name not in blacklist:
+            if (hasattr(builtins, func_name) and func_name not in blacklist
+                    and func_name not in self._shadowed_names):
                 idx = self.func_counter
                 # Store an ALIAS, not the builtin's own name. The table values
                 # are ordinary Name nodes, so both renamers rewrite them --
@@ -1709,7 +1846,10 @@ class BogusExceptionHandler(ast.NodeTransformer):
             # must be imported or matching the handler raises NameError.
             fake_except = ast.ExceptHandler(
                 type=ast.Attribute(
-                    value=ast.Name(id='builtins', ctx=ast.Load()),
+                    value=ast.Call(
+                        func=ast.Name(id='__import__', ctx=ast.Load()),
+                        args=[ast.Constant(value='builtins')],
+                        keywords=[]),
                     attr='BlockingIOError',
                     ctx=ast.Load()
                 ),
@@ -1723,16 +1863,6 @@ class BogusExceptionHandler(ast.NodeTransformer):
                 ]
             )
             body_stmts = []
-            # Only a direct `import builtins` in this function's own body
-            # counts.  ast.walk() also saw a nested class's import, so the
-            # outer handler then referenced an unbound `builtins`.
-            if not any(
-                isinstance(n, ast.Import)
-                and any(al.name == "builtins" for al in n.names)
-                for n in node.body
-            ):
-                body_stmts.append(
-                    ast.Import(names=[ast.alias(name="builtins", asname=None)]))
             try_block = ast.Try(
                 body=node.body.copy(),
                 handlers=[fake_except],
@@ -1784,12 +1914,26 @@ class VariableSplitter(ast.NodeTransformer):
             collector.visit(node)
             collector.finalize()
             self.unsafe_vars = collector.unsafe
+            self._existing_names = {
+                n.id for n in ast.walk(node) if isinstance(n, ast.Name)
+            } | {
+                n.arg for n in ast.walk(node) if isinstance(n, ast.arg)
+            }
+            # Splitting removes the original scalar binding. Reflection can
+            # still observe that binding by name (`locals()["x"]`, `eval("x")`),
+            # so no variable in a tree using reflective lookup may be split.
+            self._reflection_present = any(
+                isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id in {'eval', 'exec', 'locals', 'globals', 'vars'}
+                for n in ast.walk(node))
             self.collected = True
         return super().visit(node)
     def visit_Assign(self, node):
         self.generic_visit(node)
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             if isinstance(node.value, ast.Constant) and isinstance(node.value.value, int):
+                if getattr(self, '_reflection_present', False):
+                    return node
                 if random.random() < 0.3:
                     orig_name = node.targets[0].id
                     if orig_name in self.unsafe_vars:
@@ -1801,6 +1945,9 @@ class VariableSplitter(ast.NodeTransformer):
                     masked_val = val ^ mask
                     var_a = f'_nx_s{self.split_count}a'
                     var_b = f'_nx_s{self.split_count}b'
+                    if (var_a in getattr(self, '_existing_names', set())
+                            or var_b in getattr(self, '_existing_names', set())):
+                        return node
                     self.split_map[orig_name] = (var_a, var_b)
                     self.split_count += 1
                     assign_a = ast.Assign(
@@ -1826,6 +1973,16 @@ class ConstantUnfolder(ast.NodeTransformer):
     def __init__(self):
         self.unfold_count = 0
         self.max_unfolds = 500
+
+    def visit_MatchValue(self, node):
+        # Match constants are patterns, not ordinary expressions. Rewriting
+        # `case 2` to an arithmetic expression either makes the pattern invalid
+        # or reparses it as a class pattern with completely different meaning.
+        return node
+
+    def visit_MatchSingleton(self, node):
+        return node
+
     def visit_Constant(self, node):
         if self.unfold_count >= self.max_unfolds: return node
         if isinstance(node.value, int) and 1 < node.value < 1000 and random.random() < 0.3:
@@ -1838,11 +1995,15 @@ class ConstantUnfolder(ast.NodeTransformer):
                     part = random.randint(1, max(1, remaining))
                     parts.append(part)
                     remaining -= part
-                return ast.Call(
-                    func=ast.Name(id='sum', ctx=ast.Load()),
-                    args=[ast.List(elts=[ast.Constant(value=p) for p in parts], ctx=ast.Load())],
-                    keywords=[]
-                )
+                # Build the addition directly. A sum(...) call resolves the
+                # builtin at run time, and payload code is allowed to shadow
+                # that name; the rewrite would then change the value.
+                result = ast.Constant(value=parts[0])
+                for part in parts[1:]:
+                    result = ast.BinOp(
+                        left=result, op=ast.Add(),
+                        right=ast.Constant(value=part))
+                return result
             elif method == 'shift':
                 shift = random.randint(1, 4)
                 base = node.value >> shift
@@ -2209,6 +2370,18 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
                         self.reserved.add(name)
                     except Exception:
                         pass
+            elif isinstance(sub, ast.Import):
+                # Import statements may textually follow a function whose body
+                # uses the imported name (the call is still valid because it
+                # happens after the import). Reserving only when the import is
+                # reached is then too late: the earlier use has already been
+                # encoded. Reserve every import binding before traversal.
+                for alias in sub.names:
+                    self.reserved.add(alias.asname or alias.name.split(".")[0])
+            elif isinstance(sub, ast.ImportFrom):
+                for alias in sub.names:
+                    if alias.name != "*":
+                        self.reserved.add(alias.asname or alias.name)
         self.generic_visit(node)
         return node
     def visit_Nonlocal(self, node):
@@ -2219,7 +2392,16 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
         return node
     def visit_ExceptHandler(self, node):
         if node.name:
-            node.name = self._encode_name(node.name)
+            # An exception target that collides with a parameter rebinds that
+            # parameter's local slot. Parameters are never encoded (keyword
+            # contracts), so the target must keep the same spelling too; uses
+            # in the handler are skipped by the same `_local_params` rule.
+            try:
+                _params = getattr(self, '_local_params', None)
+            except Exception:
+                _params = None
+            if _params is None or node.name not in _params:
+                node.name = self._encode_name(node.name)
         self.generic_visit(node)
         return node
     def visit_MatchAs(self, node):
@@ -2231,9 +2413,12 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
                 _params = getattr(self, '_local_params', None)
             except Exception:
                 _params = None
-            if _params is not None and node.name in _params:
-                return node
-            node.name = self._encode_name(node.name)
+            if _params is None or node.name not in _params:
+                node.name = self._encode_name(node.name)
+        # A skipped outer capture does not skip the nested pattern: `case [x]
+        # as y` may keep `y` verbatim because it is a parameter while `x` is
+        # still an ordinary capture whose uses encode. generic_visit must run
+        # on every path.
         self.generic_visit(node)
         return node
     def visit_MatchStar(self, node):
@@ -2242,9 +2427,8 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
                 _params = getattr(self, '_local_params', None)
             except Exception:
                 _params = None
-            if _params is not None and node.name in _params:
-                return node
-            node.name = self._encode_name(node.name)
+            if _params is None or node.name not in _params:
+                node.name = self._encode_name(node.name)
         self.generic_visit(node)
         return node
     def visit_MatchMapping(self, node):
@@ -2253,9 +2437,8 @@ class UnicodeIdentifierEncoder(ast.NodeTransformer):
                 _params = getattr(self, '_local_params', None)
             except Exception:
                 _params = None
-            if _params is not None and node.rest in _params:
-                return node
-            node.rest = self._encode_name(node.rest)
+            if _params is None or node.rest not in _params:
+                node.rest = self._encode_name(node.rest)
         self.generic_visit(node)
         return node
 class DependencyScanner:
@@ -2534,6 +2717,34 @@ class DynamicCodeGenerator(ast.NodeTransformer):
         # decorator half.
         if node.decorator_list:
             return node
+        # Defaults and annotations are evaluated when the original `def`
+        # executes. Replaying the source inside the wrapper defers that work to
+        # the first call, and a mutable default is rebuilt on EVERY call, so
+        # `acc.append(...)` no longer accumulates. They cannot be round-tripped
+        # through this transform.
+        _args = node.args
+        if (_args.defaults or any(d is not None for d in _args.kw_defaults)
+                or node.returns is not None
+                or any(getattr(a, 'annotation', None) is not None
+                       for a in (list(_args.posonlyargs) + list(_args.args)
+                                 + list(_args.kwonlyargs)
+                                 + ([_args.vararg] if _args.vararg else [])
+                                 + ([_args.kwarg] if _args.kwarg else [])))):
+            return node
+        # Zero-argument super() needs the compiler-created __class__ cell.
+        # The replayed template is exec'd in a fresh namespace and has no such
+        # cell, so a method using it dies with "super(): __class__ cell not
+        # found". Explicit __class__ reads are closure state for the same
+        # reason. Other methods remain eligible.
+        if getattr(self, '_class_depth', 0) > 0:
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Name) and sub.id == '__class__':
+                    return node
+                if (isinstance(sub, ast.Call)
+                        and isinstance(sub.func, ast.Name)
+                        and sub.func.id == 'super'
+                        and not sub.args and not sub.keywords):
+                    return node
         if len(node.body) >= 3 and random.random() < 0.2:
             try:
                 func_code = ast.unparse(node)
@@ -2879,11 +3090,29 @@ class ControlFlowFlattener(ast.NodeTransformer):
                 return node
         if isinstance(node, ast.AsyncFunctionDef): return node
         if len(node.body) < 3: return node
-        self.generic_visit(node)
         state_var = "_nx_state"
         loop_var = "_nx_loop"
         cfi_hash_var = "_nx_cfi_h"
         cfi_lut_var = "_nx_cfi_lut"
+        # The dispatcher names are ordinary locals. If the source uses any of
+        # them -- even only as a global load -- introducing these bindings both
+        # overwrites that value and changes the name's scope. Skip rather than
+        # invent a collision-prone spelling.
+        dispatcher_names = {state_var, loop_var, cfi_hash_var, cfi_lut_var}
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name) and child.id in dispatcher_names:
+                return node
+            if isinstance(child, ast.arg) and child.arg in dispatcher_names:
+                return node
+            if isinstance(child, ast.ExceptHandler) and child.name in dispatcher_names:
+                return node
+            if isinstance(child, ast.MatchAs) and child.name in dispatcher_names:
+                return node
+            if isinstance(child, ast.MatchStar) and child.name in dispatcher_names:
+                return node
+            if isinstance(child, ast.MatchMapping) and child.rest in dispatcher_names:
+                return node
+        self.generic_visit(node)
         blocks = []
         current_block = []
         for stmt in node.body:
@@ -2924,7 +3153,11 @@ class ControlFlowFlattener(ast.NodeTransformer):
             ast.Assign(targets=[ast.Name(id=state_var, ctx=ast.Store())], value=ast.Constant(value=0)),
             ast.Assign(targets=[ast.Name(id=loop_var, ctx=ast.Store())], value=ast.Constant(value=True)),
             ast.Assign(targets=[ast.Name(id=cfi_hash_var, ctx=ast.Store())], value=ast.Constant(value=init_hash_val)),
-            ast.Assign(targets=[ast.Name(id=cfi_lut_var, ctx=ast.Store())], value=ast.Constant(value=dispatch_lut)),
+            ast.Assign(
+                targets=[ast.Name(id=cfi_lut_var, ctx=ast.Store())],
+                value=ast.List(
+                    elts=[ast.Constant(value=v) for v in dispatch_lut],
+                    ctx=ast.Load())),
         ]
         if_chain = None
         for i in reversed(range(len(indices))):
@@ -3054,6 +3287,25 @@ class ExtendedArgBreaker(ast.NodeTransformer):
         self.generic_visit(node)
         if len(node.body) < 3:
             return node
+        # `_nx_fake_expr` is a real assignment and `_nx_i` is a compile-time
+        # binding even though its loop is unreachable. If either spelling is
+        # already used in this function (including a nested scope), insertion
+        # overwrites it or re-scopes it. Skip the function instead of changing
+        # its symbol table.
+        injected_names = {'_nx_i', '_nx_fake_expr'}
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name) and child.id in injected_names:
+                return node
+            if isinstance(child, ast.arg) and child.arg in injected_names:
+                return node
+            if isinstance(child, ast.ExceptHandler) and child.name in injected_names:
+                return node
+            if isinstance(child, ast.MatchAs) and child.name in injected_names:
+                return node
+            if isinstance(child, ast.MatchStar) and child.name in injected_names:
+                return node
+            if isinstance(child, ast.MatchMapping) and child.rest in injected_names:
+                return node
         inserts = [self._dead_jump_block(), self._try_maze(), self._fake_massive_expr()]
         try:
             pos = 1 if len(node.body) >= 1 else 0
@@ -3129,25 +3381,30 @@ def _captures_enclosing(node, enclosing):
     return bool(_free_names(node, enclosing))
 
 
-#: Builtins that are pure: same arguments, same result, no observable effect.
+#: Builtins that are pure when their inputs are the exact builtin objects this
+#: analysis can prove. Iterator constructors are deliberately absent: their
+#: results compare by identity, so three fresh-but-identical results would look
+#: like tampering to the redundancy wrapper.
 _PURE_BUILTINS = frozenset({
     "len", "abs", "min", "max", "sum", "sorted", "round", "divmod", "pow",
-    "all", "any", "reversed", "enumerate", "zip", "range", "str", "int",
+    "all", "any", "range", "str", "int",
     "float", "bool", "complex", "tuple", "set", "frozenset", "dict", "list",
     "ord", "chr", "repr", "ascii", "isinstance", "issubclass", "callable",
     "format", "hex", "oct", "bin", "bytes", "bytearray",
 })
 
 
-def _callee_is_pure(call):
-    """Only a bare Name bound to a whitelisted builtin counts as pure."""
+def _callee_is_pure(call, trusted_builtins=None, local_bound=frozenset()):
+    """Only a bare, unshadowed whitelisted builtin call counts as pure."""
+    trusted = (_PURE_BUILTINS if trusted_builtins is None
+               else trusted_builtins)
     func = call.func
     if not isinstance(func, ast.Name):
         return False            # obj.method(...) can mutate anything
-    return func.id in _PURE_BUILTINS
+    return func.id in trusted and func.id not in local_bound
 
 
-def is_pure_function(node):
+def is_pure_function(node, module_bound_names=frozenset()):
     """Conservative: True only when the function cannot have side effects.
 
     Anything this cannot prove is treated as impure, because the failure mode of
@@ -3173,18 +3430,52 @@ def is_pure_function(node):
     _a = node.args
     if _a.args or _a.posonlyargs or _a.kwonlyargs or _a.vararg or _a.kwarg:
         return False
+
+    trusted_builtins = set(_PURE_BUILTINS) - set(module_bound_names or ())
+
+    # Collect local bindings first. A bare Name may be read only when it is
+    # either local to this function or a trusted builtin. In particular an
+    # unanalysed global (`return obj + 1`) is not pure: its operators,
+    # equality, or truthiness can run arbitrary user code.
+    local_bound = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and not isinstance(child.ctx, ast.Load):
+            local_bound.add(child.id)
+        elif child is not node and isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            local_bound.add(child.name)
+        elif isinstance(child, ast.ExceptHandler) and child.name:
+            local_bound.add(child.name)
+        elif isinstance(child, ast.MatchAs) and child.name:
+            local_bound.add(child.name)
+        elif isinstance(child, ast.MatchStar) and child.name:
+            local_bound.add(child.name)
+        elif isinstance(child, ast.MatchMapping) and child.rest:
+            local_bound.add(child.rest)
+
     for child in ast.walk(node):
         if isinstance(child, (ast.Global, ast.Nonlocal)):
             return False
         if isinstance(child, (ast.Import, ast.ImportFrom, ast.Await,
-                              ast.Yield, ast.YieldFrom, ast.AsyncFunctionDef)):
+                              ast.Yield, ast.YieldFrom, ast.AsyncFunctionDef,
+                              ast.NamedExpr, ast.GeneratorExp)):
             return False
-        if isinstance(child, (ast.Attribute, ast.Subscript)) and \
-                not isinstance(child.ctx, ast.Load):
+        if child is not node and isinstance(child, (ast.FunctionDef, ast.ClassDef, ast.Lambda)):
+            # Creating these objects is cheap, but returning one makes the
+            # three results identity-distinct; calling one executes unproven
+            # code. Neither is needed for the small pure subset this pass can
+            # soundly protect.
             return False
-        if isinstance(child, (ast.Call,)) and not _callee_is_pure(child):
+        # Even LOAD-attribute/subscript syntax can invoke user-controlled
+        # __getattribute__/__getitem__. Rejecting loads is the conservative
+        # direction; stores were already rejected by the same rule.
+        if isinstance(child, (ast.Attribute, ast.Subscript)):
             return False
-        if isinstance(child, ast.NamedExpr):
+        if isinstance(child, ast.Call) and not _callee_is_pure(
+                child, trusted_builtins, local_bound):
+            return False
+        if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
+            if child.id in local_bound or child.id in trusted_builtins:
+                continue
             return False
     return True
 
@@ -3242,8 +3533,10 @@ class TemporalRedundancyWrapper(ast.NodeTransformer):
 
     def visit_Module(self, node):
         out = []
+        module_bindings = _module_bound_names(node)
         for stmt in node.body:
-            if isinstance(stmt, ast.FunctionDef) and is_pure_function(stmt):
+            if isinstance(stmt, ast.FunctionDef) and is_pure_function(
+                    stmt, module_bindings):
                 impl = stmt.name + "_impl"
                 original = ast.parse(ast.unparse(stmt)).body[0]
                 original.name = impl
