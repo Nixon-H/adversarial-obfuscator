@@ -60,17 +60,26 @@ impl ScrubOnDrop {
 
 impl Drop for ScrubOnDrop {
     fn drop(&mut self) {
-        scrub_memory(self.ptr, self.len);
+        // The constructor contract already guarantees unique writable access.
+        unsafe { scrub_memory(self.ptr, self.len) };
     }
 }
 
-pub fn scrub_memory(ptr: *mut u8, len: usize) {
+/// Overwrite `ptr..ptr+len` with zeroes using volatile writes.
+///
+/// Volatile writes cannot be elided as dead stores. The previous plain
+/// `write_bytes` scrub was legally removable before free/unmap, exactly where
+/// key-erasure mattered.
+///
+/// # Safety
+/// The caller must guarantee that `ptr..ptr+len` is valid, initialized,
+/// writable, and exclusively accessible for the duration of the call.
+pub unsafe fn scrub_memory(ptr: *mut u8, len: usize) {
     if ptr.is_null() || len == 0 {
         return;
     }
-    let ptr = std::hint::black_box(ptr);
-    unsafe {
-        ptr::write_bytes(ptr, 0u8, len);
+    for i in 0..len {
+        unsafe { ptr::write_volatile(ptr.add(i), 0u8) };
     }
 }
 
@@ -78,10 +87,16 @@ pub fn scrub_slice(buf: &mut [u8]) {
     if buf.is_empty() {
         return;
     }
-    scrub_memory(buf.as_mut_ptr(), buf.len());
+    // A mutable slice supplies validity, initialization, and exclusivity.
+    unsafe { scrub_memory(buf.as_mut_ptr(), buf.len()) };
 }
 
-pub fn protect_region(ptr: *mut u8, len: usize, perm: PagePerm) -> bool {
+/// Change page permissions over the pages intersecting `ptr..ptr+len`.
+///
+/// # Safety
+/// The caller must own or control every page intersected by the range and
+/// must ensure no live Rust references are invalidated by the new permissions.
+pub unsafe fn protect_region(ptr: *mut u8, len: usize, perm: PagePerm) -> bool {
     if ptr.is_null() || len == 0 {
         return false;
     }
@@ -135,16 +150,16 @@ mod tests {
 
     #[test]
     fn protect_region_rejects_overflow_without_panic() {
-        assert!(!protect_region(
+        assert!(!unsafe { protect_region(
             usize::MAX as *mut u8,
             2,
             PagePerm::ReadWrite
-        ));
-        assert!(!protect_region(
+        ) });
+        assert!(!unsafe { protect_region(
             1usize as *mut u8,
             usize::MAX,
             PagePerm::ReadWrite
-        ));
+        ) });
     }
 
     #[test]

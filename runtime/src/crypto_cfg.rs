@@ -1,4 +1,4 @@
-use crate::memguard::scrub_memory;
+use crate::memguard::scrub_slice;
 
 const K: [u32; 64] = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
@@ -128,7 +128,7 @@ impl CfgStateChain {
         input.extend_from_slice(claimed_prev_token);
         input.extend_from_slice(&claimed_counter.to_le_bytes());
         let computed = sha256(&input);
-        computed == *claimed_curr_token
+        crate::timing::timing_safe_compare(&computed, claimed_curr_token)
     }
 
     pub fn generate_block_key(&self, block_id: u64) -> [u8; 32] {
@@ -144,52 +144,54 @@ pub fn check_block_authorization(
     expected_token: &[u8; 32],
     encrypted_data: &[u8],
 ) -> Result<Vec<u8>, String> {
-    if encrypted_data.len() < 4 {
+    // wire format: random IV (16) || AES-256-CTR(magic || payload || digest)
+    if encrypted_data.len() < 16 + 4 + 32 {
         return Err("encrypted data too short".to_string());
     }
-    let block_key = {
+    let mut iv = [0u8; 16];
+    iv.copy_from_slice(&encrypted_data[..16]);
+    let ciphertext = &encrypted_data[16..];
+
+    let mut block_key = {
         let mut input = Vec::with_capacity(40);
         input.extend_from_slice(expected_token);
         input.extend_from_slice(&block_id.to_le_bytes());
         sha256(&input)
     };
 
-    let decrypted: Vec<u8> = encrypted_data
-        .iter()
-        .enumerate()
-        .map(|(i, &b)| b ^ block_key[i % 32])
-        .collect();
+    let mut decrypted = ciphertext.to_vec();
+    crate::decrypt::aes_256_ctr_decrypt(&mut decrypted, &block_key, &iv);
 
     let magic = u32::from_le_bytes([decrypted[0], decrypted[1], decrypted[2], decrypted[3]]);
     if magic != 0xCFC0DE01 {
-        scrub_memory(block_key.as_ptr() as *mut u8, block_key.len());
+        scrub_slice(&mut block_key);
         return Err("decryption produced invalid data — token mismatch".to_string());
     }
 
-    let payload_len = decrypted.len() - 4;
-    let mut payload = Vec::with_capacity(payload_len);
-    payload.extend_from_slice(&decrypted[4..]);
-
-    let (payload_data, expected_digest) = payload.split_at(payload.len().saturating_sub(32));
-    if payload_data.len() < 1 {
-        scrub_memory(block_key.as_ptr() as *mut u8, block_key.len());
-        return Err("no payload data".to_string());
+    let payload = &decrypted[4..];
+    if payload.len() < 32 {
+        scrub_slice(&mut block_key);
+        return Err("decryption produced invalid data — missing digest".to_string());
     }
-    let actual_payload = &payload_data[..payload_data.len()];
-    let stored_digest = &expected_digest[..32];
+    let split = payload.len() - 32;
+    let (actual_payload, stored_digest) = payload.split_at(split);
 
     let digest = sha256(actual_payload);
-    if &digest != stored_digest {
-        scrub_memory(block_key.as_ptr() as *mut u8, block_key.len());
+    if !crate::timing::timing_safe_compare(&digest, stored_digest) {
+        scrub_slice(&mut block_key);
         return Err("decryption produced invalid data — digest mismatch".to_string());
     }
 
-    scrub_memory(block_key.as_ptr() as *mut u8, block_key.len());
+    scrub_slice(&mut block_key);
     Ok(actual_payload.to_vec())
 }
 
-pub fn encrypt_block_data(block_id: u64, token: &[u8; 32], plaintext: &[u8]) -> Vec<u8> {
-    let block_key = {
+pub fn encrypt_block_data(
+    block_id: u64,
+    token: &[u8; 32],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, String> {
+    let mut block_key = {
         let mut input = Vec::with_capacity(40);
         input.extend_from_slice(token);
         input.extend_from_slice(&block_id.to_le_bytes());
@@ -202,13 +204,18 @@ pub fn encrypt_block_data(block_id: u64, token: &[u8; 32], plaintext: &[u8]) -> 
     payload.extend_from_slice(plaintext);
     payload.extend_from_slice(&digest);
 
-    let result: Vec<u8> = payload
-        .iter()
-        .enumerate()
-        .map(|(i, &b)| b ^ block_key[i % 32])
-        .collect();
-    scrub_memory(block_key.as_ptr() as *mut u8, block_key.len());
-    result
+    // A random per-message IV prevents keystream reuse when the same token
+    // and block id are used for more than one plaintext.
+    let mut iv = [0u8; 16];
+    crate::random::fill_random(&mut iv)?;
+    let mut ciphertext = payload;
+    crate::decrypt::aes_256_ctr_decrypt(&mut ciphertext, &block_key, &iv);
+    scrub_slice(&mut block_key);
+
+    let mut result = Vec::with_capacity(16 + ciphertext.len());
+    result.extend_from_slice(&iv);
+    result.extend_from_slice(&ciphertext);
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -333,7 +340,7 @@ mod tests {
         let token = chain.current_token;
         let plaintext = b"hello crypto world";
 
-        let encrypted = encrypt_block_data(block_id, &token, plaintext);
+        let encrypted = encrypt_block_data(block_id, &token, plaintext).expect("encrypt");
         let result = check_block_authorization(block_id, &token, &encrypted);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), plaintext);
@@ -348,9 +355,36 @@ mod tests {
         let wrong_token = [0xFFu8; 32];
         let plaintext = b"secret data";
 
-        let encrypted = encrypt_block_data(block_id, &real_token, plaintext);
+        let encrypted = encrypt_block_data(block_id, &real_token, plaintext).expect("encrypt");
         let result = check_block_authorization(block_id, &wrong_token, &encrypted);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encrypt_same_key_block_uses_distinct_ivs() {
+        let token = [0x55u8; 32];
+        let first = encrypt_block_data(7, &token, b"plaintext one").expect("encrypt first");
+        let second = encrypt_block_data(7, &token, b"plaintext two").expect("encrypt second");
+        assert_ne!(first[..16], second[..16]);
+        assert_ne!(first, second);
+        assert_eq!(
+            check_block_authorization(7, &token, &first).expect("decrypt first"),
+            b"plaintext one"
+        );
+        assert_eq!(
+            check_block_authorization(7, &token, &second).expect("decrypt second"),
+            b"plaintext two"
+        );
+    }
+
+    #[test]
+    fn test_empty_plaintext_roundtrips() {
+        let token = [0x66u8; 32];
+        let encrypted = encrypt_block_data(3, &token, b"").expect("encrypt empty");
+        assert_eq!(
+            check_block_authorization(3, &token, &encrypted).expect("decrypt empty"),
+            Vec::<u8>::new()
+        );
     }
 
     #[test]

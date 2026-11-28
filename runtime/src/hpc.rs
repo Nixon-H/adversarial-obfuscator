@@ -35,7 +35,7 @@ pub fn read_pmc_raw(counter_idx: u32) -> Result<u64, String> {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub fn read_pmc(counter_idx: u32) -> Result<u64, String> {
     let config = match counter_idx {
         0 => 0x3,
@@ -56,7 +56,7 @@ pub fn read_pmc(counter_idx: u32) -> Result<u64, String> {
     }
 }
 
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(not(all(target_arch = "x86_64", target_os = "linux")))]
 pub fn read_pmc(_counter_idx: u32) -> Result<u64, String> {
     Err("RDPMC not supported on this architecture".to_string())
 }
@@ -71,7 +71,7 @@ pub fn read_tsc() -> u64 {
     0
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 #[repr(C)]
 struct PerfEventAttr {
     type_: u32,
@@ -88,28 +88,25 @@ struct PerfEventAttr {
     __reserved: [u64; 6],
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 fn perf_event_open(type_: u32, config: u64) -> Result<i32, String> {
     let mut attr: PerfEventAttr = unsafe { std::mem::zeroed() };
     attr.type_ = type_;
     attr.size = std::mem::size_of::<PerfEventAttr>() as u32;
     attr.config = config;
 
+    // Use libc's syscall wrapper rather than handwritten asm. Besides being
+    // OS-gated, this avoids an incorrect nomem asm promise: the kernel reads
+    // the attr structure through the pointer argument.
     let fd = unsafe {
-        let result: i64;
-        asm!(
-            "syscall",
-            inlateout("rax") 298i64 => result,
-            in("rdi") &attr as *const PerfEventAttr as i64,
-            in("rsi") 0i64,
-            in("rdx") -1i64,
-            in("r10") -1i64,
-            in("r8") 0i64,
-            lateout("rcx") _,
-            lateout("r11") _,
-            options(nostack, nomem),
-        );
-        result as i32
+        libc::syscall(
+            libc::SYS_perf_event_open,
+            &attr as *const PerfEventAttr,
+            0,
+            -1,
+            -1,
+            0,
+        ) as i32
     };
 
     if fd < 0 {
@@ -119,7 +116,7 @@ fn perf_event_open(type_: u32, config: u64) -> Result<i32, String> {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 fn perf_read_counter(fd: i32) -> Result<u64, String> {
     let mut val: u64 = 0;
     let n = unsafe {
@@ -133,7 +130,7 @@ fn perf_read_counter(fd: i32) -> Result<u64, String> {
 }
 
 pub fn read_l2_cache_misses() -> u64 {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
     {
         let config: u64 = 1 | (0 << 8) | (1 << 16);
         match perf_event_open(1, config) {
@@ -145,12 +142,12 @@ pub fn read_l2_cache_misses() -> u64 {
             Err(_) => 0,
         }
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(not(all(target_arch = "x86_64", target_os = "linux")))]
     { 0 }
 }
 
 pub fn read_branch_mispredictions() -> u64 {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
     {
         match perf_event_open(0, 0x5) {
             Ok(fd) => {
@@ -161,7 +158,7 @@ pub fn read_branch_mispredictions() -> u64 {
             Err(_) => 0,
         }
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(not(all(target_arch = "x86_64", target_os = "linux")))]
     { 0 }
 }
 

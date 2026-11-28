@@ -6,6 +6,12 @@ use core::arch::asm;
 
 #[cfg(target_arch = "x86_64")]
 pub fn rdrand_u64() -> Result<u64, String> {
+    // RDRAND is architectural only when CPUID.01H:ECX.RDRAND[bit 30] is set.
+    // Executing the instruction unconditionally raises #UD on older x86_64
+    // CPUs and in hypervisors that mask the feature.
+    if !std::arch::is_x86_feature_detected!("rdrand") {
+        return Err("RDRAND is not supported by this CPU".to_string());
+    }
     for _ in 0..10 {
         let mut val: u64 = 0;
         let mut cf: u8;

@@ -10,6 +10,7 @@ pub mod ledger;
 pub mod memguard;
 pub mod platform;
 pub mod port_entangle;
+pub(crate) mod random;
 pub mod replay_poison;
 pub mod selfdestruct;
 pub mod speculative;
@@ -189,19 +190,26 @@ pub fn init_runtime(config: &RuntimeConfig) {
     }
     if config.enable_memguard {
         let size = config.scratch_buffer_size;
-        // Intentional abort-on-failure: a zero-sized/over-aligned layout
-        // is a caller bug, and continuing with a differently-sized locked
-        // buffer would silently violate the memguard contract. expect()
-        // => panic => abort. (The mlock failure just below is different:
-        // resource-dependent, so it degrades gracefully instead.)
-        let layout = std::alloc::Layout::from_size_align(size, 1)
-            .expect("Invalid layout for memguard buffer");
-        let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
-        if !ptr.is_null() {
-            let locked = memguard::lock_memory(ptr, size);
-            if !locked {
-                unsafe { std::alloc::dealloc(ptr, layout) };
-                eprintln!("memguard: mlock failed, continuing without");
+        if size == 0 {
+            // std::alloc::alloc_zeroed has a non-zero-layout invariant; a
+            // zero-sized memguard allocation is simply absent, not a reason
+            // to enter UB.
+            eprintln!("memguard: zero-sized buffer requested, skipping");
+        } else {
+            // Intentional abort-on-failure: an over-aligned layout is a
+            // caller bug, and continuing with a differently-sized locked
+            // buffer would silently violate the memguard contract. expect()
+            // => panic => abort. (The mlock failure just below is different:
+            // resource-dependent, so it degrades gracefully instead.)
+            let layout = std::alloc::Layout::from_size_align(size, 1)
+                .expect("Invalid layout for memguard buffer");
+            let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
+            if !ptr.is_null() {
+                let locked = memguard::lock_memory(ptr, size);
+                if !locked {
+                    unsafe { std::alloc::dealloc(ptr, layout) };
+                    eprintln!("memguard: mlock failed, continuing without");
+                }
             }
         }
     }
@@ -288,3 +296,30 @@ pub fn init_runtime(config: &RuntimeConfig) {
 }
 
 const INTEGRITY_MAGIC: u64 = 0xA11E571E7E6A1B1C;
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn quiet_config() -> RuntimeConfig {
+        RuntimeConfig {
+            enable_memguard: false,
+            enable_integrity: false,
+            enable_decrypt: false,
+            enable_selfdestruct: false,
+            enable_antidbg: false,
+            ..RuntimeConfig::default()
+        }
+    }
+
+    #[test]
+    fn init_runtime_zero_memguard_size_does_not_allocate_zero_layout() {
+        let config = RuntimeConfig {
+            enable_memguard: true,
+            scratch_buffer_size: 0,
+            ..quiet_config()
+        };
+        init_runtime(&config);
+    }
+}
