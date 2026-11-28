@@ -70,3 +70,13 @@
 - Loader UX progress notice + approval-page empty-state text: committed.
   NOTE: workers still need a redeploy for the page-text fix to go live;
   the push/anomaly/security-header deployment predates it.
+
+## HWID-lock crypto upgrade — artifact rebuild required (2026-11-28)
+
+The hwid-lock scheme was cryptographically weak (unkeyed sha256 tag — one
+known plaintext exposed the keystream and enabled offline pack forgery).
+Fixed with keyed HMAC-SHA256 encrypt-then-MAC in both `obfuscator/hwid_lock.py`
+and the embedded loader verifier. The v4 validation artifacts were built with
+the OLD scheme — they still self-consistently unlock, but they carry the weak
+construction. Rebuild all three variants before phone validation so the
+validated artifacts are the strong-scheme ones.

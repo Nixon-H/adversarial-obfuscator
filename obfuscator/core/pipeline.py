@@ -2935,6 +2935,7 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         "        _salt = bytes.fromhex(_pack[\"salt\"])\n"
         "        _nonce = bytes.fromhex(_pack[\"nonce\"])\n"
         "        _enc = bytes.fromhex(_pack[\"data\"])\n"
+        "        _mac = str(_pack[\"mac\"])\n"
         "    except Exception:\n"
         "        raise ValueError(\"bad hwid lock pack\")\n"
         # Not uuid.getnode(): it can shell out to ip/ifconfig/arp and
@@ -2948,13 +2949,11 @@ def generate_hybrid_loader_script(native_blobs, bytecode_fallback, key_hex, nati
         "            _out.extend(_hl_hashlib.sha256(_k + _n + _c.to_bytes(8, \"big\")).digest())\n"
         "            _c += 1\n"
         "        return bytes(_out[:_ln])\n"
-        "    _tagged = bytes(_a ^ _b for _a, _b in zip(_enc, _ks(_key, _nonce, len(_enc))))\n"
-        "    if len(_tagged) < 32:\n"
-        "        raise ValueError(\"hwid unlock failed (truncated)\")\n"
-        "    _tag, _data = _tagged[:32], _tagged[32:]\n"
-        "    if not _hl_hmac.compare_digest(_hl_hashlib.sha256(_data).digest(), _tag):\n"
+        "    _auth = _hl_hmac.new(_key, b\"nx-hwid-lock-auth-v1\", _hl_hashlib.sha256).digest()\n"
+        "    _expect = _hl_hmac.new(_auth, _salt + _nonce + _enc, _hl_hashlib.sha256).hexdigest()\n"
+        "    if not _hl_hmac.compare_digest(_expect, _mac):\n"
         "        raise ValueError(\"hwid unlock failed: wrong host or tampered data\")\n"
-        "    return _data\n"
+        "    return bytes(_a ^ _b for _a, _b in zip(_enc, _ks(_key, _nonce, len(_enc))))\n"
     )
     loader_template = r'''# -*- coding: utf-8 -*-
 __NX_ANTI_DUMP__

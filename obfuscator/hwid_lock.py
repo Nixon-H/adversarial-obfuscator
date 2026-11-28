@@ -1,8 +1,9 @@
 """HWID-locked payload encryption (Phase-4, stdlib only).
 
-AES-CTR-like stream via SHA-256(key + nonce + counter) XOR. An embedded
-SHA-256 check tag (prepended before encryption) authenticates both the HWID
-and the ciphertext: wrong HWID or tampered data raises ValueError.
+AES-CTR-like stream via SHA-256(key + nonce + counter) XOR. Authentication
+is keyed HMAC-SHA256 (encrypt-then-MAC over salt+nonce+ciphertext) with a
+domain-separated derivative of the PBKDF2 key: wrong HWID or tampered data
+raises ValueError before any decryption happens.
 
 HWID fingerprint formats (AUDIT GAP #33):
 
@@ -24,6 +25,7 @@ HWID fingerprint formats (AUDIT GAP #33):
 """
 
 import hashlib
+import hmac
 import re
 import secrets
 
@@ -102,16 +104,30 @@ def _keystream(key: bytes, nonce: bytes, length: int) -> bytes:
     return bytes(out[:length])
 
 
+def _auth_key(key: bytes) -> bytes:
+    """Domain-separated authentication key derived from the encryption key.
+
+    Distinct from the keystream key so a keystream leak can never double
+    as a MAC key.
+    """
+    return hmac.new(key, b"nx-hwid-lock-auth-v1", hashlib.sha256).digest()
+
+
 def lock_payload(payload: bytes, hwid: str) -> dict:
-    """Encrypt payload for hwid. Returns {'salt': hex, 'nonce': hex, 'data': hex}."""
+    """Encrypt payload for hwid with keyed authentication.
+
+    Encrypt-then-MAC: the ciphertext carries HMAC-SHA256 over
+    salt+nonce+ciphertext, keyed by a domain-separated derivative of the
+    PBKDF2 key. Returns {'salt','nonce','data','mac','v'} (hex fields).
+    """
     data = bytes(payload)
     salt = secrets.token_bytes(_SALT_LEN)
     nonce = secrets.token_bytes(_NONCE_LEN)
     key = derive_hwid_key(hwid, salt)
-    tagged = hashlib.sha256(data).digest() + data
-    stream = _keystream(key, nonce, len(tagged))
-    enc = bytes(a ^ b for a, b in zip(tagged, stream))
-    return {"salt": salt.hex(), "nonce": nonce.hex(), "data": enc.hex()}
+    stream = _keystream(key, nonce, len(data))
+    enc = bytes(a ^ b for a, b in zip(data, stream))
+    mac = hmac.new(_auth_key(key), salt + nonce + enc, hashlib.sha256).hexdigest()
+    return {"salt": salt.hex(), "nonce": nonce.hex(), "data": enc.hex(), "mac": mac, "v": 2}
 
 
 def unlock_payload(pack: dict, hwid: str) -> bytes:
@@ -120,14 +136,14 @@ def unlock_payload(pack: dict, hwid: str) -> bytes:
         salt = bytes.fromhex(pack["salt"])
         nonce = bytes.fromhex(pack["nonce"])
         enc = bytes.fromhex(pack["data"])
+        mac_hex = pack["mac"]
     except Exception as e:
         raise ValueError(f"bad pack: {e}")
     key = derive_hwid_key(hwid, salt)
-    stream = _keystream(key, nonce, len(enc))
-    tagged = bytes(a ^ b for a, b in zip(enc, stream))
-    if len(tagged) < _TAG_LEN:
-        raise ValueError("decryption failed (truncated)")
-    tag, data = tagged[:_TAG_LEN], tagged[_TAG_LEN:]
-    if hashlib.sha256(data).digest() != tag:
+    # Verify the keyed MAC BEFORE decrypting: forgery and tampering fail
+    # closed without touching the keystream.
+    expect = hmac.new(_auth_key(key), salt + nonce + enc, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expect, str(mac_hex)):
         raise ValueError("decryption failed: wrong hwid or tampered data")
-    return data
+    stream = _keystream(key, nonce, len(enc))
+    return bytes(a ^ b for a, b in zip(enc, stream))
