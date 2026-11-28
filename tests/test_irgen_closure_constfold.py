@@ -41,8 +41,6 @@ def test_fold_covers_arithmetic_and_bitwise():
 def test_non_pure_binding_is_not_folded():
     """A binding with a call must NOT be eval'd -- nothing user-controlled
     may reach eval()."""
-    from irgen.compile import _NoFold
-    import ast
     # structural: eval must never see a Call node -- enforced by the walker;
     # verified here through the public behaviour: a call binding compiles
     # through the normal alloca path without being constant-folded.
