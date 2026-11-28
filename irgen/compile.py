@@ -307,7 +307,7 @@ class IrInstruction:
             return r
         if self.opcode == 'zext':
             r = f"{self.result.name} = zext" if self.result else "zext"
-            r += f" {self.result_type} {self.operands[0]} to {self.ty}"
+            r += f" {self.ty} {self.operands[0]} to {self.result_type}"
             return r
         if self.opcode in ('sitofp', 'fptosi'):
             r = f"{self.result.name} = {self.opcode}" if self.result else self.opcode
@@ -315,7 +315,7 @@ class IrInstruction:
             return r
         if self.opcode == 'trunc':
             r = f"{self.result.name} = trunc" if self.result else "trunc"
-            r += f" {self.result_type} {self.operands[0]} to {self.ty}"
+            r += f" {self.ty} {self.operands[0]} to {self.result_type}"
             return r
         if self.opcode in {'add', 'sub', 'mul', 'div', 'mod', 'and', 'or', 'xor', 'shl', 'shr',
                             'eq', 'ne', 'lt', 'le', 'gt', 'ge'}:
@@ -435,10 +435,10 @@ class IrBlock:
         return self._make('ge', result_type=IrType.i1(), operands=[a, b], ty=type_)
 
     def zext(self, from_type: IrType, to_type: IrType, val: IrValue) -> IrInstruction:
-        return self._make('zext', result_type=from_type, operands=[val], ty=to_type)
+        return self._make('zext', result_type=to_type, operands=[val], ty=from_type)
 
     def trunc(self, from_type: IrType, to_type: IrType, val: IrValue) -> IrInstruction:
-        return self._make('trunc', result_type=from_type, operands=[val], ty=to_type)
+        return self._make('trunc', result_type=to_type, operands=[val], ty=from_type)
 
     def sitofp(self, from_type: IrType, to_type: IrType, val: IrValue) -> IrInstruction:
         return self._make('sitofp', result_type=to_type, operands=[val], ty=from_type)
@@ -765,6 +765,11 @@ class IrCompiler:
 
     def _compile_stmt(self, stmt: ast.AST):
         """Dispatch a statement to its specific compiler."""
+        if self.current_block is not None and self.current_block.terminator is not None:
+            # Source after a terminator is unreachable.  Appending it to
+            # ``instructions`` would print it before the terminator and move
+            # dead source-level side effects back into the execution path.
+            return
         if isinstance(stmt, ast.FunctionDef):
             self._compile_func_def(stmt)
         elif isinstance(stmt, ast.Import):
@@ -1209,7 +1214,7 @@ class IrCompiler:
         next_val = self.current_block.call("__builtin_next", [it_ptr2.result], IrType.i32())
 
         if isinstance(node.target, ast.Name):
-            target_alloca = self.current_block.alloca(IrType.i32())
+            target_alloca = self._alloca_in_entry(IrType.i32())
             self.current_block.store(IrType.i32(), next_val.result, target_alloca.result)
             self.symbols[node.target.id] = (target_alloca, IrType.i32())
         elif isinstance(node.target, (ast.Tuple, ast.List)):
@@ -1218,7 +1223,7 @@ class IrCompiler:
             # them unbound made every use resolve to the fallback 0.
             for element in node.target.elts:
                 if isinstance(element, ast.Name):
-                    target_alloca = self.current_block.alloca(IrType.i32())
+                    target_alloca = self._alloca_in_entry(IrType.i32())
                     self.current_block.store(IrType.i32(), next_val.result,
                                              target_alloca.result)
                     self.symbols[element.id] = (target_alloca, IrType.i32())
@@ -1675,82 +1680,132 @@ class IrCompiler:
             acc = self.current_block.ne(IrType.i32(), acc, IrValue.const_int(0)).result
         return acc
 
+    @staticmethod
+    def _int_width(type_: IrType) -> int:
+        return {"i1": 1, "i8": 8, "i16": 16, "i32": 32, "i64": 64}.get(type_.kind, 0)
+
+    def _common_value_type(self, left: IrType, right: IrType) -> IrType:
+        """Best common type for a phi implementing a Python value expression."""
+        if left == right:
+            return left
+        numeric = {"i1", "i8", "i16", "i32", "i64", "float", "double"}
+        if left.kind not in numeric or right.kind not in numeric:
+            raise ValueError(
+                "IR cannot represent a dynamically typed boolean/if expression "
+                f"with operand types {left} and {right}")
+        if left.kind in ("float", "double") or right.kind in ("float", "double"):
+            return IrType.double()
+        return IrType(f"i{max(self._int_width(left), self._int_width(right))}")
+
+    def _coerce_value_type(self, val: IrValue, target: IrType) -> IrValue:
+        """Convert ``val`` to ``target`` in the current block when representable."""
+        if val.type == target:
+            return val
+        src_w = self._int_width(val.type)
+        dst_w = self._int_width(target)
+        if src_w and dst_w:
+            if dst_w > src_w:
+                return self.current_block.zext(val.type, target, val).result
+            return self.current_block.trunc(val.type, target, val).result
+        if target.kind in ("float", "double") and src_w:
+            return self.current_block.sitofp(val.type, target, val).result
+        if val.type.kind in ("float", "double") and dst_w:
+            return self.current_block.fptosi(val.type, target, val).result
+        raise ValueError(f"cannot coerce IR value from {val.type} to {target}")
+
+    def _truthy_value(self, val: IrValue) -> IrValue:
+        """Evaluate the IR model of Python truth testing as an i1 value."""
+        if val.type.kind == 'i1':
+            return val
+        if val.type.kind in ("float", "double"):
+            zero = self._make_constant_value(0.0)
+        else:
+            zero = IrValue.const_int(0)
+        return self.current_block.ne(val.type, val, zero).result
+
     def _compile_boolop(self, node: ast.BoolOp) -> IrValue:
         """
-        Compile a boolean expression (and/or) with short-circuit semantics.
+        Compile Python ``and``/``or`` with short-circuit value semantics.
 
-        For 'and': if left is false, skip right evaluation.
-        For 'or': if left is true, skip right evaluation.
-
-        The result is a phi of the short-circuit value and the right
-        operand's value.  The previous implementation left the
-        short-circuit block without a terminator and branched to an
-        empty block, so the IR had a block with no terminator -- which
-        llc rejects ("expected instruction opcode").
+        Python does not coerce the result to bool: ``0 or 5`` is 5 and
+        ``5 or 0`` is 5.  The phi therefore carries the original operand
+        value, while a separate i1 comparison controls the branch.  Phi
+        incoming labels are the actual blocks reached after compiling nested
+        expressions, not the initial RHS/short-circuit block labels.
         """
         is_and = isinstance(node.op, ast.And)
-        result = self._compile_expr(node.values[0])
-        if result.type.kind != 'i1':
-            result = self.current_block.ne(IrType.i32(), result,
-                                           IrValue.const_int(0)).result
+        left = self._compile_expr(node.values[0])
+        cond = self._truthy_value(left)
+        result = left
         for val_node in node.values[1:]:
             rhs_block = self.current_func.new_block()
             short_block = self.current_func.new_block()
             merge_block = self.current_func.new_block()
             if is_and:
                 self.current_block.set_terminator(
-                    "br", operands=[result, rhs_block.label, short_block.label])
+                    "br", operands=[cond, rhs_block.label, short_block.label])
             else:
                 self.current_block.set_terminator(
-                    "br", operands=[result, short_block.label, rhs_block.label])
+                    "br", operands=[cond, short_block.label, rhs_block.label])
 
             self.current_block = rhs_block
             right = self._compile_expr(val_node)
-            if right.type.kind != 'i1':
-                right = self.current_block.ne(IrType.i32(), right,
-                                              IrValue.const_int(0)).result
-            self.current_block.set_terminator("jmp", operands=[merge_block.label])
+            rhs_end = self.current_block
+            phi_type = self._common_value_type(left.type, right.type)
+            right = self._coerce_value_type(right, phi_type)
+            rhs_end = self.current_block
+            rhs_end.set_terminator("jmp", operands=[merge_block.label])
 
             self.current_block = short_block
-            # The short-circuit value: "and" skips the right side when
-            # the left is false (so the result is false), "or" skips it
-            # when the left is true (so the result is true).
-            short_value = IrValue.const_bool(not is_and)
-            self.current_block.set_terminator("jmp", operands=[merge_block.label])
+            short_value = self._coerce_value_type(left, phi_type)
+            short_end = self.current_block
+            short_end.set_terminator("jmp", operands=[merge_block.label])
 
             self.current_block = merge_block
-            result = self.current_block.phi(IrType.i1(), [
-                (short_value, short_block.label),
-                (right, rhs_block.label),
+            result = self.current_block.phi(phi_type, [
+                (short_value, short_end.label),
+                (right, rhs_end.label),
             ]).result
+            left = result
+            cond = self._truthy_value(result)
         return result
 
     def _compile_ifexp(self, node: ast.IfExp) -> IrValue:
         """
-        Compile a ternary if expression (x if cond else y).
-
-        Evaluates the condition, then selects between the two branches
-        using a phi node at the merge point.
+        Compile a ternary expression with the phi type of its branch values.
         """
         cond = self._compile_expr(node.test)
-        if cond.type.kind != 'i1':
-            cond = self.current_block.ne(IrType.i32(), cond, IrValue.const_int(0)).result
+        cond = self._truthy_value(cond)
         true_block = self.current_func.new_block()
         false_block = self.current_func.new_block()
         merge_block = self.current_func.new_block()
         self.current_block.set_terminator("br", operands=[cond, true_block.label, false_block.label])
+
         self.current_block = true_block
         true_val = self._compile_expr(node.body)
-        self.current_block.set_terminator("jmp", operands=[merge_block.label])
+        true_end = self.current_block
+
         self.current_block = false_block
         false_val = self._compile_expr(node.orelse)
-        self.current_block.set_terminator("jmp", operands=[merge_block.label])
+        false_end = self.current_block
+
+        phi_type = self._common_value_type(true_val.type, false_val.type)
+
+        self.current_block = true_end
+        true_val = self._coerce_value_type(true_val, phi_type)
+        true_end = self.current_block
+        true_end.set_terminator("jmp", operands=[merge_block.label])
+
+        self.current_block = false_end
+        false_val = self._coerce_value_type(false_val, phi_type)
+        false_end = self.current_block
+        false_end.set_terminator("jmp", operands=[merge_block.label])
+
         self.current_block = merge_block
-        result = self.current_block.phi(IrType.i32(), [
-            (true_val, true_block.label),
-            (false_val, false_block.label)
+        return self.current_block.phi(phi_type, [
+            (true_val, true_end.label),
+            (false_val, false_end.label)
         ]).result
-        return result
 
     def _compile_call(self, node: ast.Call) -> IrValue:
         """

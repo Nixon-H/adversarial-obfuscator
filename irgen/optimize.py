@@ -85,12 +85,39 @@ def _constant_folding(module: IrModule) -> IrModule:
     return module
 
 
+_INT_WIDTHS = {"i1": 1, "i8": 8, "i16": 16, "i32": 32, "i64": 64}
+
+
+def _width_of(type_) -> int:
+    return _INT_WIDTHS.get(getattr(type_, "kind", None), 0)
+
+
+def _unsigned(value: int, bits: int) -> int:
+    return int(value) & ((1 << bits) - 1)
+
+
+def _signed(value: int, bits: int) -> int:
+    value = _unsigned(value, bits)
+    sign = 1 << (bits - 1)
+    return value - (1 << bits) if value & sign else value
+
+
+def _canonical_int(value: int, type_) -> int:
+    """Canonical signed fixed-width value for this IR integer type."""
+    bits = _width_of(type_)
+    if not bits:
+        return int(value)
+    return _signed(value, bits)
+
+
 def _fold_instruction(inst: IrInstruction) -> Optional[IrValue]:
     """
-    Attempt to fold a constant instruction.
+    Fold a constant instruction using the IR's fixed-width semantics.
 
-    Evaluates the operation at compile time. Returns a constant
-    IrValue if successful, None otherwise.
+    Python integers are unbounded; IR arithmetic is not.  Arithmetic and
+    bitwise folds are masked to the result width, signed comparisons are
+    performed on canonical two's-complement operands, and conversion folds
+    use their source/destination widths rather than a hard-coded bit mask.
     """
     try:
         vals = []
@@ -99,64 +126,72 @@ def _fold_instruction(inst: IrInstruction) -> Optional[IrValue]:
                 if op.name.lstrip('-').isdigit():
                     vals.append(int(op.name))
                 elif op.name in ('true', '1'):
-                    vals.append(True)
+                    vals.append(1)
                 elif op.name in ('false', '0'):
-                    vals.append(False)
+                    vals.append(0)
                 else:
                     return None
             elif isinstance(op, IrType):
                 continue
             else:
                 try:
-                    int(str(op))
                     vals.append(int(str(op)))
                 except (ValueError, TypeError):
                     return None
 
-        result = None
         type_ = inst.result_type
+        bits = _width_of(type_)
+        if not bits:
+            return None
+        svals = [_signed(v, bits) for v in vals]
+        result = None
 
         if inst.opcode == 'add' and len(vals) >= 2:
-            result = vals[0] + vals[1]
+            result = svals[0] + svals[1]
         elif inst.opcode == 'sub' and len(vals) >= 2:
-            result = vals[0] - vals[1]
+            result = svals[0] - svals[1]
         elif inst.opcode == 'mul' and len(vals) >= 2:
-            result = vals[0] * vals[1]
-        elif inst.opcode == 'div' and len(vals) >= 2 and vals[1] != 0:
-            result = vals[0] // vals[1]
-        elif inst.opcode == 'mod' and len(vals) >= 2 and vals[1] != 0:
-            result = vals[0] % vals[1]
+            result = svals[0] * svals[1]
+        elif inst.opcode == 'div' and len(vals) >= 2 and svals[1] != 0:
+            result = svals[0] // svals[1]
+        elif inst.opcode == 'mod' and len(vals) >= 2 and svals[1] != 0:
+            result = svals[0] % svals[1]
         elif inst.opcode == 'and' and len(vals) >= 2:
-            result = vals[0] & vals[1]
+            result = _unsigned(vals[0], bits) & _unsigned(vals[1], bits)
         elif inst.opcode == 'or' and len(vals) >= 2:
-            result = vals[0] | vals[1]
+            result = _unsigned(vals[0], bits) | _unsigned(vals[1], bits)
         elif inst.opcode == 'xor' and len(vals) >= 2:
-            result = vals[0] ^ vals[1]
+            result = _unsigned(vals[0], bits) ^ _unsigned(vals[1], bits)
         elif inst.opcode == 'shl' and len(vals) >= 2:
-            result = vals[0] << vals[1]
+            result = _unsigned(vals[0], bits) << (vals[1] & 63)
         elif inst.opcode == 'shr' and len(vals) >= 2:
-            result = vals[0] >> vals[1]
+            result = svals[0] >> (vals[1] & 63)
         elif inst.opcode == 'eq' and len(vals) >= 2:
-            result = 1 if vals[0] == vals[1] else 0
+            result = int(svals[0] == svals[1])
         elif inst.opcode == 'ne' and len(vals) >= 2:
-            result = 1 if vals[0] != vals[1] else 0
+            result = int(svals[0] != svals[1])
         elif inst.opcode == 'lt' and len(vals) >= 2:
-            result = 1 if vals[0] < vals[1] else 0
+            result = int(svals[0] < svals[1])
         elif inst.opcode == 'le' and len(vals) >= 2:
-            result = 1 if vals[0] <= vals[1] else 0
+            result = int(svals[0] <= svals[1])
         elif inst.opcode == 'gt' and len(vals) >= 2:
-            result = 1 if vals[0] > vals[1] else 0
+            result = int(svals[0] > svals[1])
         elif inst.opcode == 'ge' and len(vals) >= 2:
-            result = 1 if vals[0] >= vals[1] else 0
+            result = int(svals[0] >= svals[1])
         elif inst.opcode == 'zext' and len(vals) >= 1:
-            result = vals[0]
+            # After the factory correction, ``ty`` is the source type and
+            # ``result_type`` the destination.  Older hand-built IR may use
+            # the reverse order; only fold when a source width is available.
+            src_bits = _width_of(inst.ty)
+            result = _unsigned(vals[0], src_bits) if src_bits else vals[0]
         elif inst.opcode == 'trunc' and len(vals) >= 1:
-            result = vals[0] & 1
+            result = _unsigned(vals[0], bits)
 
         if result is not None:
-            if type_ and type_.kind == 'i1':
-                return IrValue.const_bool(bool(result))
-            return IrValue.const_int(int(result))
+            folded = _canonical_int(result, type_)
+            if type_.kind == 'i1':
+                return IrValue.const_bool(bool(folded))
+            return IrValue.const_int(folded)
     except (ValueError, TypeError, ZeroDivisionError):
         pass
     return None
@@ -333,10 +368,13 @@ def _store_to_load_forwarding(module: IrModule) -> IrModule:
                                     _replace_all_uses(block, func, next_inst.result, store_val)
                                     block.instructions.pop(j)
                                     continue
-                            elif next_inst.opcode == 'store':
-                                next_store_val = next_inst.operands[1] if len(next_inst.operands) > 1 else None
-                                if next_store_val is not None and next_store_val.id == store_ptr.id:
-                                    break
+                            elif next_inst.opcode in ('store', 'call'):
+                                # Without alias information every intervening
+                                # store or call may write through this pointer.
+                                # Stopping only at a syntactically identical
+                                # pointer forwarded stale values through GEP
+                                # aliases and callee memory writes.
+                                break
                             j += 1
                 i += 1
     return module

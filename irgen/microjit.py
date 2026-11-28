@@ -155,22 +155,24 @@ def _lea_rsp_from_rbp(frame_size: int) -> bytes:
 
 
 def _store_register_at_rbp(reg: int, offset: int) -> bytes:
+    # mod=10b/rm=101b is [rbp + disp32].  mod=00b/rm=101b would be
+    # [rip + disp32], silently storing nowhere near the frame slot.
     rex = 0x48 | (0x04 if reg >= 8 else 0)
-    modrm = ((reg & 7) << 3) | 0x05
-    return bytes((rex, 0x89, modrm)) + struct.pack("<I", offset)
+    modrm = 0x80 | ((reg & 7) << 3) | 0x05
+    return bytes((rex, 0x89, modrm)) + struct.pack("<i", offset)
 
 
 def _load_register_from_rbp(reg: int, offset: int) -> bytes:
     rex = 0x48 | (0x04 if reg >= 8 else 0)
-    modrm = ((reg & 7) << 3) | 0x05
-    return bytes((rex, 0x8B, modrm)) + struct.pack("<I", offset)
+    modrm = 0x80 | ((reg & 7) << 3) | 0x05
+    return bytes((rex, 0x8B, modrm)) + struct.pack("<i", offset)
 
 
 # ---- x86_64 instruction parser helpers ----
 
 def _rex_prefix(b: int) -> bool:
-    """Check if a byte is a REX prefix (0x40-0x4F, excluding 0x40)."""
-    return (b & 0xF0) == 0x40 and b != 0x40
+    """Check if a byte is a REX prefix (0x40-0x4F in 64-bit mode)."""
+    return (b & 0xF0) == 0x40
 
 
 def _is_vex(code: bytes, pos: int) -> bool:
@@ -267,169 +269,328 @@ def _adjusts_stack_pointer(code: bytes, offset: int, length: int) -> bool:
     return reg_field in (REG_RSP, REG_RBP)
 
 
-def _instruction_length(code: bytes, offset: int) -> int:
-    """
-    Estimate length of an x86_64 instruction at the given offset.
+_LEGACY_PREFIXES = {
+    0x66, 0x67, 0xF0, 0xF2, 0xF3,
+    0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65,
+}
 
-    Handles REX prefixes, legacy prefixes, opcode bytes, ModRM,
-    SIB, displacement, and immediate fields. Returns 0 for unknown
-    instructions.
+
+def _build_one_byte_modrm_table() -> set[int]:
+    """Opcodes in the primary x86-64 map that have a ModRM byte."""
+    ops: set[int] = set()
+    # Integer ALU register/memory forms (the accumulator-immediate forms
+    # at +4/+5 do not have ModRM).
+    for base in (0x00, 0x08, 0x10, 0x18, 0x20, 0x28, 0x30, 0x38):
+        ops.update(base + i for i in range(4))
+    ops.update({
+        0x63, 0x69, 0x6B,
+        0x80, 0x81, 0x83,
+        0x84, 0x85, 0x86, 0x87,
+        0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E, 0x8F,
+        0xC0, 0xC1, 0xC6, 0xC7,
+        0xD0, 0xD1, 0xD2, 0xD3,
+        0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF,
+        0xF6, 0xF7, 0xFE, 0xFF,
+    })
+    return ops
+
+
+_ONE_BYTE_MODRM = _build_one_byte_modrm_table()
+
+# Valid no-ModRM primary-map instructions this decoder accepts.  Opcodes
+# that are invalid in 64-bit mode (pusha/popa, most segment pushes, BOUND,
+# LES/LDS aliases of VEX, INTO, etc.) are deliberately absent.
+_ONE_BYTE_NO_MODRM = (
+    set(range(0x50, 0x60))                       # push/pop r64
+    | set(range(0x70, 0x80))                     # Jcc rel8
+    | set(range(0x90, 0x98))                     # nop / xchg rAX,rAX
+    | set(range(0xA0, 0xB0))                     # moffs/string/test/imm8 ops
+    | set(range(0xB0, 0xC0))                     # mov r*,imm*
+    | set(range(0xE0, 0xEA))                     # loop/jrcxz/in/out/call/jmp
+    | {0x04, 0x05, 0x0C, 0x0D, 0x14, 0x15, 0x1C, 0x1D,
+       0x24, 0x25, 0x2C, 0x2D, 0x34, 0x35, 0x3C, 0x3D,
+       0x68, 0x6A, 0x98, 0x99, 0x9B, 0x9C, 0x9D, 0x9E, 0x9F,
+       0xC2, 0xC3, 0xC8, 0xC9, 0xCA, 0xCB, 0xCC, 0xCD, 0xCF,
+       0xD7, 0xEB, 0xF1, 0xF4, 0xF5,
+       0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD}
+)
+
+_TWO_BYTE_NO_MODRM = (
+    {0x05, 0x07, 0x0B, 0x31, 0x32, 0x33, 0x34, 0x35, 0x37,
+     0x77, 0xA0, 0xA1, 0xA2, 0xA8, 0xA9}
+    | set(range(0x80, 0x90))                     # Jcc rel16/rel32
+    | set(range(0xC8, 0xD0))                     # bswap r32/r64
+)
+
+
+def _two_byte_has_modrm(op: int) -> bool:
+    """Conservative ModRM table for the 0F map."""
+    if op in {
+        0x00, 0x01, 0x02, 0x03, 0x0D,
+        0xA3, 0xA4, 0xA5, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF,
+        0xB0, 0xB1, 0xB3, 0xB6, 0xB7, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF,
+        0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7,
+    }:
+        return True
+    return (
+        0x10 <= op <= 0x24
+        or op == 0x26
+        or 0x28 <= op <= 0x2F
+        or 0x40 <= op <= 0x56
+        or 0x58 <= op <= 0x6F
+        or 0x70 <= op <= 0x76
+        or 0x78 <= op <= 0x7F
+        or 0x90 <= op <= 0x9F
+        or 0xD0 <= op <= 0xFF
+    )
+
+
+def _decode_x86_instruction(code: bytes, offset: int) -> dict | None:
+    """Decode one x86-64 instruction boundary conservatively.
+
+    The decoder is deliberately small, but it is exact for every instruction
+    it accepts: legacy/REX prefixes, primary/0F/0F38/0F3A opcode maps,
+    ModRM, SIB, displacement, immediates, and the 15-byte architectural
+    limit.  Unsupported or invalid encodings return ``None`` rather than a
+    guessed length, so callers fail closed instead of splitting instructions.
     """
-    if offset >= len(code):
-        return 0
-    pos = offset
-    consumed = 0
+    if offset < 0 or offset >= len(code):
+        return None
+
+    start = pos = offset
     rex = 0
-    prefixes = 0
+    rex_pos = -1
+    last_legacy_pos = -1
+    operand_16 = False
+    address_32 = False
+
     while pos < len(code):
-        if _is_vex(code, pos):
-            # The hand decoder does not model VEX/EVEX opcode maps; returning
-            # 0 lets callers refuse the whole block instead of guessing a
-            # length and splitting real instructions.
-            return 0
         b = code[pos]
-        if _rex_prefix(b):
+        if b in _LEGACY_PREFIXES:
+            if b == 0x66:
+                operand_16 = True
+            elif b == 0x67:
+                address_32 = True
+            last_legacy_pos = pos
+            pos += 1
+        elif _rex_prefix(b):
             rex = b
+            rex_pos = pos
             pos += 1
-            consumed += 1
-        elif b in (0x66, 0x67, 0xF0, 0xF2, 0xF3, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65):
-            prefixes += 1
-            pos += 1
-            consumed += 1
         else:
             break
+        if pos - start > 15:
+            return None
+
+    # In valid x86-64 a REX prefix must be the byte immediately before the
+    # opcode.  A legacy prefix after a REX makes that REX inert.
+    if rex_pos >= 0 and last_legacy_pos > rex_pos:
+        rex = 0
+
     if pos >= len(code):
-        return 0
-    opcode = code[pos]
-    opcode_len = 1
+        return None
+    opcode_pos = pos
+    first = code[pos]
+
+    # In 64-bit mode these bytes are VEX/EVEX prefixes or invalid opcodes;
+    # this hand decoder does not model either opcode space.
+    if first in (0x62, 0xC4, 0xC5):
+        return None
+
     pos += 1
-    consumed += 1
-    if opcode == 0x0F:
-        if pos < len(code):
-            opcode = (opcode << 8) | code[pos]
+    map_id = 0
+    opcode = first
+    if first == 0x0F:
+        if pos >= len(code):
+            return None
+        opcode = code[pos]
+        pos += 1
+        map_id = 0x0F
+        if opcode in (0x38, 0x3A):
+            if pos >= len(code):
+                return None
+            map_id = 0x0F00 | opcode
+            opcode = code[pos]
             pos += 1
-            consumed += 1
-            opcode_len = 2
-        else:
-            return 0
+
     has_modrm = False
-    if opcode <= 0xFF:
-        first = opcode if opcode_len == 1 else (opcode >> 8)
-        second = opcode & 0xFF if opcode_len == 2 else 0
-        if opcode_len == 1:
-            if 0x00 <= first <= 0x3F:
-                has_modrm = True
-            elif 0x50 <= first <= 0x5F:
-                has_modrm = False
-            elif 0x70 <= first <= 0x7F:
-                has_modrm = False
-            elif 0x88 <= first <= 0x8B:
-                has_modrm = True
-            elif 0x8D == first:
-                has_modrm = True
-            elif 0xA0 <= first <= 0xA3:
-                has_modrm = False
-            elif 0xA8 <= first <= 0xA9:
-                has_modrm = False
-            elif 0xB0 <= first <= 0xBF:
-                has_modrm = False
-            elif 0xC0 <= first <= 0xC1:
-                has_modrm = True
-            elif 0xC3 == first or 0xC9 == first or 0xCB == first or 0xCF == first:
-                has_modrm = False
-            elif 0xD0 <= first <= 0xD3:
-                has_modrm = True
-            elif 0xE8 <= first <= 0xEB:
-                has_modrm = False
-            elif 0xFE <= first <= 0xFF:
-                has_modrm = True
-            else:
-                has_modrm = False
+    imm_kind: str | None = None
+    rex_w = bool(rex & 0x08)
+    zsize = 2 if operand_16 else 4
+
+    if map_id == 0:
+        if opcode in _ONE_BYTE_MODRM:
+            has_modrm = True
+            if opcode == 0x69:
+                imm_kind = "immz"
+            elif opcode in (0x6B, 0x80, 0x83, 0xC0, 0xC1, 0xC6):
+                imm_kind = "imm8"
+            elif opcode in (0x81, 0xC7):
+                imm_kind = "immz"
+            elif opcode == 0xF6:
+                imm_kind = "group8"
+            elif opcode == 0xF7:
+                imm_kind = "groupz"
+        elif opcode not in _ONE_BYTE_NO_MODRM:
+            return None
+
+        if opcode in (0x04, 0x0C, 0x14, 0x1C, 0x24, 0x2C, 0x34, 0x3C, 0xA8):
+            imm_kind = "imm8"
+        elif opcode in (0x05, 0x0D, 0x15, 0x1D, 0x25, 0x2D, 0x35, 0x3D,
+                        0x68, 0xA9, 0xE8, 0xE9):
+            imm_kind = "immz"
+        elif opcode == 0x6A or 0x70 <= opcode <= 0x7F or 0xE0 <= opcode <= 0xE7 \
+                or opcode in (0xEB, 0xCD):
+            imm_kind = "imm8"
+        elif 0xB0 <= opcode <= 0xB7:
+            imm_kind = "imm8"
+        elif 0xB8 <= opcode <= 0xBF:
+            imm_kind = "immv"
+        elif opcode in (0xC2, 0xCA):
+            imm_kind = "imm16"
+        elif opcode == 0xC8:
+            imm_kind = "imm16plus8"
+        elif 0xA0 <= opcode <= 0xA3:
+            imm_kind = "moffs"
+    elif map_id == 0x0F:
+        if opcode in _TWO_BYTE_NO_MODRM:
+            if 0x80 <= opcode <= 0x8F:
+                imm_kind = "immz"
+        elif _two_byte_has_modrm(opcode):
+            has_modrm = True
+            if opcode in (0x70, 0x71, 0x72, 0x73, 0xA4, 0xAC, 0xBA,
+                          0xC2, 0xC4, 0xC5, 0xC6):
+                imm_kind = "imm8"
         else:
-            if 0x00 <= second <= 0x7F:
-                has_modrm = True
-            elif 0x80 <= second <= 0x8F:
-                has_modrm = True
-            elif 0x90 <= second <= 0x9F:
-                has_modrm = False
-            elif 0xA0 <= second <= 0xBF:
-                has_modrm = False
-            elif second == 0xC7:
-                has_modrm = True
-            else:
-                has_modrm = False
+            return None
+    elif map_id == 0x0F38:
+        # Every defined opcode in the 0F38 map uses ModRM and has no
+        # immediate.  Reserved encodings are still length-decodable; unknown
+        # opcode spaces (VEX/EVEX) are rejected above.
+        has_modrm = True
+    elif map_id == 0x0F3A:
+        # Defined 0F3A opcodes use ModRM and end with an imm8.
+        has_modrm = True
+        imm_kind = "imm8"
+    else:
+        return None
+
+    modrm_pos = -1
+    sib_pos = -1
+    disp_offset = -1
+    disp_size = 0
+    modrm = None
+    sib = None
+    modrm_reg = None
+
     if has_modrm:
         if pos >= len(code):
-            return 0
+            return None
+        modrm_pos = pos
         modrm = code[pos]
-        mod_bits = modrm >> 6
-        rm = modrm & 0x7
+        modrm_reg = (modrm >> 3) & 7
         pos += 1
-        consumed += 1
-        has_sib = (mod_bits != 3 and rm == 4)
-        if has_sib:
+        mod_bits = modrm >> 6
+        rm = modrm & 7
+        if mod_bits != 3 and rm == 4:
             if pos >= len(code):
-                return 0
+                return None
+            sib_pos = pos
             sib = code[pos]
             pos += 1
-            consumed += 1
-            base = sib & 0x7
-        disp_size = 0
         if mod_bits == 1:
             disp_size = 1
         elif mod_bits == 2:
             disp_size = 4
         elif mod_bits == 0 and rm == 5:
             disp_size = 4
-        elif has_sib and mod_bits == 0 and base == 5:
+        elif mod_bits == 0 and rm == 4 and sib is not None and (sib & 7) == 5:
             disp_size = 4
-        if disp_size > 0:
+        if disp_size:
             if pos + disp_size > len(code):
-                return 0
+                return None
+            disp_offset = pos
             pos += disp_size
-            consumed += disp_size
-    imm_size = 0
-    if opcode_len == 1:
-        first = opcode
-        if 0x04 <= first <= 0x05 and rex == 0:
-            imm_size = 1
-        elif first == 0x0F:
-            pass
-        elif first in (0xA8, 0xA9):
-            imm_size = 1 if first == 0xA8 else 4
-        elif 0xB0 <= first <= 0xBF:
-            imm_size = 8 if rex & 0x08 else (4 if first >= 0xB8 else 1)
-        elif first in (0xE8, 0xE9):
-            imm_size = 4
-        elif first in (0xEB,):
-            imm_size = 1
-        elif first in (0xC0, 0xC1):
-            imm_size = 1
-        elif first in (0xC2, 0xCA):
-            imm_size = 2
-        elif first == 0xCD:
-            imm_size = 1
-        elif first == 0x80:
-            imm_size = 1
-        elif 0xD0 <= first <= 0xD3:
-            imm_size = 0
-        elif first == 0xF6:
-            imm_size = 1
-    else:
-        second = opcode & 0xFF
-        if second in (0x80, 0x83, 0xBA):
-            imm_size = 1 if second == 0x83 else (4 if second == 0xBA else 1)
-        elif second in (0xC7,):
-            imm_size = 4
-        elif second in (0xA4, 0xAC):
-            imm_size = 1
-    if imm_size > 0:
-        if pos + imm_size > len(code):
-            return 0
-        pos += imm_size
-        consumed += imm_size
-    return consumed
 
+        # Validate opcode-extension fields whose spare encodings are not
+        # instructions at all.  Otherwise random data can look decodable and
+        # later rewriters would slice it at invented boundaries.
+        if map_id == 0:
+            if opcode in (0x8F, 0xC6, 0xC7) and modrm_reg != 0:
+                return None
+            if opcode == 0xFE and modrm_reg not in (0, 1):
+                return None
+            if opcode == 0xFF and modrm_reg == 7:
+                return None
+        elif map_id == 0x0F:
+            if opcode == 0xBA and modrm_reg < 4:
+                return None
+            if opcode in (0x71, 0x72, 0x73) and modrm_reg in (0, 1):
+                return None
+            if opcode == 0xC3 and mod_bits == 3:  # movnti is memory-only
+                return None
+
+    imm_size = 0
+    if imm_kind == "imm8":
+        imm_size = 1
+    elif imm_kind == "immz":
+        imm_size = zsize
+    elif imm_kind == "immv":
+        imm_size = 8 if rex_w else zsize
+    elif imm_kind == "imm16":
+        imm_size = 2
+    elif imm_kind == "imm16plus8":
+        imm_size = 3
+    elif imm_kind == "moffs":
+        imm_size = 4 if address_32 else 8
+    elif imm_kind == "group8":
+        imm_size = 1 if modrm_reg in (0, 1) else 0
+    elif imm_kind == "groupz":
+        imm_size = zsize if modrm_reg in (0, 1) else 0
+
+    imm_offset = -1
+    if imm_size:
+        if pos + imm_size > len(code):
+            return None
+        imm_offset = pos
+        pos += imm_size
+
+    length = pos - start
+    if length <= 0 or length > 15:
+        return None
+    return {
+        "length": length,
+        "start": start,
+        "prefix_end": opcode_pos,
+        "opcode_pos": opcode_pos,
+        "map": map_id,
+        "opcode": opcode,
+        "rex": rex,
+        "rex_pos": rex_pos,
+        "operand_16": operand_16,
+        "address_32": address_32,
+        "has_modrm": has_modrm,
+        "modrm_pos": modrm_pos,
+        "modrm": modrm,
+        "modrm_reg": modrm_reg,
+        "sib_pos": sib_pos,
+        "sib": sib,
+        "disp_offset": disp_offset,
+        "disp_size": disp_size,
+        "imm_offset": imm_offset,
+        "imm_size": imm_size,
+    }
+
+
+def _instruction_length(code: bytes, offset: int) -> int:
+    """
+    Return the exact length of a supported x86-64 instruction at ``offset``.
+
+    Unknown, invalid, truncated, VEX, or EVEX encodings return 0.  Callers
+    must treat 0 as a refusal boundary, never as a one-byte instruction.
+    """
+    decoded = _decode_x86_instruction(code, offset)
+    return decoded["length"] if decoded is not None else 0
 
 def _instruction_boundaries(code: bytes) -> list[int]:
     """Byte offsets where an instruction starts (plus the end of the block)."""
@@ -449,62 +610,62 @@ def _instruction_boundaries(code: bytes) -> list[int]:
 
 def _get_instruction_regs(code: bytes, offset: int) -> set[int]:
     """
-    Extract register numbers referenced at a given instruction offset.
+    Extract x86 register numbers referenced by the instruction at ``offset``.
 
-    Returns a set of register numbers (0-15) used as sources,
-    destinations, or addressing components.
+    This is an over-approximation for dependency analysis: every explicit
+    register operand and addressing base/index is included.  RIP-relative
+    addressing and absent SIB indices are not registers.  Returns an empty
+    set for undecodable instructions.
     """
-    if offset >= len(code):
-        return set()
-    pos = offset
-    rex = 0
-    while pos < len(code):
-        b = code[pos]
-        if _rex_prefix(b):
-            rex = b
-            pos += 1
-        elif b in (0x66, 0x67, 0xF0, 0xF2, 0xF3, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65):
-            pos += 1
-        else:
-            break
-    if pos >= len(code):
+    meta = _decode_x86_instruction(code, offset)
+    if meta is None:
         return set()
     regs: set[int] = set()
-    opcode = code[pos]
-    pos += 1
-    if opcode == 0x0F and pos < len(code):
-        opcode = (opcode << 8) | code[pos]
-        pos += 1
-    rex_b = (rex & 0x01) != 0
-    rex_r = (rex & 0x04) != 0
-    opcode_len = 2 if opcode > 0xFF else 1
-    first = opcode if opcode_len == 1 else (opcode >> 8)
-    if opcode_len == 1 and 0x50 <= first <= 0x5F:
-        reg = (first - 0x50) | (1 if rex_b else 0)
-        regs.add(reg)
+    rex = meta["rex"]
+    rex_b = 8 if rex & 0x01 else 0
+    rex_x = 8 if rex & 0x02 else 0
+    rex_r = 8 if rex & 0x04 else 0
+    opcode = meta["opcode"]
+
+    if meta["map"] == 0:
+        if 0x50 <= opcode <= 0x57:
+            regs.add((opcode - 0x50) + rex_b)
+            return regs
+        if 0x58 <= opcode <= 0x5F:
+            regs.add((opcode - 0x58) + rex_b)
+            return regs
+        if 0xB0 <= opcode <= 0xB7:
+            regs.add((opcode - 0xB0) + rex_b)
+            return regs
+        if 0xB8 <= opcode <= 0xBF:
+            regs.add((opcode - 0xB8) + rex_b)
+            return regs
+    elif meta["map"] == 0x0F and 0xC8 <= opcode <= 0xCF:
+        regs.add((opcode - 0xC8) + rex_b)
         return regs
-    if opcode_len == 1 and 0xB0 <= first <= 0xBF:
-        base = 0xB8 if first >= 0xB8 else 0xB0
-        reg = (first - base) | (1 if rex_b else 0)
-        regs.add(reg)
+
+    if not meta["has_modrm"]:
         return regs
-    has_modrm = False
-    if opcode_len == 1:
-        if 0x00 <= first <= 0x3F or 0x88 <= first <= 0x8B or first == 0x8D or 0xC0 <= first <= 0xC1 or 0xD0 <= first <= 0xD3 or first in (0xFE, 0xFF):
-            has_modrm = True
-    else:
-        if 0x00 <= (opcode & 0xFF) <= 0x7F or 0x80 <= (opcode & 0xFF) <= 0x8F or (opcode & 0xFF) == 0xC7:
-            has_modrm = True
-    if has_modrm and pos < len(code):
-        modrm = code[pos]
-        mod_bits = modrm >> 6
-        reg = ((modrm >> 3) & 0x07) | (4 if rex_r else 0)
-        rm = (modrm & 0x07) | (8 if rex_b else 0)
-        regs.add(reg)
-        if mod_bits == 3:
-            regs.add(rm)
-        else:
-            regs.add(rm)
+    modrm = meta["modrm"]
+    mod_bits = modrm >> 6
+    rm_low = modrm & 7
+    # The ModRM reg field is sometimes an opcode extension rather than a
+    # register.  Including it here is a safe over-approximation for dataflow
+    # grouping; the rewrite path uses a stricter predicate before editing it.
+    regs.add(((modrm >> 3) & 7) + rex_r)
+
+    if mod_bits == 3:
+        regs.add(rm_low + rex_b)
+    elif rm_low == 4 and meta["sib"] is not None:
+        sib = meta["sib"]
+        base_low = sib & 7
+        index_low = (sib >> 3) & 7
+        if not (mod_bits == 0 and base_low == 5):
+            regs.add(base_low + rex_b)
+        if index_low != 4 or rex_x:
+            regs.add(index_low + rex_x)
+    elif not (mod_bits == 0 and rm_low == 5):
+        regs.add(rm_low + rex_b)
     return regs
 
 
@@ -654,6 +815,8 @@ class MicroJITEngine:
             if start > prev_end:
                 result.extend(code[prev_end:start])
             block = code[start:end]
+            if not _fully_decodable(block):
+                return code
             boundaries = _instruction_boundaries(block)
             instructions = []
             for left, right in zip(boundaries, boundaries[1:]):
@@ -765,129 +928,158 @@ class MicroJITEngine:
             pos += instr_len
         return bytes(result)
 
+    @staticmethod
+    def _modrm_reg_is_register(meta: dict) -> bool:
+        """True when the ModRM reg field is a register, not an opcode extension."""
+        opcode = meta["opcode"]
+        if meta["map"] == 0:
+            return opcode not in {
+                0x80, 0x81, 0x83, 0x8F,
+                0xC0, 0xC1, 0xC6, 0xC7,
+                0xD0, 0xD1, 0xD2, 0xD3,
+                0xF6, 0xF7, 0xFE, 0xFF,
+            }
+        if meta["map"] == 0x0F:
+            return opcode not in {0x00, 0x01, 0x71, 0x72, 0x73, 0xAE, 0xBA, 0xC7}
+        return True
+
     def _swap_regs_in_instruction(self, code: bytearray, offset: int, length: int,
                                   reg_map: dict) -> None:
-        """Apply register remapping within a single instruction."""
-        end = min(offset + length, len(code))
-        pos = offset
-        rex_idx = -1
-        rex = 0
-        while pos < end:
-            b = code[pos]
-            if _rex_prefix(b):
-                rex_idx = pos
-                rex = b
-                pos += 1
-            elif b in (0x66, 0x67, 0xF0, 0xF2, 0xF3, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65):
-                pos += 1
-            else:
-                break
-        if pos >= end:
+        """Apply register remapping within a single decoded instruction."""
+        del length  # The decoder is authoritative; a mismatch must not truncate parsing.
+        meta = _decode_x86_instruction(code, offset)
+        if meta is None or meta["start"] != offset:
             return
-        opcode = code[pos]
-        opcode_pos = pos
-        pos += 1
-        is_two_byte = False
-        if opcode == 0x0F and pos < end:
-            opcode = (opcode << 8) | code[pos]
-            pos += 1
-            is_two_byte = True
-        opcode_len = 2 if is_two_byte else 1
-        first = opcode if opcode_len == 1 else (opcode >> 8)
-        rex_b = (rex & 0x01) != 0
-        rex_r = (rex & 0x04) != 0
+        rex_idx = meta["rex_pos"]
+        rex = meta["rex"]
+        rex_b = 8 if rex & 0x01 else 0
+        rex_x = 8 if rex & 0x02 else 0
+        rex_r = 8 if rex & 0x04 else 0
+        opcode = meta["opcode"]
+        opcode_pos = meta["opcode_pos"]
 
-        # Handle push/pop opcodes (0x50-0x5F)
-        if opcode_len == 1 and 0x50 <= first <= 0x5F:
-            reg = (first - 0x50) | (1 if rex_b else 0)
-            if reg in reg_map:
-                new_reg = reg_map[reg]
-                new_rex_b = (new_reg & 0x08) != 0
-                new_opcode = 0x50 + (new_reg & 0x07)
-                code[opcode_pos] = new_opcode
-                if rex_idx >= 0:
-                    new_rex = 0x40
-                    if rex & 0x08:
-                        new_rex |= 0x08
-                    if new_rex_b:
-                        new_rex |= 0x01
-                    code[rex_idx] = new_rex
-                elif new_rex_b:
-                    # No REX slot to extend: leave the instruction alone
-                    # rather than inserting a byte mid-stream.
-                    code[opcode_pos] = first
-            return
-
-        # Handle mov reg,imm opcodes (0xB0-0xBF)
-        if opcode_len == 1 and 0xB0 <= first <= 0xBF:
-            reg = (first - 0xB0) | (1 if rex_b else 0)
-            if reg in reg_map:
-                new_reg = reg_map[reg]
-                new_rex_b = (new_reg & 0x08) != 0
-                new_opcode = 0xB0 + (new_reg & 0x07)
-                code[opcode_pos] = new_opcode
-                if rex_idx >= 0:
-                    new_rex = 0x40
-                    if rex & 0x08:
-                        new_rex |= 0x08
-                    if new_rex_b:
-                        new_rex |= 0x01
-                    code[rex_idx] = new_rex
-                elif new_rex_b:
-                    code[opcode_pos] = first
-            return
-
-        # Handle instructions with ModRM
-        has_modrm = False
-        if opcode_len == 1:
-            if 0x00 <= first <= 0x3F or 0x88 <= first <= 0x8B or first == 0x8D or 0xC0 <= first <= 0xC1 or 0xD0 <= first <= 0xD3 or first in (0xFE, 0xFF):
-                has_modrm = True
-        else:
-            second = opcode & 0xFF
-            if 0x00 <= second <= 0x7F or 0x80 <= second <= 0x8F or second == 0xC7:
-                has_modrm = True
-        if has_modrm and pos < end:
-            modrm_pos = pos
-            modrm = code[pos]
-            mod_bits = modrm >> 6
-            rm_low = modrm & 0x07
-            if mod_bits != 3 and (rm_low == 4 or (mod_bits == 0 and rm_low == 5)):
-                # SIB byte or RIP-relative displacement: the rm field is not
-                # a register, and the real base/index live in the SIB byte.
-                # Rewriting rm here would corrupt the addressing mode.
+        def rewrite_opcode_register(base: int, low_reg: int) -> None:
+            old_reg = low_reg + rex_b
+            if old_reg not in reg_map:
                 return
-            old_reg = ((modrm >> 3) & 0x07) | (4 if rex_r else 0)
-            old_rm = rm_low | (8 if rex_b else 0)
-            new_reg = reg_map.get(old_reg, old_reg)
-            new_rm = reg_map.get(old_rm, old_rm)
-            if new_reg == old_reg and new_rm == old_rm:
+            new_reg = reg_map[old_reg]
+            if new_reg < 0 or new_reg > 15:
                 return
-            new_rex_r = (new_reg & 0x08) != 0
-            new_rex_b = (new_rm & 0x08) != 0
-            if rex_idx < 0 and (new_rex_r or new_rex_b):
-                # Adding a REX prefix would shift every following byte while
-                # the caller still walks the original instruction lengths.
+            if new_reg >= 8 and rex_idx < 0:
                 return
-            new_modrm = (mod_bits << 6) | ((new_reg & 0x07) << 3) | (new_rm & 0x07)
-            code[modrm_pos] = new_modrm
+            code[opcode_pos] = base + (new_reg & 7)
             if rex_idx >= 0:
-                new_rex = 0x40
-                if rex & 0x08:
-                    new_rex |= 0x08
-                if new_rex_r:
-                    new_rex |= 0x04
-                if new_rex_b:
+                new_rex = 0x40 | (rex & 0x0E)
+                if new_reg >= 8:
                     new_rex |= 0x01
+                else:
+                    new_rex &= ~0x01
                 code[rex_idx] = new_rex
+
+        # push r64 and pop r64 are separate opcode bases; treating both as
+        # 0x50+rd turned POP into PUSH while decoding r8 as rcx.
+        if meta["map"] == 0 and 0x50 <= opcode <= 0x57:
+            rewrite_opcode_register(0x50, opcode - 0x50)
+            return
+        if meta["map"] == 0 and 0x58 <= opcode <= 0x5F:
+            rewrite_opcode_register(0x58, opcode - 0x58)
+            return
+
+        # mov r8/r16/r32/r64,imm: B0+rd is imm8 and B8+rd is imm16/32/64.
+        if meta["map"] == 0 and 0xB0 <= opcode <= 0xB7:
+            rewrite_opcode_register(0xB0, opcode - 0xB0)
+            return
+        if meta["map"] == 0 and 0xB8 <= opcode <= 0xBF:
+            rewrite_opcode_register(0xB8, opcode - 0xB8)
+            return
+
+        if not meta["has_modrm"]:
+            return
+
+        modrm_pos = meta["modrm_pos"]
+        modrm = meta["modrm"]
+        mod_bits = modrm >> 6
+        rm_low = modrm & 7
+        reg_low = (modrm >> 3) & 7
+        edit_reg = self._modrm_reg_is_register(meta)
+        old_reg = reg_low + rex_r
+        new_reg = reg_map.get(old_reg, old_reg) if edit_reg else old_reg
+
+        new_rm_low = rm_low
+        new_rm_high = rex_b
+        rewrite_rm = False
+        if mod_bits == 3:
+            old_rm = rm_low + rex_b
+            new_rm = reg_map.get(old_rm, old_rm)
+            new_rm_low = new_rm & 7
+            new_rm_high = 8 if new_rm >= 8 else 0
+            rewrite_rm = True
+        elif rm_low != 4 and not (mod_bits == 0 and rm_low == 5):
+            old_rm = rm_low + rex_b
+            new_rm = reg_map.get(old_rm, old_rm)
+            new_rm_low = new_rm & 7
+            new_rm_high = 8 if new_rm >= 8 else 0
+            rewrite_rm = True
+
+        sib_pos = meta["sib_pos"]
+        new_sib = meta["sib"]
+        new_x_high = rex_x
+        if mod_bits != 3 and rm_low == 4 and new_sib is not None:
+            scale = new_sib >> 6
+            index_low = (new_sib >> 3) & 7
+            base_low = new_sib & 7
+            new_index_low = index_low
+            new_base_low = base_low
+            if index_low != 4 or rex_x:
+                old_index = index_low + rex_x
+                new_index = reg_map.get(old_index, old_index)
+                new_index_low = new_index & 7
+                new_x_high = 8 if new_index >= 8 else 0
+            if not (mod_bits == 0 and base_low == 5):
+                old_base = base_low + rex_b
+                new_base = reg_map.get(old_base, old_base)
+                new_base_low = new_base & 7
+                new_rm_high = 8 if new_base >= 8 else 0
+            new_sib = (scale << 6) | (new_index_low << 3) | new_base_low
+            # The SIB byte carries base/index; rm stays 100b.
+            new_rm_low = 4
+            rewrite_rm = True
+
+        need_r = new_reg >= 8
+        need_b = bool(new_rm_high)
+        need_x = bool(new_x_high)
+        if rex_idx < 0 and (need_r or need_b or need_x):
+            # Inserting a REX byte would shift immediates and every following
+            # instruction.  Length-preserving rewrite cannot express it.
+            return
+
+        if edit_reg:
+            modrm = (mod_bits << 6) | ((new_reg & 7) << 3) | (modrm & 7)
+        if rewrite_rm:
+            modrm = (modrm & 0xF8) | new_rm_low
+        code[modrm_pos] = modrm
+        if sib_pos >= 0 and new_sib is not None:
+            code[sib_pos] = new_sib
+        if rex_idx >= 0:
+            new_rex = 0x40 | (rex & 0x08)
+            if need_r:
+                new_rex |= 0x04
+            if need_x:
+                new_rex |= 0x02
+            if need_b:
+                new_rex |= 0x01
+            code[rex_idx] = new_rex
 
     # ---- Stack offset alteration ----
 
     def alter_stack_offsets(self, code: bytes, offset_delta: int) -> bytes:
         """
-        Shift all RBP/RSP-relative stack offsets by `offset_delta`.
+        Shift RBP/RSP-relative displacement fields by ``offset_delta``.
 
-        Scans for ModRM bytes with RBP or RSP base and adjusts the
-        displacement field (both 1-byte and 4-byte displacements).
+        Only decoded ModRM memory operands with a real RBP/RSP base are
+        rewritten.  Instructions without ModRM, RIP-relative operands,
+        immediates, and displacements that would overflow their encoded
+        signed width make the whole transformation fail closed.
         """
         if offset_delta == 0:
             return code
@@ -896,62 +1088,37 @@ class MicroJITEngine:
         result = bytearray(code)
         pos = 0
         while pos < len(result):
-            length = _instruction_length(result, pos)
-            if length == 0:
+            meta = _decode_x86_instruction(result, pos)
+            if meta is None:
                 return code
+            length = meta["length"]
             if _adjusts_stack_pointer(result, pos, length):
-                # Shifting local offsets without also adjusting the prologue
-                # frame size (or a push/pop) changes which locals are read.
                 return code
-            p = pos
-            while p < pos + min(length, 4):
-                b = result[p]
-                if _rex_prefix(b):
-                    p += 1
-                elif b in (0x66, 0x67, 0xF0, 0xF2, 0xF3, 0x2E, 0x36, 0x3E, 0x26, 0x64, 0x65):
-                    p += 1
-                else:
-                    break
-            if p >= len(result):
-                pos += length
-                continue
-            opcode = result[p]
-            p += 1
-            if opcode == 0x0F and p < len(result):
-                p += 1
-            if p >= len(result):
-                pos += length
-                continue
-            modrm = result[p]
-            mod_bits = modrm >> 6
-            rm = modrm & 0x7
-            if mod_bits == 3:
-                pos += length
-                continue
-            disp_offset = p + 1
-            has_sib = (rm == 4)
-            if has_sib:
-                if p + 1 >= len(result):
-                    pos += length
-                    continue
-                sib = result[p + 1]
-                base = sib & 0x7
-                disp_offset = p + 2
-            else:
-                base = rm
-            if not (base == REG_RBP or base == REG_RSP):
-                pos += length
-                continue
-            if mod_bits == 1:
-                if disp_offset < len(result):
-                    old = result[disp_offset]
-                    new = (old + offset_delta) & 0xFF
-                    result[disp_offset] = new
-            elif mod_bits == 2 or (mod_bits == 0 and rm == 5):
-                if disp_offset + 4 <= len(result):
-                    old = struct.unpack('<i', result[disp_offset:disp_offset + 4])[0]
-                    new = old + offset_delta
-                    result[disp_offset:disp_offset + 4] = struct.pack('<i', new)
+            if meta["has_modrm"] and meta["disp_size"] in (1, 4):
+                modrm = meta["modrm"]
+                mod_bits = modrm >> 6
+                rm_low = modrm & 7
+                base = None
+                if rm_low == 4 and meta["sib"] is not None:
+                    base_low = meta["sib"] & 7
+                    if not (mod_bits == 0 and base_low == 5):
+                        base = base_low + (8 if meta["rex"] & 0x01 else 0)
+                elif not (mod_bits == 0 and rm_low == 5):
+                    base = rm_low + (8 if meta["rex"] & 0x01 else 0)
+                if base in (REG_RSP, REG_RBP):
+                    disp_offset = meta["disp_offset"]
+                    if meta["disp_size"] == 1:
+                        old = struct.unpack('<b', result[disp_offset:disp_offset + 1])[0]
+                        new = old + offset_delta
+                        if not -128 <= new <= 127:
+                            return code
+                        result[disp_offset] = new & 0xFF
+                    else:
+                        old = struct.unpack('<i', result[disp_offset:disp_offset + 4])[0]
+                        new = old + offset_delta
+                        if not -(1 << 31) <= new <= (1 << 31) - 1:
+                            return code
+                        result[disp_offset:disp_offset + 4] = struct.pack('<i', new)
             pos += length
         return bytes(result)
 

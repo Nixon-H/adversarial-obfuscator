@@ -558,16 +558,15 @@ def _make_opaque_predicate(
 
     cmp = block.eq(IrType.i32(), const_a, const_b)
 
+    # (a == b) OR (a != b) is always true; ANDing the same complementary
+    # pair is always false.  The previous false predicate computed
+    # ``(cmp != 0) xor 1``, which is true exactly when cmp is false -- the
+    # opposite of its contract for the unequal random constants normally
+    # generated here.
+    neq = block.ne(IrType.i32(), const_a, const_b)
     if always_true:
-        always_true_val = IrValue.const_bool(True)
-        op = block.or_(IrType.i1(), cmp.result, always_true_val)
-        return op
-    else:
-        always_true_val = IrValue.const_bool(True)
-        op = block.and_(IrType.i1(), cmp.result, always_true_val)
-        ne = block.ne(IrType.i32(), cmp.result, IrValue.const_int(0))
-        xor = block.xor(IrType.i1(), ne.result, IrValue.const_bool(True))
-        return xor
+        return block.or_(IrType.i1(), cmp.result, neq.result)
+    return block.and_(IrType.i1(), cmp.result, neq.result)
 
 
 _DEFAULT_BUILD_SEED = bytes(16)

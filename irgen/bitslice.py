@@ -150,12 +150,14 @@ class BitSliceCompiler:
 
     def shr_bitslice(self, val_bits: List[int], shift_amount: int) -> List[int]:
         """
-        Bit-slice right shift.
+        Bit-slice arithmetic right shift.
 
-        Pads with zeros on the left and truncates to word_size.
+        The IR models Python ``>>`` (and the VM's SHR) as an arithmetic
+        shift, so vacated high bits replicate the sign bit rather than zero.
         """
         shift = shift_amount % self.word_size
-        result = val_bits[shift:] + [0] * shift
+        sign = val_bits[self.word_size - 1] if val_bits else 0
+        result = val_bits[shift:] + [sign] * shift
         return result[:self.word_size]
 
     def cmp_eq_bitslice(self, a_bits: List[int], b_bits: List[int]) -> List[int]:
@@ -331,12 +333,13 @@ def _bitwise_shl_ir(block: IrBlock, val_bits: list, shift_val: IrValue, word_siz
 
 
 def _bitwise_shr_ir(block: IrBlock, val_bits: list, shift_val: IrValue, word_size: int, ty: IrType, insts: list) -> Optional[list]:
-    """IR-level right shift by a constant amount (None for variable shifts)."""
+    """IR-level arithmetic right shift by a constant amount."""
     shift = _const_int(shift_val)
     if shift is None:
         return None
     shift %= word_size
-    result = val_bits[shift:] + [IrValue.const_int(0)] * shift
+    sign = val_bits[word_size - 1] if val_bits else IrValue.const_int(0)
+    result = val_bits[shift:] + [sign] * shift
     return result[:word_size]
 
 
@@ -715,7 +718,7 @@ def _parse_instruction_line(line: str, block: IrBlock, var_types: dict):
         val = IrValue(IrType(src_str))
         val.name = parts[2].rstrip(',')
         to_str = parts[-1]
-        inst = IrInstruction('zext', IrType(src_str), [val], ty=IrType(to_str))
+        inst = IrInstruction('zext', IrType(to_str), [val], ty=IrType(src_str))
         inst.parent_block = block
         if result_name:
             inst.result.name = result_name
@@ -728,7 +731,7 @@ def _parse_instruction_line(line: str, block: IrBlock, var_types: dict):
         val = IrValue(IrType(src_str))
         val.name = parts[2].rstrip(',')
         to_str = parts[-1]
-        inst = IrInstruction('trunc', IrType(src_str), [val], ty=IrType(to_str))
+        inst = IrInstruction('trunc', IrType(to_str), [val], ty=IrType(src_str))
         inst.parent_block = block
         if result_name:
             inst.result.name = result_name

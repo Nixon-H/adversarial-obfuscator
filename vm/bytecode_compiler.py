@@ -117,6 +117,7 @@ def compile_to_bytecode(
 
     rng = _Rng(seed)
     ctx: dict = {}
+    _validate_register_allocation(ir_function)
 
     # Pass 1: translate instructions and record each block's BYTE offset.
     # The VM's PC is a byte offset into the bytecode, so jump targets must be
@@ -259,6 +260,87 @@ def _mask_reg(reg: int, width: int, rng, out: list) -> None:
     out.append(VMInstruction(VMOpcode.POP, [(VMOperand.REG, temp)]))
 
 
+
+def _scratch_regs(rng, forbidden: set[int], count: int) -> list[int]:
+    """Allocate distinct scratch registers, all saved/restored by callers."""
+    regs = []
+    blocked = set(forbidden)
+    for _ in range(count):
+        reg = _fresh_reg(rng, blocked)
+        regs.append(reg)
+        blocked.add(reg)
+    return regs
+
+
+def _emit_reg_copy(src: int, dst: int) -> list[VMInstruction]:
+    return [VMInstruction(VMOpcode.PUSH, [(VMOperand.REG, src)]),
+            VMInstruction(VMOpcode.POP, [(VMOperand.REG, dst)])]
+
+
+def _width_bytes(width: int) -> int:
+    return max(1, (width + 7) // 8)
+
+
+def _emit_store_memory(src: int, addr: int, width: int, rng) -> list[VMInstruction]:
+    """Store a fixed-width integer little-endian through byte memory."""
+    nbytes = _width_bytes(width)
+    s_addr, s_val, s_tmp = _scratch_regs(rng, {src, addr}, 3)
+    out = [VMInstruction(VMOpcode.PUSH, [(VMOperand.REG, s_addr)]),
+           VMInstruction(VMOpcode.PUSH, [(VMOperand.REG, s_val)]),
+           VMInstruction(VMOpcode.PUSH, [(VMOperand.REG, s_tmp)])]
+    out.extend(_emit_reg_copy(addr, s_addr))
+    for index in range(nbytes):
+        out.extend(_emit_reg_copy(src, s_val))
+        if index:
+            out.append(VMInstruction(VMOpcode.MOV, [
+                (VMOperand.REG, s_tmp), (VMOperand.IMM8, (8 * index) & 0xFF),
+                (VMOperand.IMM8, (8 * index) >> 8)]))
+            out.append(VMInstruction(VMOpcode.SHR, [
+                (VMOperand.REG, s_val), (VMOperand.REG, s_tmp)]))
+        out.append(VMInstruction(VMOpcode.STORE, [
+            (VMOperand.REG, s_val), (VMOperand.REG, s_addr)]))
+        if index + 1 < nbytes:
+            out.append(VMInstruction(VMOpcode.MOV, [
+                (VMOperand.REG, s_tmp), (VMOperand.IMM8, 1), (VMOperand.IMM8, 0)]))
+            out.append(VMInstruction(VMOpcode.ADD, [
+                (VMOperand.REG, s_addr), (VMOperand.REG, s_tmp)]))
+    out.extend([VMInstruction(VMOpcode.POP, [(VMOperand.REG, s_tmp)]),
+                VMInstruction(VMOpcode.POP, [(VMOperand.REG, s_val)]),
+                VMInstruction(VMOpcode.POP, [(VMOperand.REG, s_addr)])])
+    return out
+
+
+def _emit_load_memory(dst: int, addr: int, width: int, rng) -> list[VMInstruction]:
+    """Load a fixed-width little-endian integer through byte memory."""
+    nbytes = _width_bytes(width)
+    s_addr, s_val, s_tmp = _scratch_regs(rng, {dst, addr}, 3)
+    out = [VMInstruction(VMOpcode.PUSH, [(VMOperand.REG, s_addr)]),
+           VMInstruction(VMOpcode.PUSH, [(VMOperand.REG, s_val)]),
+           VMInstruction(VMOpcode.PUSH, [(VMOperand.REG, s_tmp)])]
+    out.extend(_emit_reg_copy(addr, s_addr))
+    out.append(VMInstruction(VMOpcode.MOV, [
+        (VMOperand.REG, dst), (VMOperand.IMM8, 0), (VMOperand.IMM8, 0)]))
+    for index in range(nbytes):
+        out.append(VMInstruction(VMOpcode.LOAD, [
+            (VMOperand.REG, s_val), (VMOperand.REG, s_addr)]))
+        if index:
+            out.append(VMInstruction(VMOpcode.MOV, [
+                (VMOperand.REG, s_tmp), (VMOperand.IMM8, (8 * index) & 0xFF),
+                (VMOperand.IMM8, (8 * index) >> 8)]))
+            out.append(VMInstruction(VMOpcode.SHL, [
+                (VMOperand.REG, s_val), (VMOperand.REG, s_tmp)]))
+        out.append(VMInstruction(VMOpcode.OR, [
+            (VMOperand.REG, dst), (VMOperand.REG, s_val)]))
+        if index + 1 < nbytes:
+            out.append(VMInstruction(VMOpcode.MOV, [
+                (VMOperand.REG, s_tmp), (VMOperand.IMM8, 1), (VMOperand.IMM8, 0)]))
+            out.append(VMInstruction(VMOpcode.ADD, [
+                (VMOperand.REG, s_addr), (VMOperand.REG, s_tmp)]))
+    out.extend([VMInstruction(VMOpcode.POP, [(VMOperand.REG, s_tmp)]),
+                VMInstruction(VMOpcode.POP, [(VMOperand.REG, s_val)]),
+                VMInstruction(VMOpcode.POP, [(VMOperand.REG, s_addr)])])
+    return out
+
 def _translate_instruction(ir_inst, opcode_map, rng, base: int = 0, ctx: dict | None = None) -> list[VMInstruction]:
     """
     Translate a single IR instruction to one or more VM instructions.
@@ -291,6 +373,9 @@ def _translate_instruction(ir_inst, opcode_map, rng, base: int = 0, ctx: dict | 
         "nop": VMOpcode.NOP,
     }
 
+    if opcode == "nop":
+        return [VMInstruction(VMOpcode.NOP)]
+
     if opcode in ir_to_vm:
         vm_op = ir_to_vm[opcode]
         # VM arithmetic is in-place: ADD dst, src means dst = dst + src.
@@ -316,21 +401,23 @@ def _translate_instruction(ir_inst, opcode_map, rng, base: int = 0, ctx: dict | 
         pre: list[VMInstruction] = []
         addr = _materialize(operands[0], rng, pre) if operands else 0
         dst = _value_to_reg(ir_inst.result, rng)
-        return pre + [VMInstruction(VMOpcode.LOAD, [(VMOperand.REG, dst), (VMOperand.REG, addr)])]
+        return pre + _emit_load_memory(dst, addr, _ir_width(ir_inst.result_type), rng)
 
     if opcode == "store":
         # VM STORE reads (src, addr_reg).
         pre: list[VMInstruction] = []
         src = _materialize(operands[0], rng, pre) if len(operands) > 0 else 0
         addr = _materialize(operands[1], rng, pre) if len(operands) > 1 else 0
-        return pre + [VMInstruction(VMOpcode.STORE, [(VMOperand.REG, src), (VMOperand.REG, addr)])]
+        return pre + _emit_store_memory(src, addr, _ir_width(ir_inst.result_type), rng)
 
     if opcode == "alloca":
         # Allocate a distinct memory slot for the pointer: MOV the slot
         # address (16-bit immediate) into the result register. The old LEA
         # emission was a no-op placeholder, so every alloca collided at 0.
         slot = ctx.setdefault("alloca", 0)
-        ctx["alloca"] = slot + 1
+        ctx["alloca"] = slot + _width_bytes(_ir_width(ir_inst.result_type))
+        if ctx["alloca"] > 65536:
+            raise NotImplementedError("VM alloca memory exceeds the 64KB address space")
         return [VMInstruction(VMOpcode.MOV, [
             (VMOperand.REG, _value_to_reg(ir_inst.result, rng)),
             (VMOperand.IMM8, slot & 0xFF), (VMOperand.IMM8, (slot >> 8) & 0xFF)])]
@@ -471,6 +558,42 @@ def _materialize(op, rng, out: list) -> int:
         val = int(op) & 0xFFFF if hasattr(op, '__int__') else 0
     _load_constant(reg, val, 64, rng, out)
     return reg
+
+
+def _iter_ir_values(ir_function):
+    """Yield every SSA value referenced or defined by a function."""
+    for block in ir_function.blocks:
+        for inst in block.instructions:
+            if inst.result is not None:
+                yield inst.result
+            for op in inst.operands:
+                if isinstance(op, IrValue):
+                    yield op
+                elif isinstance(op, tuple) and op and isinstance(op[0], IrValue):
+                    yield op[0]
+        if block.terminator:
+            for op in block.terminator.operands:
+                if isinstance(op, IrValue):
+                    yield op
+
+
+def _validate_register_allocation(ir_function) -> None:
+    """Fail closed when the legacy modulo mapping would merge SSA values.
+
+    The VM has no spill machinery.  ``id % 12`` register selection is safe
+    only when no two distinct values in this function collide; silently
+    allowing a collision overwrites a live value with an unrelated one.
+    """
+    owners: dict[int, IrValue] = {}
+    for value in _iter_ir_values(ir_function):
+        reg = _value_to_reg(value, None)
+        old = owners.get(reg)
+        if old is not None and old.id != value.id:
+            raise NotImplementedError(
+                "VM register allocation collision: values "
+                f"{old.name} and {value.name} both map to r{reg}; "
+                "spilling/liveness allocation is required")
+        owners[reg] = value
 
 
 def _value_to_reg(value, rng) -> int:

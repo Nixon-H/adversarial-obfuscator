@@ -162,12 +162,9 @@ def _insert_nops(variant: Any, class_id: int) -> None:
 
 
 def _make_nop() -> Any:
-    """Create a simple NOP instruction object."""
-    class NopInstr:
-        def __init__(self):
-            self.opcode = 'nop'
-            self.name = 'nop'
-    return NopInstr()
+    """Create a real IR NOP so block serialization remains valid IR."""
+    from .compile import IrInstruction
+    return IrInstruction('nop')
 
 
 def _is_movable(inst, defined: set) -> bool:

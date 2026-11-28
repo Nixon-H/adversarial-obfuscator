@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import struct
 import sys
 import argparse
@@ -107,7 +108,9 @@ def generate_template(
                     for si in range(slot_id):
                         lookup = f"slot_{si}"
                         if lookup in slot_map and slot_map[lookup]["param_name"] == pname:
-                            inst_str = inst_str.replace(f"%{pname}", f"{{slot_{si}}}")
+                            inst_str = re.sub(
+                                rf"%{re.escape(pname)}(?![A-Za-z0-9_.$])",
+                                f"{{slot_{si}}}", inst_str)
             template_ir_lines.append(f"    {inst_str}")
         if block.terminator:
             template_ir_lines.append(f"    {block.terminator}")
