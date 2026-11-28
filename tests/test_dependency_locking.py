@@ -21,8 +21,8 @@ and pins the two packages that were missing from requirements.txt at all.
 These tests pin the POLICY, not the file contents: a new workflow that installs a
 build dependency unhashed will fail here rather than shipping quietly.
 """
-import glob
 import os
+import glob
 import re
 
 
@@ -173,3 +173,57 @@ def test_artifact_workflows_do_not_install_unused_upx():
     assert not offenders, (
         "UPX is not invoked by these artifact workflows; installing it is an "
         "unnecessary unhashed supply-chain exception:\n  " + "\n  ".join(offenders))
+
+
+def _pins_from(path):
+    """name -> version for pkg==ver lines in a requirements source file."""
+    import re as _re
+    pins = {}
+    for raw in open(path, encoding="utf-8"):
+        line = raw.split("#", 1)[0].strip().rstrip("\\")
+        m = _re.match(r"^([A-Za-z0-9_.\-]+)==([A-Za-z0-9.]+)", line)
+        if m:
+            pins[m.group(1).lower().replace("-", "_")] = m.group(2)
+    return pins
+
+
+def _lock_versions(path):
+    import re as _re
+    vers = {}
+    for raw in open(path, encoding="utf-8"):
+        m = _re.match(r"^([A-Za-z0-9_.\-]+)==([A-Za-z0-9.]+)", raw.strip())
+        if m:
+            vers[m.group(1).lower().replace("-", "_")] = m.group(2)
+    return vers
+
+
+def test_locks_are_in_sync_with_their_source_pins():
+    """The dependabot no-op gap, measured 2026-11-28: dependabot bumped
+    versions in requirements*.txt but cannot regenerate the hash-locked
+    .lock files, so the bumps would have changed nothing CI installs.
+    Invariant: every version pinned in a source .txt must appear at the
+    same version in its .lock -- a .txt/.lock mismatch means someone
+    edited the input without regenerating the lock."""
+    pairs = [
+        ("requirements.txt", "requirements.lock"),
+        ("requirements-dev.txt", "requirements-dev.lock"),
+        ("requirements-evm.txt", "requirements-evm.lock"),
+    ]
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    problems = []
+    for src_name, lock_name in pairs:
+        src_p = os.path.join(root, src_name)
+        lock_p = os.path.join(root, lock_name)
+        if not (os.path.exists(src_p) and os.path.exists(lock_p)):
+            continue
+        pins = _pins_from(src_p)
+        lock = _lock_versions(lock_p)
+        for name, ver in pins.items():
+            got = lock.get(name)
+            if got is None:
+                problems.append("%s: %s==%s missing from %s"
+                                % (src_name, name, ver, lock_name))
+            elif got != ver:
+                problems.append("%s: %s==%s but %s has ==%s"
+                                % (src_name, name, ver, lock_name, got))
+    assert not problems, "lock/source drift:\n" + "\n".join(problems)
