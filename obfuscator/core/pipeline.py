@@ -875,9 +875,15 @@ def cython_compat_issues(source_code):
     succeed, only that the cheap, certain failures have been ruled out.
     """
     import ast as _ast
+    import re as _re
     try:
         tree = _ast.parse(source_code)
-    except SyntaxError:
+    except SyntaxError as _se:
+        # except* does not even parse on Python < 3.11, so the AST walk
+        # never runs there and the construct was reported as compatible
+        # (measured: the 3.10 CI lanes). It is still a Cython blocker.
+        if _re.search(r"^\s*except\s*\*", source_code, _re.M):
+            return [(_se.lineno or 0, "exception groups (except*)")]
         return []
     issues = []
     for node in _ast.walk(tree):
